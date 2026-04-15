@@ -389,6 +389,15 @@ impl ApplicationHandler<UserEvent> for App {
         let mut attrs = WindowAttributes::default()
             .with_title("llnzy")
             .with_inner_size(inner_size);
+
+        if let Ok(image) = image::load_from_memory(include_bytes!("../llnzy.jpg")) {
+            let image = image.to_rgba8();
+            let (width, height) = image.dimensions();
+            if let Ok(icon) = winit::window::Icon::from_rgba(image.into_raw(), width, height) {
+                attrs = attrs.with_window_icon(Some(icon));
+            }
+        }
+
         if self.config.opacity < 1.0 {
             attrs = attrs.with_transparent(true);
         }
