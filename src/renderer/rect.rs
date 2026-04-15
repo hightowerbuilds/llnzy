@@ -50,10 +50,15 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 }
 "#;
 
+/// Initial vertex buffer capacity (in vertices). Grows as needed.
+const INITIAL_VERTEX_CAPACITY: usize = 4096;
+
 pub struct RectRenderer {
     pipeline: wgpu::RenderPipeline,
     uniform_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
+    vertex_buffer: wgpu::Buffer,
+    vertex_capacity: usize,
 }
 
 impl RectRenderer {
@@ -66,7 +71,10 @@ impl RectRenderer {
             });
 
         let uniforms = Uniforms {
-            screen_size: [gpu.surface_config.width as f32, gpu.surface_config.height as f32],
+            screen_size: [
+                gpu.surface_config.width as f32,
+                gpu.surface_config.height as f32,
+            ],
             _padding: [0.0; 2],
         };
 
@@ -103,13 +111,13 @@ impl RectRenderer {
             }],
         });
 
-        let pipeline_layout =
-            gpu.device
-                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: Some("rect_pipeline_layout"),
-                    bind_group_layouts: &[&bind_group_layout],
-                    push_constant_ranges: &[],
-                });
+        let pipeline_layout = gpu
+            .device
+            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("rect_pipeline_layout"),
+                bind_group_layouts: &[&bind_group_layout],
+                push_constant_ranges: &[],
+            });
 
         let pipeline = gpu
             .device
@@ -157,27 +165,37 @@ impl RectRenderer {
                 cache: None,
             });
 
+        // Pre-allocate reusable vertex buffer
+        let vertex_buffer = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("rect_vertices"),
+            size: (INITIAL_VERTEX_CAPACITY * std::mem::size_of::<RectVertex>()) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         RectRenderer {
             pipeline,
             uniform_buffer,
             bind_group,
+            vertex_buffer,
+            vertex_capacity: INITIAL_VERTEX_CAPACITY,
         }
     }
 
-    /// Update the screen size uniform (call on resize).
     pub fn update_size(&self, gpu: &GpuState) {
         let uniforms = Uniforms {
-            screen_size: [gpu.surface_config.width as f32, gpu.surface_config.height as f32],
+            screen_size: [
+                gpu.surface_config.width as f32,
+                gpu.surface_config.height as f32,
+            ],
             _padding: [0.0; 2],
         };
         gpu.queue
             .write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[uniforms]));
     }
 
-    /// Draw a list of colored rectangles.
-    /// Each rect is (x, y, width, height, r, g, b, a) in pixel coordinates.
     pub fn draw_rects(
-        &self,
+        &mut self,
         gpu: &GpuState,
         view: &wgpu::TextureView,
         encoder: &mut wgpu::CommandEncoder,
@@ -190,28 +208,51 @@ impl RectRenderer {
         let mut vertices: Vec<RectVertex> = Vec::with_capacity(rects.len() * 6);
 
         for &(x, y, w, h, color) in rects {
-            // Two triangles per rect
             let tl = [x, y];
             let tr = [x + w, y];
             let bl = [x, y + h];
             let br = [x + w, y + h];
 
-            vertices.push(RectVertex { position: tl, color });
-            vertices.push(RectVertex { position: tr, color });
-            vertices.push(RectVertex { position: bl, color });
-
-            vertices.push(RectVertex { position: tr, color });
-            vertices.push(RectVertex { position: br, color });
-            vertices.push(RectVertex { position: bl, color });
+            vertices.push(RectVertex {
+                position: tl,
+                color,
+            });
+            vertices.push(RectVertex {
+                position: tr,
+                color,
+            });
+            vertices.push(RectVertex {
+                position: bl,
+                color,
+            });
+            vertices.push(RectVertex {
+                position: tr,
+                color,
+            });
+            vertices.push(RectVertex {
+                position: br,
+                color,
+            });
+            vertices.push(RectVertex {
+                position: bl,
+                color,
+            });
         }
 
-        let vertex_buffer = gpu
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        // Grow vertex buffer if needed
+        if vertices.len() > self.vertex_capacity {
+            self.vertex_capacity = vertices.len().next_power_of_two();
+            self.vertex_buffer = gpu.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("rect_vertices"),
-                contents: bytemuck::cast_slice(&vertices),
-                usage: wgpu::BufferUsages::VERTEX,
+                size: (self.vertex_capacity * std::mem::size_of::<RectVertex>()) as u64,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
             });
+        }
+
+        // Write into pre-allocated buffer
+        gpu.queue
+            .write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(&vertices));
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("rect_pass"),
@@ -229,7 +270,7 @@ impl RectRenderer {
 
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.bind_group, &[]);
-        pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+        pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
         pass.draw(0..vertices.len() as u32, 0..1);
     }
 }

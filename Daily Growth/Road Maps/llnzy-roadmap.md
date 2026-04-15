@@ -149,26 +149,26 @@
 
 ---
 
-## Phase 12: Testing & Quality
+## Phase 12: Testing & Quality [IN PROGRESS]
 
-12.1 Unit tests — color resolution, input encoding, selection logic, config parsing
-12.2 Integration tests — terminal emulation (feed escape sequences, verify grid)
+12.1 Unit tests — color resolution, input encoding, selection logic, config parsing [COMPLETED — 175 tests]
+12.2 Integration tests — terminal emulation (feed escape sequences, verify grid) [COMPLETED — 45 tests]
 12.3 Rendering snapshot tests (capture frames, compare against baseline)
-12.4 PTY round-trip tests (write input, verify output)
+12.4 PTY round-trip tests (write input, verify output) [COMPLETED — 5 tests]
 12.5 vttest compatibility (standard terminal conformance suite)
-12.6 CI/CD pipeline (GitHub Actions: build, test, clippy, rustfmt)
+12.6 CI/CD pipeline (GitHub Actions: build, test, clippy, rustfmt) [COMPLETED]
 12.7 Fuzz testing (random byte streams into terminal parser)
 12.8 Performance regression tests (throughput benchmarks in CI)
 
 ---
 
-## Phase 13: Documentation & Distribution
+## Phase 13: Documentation & Distribution [IN PROGRESS]
 
-13.1 README with feature overview + screenshots
-13.2 Build instructions (all platforms)
-13.3 Configuration reference (all TOML keys documented)
-13.4 LICENSE file (choose and apply license)
-13.5 CHANGELOG (keep from this point forward)
+13.1 README with feature overview + screenshots [COMPLETED — thorough feature docs, build/test instructions, honest limitations]
+13.2 Build instructions (all platforms) [COMPLETED — in README]
+13.3 Configuration reference (all TOML keys documented) [COMPLETED — docs/configuration.md]
+13.4 LICENSE file (choose and apply license) [COMPLETED — MIT]
+13.5 CHANGELOG (keep from this point forward) [COMPLETED — CHANGELOG.md]
 13.6 Release binaries via GitHub Releases (macOS universal, Linux x86_64)
 13.7 Homebrew formula for macOS installation
 13.8 Man page (llnzy.1)

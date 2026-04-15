@@ -1277,6 +1277,7 @@ dependencies = [
  "log",
  "pollster",
  "portable-pty",
+ "regex",
  "serde",
  "tokio",
  "toml",

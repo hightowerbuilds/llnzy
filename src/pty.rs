@@ -23,35 +23,24 @@ impl Pty {
             pixel_height: 0,
         };
 
-        let pair = pty_system
-            .openpty(size)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        let pair = pty_system.openpty(size).map_err(io::Error::other)?;
 
         let mut cmd = CommandBuilder::new(shell);
         cmd.env("TERM", "xterm-256color");
 
-        let _child = pair
-            .slave
-            .spawn_command(cmd)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        let _child = pair.slave.spawn_command(cmd).map_err(io::Error::other)?;
 
         // Close slave in parent process
         drop(pair.slave);
 
-        let mut reader = pair
-            .master
-            .try_clone_reader()
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-        let writer = pair
-            .master
-            .take_writer()
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        let mut reader = pair.master.try_clone_reader().map_err(io::Error::other)?;
+        let writer = pair.master.take_writer().map_err(io::Error::other)?;
 
         let (tx, rx) = mpsc::channel();
 
         // Spawn a dedicated thread for reading PTY output
         std::thread::spawn(move || {
-            let mut buf = [0u8; 4096];
+            let mut buf = [0u8; 65536];
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) => break,

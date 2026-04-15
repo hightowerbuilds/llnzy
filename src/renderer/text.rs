@@ -1,6 +1,10 @@
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+
+use alacritty_terminal::term::cell::Flags;
 use glyphon::{
-    Attrs, Buffer, Cache, Color, Family, FontSystem, Metrics, Resolution, Shaping, SwashCache,
-    TextArea, TextAtlas, TextBounds, TextRenderer as GlyphonRenderer, Viewport,
+    Attrs, Buffer, Cache, Color, Family, FontSystem, Metrics, Resolution, Shaping, Style,
+    SwashCache, TextArea, TextAtlas, TextBounds, TextRenderer as GlyphonRenderer, Viewport, Weight,
 };
 
 use crate::config::Config;
@@ -8,67 +12,82 @@ use crate::renderer::state::GpuState;
 use crate::terminal::Terminal;
 
 pub struct TextSystem {
-    pub font_system: FontSystem,
-    pub swash_cache: SwashCache,
-    pub atlas: TextAtlas,
-    pub renderer: GlyphonRenderer,
-    pub viewport: Viewport,
+    font_system: FontSystem,
+    swash_cache: SwashCache,
+    atlas: TextAtlas,
+    renderer: GlyphonRenderer,
+    viewport: Viewport,
     pub cell_width: f32,
     pub cell_height: f32,
     font_size: f32,
+    font_family: String,
+    shaping: Shaping,
+    // Line-level cache
+    line_buffers: Vec<Buffer>,
+    line_hashes: Vec<u64>,
+    cached_width: f32,
 }
 
 impl TextSystem {
-    pub fn new(gpu: &GpuState, config: &Config) -> Self {
+    pub fn new(gpu: &GpuState, config: &Config, scale_factor: f64) -> Self {
         let mut font_system = FontSystem::new();
 
-        // Load the bundled JetBrains Mono font
-        let font_data = include_bytes!("../../assets/fonts/JetBrainsMono-Regular.ttf");
-        font_system.db_mut().load_font_data(font_data.to_vec());
-
-        let bold_data = include_bytes!("../../assets/fonts/JetBrainsMono-Bold.ttf");
-        font_system.db_mut().load_font_data(bold_data.to_vec());
+        for data in [
+            &include_bytes!("../../assets/fonts/JetBrainsMono-Regular.ttf")[..],
+            &include_bytes!("../../assets/fonts/JetBrainsMono-Bold.ttf")[..],
+            &include_bytes!("../../assets/fonts/JetBrainsMono-Italic.ttf")[..],
+            &include_bytes!("../../assets/fonts/JetBrainsMono-BoldItalic.ttf")[..],
+        ] {
+            font_system.db_mut().load_font_data(data.to_vec());
+        }
 
         let swash_cache = SwashCache::new();
         let cache = Cache::new(&gpu.device);
-
         let mut atlas = TextAtlas::new(&gpu.device, &gpu.queue, &cache, gpu.surface_config.format);
-
         let renderer = GlyphonRenderer::new(
             &mut atlas,
             &gpu.device,
             wgpu::MultisampleState::default(),
             None,
         );
-
         let viewport = Viewport::new(&gpu.device, &cache);
 
-        // Measure actual cell dimensions from the font
-        let line_height = (config.font_size * 1.4).ceil();
-        let metrics = Metrics::new(config.font_size, line_height);
+        let font_family = config
+            .font_family
+            .clone()
+            .unwrap_or_else(|| "JetBrains Mono".to_string());
+
+        let shaping = if config.ligatures {
+            Shaping::Advanced
+        } else {
+            Shaping::Basic
+        };
+
+        let physical_font_size = config.font_size * scale_factor as f32;
+        let line_height = (physical_font_size * config.line_height).ceil();
+        let metrics = Metrics::new(physical_font_size, line_height);
+
         let mut measure_buf = Buffer::new(&mut font_system, metrics);
         measure_buf.set_size(
             &mut font_system,
-            Some(config.font_size * 10.0),
+            Some(physical_font_size * 10.0),
             Some(line_height * 2.0),
         );
         measure_buf.set_text(
             &mut font_system,
             "M",
-            Attrs::new().family(Family::Name("JetBrains Mono")),
-            Shaping::Advanced,
+            Attrs::new().family(Family::Name(&font_family)),
+            shaping,
         );
         measure_buf.shape_until_scroll(&mut font_system, false);
 
-        // Get actual glyph advance width and line height from layout
-        let mut cell_width = (config.font_size * 0.6).ceil(); // fallback
+        let mut cell_width = (physical_font_size * 0.6).ceil();
         let mut cell_height = line_height;
-        for run in measure_buf.layout_runs() {
+        if let Some(run) = measure_buf.layout_runs().next() {
             cell_height = run.line_height.ceil();
             if let Some(glyph) = run.glyphs.first() {
                 cell_width = glyph.w.ceil();
             }
-            break;
         }
 
         TextSystem {
@@ -79,7 +98,12 @@ impl TextSystem {
             viewport,
             cell_width,
             cell_height,
-            font_size: config.font_size,
+            font_size: physical_font_size,
+            font_family,
+            shaping,
+            line_buffers: Vec::new(),
+            line_hashes: Vec::new(),
+            cached_width: 0.0,
         }
     }
 
@@ -87,10 +111,13 @@ impl TextSystem {
         (self.cell_width, self.cell_height)
     }
 
-    /// Render the terminal grid. `block_cursor` is Some((row, col)) when a block
-    /// cursor is active — the character at that cell is drawn in the background
-    /// color so it's visible against the cursor rect.
-    pub fn render_grid(
+    /// Invalidate the entire line cache (call on resize, scroll, etc.)
+    pub fn invalidate_cache(&mut self) {
+        self.line_hashes.clear();
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_grid_at(
         &mut self,
         terminal: &Terminal,
         config: &Config,
@@ -98,11 +125,20 @@ impl TextSystem {
         view: &wgpu::TextureView,
         encoder: &mut wgpu::CommandEncoder,
         block_cursor: Option<(usize, usize)>,
+        offset_x: f32,
+        offset_y: f32,
     ) {
         let (cols, rows) = terminal.size();
+        let width = gpu.surface_config.width as f32;
+
+        // Invalidate cache if width changed
+        if (width - self.cached_width).abs() > 0.5 {
+            self.invalidate_cache();
+            self.cached_width = width;
+        }
+
         let metrics = Metrics::new(self.font_size, self.cell_height);
 
-        // Update viewport resolution
         self.viewport.update(
             &gpu.queue,
             Resolution {
@@ -111,83 +147,60 @@ impl TextSystem {
             },
         );
 
-        // Build one text buffer per line with per-character colors
-        let mut buffers: Vec<(Buffer, f32)> = Vec::with_capacity(rows);
+        // Compute hashes for each line to detect changes
+        let new_hashes: Vec<u64> = (0..rows)
+            .map(|row| hash_line(terminal, config, row, cols, block_cursor))
+            .collect();
 
-        for row in 0..rows {
-            let mut buffer = Buffer::new(&mut self.font_system, metrics);
-            buffer.set_size(
-                &mut self.font_system,
-                Some(gpu.surface_config.width as f32),
-                Some(self.cell_height),
-            );
+        // Ensure we have enough buffers
+        let font_system = &mut self.font_system;
+        while self.line_buffers.len() < rows {
+            let mut buf = Buffer::new(font_system, metrics);
+            buf.set_size(font_system, Some(width), Some(self.cell_height));
+            self.line_buffers.push(buf);
+        }
+        self.line_buffers.truncate(rows);
 
-            // Build spans with per-character color attributes
-            let mut spans: Vec<(String, Attrs)> = Vec::new();
-            let mut current_text = String::new();
-            let mut current_fg: [u8; 3] = config.fg;
+        // Rebuild only changed lines
+        let font_family = &self.font_family;
+        let shaping = self.shaping;
+        let cell_height = self.cell_height;
+        let font_system = &mut self.font_system;
 
-            for col in 0..cols {
-                let ch = terminal.cell_char(row, col);
-                let is_cursor = block_cursor == Some((row, col));
-                let fg = if is_cursor {
-                    // Invert: draw text in background color on top of cursor rect
-                    let bg = config.bg;
-                    [(bg[0] * 255.0) as u8, (bg[1] * 255.0) as u8, (bg[2] * 255.0) as u8]
-                } else {
-                    terminal.resolve_fg(row, col, config)
-                };
-
-                if fg == current_fg || current_text.is_empty() {
-                    if current_text.is_empty() {
-                        current_fg = fg;
-                    }
-                    current_text.push(ch);
-                } else {
-                    spans.push((
-                        std::mem::take(&mut current_text),
-                        Attrs::new()
-                            .family(Family::Name("JetBrains Mono"))
-                            .color(Color::rgb(current_fg[0], current_fg[1], current_fg[2])),
-                    ));
-                    current_fg = fg;
-                    current_text.push(ch);
-                }
+        for (row, &new_hash) in new_hashes.iter().enumerate().take(rows) {
+            let cached_ok = row < self.line_hashes.len() && self.line_hashes[row] == new_hash;
+            if cached_ok {
+                continue;
             }
 
-            if !current_text.is_empty() {
-                spans.push((
-                    current_text,
-                    Attrs::new()
-                        .family(Family::Name("JetBrains Mono"))
-                        .color(Color::rgb(current_fg[0], current_fg[1], current_fg[2])),
-                ));
-            }
+            let buffer = &mut self.line_buffers[row];
+            buffer.set_metrics(font_system, metrics);
+            buffer.set_size(font_system, Some(width), Some(cell_height));
 
+            // Build spans for this line
+            let spans = build_line_spans(terminal, config, row, cols, block_cursor, font_family);
             let span_refs: Vec<(&str, Attrs)> =
                 spans.iter().map(|(s, a)| (s.as_str(), *a)).collect();
 
-            buffer.set_rich_text(
-                &mut self.font_system,
-                span_refs,
-                Attrs::new()
-                    .family(Family::Name("JetBrains Mono"))
-                    .color(Color::rgb(config.fg[0], config.fg[1], config.fg[2])),
-                Shaping::Advanced,
-            );
-            buffer.shape_until_scroll(&mut self.font_system, false);
+            let default_attrs = Attrs::new()
+                .family(Family::Name(font_family))
+                .color(Color::rgb(config.fg()[0], config.fg()[1], config.fg()[2]));
 
-            let top = row as f32 * self.cell_height;
-            buffers.push((buffer, top));
+            buffer.set_rich_text(font_system, span_refs, default_attrs, shaping);
+            buffer.shape_until_scroll(font_system, false);
         }
 
-        // Build text areas from buffers
-        let text_areas: Vec<TextArea> = buffers
+        self.line_hashes = new_hashes;
+
+        // Build text areas from cached buffers
+        let text_areas: Vec<TextArea> = self
+            .line_buffers
             .iter()
-            .map(|(buffer, top)| TextArea {
+            .enumerate()
+            .map(|(row, buffer)| TextArea {
                 buffer,
-                left: 0.0,
-                top: *top,
+                left: offset_x,
+                top: row as f32 * self.cell_height + offset_y,
                 scale: 1.0,
                 bounds: TextBounds {
                     left: 0,
@@ -195,7 +208,7 @@ impl TextSystem {
                     right: gpu.surface_config.width as i32,
                     bottom: gpu.surface_config.height as i32,
                 },
-                default_color: Color::rgb(config.fg[0], config.fg[1], config.fg[2]),
+                default_color: Color::rgb(config.fg()[0], config.fg()[1], config.fg()[2]),
                 custom_glyphs: &[],
             })
             .collect();
@@ -230,5 +243,279 @@ impl TextSystem {
                 .render(&self.atlas, &self.viewport, &mut pass)
                 .unwrap();
         }
+
+        // Trim atlas to free unused GPU textures
+        self.atlas.trim();
     }
+
+    /// Render tab bar labels.
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_tab_labels(
+        &mut self,
+        tabs: &[(String, bool)],
+        tab_w: f32,
+        tab_h: f32,
+        config: &Config,
+        gpu: &GpuState,
+        view: &wgpu::TextureView,
+        encoder: &mut wgpu::CommandEncoder,
+    ) {
+        let metrics = Metrics::new(self.font_size * 0.8, tab_h);
+        let font_family = self.font_family.clone();
+        let shaping = self.shaping;
+
+        let mut buffers: Vec<Buffer> = Vec::new();
+        for (title, _) in tabs {
+            let mut buf = Buffer::new(&mut self.font_system, metrics);
+            buf.set_size(&mut self.font_system, Some(tab_w - 16.0), Some(tab_h));
+            let attrs = Attrs::new()
+                .family(Family::Name(&font_family))
+                .color(Color::rgb(config.fg()[0], config.fg()[1], config.fg()[2]));
+            buf.set_text(&mut self.font_system, title, attrs, shaping);
+            buf.shape_until_scroll(&mut self.font_system, false);
+            buffers.push(buf);
+        }
+
+        let text_areas: Vec<TextArea> = buffers
+            .iter()
+            .enumerate()
+            .map(|(i, buffer)| TextArea {
+                buffer,
+                left: i as f32 * tab_w + 8.0,
+                top: 0.0,
+                scale: 1.0,
+                bounds: TextBounds {
+                    left: 0,
+                    top: 0,
+                    right: gpu.surface_config.width as i32,
+                    bottom: tab_h as i32,
+                },
+                default_color: Color::rgb(config.fg()[0], config.fg()[1], config.fg()[2]),
+                custom_glyphs: &[],
+            })
+            .collect();
+
+        self.renderer
+            .prepare(
+                &gpu.device,
+                &gpu.queue,
+                &mut self.font_system,
+                &mut self.atlas,
+                &self.viewport,
+                text_areas,
+                &mut self.swash_cache,
+            )
+            .unwrap();
+
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("tab_text_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                ..Default::default()
+            });
+            self.renderer
+                .render(&self.atlas, &self.viewport, &mut pass)
+                .unwrap();
+        }
+    }
+    /// Render multiple lines of text at a given Y offset (for the error panel).
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_panel_lines(
+        &mut self,
+        lines: &[&str],
+        y_offset: f32,
+        line_h: f32,
+        config: &Config,
+        gpu: &GpuState,
+        view: &wgpu::TextureView,
+        encoder: &mut wgpu::CommandEncoder,
+    ) {
+        let metrics = Metrics::new(self.font_size * 0.75, line_h);
+        let font_family = self.font_family.clone();
+        let shaping = self.shaping;
+        let width = gpu.surface_config.width as f32;
+
+        let mut buffers: Vec<Buffer> = Vec::new();
+        for line in lines {
+            let mut buf = Buffer::new(&mut self.font_system, metrics);
+            buf.set_size(&mut self.font_system, Some(width), Some(line_h));
+            let attrs = Attrs::new()
+                .family(Family::Name(&font_family))
+                .color(Color::rgb(config.fg()[0], config.fg()[1], config.fg()[2]));
+            buf.set_text(&mut self.font_system, line, attrs, shaping);
+            buf.shape_until_scroll(&mut self.font_system, false);
+            buffers.push(buf);
+        }
+
+        let text_areas: Vec<TextArea> = buffers
+            .iter()
+            .enumerate()
+            .map(|(i, buffer)| TextArea {
+                buffer,
+                left: 0.0,
+                top: y_offset + i as f32 * line_h,
+                scale: 1.0,
+                bounds: TextBounds {
+                    left: 0,
+                    top: y_offset as i32,
+                    right: gpu.surface_config.width as i32,
+                    bottom: gpu.surface_config.height as i32,
+                },
+                default_color: Color::rgb(config.fg()[0], config.fg()[1], config.fg()[2]),
+                custom_glyphs: &[],
+            })
+            .collect();
+
+        self.renderer
+            .prepare(
+                &gpu.device,
+                &gpu.queue,
+                &mut self.font_system,
+                &mut self.atlas,
+                &self.viewport,
+                text_areas,
+                &mut self.swash_cache,
+            )
+            .unwrap();
+
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("panel_text_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                ..Default::default()
+            });
+            self.renderer
+                .render(&self.atlas, &self.viewport, &mut pass)
+                .unwrap();
+        }
+    }
+}
+
+/// Build rich text spans for a single terminal line.
+fn build_line_spans<'a>(
+    terminal: &Terminal,
+    config: &Config,
+    row: usize,
+    cols: usize,
+    block_cursor: Option<(usize, usize)>,
+    font_family: &'a str,
+) -> Vec<(String, Attrs<'a>)> {
+    let mut spans: Vec<(String, Attrs)> = Vec::new();
+    let mut current_text = String::new();
+    let mut current_attrs: Option<Attrs> = None;
+
+    for col in 0..cols {
+        let ch = terminal.cell_char(row, col);
+        let flags = terminal.cell_flags(row, col);
+        let is_cursor = block_cursor == Some((row, col));
+
+        let mut fg = if is_cursor {
+            let bg = config.bg();
+            [
+                (bg[0] * 255.0) as u8,
+                (bg[1] * 255.0) as u8,
+                (bg[2] * 255.0) as u8,
+            ]
+        } else {
+            terminal.resolve_fg_with_attrs(row, col, config)
+        };
+
+        if flags.contains(Flags::DIM) && !is_cursor {
+            fg = [fg[0] * 2 / 3, fg[1] * 2 / 3, fg[2] * 2 / 3];
+        }
+        if flags.contains(Flags::HIDDEN) && !is_cursor {
+            let bg = config.bg();
+            fg = [
+                (bg[0] * 255.0) as u8,
+                (bg[1] * 255.0) as u8,
+                (bg[2] * 255.0) as u8,
+            ];
+        }
+
+        let cell_attrs = attrs_for_cell(font_family, flags, fg);
+
+        let same = current_attrs.is_some_and(|prev| {
+            prev.color_opt == cell_attrs.color_opt
+                && prev.weight == cell_attrs.weight
+                && prev.style == cell_attrs.style
+        });
+
+        if same || current_text.is_empty() {
+            if current_text.is_empty() {
+                current_attrs = Some(cell_attrs);
+            }
+            current_text.push(ch);
+        } else {
+            if let Some(attrs) = current_attrs.take() {
+                spans.push((std::mem::take(&mut current_text), attrs));
+            }
+            current_attrs = Some(cell_attrs);
+            current_text.push(ch);
+        }
+    }
+
+    if !current_text.is_empty() {
+        if let Some(attrs) = current_attrs {
+            spans.push((current_text, attrs));
+        }
+    }
+
+    spans
+}
+
+fn attrs_for_cell<'a>(font_family: &'a str, flags: Flags, fg: [u8; 3]) -> Attrs<'a> {
+    let mut attrs = Attrs::new()
+        .family(Family::Name(font_family))
+        .color(Color::rgb(fg[0], fg[1], fg[2]));
+
+    if flags.contains(Flags::BOLD) {
+        attrs = attrs.weight(Weight::BOLD);
+    }
+    if flags.contains(Flags::ITALIC) {
+        attrs = attrs.style(Style::Italic);
+    }
+
+    attrs
+}
+
+/// Compute a content hash for a terminal line (used for dirty tracking).
+fn hash_line(
+    terminal: &Terminal,
+    config: &Config,
+    row: usize,
+    cols: usize,
+    block_cursor: Option<(usize, usize)>,
+) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    for col in 0..cols {
+        let cell = terminal.cell(row, col);
+        cell.c.hash(&mut hasher);
+        cell.flags.bits().hash(&mut hasher);
+        terminal
+            .resolve_fg_with_attrs(row, col, config)
+            .hash(&mut hasher);
+    }
+    // Cursor position affects the line's appearance
+    if let Some((cr, cc)) = block_cursor {
+        if cr == row {
+            cc.hash(&mut hasher);
+        }
+    }
+    hasher.finish()
 }
