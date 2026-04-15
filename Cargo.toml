@@ -1,0 +1,20 @@
+[package]
+name = "llnzy"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "io-util"] }
+winit = "0.30"
+wgpu = "22"
+glyphon = "0.6"
+alacritty_terminal = "0.26"
+portable-pty = "0.8"
+log = "0.4"
+env_logger = "0.11"
+pollster = "0.4"
+bytemuck = { version = "1", features = ["derive"] }
+arboard = "3"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+dirs = "6"
