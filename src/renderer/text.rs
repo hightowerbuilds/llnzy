@@ -95,10 +95,10 @@ impl TextSystem {
             // cell top and glyph top is the cursor alignment offset.
             glyph_offset_y = (cell_height - physical_font_size) * 0.5;
             if let Some(glyph) = run.glyphs.first() {
-                cell_width = glyph.w.ceil();
-                if glyph.x < 0.0 {
-                    glyph_offset_x = (-glyph.x).ceil();
-                }
+                // Use exact advance width — ceil() causes cumulative cursor drift
+                cell_width = glyph.w;
+                // Fixed left padding to prevent first glyph clipping
+                glyph_offset_x = 4.0;
             }
         }
 
