@@ -1,7 +1,7 @@
 use winit::window::Window;
 
 use crate::config::Config;
-use crate::theme::{builtin_themes, VisualTheme};
+use crate::theme::builtin_themes;
 
 /// Which view is active.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -39,6 +39,9 @@ pub struct UiState {
     pub pending_config: Option<Config>,
     /// Text copied to clipboard by Stacker (main loop applies it)
     pub clipboard_text: Option<String>,
+    // Debug overlay
+    pub show_fps: bool,
+    frame_times: std::collections::VecDeque<f32>,
     // Stacker state
     pub stacker_prompts: Vec<StackerPrompt>,
     pub stacker_input: String,
@@ -87,6 +90,8 @@ impl UiState {
             footer_height: 36.0,
             pending_config: None,
             clipboard_text: None,
+            show_fps: false,
+            frame_times: std::collections::VecDeque::with_capacity(120),
             stacker_prompts: Vec::new(),
             stacker_input: String::new(),
             stacker_label_input: String::new(),
@@ -111,8 +116,15 @@ impl UiState {
         self.pending_config.take()
     }
 
+    /// Record a frame time for the FPS overlay.
+    pub fn record_frame_time(&mut self, dt: f32) {
+        if self.frame_times.len() >= 120 {
+            self.frame_times.pop_front();
+        }
+        self.frame_times.push_back(dt);
+    }
+
     /// Run the egui frame and render to the swapchain.
-    /// Creates its own command encoder and submits it.
     pub fn render(
         &mut self,
         window: &Window,
@@ -136,6 +148,14 @@ impl UiState {
         // Stacker state — extract for closure
         let mut stacker_prompts = std::mem::take(&mut self.stacker_prompts);
         let mut stacker_input = std::mem::take(&mut self.stacker_input);
+        let show_fps = self.show_fps;
+        let fps_info = if show_fps && !self.frame_times.is_empty() {
+            let avg_dt: f32 = self.frame_times.iter().sum::<f32>() / self.frame_times.len() as f32;
+            let fps = if avg_dt > 0.0 { 1.0 / avg_dt } else { 0.0 };
+            Some((fps, avg_dt * 1000.0))
+        } else {
+            None
+        };
 
         let full_output = self.ctx.run(raw_input, |ctx| {
             // ── Footer nav bar (ALWAYS visible) ──
@@ -294,6 +314,22 @@ impl UiState {
                         }
                     });
             }
+
+            // FPS overlay
+            if let Some((fps, ms)) = fps_info {
+                egui::Area::new(egui::Id::new("fps_overlay"))
+                    .fixed_pos(egui::Pos2::new(8.0, 8.0))
+                    .show(ctx, |ui| {
+                        egui::Frame::none()
+                            .fill(egui::Color32::from_rgba_premultiplied(0, 0, 0, 180))
+                            .rounding(egui::Rounding::same(4.0))
+                            .inner_margin(egui::Margin::symmetric(8.0, 4.0))
+                            .show(ui, |ui| {
+                                ui.label(egui::RichText::new(format!("{:.0} FPS  {:.1}ms", fps, ms))
+                                    .size(12.0).color(egui::Color32::from_rgb(150, 255, 150)).monospace());
+                            });
+                    });
+            }
         });
 
         // Apply state changes
@@ -343,7 +379,7 @@ impl UiState {
             let mut render_encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("egui_render"),
             });
-            let mut pass = render_encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            let pass = render_encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("egui_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view,
