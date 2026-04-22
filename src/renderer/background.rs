@@ -255,14 +255,14 @@ impl BackgroundRenderer {
         let g = bg_color[1];
         let b = bg_color[2];
 
-        // Blue-grey smoke palette
+        // Subtle blue-grey smoke palette — kept dark so terminal text remains readable
         let uniforms = BackgroundUniforms {
             intensity,
             speed,
             _padding: [0.0; 2],
-            color1: [r * 0.25 + 0.02, g * 0.28 + 0.03, b * 0.5 + 0.08, 1.0],
-            color2: [r * 0.3 + 0.06, g * 0.35 + 0.08, b * 0.6 + 0.14, 1.0],
-            color3: [r * 0.4 + 0.12, g * 0.5 + 0.14, b * 0.7 + 0.18, 1.0],
+            color1: [r * 0.15, g * 0.15, b * 0.25 + 0.02, 1.0],
+            color2: [r * 0.2 + 0.01, g * 0.18 + 0.01, b * 0.3 + 0.03, 1.0],
+            color3: [r * 0.25 + 0.02, g * 0.22 + 0.02, b * 0.35 + 0.05, 1.0],
         };
 
         gpu.queue.write_buffer(

@@ -10,7 +10,9 @@ use winit::window::{Fullscreen, Window, WindowAttributes, WindowId};
 use llnzy::config::Config;
 use llnzy::error_log::{ErrorLog, ErrorPanel};
 use llnzy::input;
+use llnzy::layout::ScreenLayout;
 use llnzy::renderer::Renderer;
+use llnzy::ui::UiState;
 use llnzy::search::Search;
 use llnzy::selection::Selection;
 use llnzy::session::{split_pane, PaneNode, Rect as PaneRect, Session, SplitDir};
@@ -67,6 +69,8 @@ struct App {
     cursor_pos: winit::dpi::PhysicalPosition<f64>,
     mouse_pressed: bool,
     click_state: ClickState,
+    ui: Option<UiState>,
+    screen_layout: Option<ScreenLayout>,
     visual_bell_until: Option<Instant>,
     last_blink_toggle: Instant,
     last_keypress: Instant,
@@ -92,6 +96,8 @@ impl App {
             cursor_pos: winit::dpi::PhysicalPosition::new(0.0, 0.0),
             mouse_pressed: false,
             click_state: ClickState::new(),
+            ui: None,
+            screen_layout: None,
             visual_bell_until: None,
             last_blink_toggle: Instant::now(),
             last_keypress: Instant::now(),
@@ -164,44 +170,36 @@ impl App {
         }
     }
 
-    fn grid_size(&self) -> (u16, u16) {
+    fn recompute_layout(&mut self) {
         if let Some(renderer) = &self.renderer {
             let (cw, ch) = renderer.cell_dimensions();
-            let rect = renderer.content_rect(self.tabs.len());
-            let cols = (rect.w / cw).max(1.0) as u16;
-            let rows = (rect.h / ch).max(1.0) as u16;
-            (cols, rows)
+            let gox = renderer.glyph_offset_x();
+            let w = self.window.as_ref().map(|w| w.inner_size().width as f32).unwrap_or(900.0);
+            let h = self.window.as_ref().map(|w| w.inner_size().height as f32).unwrap_or(600.0);
+            self.screen_layout = Some(ScreenLayout::compute(
+                w, h, cw, ch,
+                self.tabs.len(),
+                self.config.padding_x,
+                self.config.padding_y,
+                gox,
+            ));
+        }
+    }
+
+    fn grid_size(&self) -> (u16, u16) {
+        if let Some(layout) = &self.screen_layout {
+            (layout.grid_cols, layout.grid_rows)
         } else {
             (80, 24)
         }
     }
 
     fn pixel_to_grid(&self, pos: winit::dpi::PhysicalPosition<f64>) -> (usize, usize) {
-        let (cw, ch) = self
-            .renderer
-            .as_ref()
-            .map(|r| r.cell_dimensions())
-            .unwrap_or((1.0, 1.0));
-        let content_rect = self
-            .renderer
-            .as_ref()
-            .map(|r| r.content_rect(self.tabs.len()))
-            .unwrap_or(PaneRect {
-                x: 0.0,
-                y: 0.0,
-                w: 800.0,
-                h: 600.0,
-            });
-        let (cols, rows) = self
-            .active_session()
-            .map(|s| s.terminal.size())
-            .unwrap_or((80, 24));
-
-        let col =
-            (((pos.x as f32 - content_rect.x) / cw).max(0.0) as usize).min(cols.saturating_sub(1));
-        let row =
-            (((pos.y as f32 - content_rect.y) / ch).max(0.0) as usize).min(rows.saturating_sub(1));
-        (row, col)
+        if let Some(layout) = &self.screen_layout {
+            layout.pixel_to_grid(pos.x as f32, pos.y as f32)
+        } else {
+            (0, 0)
+        }
     }
 
     fn request_redraw(&self) {
@@ -297,13 +295,10 @@ impl App {
 
     fn split_active_pane(&mut self, dir: SplitDir) {
         let (cols, rows) = self.grid_size();
-        let tab_count = self.tabs.len();
-
         // Compute layout info before borrowing tabs mutably
-        let layout_info = self.renderer.as_ref().map(|r| {
-            let (cw, ch) = r.cell_dimensions();
-            let rect = r.content_rect(tab_count);
-            (cw, ch, rect)
+        let layout_info = self.screen_layout.as_ref().map(|l| {
+            let rect = PaneRect { x: l.content.x, y: l.content.y, w: l.content.w, h: l.content.h };
+            (l.cell_w, l.cell_h, rect)
         });
 
         if let Some(tab) = self.tabs.get_mut(self.active_tab) {
@@ -411,9 +406,15 @@ impl ApplicationHandler<UserEvent> for App {
         let renderer = pollster::block_on(Renderer::new(window.clone(), self.config.clone()));
 
         let (cw, ch) = renderer.cell_dimensions();
-        let rect = renderer.content_rect(1); // 1 tab initially
-        let cols = (rect.w / cw).max(1.0) as u16;
-        let rows = (rect.h / ch).max(1.0) as u16;
+        let gox = renderer.glyph_offset_x();
+        let size = window.inner_size();
+        let layout = ScreenLayout::compute(
+            size.width as f32, size.height as f32, cw, ch, 1,
+            self.config.padding_x, self.config.padding_y, gox,
+        );
+        let cols = layout.grid_cols;
+        let rows = layout.grid_rows;
+        self.screen_layout = Some(layout);
 
         match Session::new(cols, rows, &self.config, self.proxy.clone()) {
             Ok(session) => {
@@ -428,8 +429,15 @@ impl ApplicationHandler<UserEvent> for App {
             }
         }
 
+        let ui_state = UiState::new(
+            &window,
+            &renderer.gpu_device(),
+            renderer.gpu_surface_format(),
+        );
+
         self.window = Some(window);
         self.renderer = Some(renderer);
+        self.ui = Some(ui_state);
     }
 
     fn window_event(
@@ -438,6 +446,19 @@ impl ApplicationHandler<UserEvent> for App {
         _window_id: WindowId,
         event: WindowEvent,
     ) {
+        // Route events to egui first
+        if let (Some(window), Some(ui)) = (&self.window, &mut self.ui) {
+            let response = ui.handle_event(window, &event);
+            // If egui consumed a mouse/keyboard event, don't pass to terminal
+            if response && ui.settings_open {
+                self.request_redraw();
+                match &event {
+                    WindowEvent::CloseRequested | WindowEvent::Resized(_) => {}
+                    _ => return,
+                }
+            }
+        }
+
         match event {
             WindowEvent::CloseRequested => {
                 self.save_window_state();
@@ -448,10 +469,14 @@ impl ApplicationHandler<UserEvent> for App {
                 if let Some(renderer) = &mut self.renderer {
                     renderer.resize(size.width, size.height);
                     renderer.invalidate_text_cache();
-
-                    let (cw, ch) = renderer.cell_dimensions();
-                    let rect = renderer.content_rect(self.tabs.len());
-
+                }
+                self.recompute_layout();
+                if let Some(layout) = &self.screen_layout {
+                    let rect = PaneRect {
+                        x: layout.content.x, y: layout.content.y,
+                        w: layout.content.w, h: layout.content.h,
+                    };
+                    let (cw, ch) = (layout.cell_w, layout.cell_h);
                     for tab in &mut self.tabs {
                         tab.root.resize_all(rect, cw, ch);
                     }
@@ -506,15 +531,27 @@ impl ApplicationHandler<UserEvent> for App {
                 if let (Some(renderer), Some(tab)) =
                     (&mut self.renderer, self.tabs.get(self.active_tab))
                 {
-                    renderer.render(
-                        &tab.root,
-                        &titles,
-                        &sel_info,
-                        &search_rects,
-                        search_bar_ref,
-                        err_panel,
-                        bell_active,
-                    );
+                    if let Some(layout) = &self.screen_layout {
+                        let ui_state = &mut self.ui;
+                        let window_ref = &self.window;
+                        let config_ref = &self.config;
+                        let mut egui_cb = |device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView, desc: egui_wgpu::ScreenDescriptor| {
+                            if let (Some(ui), Some(window)) = (ui_state.as_mut(), window_ref.as_ref()) {
+                                ui.render(window, device, queue, encoder, view, desc, config_ref);
+                            }
+                        };
+                        renderer.render(
+                            &tab.root,
+                            &titles,
+                            &sel_info,
+                            &search_rects,
+                            search_bar_ref,
+                            err_panel,
+                            bell_active,
+                            layout,
+                            Some(&mut egui_cb),
+                        );
+                    }
                 }
             }
 
@@ -573,7 +610,7 @@ impl ApplicationHandler<UserEvent> for App {
             WindowEvent::MouseInput { state, button, .. } => {
                 let (row, col) = self.pixel_to_grid(self.cursor_pos);
 
-                if button == MouseButton::Right && state == ElementState::Pressed {
+                    if button == MouseButton::Right && state == ElementState::Pressed {
                     if self.selection.is_active() {
                         self.copy_selection();
                     } else if let Some(cb) = &mut self.clipboard {
@@ -989,10 +1026,9 @@ impl ApplicationHandler<UserEvent> for App {
             }
         }
 
-        // Continuous animation mode when effects are enabled.
-        // Use Poll so the event loop never sleeps — VSync (PresentMode::Fifo)
-        // handles frame pacing at the display refresh rate for smooth animation.
-        if self.config.effects.enabled {
+        // Continuous animation mode
+        let ui_active = self.ui.as_ref().map_or(false, |u| u.settings_open);
+        if self.config.effects.enabled || ui_active {
             event_loop.set_control_flow(ControlFlow::Poll);
             self.request_redraw();
         }
