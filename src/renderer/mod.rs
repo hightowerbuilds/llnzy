@@ -114,7 +114,11 @@ impl Renderer {
         self.text.invalidate_cache();
     }
 
-    pub fn update_config(&mut self, config: Config) {
+    pub fn update_config(&mut self, mut config: Config) {
+        // Apply time-of-day warmth shift if enabled
+        if config.time_of_day_enabled {
+            crate::config::apply_time_of_day(&mut config.colors);
+        }
         self.config = config;
         self.invalidate_text_cache();
         // Update background effect uniforms from config
@@ -137,7 +141,7 @@ impl Renderer {
         error_panel: Option<(&ErrorPanel, &ErrorLog)>,
         visual_bell: bool,
         screen_layout: &ScreenLayout,
-        egui_render: Option<&mut dyn FnMut(&wgpu::Device, &wgpu::Queue, &mut wgpu::CommandEncoder, &wgpu::TextureView, egui_wgpu::ScreenDescriptor)>,
+        egui_render: Option<&mut dyn FnMut(&wgpu::Device, &wgpu::Queue, &wgpu::TextureView, egui_wgpu::ScreenDescriptor)>,
     ) {
         // Update per-frame uniforms (time, resolution, frame count)
         self.gpu.update_frame_uniforms();
@@ -218,7 +222,7 @@ impl Renderer {
                 self.config.bg(),
             );
             self.background
-                .draw(&self.gpu, &mut encoder, &self.gpu.scene_view);
+                .draw(&self.gpu, &mut encoder, &self.gpu.scene_view, &self.config.effects.background);
         }
 
         // 1c. Particles (floating behind terminal content)
@@ -494,15 +498,18 @@ impl Renderer {
         self.gpu.queue.submit(std::iter::once(encoder.finish()));
 
         // 9. egui overlay (footer, settings UI) — renders AFTER terminal content
+        //    egui creates and submits its own command encoders internally.
         if let Some(egui_fn) = egui_render {
             let desc = self.screen_descriptor();
-            let mut egui_encoder = self.gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("egui_host_encoder"),
-            });
-            egui_fn(&self.gpu.device, &self.gpu.queue, &mut egui_encoder, &swapchain_view, desc);
+            egui_fn(&self.gpu.device, &self.gpu.queue, &swapchain_view, desc);
         }
 
         output.present();
+
+        // Trim glyph atlas AFTER present — GPU work is complete, safe to free buffers.
+        // Must NOT be called before present(); submit() is async and the GPU may
+        // still be reading vertex/texture data owned by the atlas.
+        self.text.trim_atlas();
     }
 
     #[allow(clippy::too_many_arguments)]

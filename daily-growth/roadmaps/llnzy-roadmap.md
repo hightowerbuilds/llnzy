@@ -97,34 +97,34 @@
 - [x] FPS debug overlay (Cmd+Shift+P)
 - [x] Dead code cleanup — zero warnings, 184 tests passing
 - [x] README rewrite
+- [x] GPU error recovery — dual GlyphonRenderer to prevent vertex buffer destruction across prepare() calls; SIGPIPE guard; PTY death detection; crash diagnostics to /tmp/llnzy-crash.log
 - [ ] Adaptive quality (reduce effects when frame time exceeds budget)
-- [ ] GPU error recovery (device lost, shader compilation failure)
 - [ ] Power-aware rendering (reduce effects on battery)
 
-### Phase 7: Terminal Robustness
-- [ ] OSC 7 working directory tracking
-- [ ] Keybinding customization
-- [ ] Session naming / renaming
-- [ ] Pane resize by dragging dividers
-- [ ] Desktop notifications for long-running commands
-- [ ] Native macOS menu bar integration
+### Phase 7: Terminal Robustness [COMPLETED]
+- [x] OSC 7 working directory tracking
+- [x] Session naming / renaming
+- [x] Desktop notifications for long-running commands
+- [x] Keybinding customization — `[keybindings]` TOML section, action registry with `parse_key_combo()`, hot-reloadable
+- [x] Pane resize by dragging dividers — `find_divider_at()` hit-testing, 5px grab zone, live ratio update, cursor icon feedback
+- [x] Native macOS menu bar — objc2 integration, File/Edit/View menus, standard Cmd shortcuts, MenuAction event dispatch
 
-### Phase 8: Stacker Enhancements
-- [ ] Persist prompts to disk (JSON/TOML file)
-- [ ] Prompt categories / folders
-- [ ] Search within saved prompts
-- [ ] Edit existing prompts
-- [ ] Import/export prompt collections
+### Phase 8: Stacker Enhancements [COMPLETED]
+- [x] Persist prompts to disk — auto-save to `~/.config/llnzy/stacker.json`, loaded on startup
+- [x] Prompt categories — category field on each prompt, `[category]` badge in list, combo-box filter
+- [x] Search within saved prompts — real-time text filter across label, text, and category
+- [x] Edit existing prompts — inline multiline editor with Save/Cancel, auto-relabel on save
+- [x] Import/export prompt collections — JSON export/import to `stacker.export.json`, dedup on import
 
-### Phase 9: Additional Visual Effects
-- [ ] More background shaders (aurora, matrix rain, nebula, tron grid)
-- [ ] User-loadable custom .wgsl background shaders
-- [ ] Animated theme transitions (smooth interpolation between presets)
-- [ ] Time-of-day awareness (shift warmth based on system clock)
+### Phase 9: Additional Visual Effects [COMPLETED]
+- [x] More background shaders — aurora (swaying curtains), matrix (falling columns), nebula (gas clouds + stars), tron (perspective grid with pulse)
+- [x] User-loadable custom .wgsl shaders — drop fragment shaders into `~/.config/llnzy/shaders/`, auto-compiled at startup, appear in background dropdown
+- [x] Animated theme transitions — 600ms smoothstep color interpolation between presets via `ColorTransition`, blends all 16 ANSI + fg/bg/cursor/selection
+- [x] Time-of-day awareness — toggle in Text settings, shifts warmth (red up, blue down) at night, cool tint during day
 
-### Phase 10: Distribution
+### Phase 10: Distribution [IN PROGRESS]
+- [x] App icon and .app bundle — `.icns` generated from `llnzy.jpg` at all Retina sizes, `Info.plist` with GPU switching + HiDPI, `bundle.sh` script builds `target/llnzy.app`
 - [ ] Release binaries via GitHub Releases (macOS universal)
 - [ ] Homebrew formula
 - [ ] Linux + Windows testing and support
-- [ ] App icon and .app bundle
 - [ ] Auto-update mechanism

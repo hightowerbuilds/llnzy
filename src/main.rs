@@ -11,11 +11,13 @@ use llnzy::config::Config;
 use llnzy::error_log::{ErrorLog, ErrorPanel};
 use llnzy::input;
 use llnzy::layout::ScreenLayout;
+use llnzy::keybindings::Action;
 use llnzy::renderer::Renderer;
 use llnzy::ui::UiState;
 use llnzy::search::Search;
 use llnzy::selection::Selection;
 use llnzy::session::{split_pane, PaneNode, Rect as PaneRect, Session, SplitDir};
+use winit::window::CursorIcon;
 use llnzy::UserEvent;
 
 struct ClickState {
@@ -53,6 +55,13 @@ struct Tab {
     root: PaneNode,
 }
 
+/// Tracks an active divider drag for pane resizing.
+struct DividerDrag {
+    path: Vec<bool>,
+    dir: SplitDir,
+    parent_rect: PaneRect,
+}
+
 struct App {
     config: Config,
     window: Option<Arc<Window>>,
@@ -68,6 +77,7 @@ struct App {
     clipboard: Option<arboard::Clipboard>,
     cursor_pos: winit::dpi::PhysicalPosition<f64>,
     mouse_pressed: bool,
+    divider_drag: Option<DividerDrag>,
     click_state: ClickState,
     ui: Option<UiState>,
     screen_layout: Option<ScreenLayout>,
@@ -98,6 +108,7 @@ impl App {
             clipboard,
             cursor_pos: winit::dpi::PhysicalPosition::new(0.0, 0.0),
             mouse_pressed: false,
+            divider_drag: None,
             click_state: ClickState::new(),
             ui: None,
             screen_layout: None,
@@ -279,6 +290,13 @@ impl App {
             self.selection.clear();
             self.request_redraw();
         }
+    }
+
+    fn content_rect(&self) -> Option<PaneRect> {
+        self.screen_layout.as_ref().map(|l| PaneRect {
+            x: l.content.x, y: l.content.y,
+            w: l.content.w, h: l.content.h,
+        })
     }
 
     fn mouse_reporting(&self) -> bool {
@@ -476,6 +494,10 @@ impl ApplicationHandler<UserEvent> for App {
         self.window = Some(window);
         self.renderer = Some(renderer);
         self.ui = Some(ui_state);
+
+        // Set up native macOS menu bar
+        #[cfg(target_os = "macos")]
+        llnzy::menu::setup_menu_bar(self.proxy.clone());
     }
 
     fn window_event(
@@ -499,6 +521,8 @@ impl ApplicationHandler<UserEvent> for App {
 
         match event {
             WindowEvent::CloseRequested => {
+                eprintln!("llnzy: CloseRequested received");
+                let _ = std::fs::write("/tmp/llnzy-close.log", "CloseRequested event received\n");
                 self.save_window_state();
                 event_loop.exit();
             }
@@ -578,9 +602,9 @@ impl ApplicationHandler<UserEvent> for App {
                         let ui_state = &mut self.ui;
                         let window_ref = &self.window;
                         let config_ref = &self.config;
-                        let mut egui_cb = |device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView, desc: egui_wgpu::ScreenDescriptor| {
+                        let mut egui_cb = |device: &wgpu::Device, queue: &wgpu::Queue, view: &wgpu::TextureView, desc: egui_wgpu::ScreenDescriptor| {
                             if let (Some(ui), Some(window)) = (ui_state.as_mut(), window_ref.as_ref()) {
-                                ui.render(window, device, queue, encoder, view, desc, config_ref);
+                                ui.render(window, device, queue, view, desc, config_ref);
                             }
                         };
                         renderer.render(
@@ -696,6 +720,29 @@ impl ApplicationHandler<UserEvent> for App {
                     }
                 }
 
+                // Divider drag detection
+                if button == MouseButton::Left && state == ElementState::Pressed {
+                    let px = self.cursor_pos.x as f32;
+                    let py = self.cursor_pos.y as f32;
+                    let hit = self.content_rect().and_then(|cr| {
+                        let tab = self.tabs.get(self.active_tab)?;
+                        let mut path = Vec::new();
+                        tab.root.find_divider_at(cr, px, py, 5.0, &mut path)
+                    });
+                    if let Some((p, dir, parent)) = hit {
+                        self.divider_drag = Some(DividerDrag { path: p, dir, parent_rect: parent });
+                        return;
+                    }
+                }
+                if button == MouseButton::Left && state == ElementState::Released {
+                    if self.divider_drag.take().is_some() {
+                        if let Some(window) = &self.window {
+                            window.set_cursor(CursorIcon::Default);
+                        }
+                        return;
+                    }
+                }
+
                 if button == MouseButton::Right && state == ElementState::Pressed {
                     if self.selection.is_active() {
                         self.copy_selection();
@@ -767,6 +814,55 @@ impl ApplicationHandler<UserEvent> for App {
 
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor_pos = position;
+                let px = position.x as f32;
+                let py = position.y as f32;
+
+                // Handle active divider drag
+                if let Some(drag) = &self.divider_drag {
+                    let new_ratio = match drag.dir {
+                        SplitDir::Vertical => {
+                            (px - drag.parent_rect.x) / drag.parent_rect.w
+                        }
+                        SplitDir::Horizontal => {
+                            (py - drag.parent_rect.y) / drag.parent_rect.h
+                        }
+                    };
+                    let path = drag.path.clone();
+                    let content_rect = self.content_rect();
+                    let (cw, ch) = self.renderer.as_ref()
+                        .map(|r| r.cell_dimensions()).unwrap_or((1.0, 1.0));
+                    if let Some(tab) = self.active_tab_mut() {
+                        tab.root.set_ratio_at(&path, new_ratio);
+                        if let Some(cr) = content_rect {
+                            tab.root.resize_all(cr, cw, ch);
+                        }
+                    }
+                    if let Some(r) = &mut self.renderer {
+                        r.invalidate_text_cache();
+                    }
+                    self.request_redraw();
+                    return;
+                }
+
+                // Hover cursor icon for dividers
+                if !self.mouse_pressed {
+                    let near_divider = self.content_rect().and_then(|cr| {
+                        self.tabs.get(self.active_tab).and_then(|tab| {
+                            let mut path = Vec::new();
+                            tab.root.find_divider_at(cr, px, py, 5.0, &mut path)
+                        })
+                    });
+                    if let (Some(window), Some((_, dir, _))) = (&self.window, near_divider) {
+                        let icon = match dir {
+                            SplitDir::Vertical => CursorIcon::ColResize,
+                            SplitDir::Horizontal => CursorIcon::RowResize,
+                        };
+                        window.set_cursor(icon);
+                    } else if let Some(window) = &self.window {
+                        window.set_cursor(CursorIcon::Default);
+                    }
+                }
+
                 if self.mouse_pressed {
                     let (row, col) = self.pixel_to_grid(position);
                     if self.mouse_reporting() {
@@ -875,115 +971,65 @@ impl ApplicationHandler<UserEvent> for App {
                     }
                 }
 
-                // Cmd shortcuts
-                if self.modifiers.super_key() {
-                    match &key_event.logical_key {
-                        // Cmd+F: open search
-                        Key::Character(c) if c.as_str() == "f" => {
+                // Dispatch through keybinding registry
+                if let Some(action) = self.config.keybindings.match_key(&key_event, self.modifiers) {
+                    match action {
+                        Action::Search => {
                             self.search.open();
                             self.request_redraw();
-                            return;
                         }
-                        Key::Character(c) if c.as_str() == "c" => {
-                            self.copy_selection();
-                            return;
-                        }
-                        Key::Character(c) if c.as_str() == "v" => {
+                        Action::Copy => self.copy_selection(),
+                        Action::Paste => {
                             if let Some(cb) = &mut self.clipboard {
                                 if let Ok(text) = cb.get_text() {
                                     self.paste_text(&text);
                                 }
                             }
-                            return;
                         }
-                        Key::Character(c) if c.as_str() == "a" => {
+                        Action::SelectAll => {
                             if let Some(s) = self.active_session() {
                                 let (cols, rows) = s.terminal.size();
                                 self.selection.select_all(rows, cols);
                             }
                             self.request_redraw();
-                            return;
                         }
-                        // Tab management
-                        Key::Character(c) if c.as_str() == "t" => {
-                            self.new_tab();
-                            return;
-                        }
-                        Key::Character(c) if c.as_str() == "w" => {
-                            self.close_tab();
-                            return;
-                        }
-                        // Cmd+Shift+] / Cmd+Shift+[ : next/prev tab
-                        Key::Character(c) if c.as_str() == "}" || c.as_str() == "]" => {
+                        Action::NewTab => self.new_tab(),
+                        Action::CloseTab => self.close_tab(),
+                        Action::NextTab => {
                             let next = (self.active_tab + 1) % self.tabs.len().max(1);
                             self.switch_tab(next);
-                            return;
                         }
-                        Key::Character(c) if c.as_str() == "{" || c.as_str() == "[" => {
+                        Action::PrevTab => {
                             let prev = if self.active_tab == 0 {
                                 self.tabs.len().saturating_sub(1)
                             } else {
                                 self.active_tab - 1
                             };
                             self.switch_tab(prev);
-                            return;
                         }
-                        // Cmd+D / Cmd+Shift+D: split pane
-                        Key::Character(c) if c.as_str() == "d" => {
-                            if self.modifiers.shift_key() {
-                                self.split_active_pane(SplitDir::Horizontal);
-                            } else {
-                                self.split_active_pane(SplitDir::Vertical);
+                        Action::SplitVertical => self.split_active_pane(SplitDir::Vertical),
+                        Action::SplitHorizontal => self.split_active_pane(SplitDir::Horizontal),
+                        Action::ToggleFullscreen => self.toggle_fullscreen(),
+                        Action::ToggleEffects => {
+                            self.config.effects.enabled = !self.config.effects.enabled;
+                            if let Some(renderer) = &mut self.renderer {
+                                renderer.update_config(self.config.clone());
                             }
-                            return;
+                            let state = if self.config.effects.enabled { "ON" } else { "OFF" };
+                            self.error_log.info(format!("Visual effects: {}", state));
+                            self.request_redraw();
                         }
-                        // Cmd+Enter: toggle fullscreen
-                        Key::Named(NamedKey::Enter) => {
-                            self.toggle_fullscreen();
-                            return;
-                        }
-                        // Cmd+Shift+E: toggle error/diagnostics panel
-                        Key::Character(c) if c.as_str() == "e" || c.as_str() == "E" => {
-                            if self.modifiers.shift_key() {
-                                self.error_panel.toggle();
-                                self.request_redraw();
-                                return;
+                        Action::ToggleFps => {
+                            if let Some(ui) = &mut self.ui {
+                                ui.show_fps = !ui.show_fps;
                             }
+                            self.request_redraw();
                         }
-                        // Cmd+Shift+F: toggle all visual effects on/off
-                        Key::Character(c) if c.as_str() == "f" || c.as_str() == "F" => {
-                            if self.modifiers.shift_key() {
-                                self.config.effects.enabled = !self.config.effects.enabled;
-                                if let Some(renderer) = &mut self.renderer {
-                                    renderer.update_config(self.config.clone());
-                                }
-                                let state = if self.config.effects.enabled { "ON" } else { "OFF" };
-                                self.error_log.info(format!("Visual effects: {}", state));
-                                self.request_redraw();
-                                return;
-                            }
+                        Action::ToggleErrorPanel => {
+                            self.error_panel.toggle();
+                            self.request_redraw();
                         }
-                        // Cmd+Shift+P: toggle FPS overlay
-                        Key::Character(c) if c.as_str() == "p" || c.as_str() == "P" => {
-                            if self.modifiers.shift_key() {
-                                if let Some(ui) = &mut self.ui {
-                                    ui.show_fps = !ui.show_fps;
-                                }
-                                self.request_redraw();
-                                return;
-                            }
-                        }
-                        // Cmd+1-9: switch tabs
-                        Key::Character(c) => {
-                            if let Some(d) = c.chars().next().and_then(|ch| ch.to_digit(10)) {
-                                if (1..=9).contains(&d) {
-                                    self.switch_tab((d - 1) as usize);
-                                    return;
-                                }
-                            }
-                        }
-                        // Cmd+Arrow: cycle focus between panes
-                        Key::Named(NamedKey::ArrowRight | NamedKey::ArrowDown) => {
+                        Action::CyclePaneForward | Action::CyclePaneBackward => {
                             if let Some(tab) = self.active_tab_mut() {
                                 tab.root.cycle_focus();
                             }
@@ -992,48 +1038,34 @@ impl ApplicationHandler<UserEvent> for App {
                                 r.invalidate_text_cache();
                             }
                             self.request_redraw();
-                            return;
                         }
-                        Key::Named(NamedKey::ArrowLeft | NamedKey::ArrowUp) => {
-                            if let Some(tab) = self.active_tab_mut() {
-                                tab.root.cycle_focus();
+                        Action::ScrollPageUp => {
+                            if !self.mouse_reporting() {
+                                if let Some(s) = self.active_session_mut() {
+                                    s.terminal.scroll_page_up();
+                                }
+                                if let Some(r) = &mut self.renderer {
+                                    r.invalidate_text_cache();
+                                }
+                                self.request_redraw();
                             }
-                            self.selection.clear();
-                            if let Some(r) = &mut self.renderer {
-                                r.invalidate_text_cache();
-                            }
-                            self.request_redraw();
-                            return;
                         }
-                        _ => {}
+                        Action::ScrollPageDown => {
+                            if !self.mouse_reporting() {
+                                if let Some(s) = self.active_session_mut() {
+                                    s.terminal.scroll_page_down();
+                                }
+                                if let Some(r) = &mut self.renderer {
+                                    r.invalidate_text_cache();
+                                }
+                                self.request_redraw();
+                            }
+                        }
+                        Action::SwitchTab(n) => {
+                            self.switch_tab((n - 1) as usize);
+                        }
                     }
-                }
-
-                // Shift+PageUp/Down
-                if self.modifiers.shift_key() && !self.mouse_reporting() {
-                    match &key_event.logical_key {
-                        Key::Named(NamedKey::PageUp) => {
-                            if let Some(s) = self.active_session_mut() {
-                                s.terminal.scroll_page_up();
-                            }
-                            if let Some(r) = &mut self.renderer {
-                                r.invalidate_text_cache();
-                            }
-                            self.request_redraw();
-                            return;
-                        }
-                        Key::Named(NamedKey::PageDown) => {
-                            if let Some(s) = self.active_session_mut() {
-                                s.terminal.scroll_page_down();
-                            }
-                            if let Some(r) = &mut self.renderer {
-                                r.invalidate_text_cache();
-                            }
-                            self.request_redraw();
-                            return;
-                        }
-                        _ => {}
-                    }
+                    return;
                 }
 
                 if self.selection.is_active() {
@@ -1089,6 +1121,43 @@ impl ApplicationHandler<UserEvent> for App {
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
             UserEvent::PtyOutput => self.process_all_output(),
+            #[cfg(target_os = "macos")]
+            UserEvent::MenuAction(action) => {
+                use llnzy::menu::MenuAction;
+                match action {
+                    MenuAction::NewTab => self.new_tab(),
+                    MenuAction::CloseTab => self.close_tab(),
+                    MenuAction::Copy => self.copy_selection(),
+                    MenuAction::Paste => {
+                        if let Some(cb) = &mut self.clipboard {
+                            if let Ok(text) = cb.get_text() {
+                                self.paste_text(&text);
+                            }
+                        }
+                    }
+                    MenuAction::SelectAll => {
+                        if let Some(s) = self.active_session() {
+                            let (cols, rows) = s.terminal.size();
+                            self.selection.select_all(rows, cols);
+                        }
+                        self.request_redraw();
+                    }
+                    MenuAction::Find => {
+                        self.search.open();
+                        self.request_redraw();
+                    }
+                    MenuAction::ToggleFullscreen => self.toggle_fullscreen(),
+                    MenuAction::SplitVertical => self.split_active_pane(SplitDir::Vertical),
+                    MenuAction::SplitHorizontal => self.split_active_pane(SplitDir::Horizontal),
+                    MenuAction::ToggleEffects => {
+                        self.config.effects.enabled = !self.config.effects.enabled;
+                        if let Some(renderer) = &mut self.renderer {
+                            renderer.update_config(self.config.clone());
+                        }
+                        self.request_redraw();
+                    }
+                }
+            }
         }
     }
 
@@ -1121,6 +1190,23 @@ impl ApplicationHandler<UserEvent> for App {
             }
             let next = self.last_blink_toggle + std::time::Duration::from_millis(blink_ms);
             event_loop.set_control_flow(ControlFlow::WaitUntil(next));
+        }
+
+        // Advance theme color transition
+        if let Some(ref mut trans) = self.config.transition {
+            let dt = self.renderer.as_ref().map(|r| r.gpu_delta_time()).unwrap_or(1.0 / 60.0);
+            let done = trans.advance(dt);
+            let blended = trans.current();
+            // Apply blended colors to renderer without overwriting the target config
+            if let Some(renderer) = &mut self.renderer {
+                let mut render_config = self.config.clone();
+                render_config.colors = blended;
+                renderer.update_config(render_config);
+            }
+            if done {
+                self.config.transition = None;
+            }
+            self.request_redraw();
         }
 
         // Apply config changes from settings UI
@@ -1174,12 +1260,21 @@ fn load_window_state() -> Option<(u32, u32)> {
 fn main() {
     env_logger::init();
 
-    // Install panic handler that logs to stderr (and could log to ErrorLog if we had a global ref)
+    // Install panic handler that logs to a file so we can see panics even if stderr is lost
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        eprintln!("llnzy panic: {}", info);
+        let msg = format!("llnzy panic: {}\n", info);
+        eprintln!("{}", msg);
+        let _ = std::fs::write("/tmp/llnzy-crash.log", &msg);
         default_hook(info);
     }));
+
+    // Catch signals that would silently kill the process
+    #[cfg(unix)]
+    unsafe {
+        // SIGPIPE: writing to broken pipe (dead PTY)
+        libc::signal(libc::SIGPIPE, libc::SIG_IGN);
+    }
 
     let event_loop = EventLoop::<UserEvent>::with_user_event().build().unwrap();
     event_loop.set_control_flow(ControlFlow::Wait);
@@ -1190,5 +1285,10 @@ fn main() {
     // Log startup
     app.error_log.info("llnzy starting up");
 
-    event_loop.run_app(&mut app).unwrap();
+    let result = event_loop.run_app(&mut app);
+    // If we get here, the event loop exited — log WHY
+    let exit_msg = format!("llnzy event loop exited: {:?}\n", result);
+    eprintln!("{}", exit_msg);
+    let _ = std::fs::write("/tmp/llnzy-exit.log", &exit_msg);
+    result.unwrap();
 }

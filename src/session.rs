@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::pty::Pty;
+use crate::pty::{Pty, PtyReadResult};
 use crate::terminal::Terminal;
 
 pub struct Session {
@@ -43,8 +43,16 @@ impl Session {
     /// Process all available PTY output. Returns (data_changed, clipboard_text, bell_rang).
     pub fn process_output(&mut self) -> (bool, Option<String>, bool) {
         let mut all_bytes = Vec::new();
-        while let Some(bytes) = self.pty.try_read() {
-            all_bytes.extend_from_slice(&bytes);
+        let mut disconnected = false;
+        loop {
+            match self.pty.try_read() {
+                PtyReadResult::Data(bytes) => all_bytes.extend_from_slice(&bytes),
+                PtyReadResult::Empty => break,
+                PtyReadResult::Disconnected => {
+                    disconnected = true;
+                    break;
+                }
+            }
         }
         let mut clipboard_text = None;
         let mut bell = false;
@@ -74,10 +82,14 @@ impl Session {
                     }
                 }
             }
-            (true, clipboard_text, bell)
-        } else {
-            (false, None, false)
         }
+        // Detect shell exit via PTY reader channel disconnect.
+        // The VTE parser never emits ChildExit, so this is the primary
+        // exit detection mechanism.
+        if disconnected && self.exited.is_none() {
+            self.exited = Some(0);
+        }
+        (disconnected || !all_bytes.is_empty(), clipboard_text, bell)
     }
 
     pub fn resize(&mut self, cols: u16, rows: u16) {
@@ -292,6 +304,76 @@ impl PaneNode {
                 rects.extend(second.collect_dividers(r2));
                 rects
             }
+        }
+    }
+
+    /// Find a divider near the given pixel position. Returns the split direction
+    /// and the parent rect so the caller can compute a new ratio from mouse position.
+    /// `path` accumulates the navigation path to reach this node.
+    pub fn find_divider_at(
+        &self,
+        rect: Rect,
+        px: f32,
+        py: f32,
+        tolerance: f32,
+        path: &mut Vec<bool>,
+    ) -> Option<(Vec<bool>, SplitDir, Rect)> {
+        match self {
+            PaneNode::Leaf(_) => None,
+            PaneNode::Split {
+                dir, ratio, first, second, ..
+            } => {
+                let (r1, r2) = split_rect(rect, *dir, *ratio);
+                let hit = match dir {
+                    SplitDir::Vertical => {
+                        let div_x = r1.x + r1.w;
+                        (px - div_x).abs() <= tolerance
+                            && py >= rect.y
+                            && py <= rect.y + rect.h
+                    }
+                    SplitDir::Horizontal => {
+                        let div_y = r1.y + r1.h;
+                        (py - div_y).abs() <= tolerance
+                            && px >= rect.x
+                            && px <= rect.x + rect.w
+                    }
+                };
+                if hit {
+                    return Some((path.clone(), *dir, rect));
+                }
+                // Recurse into children
+                path.push(false);
+                if let Some(result) = first.find_divider_at(r1, px, py, tolerance, path) {
+                    return Some(result);
+                }
+                path.pop();
+                path.push(true);
+                if let Some(result) = second.find_divider_at(r2, px, py, tolerance, path) {
+                    return Some(result);
+                }
+                path.pop();
+                None
+            }
+        }
+    }
+
+    /// Set the split ratio at a node reached by following `path`.
+    /// Each element: false = go to first child, true = go to second child.
+    /// An empty path means this node itself.
+    pub fn set_ratio_at(&mut self, path: &[bool], new_ratio: f32) {
+        match self {
+            PaneNode::Split {
+                ratio, first, second, ..
+            } => {
+                if path.is_empty() {
+                    *ratio = new_ratio.clamp(0.1, 0.9);
+                } else if path[0] {
+                    second.set_ratio_at(&path[1..], new_ratio);
+                } else {
+                    first.set_ratio_at(&path[1..], new_ratio);
+                }
+            }
+            PaneNode::Leaf(_) => {}
         }
     }
 

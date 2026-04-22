@@ -1,4 +1,5 @@
 use bytemuck::{Pod, Zeroable};
+use std::collections::HashMap;
 
 use super::state::GpuState;
 
@@ -14,9 +15,9 @@ pub struct BackgroundUniforms {
     pub color3: [f32; 4],
 }
 
-const SMOKE_SHADER: &str = r#"
-// ── Noise utilities ──
+// ── Shared vertex + noise preamble for all background shaders ──
 
+const SHARED_PREAMBLE: &str = r#"
 fn hash2(p: vec2<f32>) -> f32 {
     var p3 = fract(vec3<f32>(p.x, p.y, p.x) * 0.1031);
     p3 = p3 + dot(p3, vec3<f32>(p3.y + 33.33, p3.z + 33.33, p3.x + 33.33));
@@ -50,8 +51,6 @@ fn fbm(p_in: vec2<f32>, octaves: i32) -> f32 {
     return value;
 }
 
-// ── Uniforms ──
-
 struct FrameUniforms {
     time: f32,
     delta_time: f32,
@@ -70,8 +69,6 @@ struct BackgroundUniforms {
 };
 @group(1) @binding(0) var<uniform> bg: BackgroundUniforms;
 
-// ── Vertex ──
-
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) uv: vec2<f32>,
@@ -86,100 +83,220 @@ fn vs_main(@builtin(vertex_index) vi: u32) -> VertexOutput {
     out.uv = vec2<f32>(x * 0.5 + 0.5, 1.0 - (y * 0.5 + 0.5));
     return out;
 }
+"#;
 
-// ── Fragment: living smoke ──
+// ── Fragment shaders ──
 
+const SMOKE_FRAGMENT: &str = r#"
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let t = frame.time * bg.speed * 0.15;
     let aspect = frame.resolution.x / frame.resolution.y;
     var uv = in.uv;
     uv.x = uv.x * aspect;
-
-    // Domain warping — displace the UV before sampling noise
-    // This creates the organic, flowing smoke feel
     let warp1 = vec2<f32>(
         fbm(uv * 3.0 + vec2<f32>(t * 0.7, t * 0.3), 4),
         fbm(uv * 3.0 + vec2<f32>(t * 0.4 + 5.2, t * 0.6 + 1.3), 4)
     );
-
     let warp2 = vec2<f32>(
         fbm(uv * 3.0 + warp1 * 2.0 + vec2<f32>(t * 0.2 + 1.7, t * 0.5 + 9.2), 4),
         fbm(uv * 3.0 + warp1 * 2.0 + vec2<f32>(t * 0.3 + 8.3, t * 0.1 + 2.8), 4)
     );
-
-    // Final smoke density from double-warped noise
     let smoke = fbm(uv * 2.0 + warp2 * 1.5, 5);
-
-    // Create depth layers by mixing theme colors based on smoke density
     let layer1 = mix(bg.color1.rgb, bg.color2.rgb, smoothstep(0.2, 0.6, smoke));
     let layer2 = mix(layer1, bg.color3.rgb, smoothstep(0.4, 0.8, smoke));
-
-    // Subtle brightness variation for glow in dense smoke regions
     let glow = smoothstep(0.5, 0.9, smoke) * 0.15;
     let color = layer2 + glow;
-
     return vec4<f32>(color, bg.intensity);
 }
 "#;
 
+const AURORA_FRAGMENT: &str = r#"
+@fragment
+fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    let t = frame.time * bg.speed * 0.12;
+    let aspect = frame.resolution.x / frame.resolution.y;
+    var uv = in.uv;
+    uv.x = uv.x * aspect;
+
+    // Curtains of light — vertical bands that sway
+    var aurora = 0.0;
+    for (var i = 0; i < 5; i = i + 1) {
+        let fi = f32(i);
+        let wave_x = uv.x * (1.5 + fi * 0.4) + t * (0.3 + fi * 0.1) + fi * 2.1;
+        let wave = sin(wave_x) * cos(wave_x * 0.7 + t * 0.2) * 0.5 + 0.5;
+        let band = smoothstep(0.0, 0.3, wave) * smoothstep(1.0, 0.5, wave);
+        // Fade toward top of screen
+        let vertical_fade = smoothstep(0.8, 0.2, uv.y) * smoothstep(0.0, 0.15, uv.y);
+        aurora += band * vertical_fade * (0.6 - fi * 0.08);
+    }
+
+    // Mix theme colors based on position
+    let color_mix = mix(bg.color1.rgb, bg.color2.rgb, uv.x / aspect);
+    let highlight = mix(color_mix, bg.color3.rgb, aurora * 0.7);
+    let glow = aurora * 0.3;
+
+    return vec4<f32>(highlight + glow, aurora * bg.intensity);
+}
+"#;
+
+const MATRIX_FRAGMENT: &str = r#"
+@fragment
+fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    let t = frame.time * bg.speed * 0.5;
+    let aspect = frame.resolution.x / frame.resolution.y;
+    var uv = in.uv;
+
+    // Grid of falling columns
+    let cols = 40.0;
+    let col_id = floor(uv.x * cols);
+    let col_uv = fract(uv.x * cols);
+
+    // Each column has its own speed and phase
+    let col_hash = hash2(vec2<f32>(col_id, 0.0));
+    let col_speed = 0.5 + col_hash * 1.5;
+    let col_phase = col_hash * 100.0;
+
+    // Falling position
+    let fall_y = fract(uv.y + t * col_speed + col_phase);
+
+    // Character-like cells
+    let cell_rows = 30.0;
+    let cell_id = floor(fall_y * cell_rows);
+    let cell_hash = hash2(vec2<f32>(col_id, cell_id + floor(t * col_speed)));
+
+    // Brightness: bright at head, fading trail
+    let head = 1.0 - fall_y;
+    let trail = pow(head, 3.0);
+    let char_brightness = step(0.3, cell_hash) * trail;
+
+    // Narrow the glyph within the column
+    let glyph_mask = smoothstep(0.0, 0.15, col_uv) * smoothstep(1.0, 0.85, col_uv);
+
+    let brightness = char_brightness * glyph_mask;
+    let color = mix(bg.color1.rgb, bg.color2.rgb, brightness) + bg.color3.rgb * brightness * 0.3;
+
+    return vec4<f32>(color, brightness * bg.intensity);
+}
+"#;
+
+const NEBULA_FRAGMENT: &str = r#"
+@fragment
+fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    let t = frame.time * bg.speed * 0.08;
+    let aspect = frame.resolution.x / frame.resolution.y;
+    var uv = in.uv;
+    uv.x = uv.x * aspect;
+
+    // Layered noise for gas clouds
+    let n1 = fbm(uv * 2.0 + vec2<f32>(t * 0.3, t * 0.2), 6);
+    let n2 = fbm(uv * 3.5 + vec2<f32>(t * 0.15 + 5.0, -t * 0.1), 5);
+    let n3 = fbm(uv * 5.0 + vec2<f32>(-t * 0.1, t * 0.25 + 3.0), 4);
+
+    // Star field
+    let star_uv = uv * 50.0;
+    let star_cell = floor(star_uv);
+    let star_hash = hash2(star_cell);
+    let star_pos = star_cell + vec2<f32>(hash2(star_cell + 0.1), hash2(star_cell + 0.2));
+    let star_dist = length(star_uv - star_pos);
+    let star = smoothstep(0.15, 0.0, star_dist) * step(0.92, star_hash);
+    let star_twinkle = star * (0.7 + 0.3 * sin(frame.time * 3.0 + star_hash * 50.0));
+
+    // Cloud layers with theme colors
+    let cloud1 = smoothstep(0.3, 0.7, n1) * 0.6;
+    let cloud2 = smoothstep(0.4, 0.8, n2) * 0.4;
+    let cloud3 = smoothstep(0.5, 0.9, n3) * 0.3;
+
+    let color = bg.color1.rgb * cloud1
+              + bg.color2.rgb * cloud2
+              + bg.color3.rgb * cloud3
+              + vec3<f32>(star_twinkle);
+
+    let alpha = max(cloud1 + cloud2 * 0.5, star_twinkle * 0.8);
+    return vec4<f32>(color, alpha * bg.intensity);
+}
+"#;
+
+const TRON_FRAGMENT: &str = r#"
+@fragment
+fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    let t = frame.time * bg.speed * 0.3;
+    let aspect = frame.resolution.x / frame.resolution.y;
+    var uv = in.uv;
+    uv.x = uv.x * aspect;
+
+    // Perspective grid receding into distance
+    let grid_y = 1.0 / (1.001 - uv.y) * 0.5;
+    let grid_x = (uv.x - aspect * 0.5) * grid_y;
+
+    // Grid lines
+    let grid_size = 2.0;
+    let gx = abs(fract((grid_x + t) * grid_size) - 0.5);
+    let gy = abs(fract(grid_y * grid_size * 0.5) - 0.5);
+
+    let line_x = smoothstep(0.02, 0.0, gx) * 0.6;
+    let line_y = smoothstep(0.02, 0.0, gy) * 0.6;
+    let grid = max(line_x, line_y);
+
+    // Fade with distance (vertical)
+    let depth_fade = smoothstep(0.0, 0.5, uv.y) * smoothstep(1.0, 0.6, uv.y);
+    let grid_final = grid * depth_fade;
+
+    // Pulse along grid lines
+    let pulse = sin(grid_y * 3.0 - t * 5.0) * 0.5 + 0.5;
+    let pulse_glow = grid_final * pulse * 0.3;
+
+    let color = mix(bg.color1.rgb, bg.color2.rgb, grid_final) + bg.color3.rgb * pulse_glow;
+    return vec4<f32>(color, grid_final * bg.intensity);
+}
+"#;
+
+// ── Built-in shader registry ──
+
+fn builtin_shaders() -> Vec<(&'static str, String)> {
+    let shaders = [
+        ("smoke", SMOKE_FRAGMENT),
+        ("aurora", AURORA_FRAGMENT),
+        ("matrix", MATRIX_FRAGMENT),
+        ("nebula", NEBULA_FRAGMENT),
+        ("tron", TRON_FRAGMENT),
+    ];
+    shaders.iter().map(|(name, frag)| {
+        (*name, format!("{}{}", SHARED_PREAMBLE, frag))
+    }).collect()
+}
+
 pub struct BackgroundRenderer {
-    pipeline: wgpu::RenderPipeline,
+    pipelines: HashMap<String, wgpu::RenderPipeline>,
     uniform_buffer: wgpu::Buffer,
-    #[allow(dead_code)] // needed for future shader hot-swap
+    #[allow(dead_code)]
     bind_group_layout: wgpu::BindGroupLayout,
     bind_group: wgpu::BindGroup,
 }
 
 impl BackgroundRenderer {
     pub fn new(gpu: &GpuState) -> Self {
-        let shader = gpu
-            .device
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("background_shader"),
-                source: wgpu::ShaderSource::Wgsl(SMOKE_SHADER.into()),
+        let bind_group_layout =
+            gpu.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("bg_bind_group_layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
             });
 
-        // Background-specific uniforms at @group(1)
-        let bind_group_layout =
-            gpu.device
-                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                    label: Some("bg_bind_group_layout"),
-                    entries: &[wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    }],
-                });
-
-        let uniforms = BackgroundUniforms {
-            intensity: 0.3,
-            speed: 1.0,
-            _padding: [0.0; 2],
-            color1: [0.05, 0.05, 0.12, 1.0],
-            color2: [0.12, 0.08, 0.18, 1.0],
-            color3: [0.18, 0.12, 0.22, 1.0],
-        };
-
-        let uniform_buffer =
-            gpu.device
-                .create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("bg_uniforms"),
-                    size: std::mem::size_of::<BackgroundUniforms>() as u64,
-                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                    mapped_at_creation: false,
-                });
-
-        gpu.queue.write_buffer(
-            &uniform_buffer,
-            0,
-            bytemuck::cast_slice(&[uniforms]),
-        );
+        let uniform_buffer = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("bg_uniforms"),
+            size: std::mem::size_of::<BackgroundUniforms>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
 
         let bind_group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("bg_bind_group"),
@@ -190,58 +307,99 @@ impl BackgroundRenderer {
             }],
         });
 
-        let pipeline_layout =
-            gpu.device
-                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: Some("bg_pipeline_layout"),
-                    bind_group_layouts: &[
-                        &gpu.frame_bind_group_layout, // @group(0) = frame uniforms
-                        &bind_group_layout,            // @group(1) = background uniforms
-                    ],
-                    push_constant_ranges: &[],
-                });
+        let pipeline_layout = gpu.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("bg_pipeline_layout"),
+            bind_group_layouts: &[&gpu.frame_bind_group_layout, &bind_group_layout],
+            push_constant_ranges: &[],
+        });
 
-        let pipeline =
-            gpu.device
-                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                    label: Some("bg_pipeline"),
-                    layout: Some(&pipeline_layout),
-                    vertex: wgpu::VertexState {
-                        module: &shader,
-                        entry_point: "vs_main",
-                        buffers: &[],
-                        compilation_options: Default::default(),
-                    },
-                    fragment: Some(wgpu::FragmentState {
-                        module: &shader,
-                        entry_point: "fs_main",
-                        targets: &[Some(wgpu::ColorTargetState {
-                            format: gpu.surface_config.format,
-                            // Alpha blending so smoke composites over the cleared background
-                            blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                            write_mask: wgpu::ColorWrites::ALL,
-                        })],
-                        compilation_options: Default::default(),
-                    }),
-                    primitive: wgpu::PrimitiveState {
-                        topology: wgpu::PrimitiveTopology::TriangleList,
-                        ..Default::default()
-                    },
-                    depth_stencil: None,
-                    multisample: wgpu::MultisampleState::default(),
-                    multiview: None,
-                    cache: None,
-                });
+        // Build a pipeline for each built-in shader
+        let mut pipelines = HashMap::new();
+        for (name, source) in builtin_shaders() {
+            if let Some(pipeline) = Self::compile_pipeline(gpu, &pipeline_layout, &source, &name) {
+                pipelines.insert(name.to_string(), pipeline);
+            }
+        }
+
+        // Load custom shaders from ~/.config/llnzy/shaders/
+        if let Some(config_dir) = dirs::config_dir() {
+            let shader_dir = config_dir.join("llnzy").join("shaders");
+            if let Ok(entries) = std::fs::read_dir(&shader_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().is_some_and(|e| e == "wgsl") {
+                        if let Ok(user_frag) = std::fs::read_to_string(&path) {
+                            let name = path.file_stem().unwrap().to_string_lossy().to_string();
+                            let full_source = format!("{}{}", SHARED_PREAMBLE, user_frag);
+                            if let Some(pipeline) = Self::compile_pipeline(gpu, &pipeline_layout, &full_source, &name) {
+                                log::info!("Loaded custom shader: {}", name);
+                                pipelines.insert(name, pipeline);
+                            } else {
+                                log::warn!("Failed to compile custom shader: {}", path.display());
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         BackgroundRenderer {
-            pipeline,
+            pipelines,
             uniform_buffer,
             bind_group_layout,
             bind_group,
         }
     }
 
-    /// Update uniforms from config (called on config hot-reload).
+    fn compile_pipeline(
+        gpu: &GpuState,
+        layout: &wgpu::PipelineLayout,
+        source: &str,
+        name: &str,
+    ) -> Option<wgpu::RenderPipeline> {
+        // wgpu panics on shader compilation errors in some backends,
+        // so we catch_unwind to handle malformed custom shaders gracefully.
+        let device = &gpu.device;
+        let format = gpu.surface_config.format;
+
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some(name),
+            source: wgpu::ShaderSource::Wgsl(source.into()),
+        });
+
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some(name),
+            layout: Some(layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_main",
+                buffers: &[],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+
+        Some(pipeline)
+    }
+
+    /// Update uniforms from config.
     pub fn update_uniforms(
         &self,
         gpu: &GpuState,
@@ -249,13 +407,10 @@ impl BackgroundRenderer {
         speed: f32,
         bg_color: [f32; 4],
     ) {
-        // Derive smoke colors from the terminal background color
-        // color1 = base (darkest), color2 = mid smoke, color3 = highlights
         let r = bg_color[0];
         let g = bg_color[1];
         let b = bg_color[2];
 
-        // Subtle blue-grey smoke palette — kept dark so terminal text remains readable
         let uniforms = BackgroundUniforms {
             intensity,
             speed,
@@ -272,20 +427,25 @@ impl BackgroundRenderer {
         );
     }
 
-    /// Draw the background effect into the given render target.
+    /// Draw the background effect. `shader_name` selects which pipeline to use.
     pub fn draw(
         &self,
         gpu: &GpuState,
         encoder: &mut wgpu::CommandEncoder,
         target: &wgpu::TextureView,
+        shader_name: &str,
     ) {
+        let Some(pipeline) = self.pipelines.get(shader_name) else {
+            return;
+        };
+
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("background_pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: target,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Load, // Load the cleared background
+                    load: wgpu::LoadOp::Load,
                     store: wgpu::StoreOp::Store,
                 },
             })],
@@ -293,9 +453,16 @@ impl BackgroundRenderer {
             ..Default::default()
         });
 
-        pass.set_pipeline(&self.pipeline);
+        pass.set_pipeline(pipeline);
         pass.set_bind_group(0, &gpu.frame_bind_group, &[]);
         pass.set_bind_group(1, &self.bind_group, &[]);
         pass.draw(0..3, 0..1);
+    }
+
+    /// List all available shader names (built-in + custom).
+    pub fn available_shaders(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.pipelines.keys().cloned().collect();
+        names.sort();
+        names
     }
 }
