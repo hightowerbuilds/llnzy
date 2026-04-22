@@ -22,7 +22,6 @@ use blit::BlitPipeline;
 use bloom::BloomEffect;
 use crt::CrtEffect;
 use cursor::CursorRenderer;
-use flip::FlipAnimation;
 use particles::ParticleSystem;
 use rect::RectRenderer;
 use state::GpuState;
@@ -38,7 +37,6 @@ pub struct Renderer {
     cursor_renderer: CursorRenderer,
     particles: ParticleSystem,
     background: BackgroundRenderer,
-    flip: FlipAnimation,
     config: Config,
     pub cursor_visible: bool,
 }
@@ -55,7 +53,6 @@ impl Renderer {
         let cursor_renderer = CursorRenderer::new(&gpu);
         let particles = ParticleSystem::new(&gpu, config.effects.particles_count);
         let background = BackgroundRenderer::new(&gpu);
-        let flip = FlipAnimation::new(&gpu);
         Renderer {
             gpu,
             text,
@@ -66,7 +63,6 @@ impl Renderer {
             cursor_renderer,
             particles,
             background,
-            flip,
             config,
             cursor_visible: true,
         }

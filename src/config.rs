@@ -834,7 +834,7 @@ mod tests {
         assert_eq!(config.line_height, 1.4);
         assert_eq!(config.cursor_style, CursorStyle::Block);
         assert_eq!(config.cursor_blink_ms, 500);
-        assert_eq!(config.padding_x, 8.0);
+        assert_eq!(config.padding_x, 12.0);
         assert_eq!(config.padding_y, 8.0);
         assert_eq!(config.opacity, 1.0);
         assert_eq!(config.scroll_lines, 3);

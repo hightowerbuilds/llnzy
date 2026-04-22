@@ -489,6 +489,11 @@ impl ApplicationHandler<UserEvent> for App {
             WindowEvent::RedrawRequested => {
                 self.process_all_output();
 
+                // Feed frame time to UI for FPS overlay
+                if let (Some(renderer), Some(ui)) = (&self.renderer, &mut self.ui) {
+                    ui.record_frame_time(renderer.gpu_delta_time());
+                }
+
                 let bell_active = self.visual_bell_until.is_some_and(|t| Instant::now() < t);
                 if bell_active {
                     self.request_redraw();
@@ -885,6 +890,29 @@ impl ApplicationHandler<UserEvent> for App {
                         Key::Character(c) if c.as_str() == "e" || c.as_str() == "E" => {
                             if self.modifiers.shift_key() {
                                 self.error_panel.toggle();
+                                self.request_redraw();
+                                return;
+                            }
+                        }
+                        // Cmd+Shift+F: toggle all visual effects on/off
+                        Key::Character(c) if c.as_str() == "f" || c.as_str() == "F" => {
+                            if self.modifiers.shift_key() {
+                                self.config.effects.enabled = !self.config.effects.enabled;
+                                if let Some(renderer) = &mut self.renderer {
+                                    renderer.update_config(self.config.clone());
+                                }
+                                let state = if self.config.effects.enabled { "ON" } else { "OFF" };
+                                self.error_log.info(format!("Visual effects: {}", state));
+                                self.request_redraw();
+                                return;
+                            }
+                        }
+                        // Cmd+Shift+P: toggle FPS overlay
+                        Key::Character(c) if c.as_str() == "p" || c.as_str() == "P" => {
+                            if self.modifiers.shift_key() {
+                                if let Some(ui) = &mut self.ui {
+                                    ui.show_fps = !ui.show_fps;
+                                }
                                 self.request_redraw();
                                 return;
                             }
