@@ -73,6 +73,8 @@ struct App {
     screen_layout: Option<ScreenLayout>,
     visual_bell_until: Option<Instant>,
     last_ui_config_change: Instant,
+    last_pty_output: Instant,
+    notified_idle: bool,
     last_blink_toggle: Instant,
     last_keypress: Instant,
     last_config_check: Instant,
@@ -101,6 +103,8 @@ impl App {
             screen_layout: None,
             visual_bell_until: None,
             last_ui_config_change: Instant::now() - std::time::Duration::from_secs(60),
+            last_pty_output: Instant::now(),
+            notified_idle: false,
             last_blink_toggle: Instant::now(),
             last_keypress: Instant::now(),
             last_config_check: Instant::now(),
@@ -140,6 +144,41 @@ impl App {
                     let _ = cb.set_text(text);
                 }
             }
+        }
+
+        // Track PTY output timing for long-command notifications
+        if any_changed {
+            let now = Instant::now();
+            let since_keypress = now.duration_since(self.last_keypress).as_secs();
+            let since_last_output = now.duration_since(self.last_pty_output).as_secs();
+
+            // If we haven't typed in >15 seconds and there was a gap in output >3 seconds,
+            // this likely means a long command just finished — notify the user
+            if since_keypress > 15 && since_last_output > 3 && !self.notified_idle {
+                self.notified_idle = true;
+                let title = self.active_session()
+                    .map(|s| s.display_name().to_string())
+                    .unwrap_or_else(|| "llnzy".to_string());
+                std::thread::spawn(move || {
+                    let _ = std::process::Command::new("osascript")
+                        .args([
+                            "-e",
+                            &format!(
+                                "display notification \"Command completed\" with title \"llnzy — {}\"",
+                                title.replace('"', "\\\"")
+                            ),
+                        ])
+                        .output();
+                });
+            }
+
+            self.last_pty_output = now;
+            // Reset notification flag when user types again
+        }
+
+        // Reset notification flag on keypress (handled in keypress event already via last_keypress)
+        if Instant::now().duration_since(self.last_keypress).as_secs() < 2 {
+            self.notified_idle = false;
         }
 
         // Update window title from active session
@@ -259,7 +298,9 @@ impl App {
 
     fn new_tab(&mut self) {
         let (cols, rows) = self.grid_size();
-        match Session::new(cols, rows, &self.config, self.proxy.clone()) {
+        // Spawn new tab in the current session's working directory
+        let cwd = self.active_session().and_then(|s| s.cwd.clone());
+        match Session::new_in_dir(cols, rows, &self.config, self.proxy.clone(), cwd.as_deref()) {
             Ok(session) => {
                 self.tabs.push(Tab {
                     root: PaneNode::Leaf(Box::new(session)),
@@ -363,7 +404,7 @@ impl App {
             .iter()
             .enumerate()
             .map(|(i, tab)| {
-                let title = tab.root.active().title.clone();
+                let title = tab.root.active().display_name().to_string();
                 let short = if title.chars().count() > 20 {
                     let truncated: String = title.chars().take(19).collect();
                     format!("{}…", truncated)
