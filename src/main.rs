@@ -72,6 +72,7 @@ struct App {
     ui: Option<UiState>,
     screen_layout: Option<ScreenLayout>,
     visual_bell_until: Option<Instant>,
+    last_ui_config_change: Instant,
     last_blink_toggle: Instant,
     last_keypress: Instant,
     last_config_check: Instant,
@@ -99,6 +100,7 @@ impl App {
             ui: None,
             screen_layout: None,
             visual_bell_until: None,
+            last_ui_config_change: Instant::now() - std::time::Duration::from_secs(60),
             last_blink_toggle: Instant::now(),
             last_keypress: Instant::now(),
             last_config_check: Instant::now(),
@@ -450,7 +452,7 @@ impl ApplicationHandler<UserEvent> for App {
         if let (Some(window), Some(ui)) = (&self.window, &mut self.ui) {
             let response = ui.handle_event(window, &event);
             // If egui consumed a mouse/keyboard event, don't pass to terminal
-            if response && ui.settings_open {
+            if response && ui.settings_open() {
                 self.request_redraw();
                 match &event {
                     WindowEvent::CloseRequested | WindowEvent::Resized(_) => {}
@@ -551,6 +553,29 @@ impl ApplicationHandler<UserEvent> for App {
                             layout,
                             Some(&mut egui_cb),
                         );
+                    }
+                }
+
+                // Apply config changes from settings UI after render
+                let mut need_redraw = false;
+                let mut clip_text: Option<String> = None;
+                if let Some(ui) = &mut self.ui {
+                    if let Some(new_config) = ui.take_config() {
+                        self.config = new_config;
+                        if let Some(renderer) = &mut self.renderer {
+                            renderer.update_config(self.config.clone());
+                        }
+                        self.last_ui_config_change = Instant::now();
+                        need_redraw = true;
+                    }
+                    clip_text = ui.clipboard_text.take();
+                }
+                if need_redraw {
+                    self.request_redraw();
+                }
+                if let Some(text) = clip_text {
+                    if let Some(cb) = &mut self.clipboard {
+                        let _ = cb.set_text(text);
                     }
                 }
             }
@@ -1014,8 +1039,21 @@ impl ApplicationHandler<UserEvent> for App {
             event_loop.set_control_flow(ControlFlow::WaitUntil(next));
         }
 
-        // Config hot-reload
-        if now.duration_since(self.last_config_check).as_secs() >= 2 {
+        // Apply config changes from settings UI
+        if let Some(ui) = &mut self.ui {
+            if let Some(new_config) = ui.pending_config.take() {
+                self.config = new_config;
+                if let Some(renderer) = &mut self.renderer {
+                    renderer.update_config(self.config.clone());
+                }
+                self.request_redraw();
+            }
+        }
+
+        // Config hot-reload from disk (skip when settings UI is open or recently changed)
+        let settings_active = self.ui.as_ref().map_or(false, |u| u.settings_open());
+        let recently_changed = now.duration_since(self.last_ui_config_change).as_secs() < 10;
+        if !settings_active && !recently_changed && now.duration_since(self.last_config_check).as_secs() >= 2 {
             self.last_config_check = now;
             if self.config.check_reload() {
                 self.error_log.info("Config reloaded from disk");
@@ -1027,7 +1065,7 @@ impl ApplicationHandler<UserEvent> for App {
         }
 
         // Continuous animation mode
-        let ui_active = self.ui.as_ref().map_or(false, |u| u.settings_open);
+        let ui_active = self.ui.as_ref().map_or(false, |u| u.settings_open());
         if self.config.effects.enabled || ui_active {
             event_loop.set_control_flow(ControlFlow::Poll);
             self.request_redraw();

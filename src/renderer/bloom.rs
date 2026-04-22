@@ -41,8 +41,11 @@ fn vs_main(@builtin(vertex_index) vi: u32) -> VertexOutput {
 fn fs_threshold(in: VertexOutput) -> @location(0) vec4<f32> {
     let color = textureSample(src_tex, src_sampler, in.uv);
     let brightness = dot(color.rgb, vec3<f32>(0.2126, 0.7152, 0.0722));
-    let contribution = smoothstep(params.threshold, params.threshold + 0.15, brightness);
-    return vec4<f32>(color.rgb * contribution, 1.0);
+    // Wide smooth transition to avoid flickering at the threshold boundary
+    let contribution = smoothstep(params.threshold, params.threshold + 0.4, brightness);
+    // Clamp to prevent extreme hot pixels from dominating the bloom
+    let bloomed = clamp(color.rgb * contribution, vec3<f32>(0.0), vec3<f32>(1.5));
+    return vec4<f32>(bloomed, 1.0);
 }
 
 @fragment
@@ -54,16 +57,20 @@ fn fs_blur(in: VertexOutput) -> @location(0) vec4<f32> {
     let dir = select(vec2<f32>(1.0, 0.0), vec2<f32>(0.0, 1.0), params.direction > 0.5);
     let step = dir * pixel * params.radius;
 
-    // 9-tap Gaussian kernel (sigma ≈ 3)
-    var result = textureSample(src_tex, src_sampler, in.uv).rgb * 0.2270;
-    result += textureSample(src_tex, src_sampler, in.uv + step * 1.0).rgb * 0.1946;
-    result += textureSample(src_tex, src_sampler, in.uv - step * 1.0).rgb * 0.1946;
-    result += textureSample(src_tex, src_sampler, in.uv + step * 2.0).rgb * 0.1216;
-    result += textureSample(src_tex, src_sampler, in.uv - step * 2.0).rgb * 0.1216;
-    result += textureSample(src_tex, src_sampler, in.uv + step * 3.0).rgb * 0.0541;
-    result += textureSample(src_tex, src_sampler, in.uv - step * 3.0).rgb * 0.0541;
-    result += textureSample(src_tex, src_sampler, in.uv + step * 4.0).rgb * 0.0162;
-    result += textureSample(src_tex, src_sampler, in.uv - step * 4.0).rgb * 0.0162;
+    // 13-tap Gaussian kernel (wider, smoother spread)
+    var result = textureSample(src_tex, src_sampler, in.uv).rgb * 0.1964;
+    result += textureSample(src_tex, src_sampler, in.uv + step * 1.0).rgb * 0.1748;
+    result += textureSample(src_tex, src_sampler, in.uv - step * 1.0).rgb * 0.1748;
+    result += textureSample(src_tex, src_sampler, in.uv + step * 2.0).rgb * 0.1210;
+    result += textureSample(src_tex, src_sampler, in.uv - step * 2.0).rgb * 0.1210;
+    result += textureSample(src_tex, src_sampler, in.uv + step * 3.0).rgb * 0.0650;
+    result += textureSample(src_tex, src_sampler, in.uv - step * 3.0).rgb * 0.0650;
+    result += textureSample(src_tex, src_sampler, in.uv + step * 4.0).rgb * 0.0272;
+    result += textureSample(src_tex, src_sampler, in.uv - step * 4.0).rgb * 0.0272;
+    result += textureSample(src_tex, src_sampler, in.uv + step * 5.0).rgb * 0.0088;
+    result += textureSample(src_tex, src_sampler, in.uv - step * 5.0).rgb * 0.0088;
+    result += textureSample(src_tex, src_sampler, in.uv + step * 6.0).rgb * 0.0022;
+    result += textureSample(src_tex, src_sampler, in.uv - step * 6.0).rgb * 0.0022;
 
     return vec4<f32>(result, 1.0);
 }
@@ -371,9 +378,9 @@ impl BloomEffect {
 
     /// Run the full bloom pipeline:
     /// 1. Threshold (scene -> bloom_a at half-res)
-    /// 2. Blur horizontal (bloom_a -> bloom_b)
-    /// 3. Blur vertical (bloom_b -> bloom_a)
-    /// 4. Composite (scene + bloom_a -> swapchain or target)
+    /// 2-3. First blur pass H+V (bloom_a -> bloom_b -> bloom_a)
+    /// 4-5. Second blur pass H+V for extra smoothness (bloom_a -> bloom_b -> bloom_a)
+    /// 6. Composite (scene + bloom_a -> output)
     pub fn apply(
         &self,
         gpu: &GpuState,
@@ -389,15 +396,25 @@ impl BloomEffect {
         let scene_bg = self.make_tex_bind_group(gpu, scene_view);
         self.fullscreen_pass(encoder, &self.threshold_pipeline, &scene_bg, &self.bloom_a_view);
 
-        // -- Step 2: Horizontal blur (bloom_a -> bloom_b)
-        self.write_params(gpu, threshold, intensity, radius, 0.0); // direction = 0 (horizontal)
-        let blur_h_bg = self.make_tex_bind_group(gpu, &self.bloom_a_view);
-        self.fullscreen_pass(encoder, &self.blur_pipeline, &blur_h_bg, &self.bloom_b_view);
+        // -- Step 2: First horizontal blur (bloom_a -> bloom_b)
+        self.write_params(gpu, threshold, intensity, radius, 0.0);
+        let blur_h1 = self.make_tex_bind_group(gpu, &self.bloom_a_view);
+        self.fullscreen_pass(encoder, &self.blur_pipeline, &blur_h1, &self.bloom_b_view);
 
-        // -- Step 3: Vertical blur (bloom_b -> bloom_a)
-        self.write_params(gpu, threshold, intensity, radius, 1.0); // direction = 1 (vertical)
-        let blur_v_bg = self.make_tex_bind_group(gpu, &self.bloom_b_view);
-        self.fullscreen_pass(encoder, &self.blur_pipeline, &blur_v_bg, &self.bloom_a_view);
+        // -- Step 3: First vertical blur (bloom_b -> bloom_a)
+        self.write_params(gpu, threshold, intensity, radius, 1.0);
+        let blur_v1 = self.make_tex_bind_group(gpu, &self.bloom_b_view);
+        self.fullscreen_pass(encoder, &self.blur_pipeline, &blur_v1, &self.bloom_a_view);
+
+        // -- Step 4: Second horizontal blur for extra smoothness (bloom_a -> bloom_b)
+        self.write_params(gpu, threshold, intensity, radius * 1.5, 0.0);
+        let blur_h2 = self.make_tex_bind_group(gpu, &self.bloom_a_view);
+        self.fullscreen_pass(encoder, &self.blur_pipeline, &blur_h2, &self.bloom_b_view);
+
+        // -- Step 5: Second vertical blur (bloom_b -> bloom_a)
+        self.write_params(gpu, threshold, intensity, radius * 1.5, 1.0);
+        let blur_v2 = self.make_tex_bind_group(gpu, &self.bloom_b_view);
+        self.fullscreen_pass(encoder, &self.blur_pipeline, &blur_v2, &self.bloom_a_view);
 
         // -- Step 4: Composite (scene + bloom_a -> output)
         self.write_params(gpu, threshold, intensity, radius, 0.0);

@@ -1,7 +1,14 @@
-use std::sync::Arc;
 use winit::window::Window;
 
 use crate::config::Config;
+
+/// Which view is active.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ActiveView {
+    Shells,
+    Stacker,
+    Settings,
+}
 
 /// Which settings tab is active.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -10,18 +17,30 @@ pub enum SettingsTab {
     Text,
 }
 
+/// A saved prompt in the stacker queue.
+#[derive(Clone, Debug)]
+pub struct StackerPrompt {
+    pub text: String,
+    pub label: String,
+}
+
 /// State for the egui-driven UI overlay.
 pub struct UiState {
     pub ctx: egui::Context,
     pub winit_state: egui_winit::State,
     pub wgpu_renderer: egui_wgpu::Renderer,
-    pub settings_open: bool,
+    pub active_view: ActiveView,
     pub settings_tab: SettingsTab,
-    /// Flip animation: 0.0 = terminal, 1.0 = settings
-    pub flip_t: f32,
-    pub flip_target_open: bool,
     /// How much vertical space the footer occupies (for terminal content layout)
     pub footer_height: f32,
+    /// Config changes from the settings panel, to be applied by main loop
+    pub pending_config: Option<Config>,
+    /// Text copied to clipboard by Stacker (main loop applies it)
+    pub clipboard_text: Option<String>,
+    // Stacker state
+    pub stacker_prompts: Vec<StackerPrompt>,
+    pub stacker_input: String,
+    pub stacker_label_input: String,
 }
 
 impl UiState {
@@ -61,11 +80,14 @@ impl UiState {
             ctx,
             winit_state,
             wgpu_renderer,
-            settings_open: false,
+            active_view: ActiveView::Shells,
             settings_tab: SettingsTab::Background,
-            flip_t: 0.0,
-            flip_target_open: false,
             footer_height: 36.0,
+            pending_config: None,
+            clipboard_text: None,
+            stacker_prompts: Vec::new(),
+            stacker_input: String::new(),
+            stacker_label_input: String::new(),
         }
     }
 
@@ -75,13 +97,18 @@ impl UiState {
         response.consumed
     }
 
-    /// Toggle settings open/closed.
-    pub fn toggle_settings(&mut self) {
-        self.settings_open = !self.settings_open;
+    /// Whether the terminal is covered by a full-screen view.
+    pub fn settings_open(&self) -> bool {
+        self.active_view != ActiveView::Shells
     }
 
     /// Run the egui frame and render. Returns the clipping info for the footer.
     /// Call this AFTER rendering the terminal content to the swapchain.
+    /// Take pending config changes, if any.
+    pub fn take_config(&mut self) -> Option<Config> {
+        self.pending_config.take()
+    }
+
     /// Run the egui frame and render to the swapchain.
     /// Creates its own command encoder and submits it.
     pub fn render(
@@ -89,7 +116,7 @@ impl UiState {
         window: &Window,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        _encoder: &mut wgpu::CommandEncoder, // unused — we create our own for lifetime reasons
+        _encoder: &mut wgpu::CommandEncoder,
         view: &wgpu::TextureView,
         screen_desc: egui_wgpu::ScreenDescriptor,
         config: &Config,
@@ -97,11 +124,16 @@ impl UiState {
         let raw_input = self.winit_state.take_egui_input(window);
 
         // Extract state to avoid borrowing self inside the closure
-        let settings_open = self.settings_open;
+        let current_view = self.active_view;
         let footer_height = self.footer_height;
         let mut settings_tab = self.settings_tab;
-        let mut nav_target: Option<bool> = None; // Some(true) = open settings, Some(false) = close
-        let config_clone = config.clone();
+        let mut nav_target: Option<ActiveView> = None;
+        let mut config_clone = config.clone();
+        let mut clipboard_copy: Option<String> = None;
+
+        // Stacker state — extract for closure
+        let mut stacker_prompts = std::mem::take(&mut self.stacker_prompts);
+        let mut stacker_input = std::mem::take(&mut self.stacker_input);
 
         let full_output = self.ctx.run(raw_input, |ctx| {
             // ── Footer nav bar (ALWAYS visible) ──
@@ -112,51 +144,166 @@ impl UiState {
                     ui.add_space(4.0);
                     ui.horizontal(|ui| {
                         ui.add_space(8.0);
-                        // Shells button — navigates to terminal
-                        let shells_text = egui::RichText::new("Shells").size(16.0);
-                        let shells_btn = if !settings_open {
-                            ui.add(egui::Button::new(shells_text.color(egui::Color32::WHITE))
-                                .fill(egui::Color32::from_rgb(50, 50, 65)))
-                        } else {
-                            ui.button(shells_text)
-                        };
-                        if shells_btn.clicked() && settings_open {
-                            nav_target = Some(false);
-                        }
 
-                        // Stacker button — placeholder
-                        if ui.button(egui::RichText::new("Stacker").size(16.0)).clicked() {
-                            // Placeholder
-                        }
+                        let views = [
+                            ("Shells", ActiveView::Shells),
+                            ("Stacker", ActiveView::Stacker),
+                            ("Settings", ActiveView::Settings),
+                        ];
 
-                        // Settings button — navigates to settings
-                        let settings_text = egui::RichText::new("Settings").size(16.0);
-                        let settings_btn = if settings_open {
-                            ui.add(egui::Button::new(settings_text.color(egui::Color32::WHITE))
-                                .fill(egui::Color32::from_rgb(50, 50, 65)))
-                        } else {
-                            ui.button(settings_text)
-                        };
-                        if settings_btn.clicked() && !settings_open {
-                            nav_target = Some(true);
+                        for (name, view) in views {
+                            let text = egui::RichText::new(name).size(16.0);
+                            let btn = if current_view == view {
+                                ui.add(egui::Button::new(text.color(egui::Color32::WHITE))
+                                    .fill(egui::Color32::from_rgb(50, 50, 65)))
+                            } else {
+                                ui.button(text)
+                            };
+                            if btn.clicked() && current_view != view {
+                                nav_target = Some(view);
+                            }
                         }
                     });
                 });
 
-            // ── Settings panel (when open) ──
-            if settings_open {
-                egui::CentralPanel::default()
-                    .frame(egui::Frame::none().fill(egui::Color32::from_rgb(20, 20, 26)))
+            // ── Settings view ──
+            if current_view == ActiveView::Settings {
+                egui::SidePanel::left("settings_sidebar")
+                    .exact_width(170.0)
+                    .frame(egui::Frame::none().fill(egui::Color32::from_rgb(24, 24, 32))
+                        .inner_margin(egui::Margin::same(12.0)))
                     .show(ctx, |ui| {
-                        render_settings_panel_static(ui, &config_clone, &mut settings_tab, &mut false);
+                        ui.add_space(8.0);
+                        ui.label(egui::RichText::new("Settings").size(22.0).color(egui::Color32::WHITE));
+                        ui.add_space(16.0);
+
+                        if ui.selectable_label(settings_tab == SettingsTab::Background, label("Background")).clicked() {
+                            settings_tab = SettingsTab::Background;
+                        }
+                        ui.add_space(4.0);
+                        if ui.selectable_label(settings_tab == SettingsTab::Text, label("Text")).clicked() {
+                            settings_tab = SettingsTab::Text;
+                        }
+                    });
+
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::none().fill(egui::Color32::from_rgb(20, 20, 26))
+                        .inner_margin(egui::Margin::same(20.0)))
+                    .show(ctx, |ui| {
+                        egui::ScrollArea::vertical().show(ui, |ui| {
+                            match settings_tab {
+                                SettingsTab::Background => render_background_tab(ui, &mut config_clone),
+                                SettingsTab::Text => render_text_tab(ui, &mut config_clone),
+                            }
+                        });
+                    });
+            }
+
+            // ── Stacker view ──
+            if current_view == ActiveView::Stacker {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::none().fill(egui::Color32::from_rgb(20, 20, 26))
+                        .inner_margin(egui::Margin::same(20.0)))
+                    .show(ctx, |ui| {
+                        ui.label(egui::RichText::new("Stacker — Prompt Queue")
+                            .size(22.0).color(egui::Color32::WHITE));
+                        ui.add_space(12.0);
+
+                        // ── Input area ──
+                        ui.group(|ui| {
+                            ui.label(label("New Prompt"));
+                            ui.add_space(4.0);
+
+                            ui.add(
+                                egui::TextEdit::multiline(&mut stacker_input)
+                                    .desired_rows(4)
+                                    .desired_width(f32::INFINITY)
+                                    .hint_text("Type or paste your prompt here...")
+                                    .font(egui::TextStyle::Monospace),
+                            );
+                            ui.add_space(8.0);
+
+                            if ui.add_enabled(
+                                !stacker_input.trim().is_empty(),
+                                egui::Button::new(label("Save to Queue")),
+                            ).clicked() {
+                                let words: String = stacker_input.split_whitespace().take(6).collect::<Vec<_>>().join(" ");
+                                let prompt_label = if words.len() < stacker_input.trim().len() {
+                                    format!("{}...", words)
+                                } else {
+                                    words
+                                };
+                                stacker_prompts.push(StackerPrompt {
+                                    text: stacker_input.trim().to_string(),
+                                    label: prompt_label,
+                                });
+                                stacker_input.clear();
+                            }
+                        });
+
+                        ui.add_space(16.0);
+                        ui.separator();
+                        ui.add_space(8.0);
+
+                        // ── Prompt queue ──
+                        ui.label(egui::RichText::new(format!("Queue ({})", stacker_prompts.len()))
+                            .size(18.0).color(egui::Color32::WHITE));
+                        ui.add_space(8.0);
+
+                        if stacker_prompts.is_empty() {
+                            ui.label(label("No prompts saved yet. Add one above."));
+                        }
+
+                        let mut remove_idx: Option<usize> = None;
+                        egui::ScrollArea::vertical().show(ui, |ui| {
+                            for (i, prompt) in stacker_prompts.iter().enumerate() {
+                                ui.group(|ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.label(egui::RichText::new(&prompt.label)
+                                            .size(15.0).color(egui::Color32::WHITE).strong());
+
+                                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                            if ui.small_button("Delete").clicked() {
+                                                remove_idx = Some(i);
+                                            }
+                                            if ui.button(label("Copy")).clicked() {
+                                                clipboard_copy = Some(prompt.text.clone());
+                                            }
+                                        });
+                                    });
+
+                                    // Show preview of prompt text
+                                    let preview: String = prompt.text.lines().take(3).collect::<Vec<_>>().join("\n");
+                                    ui.label(egui::RichText::new(preview)
+                                        .size(13.0).color(egui::Color32::from_rgb(160, 160, 170))
+                                        .monospace());
+                                });
+                                ui.add_space(4.0);
+                            }
+                        });
+
+                        if let Some(idx) = remove_idx {
+                            stacker_prompts.remove(idx);
+                        }
                     });
             }
         });
 
-        // Apply navigation
+        // Apply state changes
         self.settings_tab = settings_tab;
-        if let Some(open) = nav_target {
-            self.settings_open = open;
+        self.stacker_prompts = stacker_prompts;
+        self.stacker_input = stacker_input;
+
+        if let Some(view) = nav_target {
+            self.active_view = view;
+        }
+        if let Some(text) = clipboard_copy {
+            self.clipboard_text = Some(text);
+        }
+
+        // Push config changes when on settings view
+        if current_view == ActiveView::Settings {
+            self.pending_config = Some(config_clone);
         }
 
         self.winit_state
@@ -215,162 +362,195 @@ impl UiState {
 
 }
 
-fn render_settings_panel_static(
-    ui: &mut egui::Ui,
-    config: &Config,
-    settings_tab: &mut SettingsTab,
-    toggle_requested: &mut bool,
-) {
-        // Header
-        ui.heading(
-            egui::RichText::new("Settings")
-                .size(20.0)
-                .color(egui::Color32::WHITE),
-        );
-        ui.separator();
+const S: f32 = 16.0; // settings panel font size
 
-        ui.horizontal(|ui| {
-            // Sidebar
-            ui.vertical(|ui| {
-                ui.set_width(160.0);
-                ui.add_space(8.0);
+fn label(text: &str) -> egui::RichText {
+    egui::RichText::new(text).size(S)
+}
 
-                let bg_btn = ui.selectable_label(
-                    *settings_tab == SettingsTab::Background,
-                    egui::RichText::new("Background").size(14.0),
-                );
-                if bg_btn.clicked() {
-                    *settings_tab = SettingsTab::Background;
-                }
+fn render_background_tab(ui: &mut egui::Ui, config: &mut Config) {
+    ui.label(
+        egui::RichText::new("Background Effects")
+            .size(18.0)
+            .color(egui::Color32::WHITE),
+    );
+    ui.add_space(12.0);
 
-                let text_btn = ui.selectable_label(
-                    *settings_tab == SettingsTab::Text,
-                    egui::RichText::new("Text").size(14.0),
-                );
-                if text_btn.clicked() {
-                    *settings_tab = SettingsTab::Text;
-                }
-            });
+    egui::Grid::new("bg_settings")
+        .num_columns(2)
+        .spacing([24.0, 10.0])
+        .show(ui, |ui| {
+            // Background type
+            ui.label(label("Background"));
+            egui::ComboBox::from_id_salt("bg_type")
+                .selected_text(label(&config.effects.background))
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut config.effects.background, "smoke".to_string(), "smoke");
+                    ui.selectable_value(&mut config.effects.background, "none".to_string(), "none");
+                });
+            ui.end_row();
 
-            ui.separator();
+            // Intensity slider
+            ui.label(label("Intensity"));
+            ui.add(egui::Slider::new(&mut config.effects.background_intensity, 0.0..=1.0).text(""));
+            ui.end_row();
 
-            // Content
-            ui.vertical(|ui| {
-                ui.add_space(8.0);
-                match *settings_tab {
-                    SettingsTab::Background => {
-                        ui.label(
-                            egui::RichText::new("Background Effects")
-                                .size(16.0)
-                                .color(egui::Color32::WHITE),
-                        );
-                        ui.add_space(12.0);
-
-                        egui::Grid::new("bg_settings")
-                            .num_columns(2)
-                            .spacing([20.0, 8.0])
-                            .show(ui, |ui| {
-                                ui.label("Background:");
-                                ui.label(&config.effects.background);
-                                ui.end_row();
-
-                                ui.label("Intensity:");
-                                ui.label(format!("{:.1}", config.effects.background_intensity));
-                                ui.end_row();
-
-                                ui.label("Speed:");
-                                ui.label(format!("{:.1}", config.effects.background_speed));
-                                ui.end_row();
-
-                                ui.label("Bloom:");
-                                ui.label(if config.effects.bloom_enabled {
-                                    "ON"
-                                } else {
-                                    "OFF"
-                                });
-                                ui.end_row();
-
-                                ui.label("Bloom Threshold:");
-                                ui.label(format!("{:.2}", config.effects.bloom_threshold));
-                                ui.end_row();
-
-                                ui.label("Bloom Intensity:");
-                                ui.label(format!("{:.1}", config.effects.bloom_intensity));
-                                ui.end_row();
-
-                                ui.label("Particles:");
-                                ui.label(if config.effects.particles_enabled {
-                                    "ON"
-                                } else {
-                                    "OFF"
-                                });
-                                ui.end_row();
-
-                                ui.label("Particle Count:");
-                                ui.label(format!("{}", config.effects.particles_count));
-                                ui.end_row();
-                            });
-                    }
-                    SettingsTab::Text => {
-                        ui.label(
-                            egui::RichText::new("Text & Font")
-                                .size(16.0)
-                                .color(egui::Color32::WHITE),
-                        );
-                        ui.add_space(12.0);
-
-                        egui::Grid::new("text_settings")
-                            .num_columns(2)
-                            .spacing([20.0, 8.0])
-                            .show(ui, |ui| {
-                                ui.label("Font Size:");
-                                ui.label(format!("{:.0}", config.font_size));
-                                ui.end_row();
-
-                                ui.label("Font Family:");
-                                ui.label(
-                                    config
-                                        .font_family
-                                        .as_deref()
-                                        .unwrap_or("JetBrains Mono"),
-                                );
-                                ui.end_row();
-
-                                ui.label("Line Height:");
-                                ui.label(format!("{:.1}", config.line_height));
-                                ui.end_row();
-
-                                ui.label("Ligatures:");
-                                ui.label(if config.ligatures { "ON" } else { "OFF" });
-                                ui.end_row();
-
-                                ui.label("Text Animation:");
-                                ui.label(if config.effects.text_animation {
-                                    "ON"
-                                } else {
-                                    "OFF"
-                                });
-                                ui.end_row();
-
-                                ui.label("Cursor Glow:");
-                                ui.label(if config.effects.cursor_glow {
-                                    "ON"
-                                } else {
-                                    "OFF"
-                                });
-                                ui.end_row();
-
-                                ui.label("Cursor Trail:");
-                                ui.label(if config.effects.cursor_trail {
-                                    "ON"
-                                } else {
-                                    "OFF"
-                                });
-                                ui.end_row();
-                            });
-                    }
-                }
-            });
+            // Speed slider
+            ui.label(label("Speed"));
+            ui.add(egui::Slider::new(&mut config.effects.background_speed, 0.1..=5.0).text(""));
+            ui.end_row();
         });
-    }
+
+    ui.add_space(16.0);
+    ui.separator();
+    ui.add_space(8.0);
+
+    egui::CollapsingHeader::new(
+        egui::RichText::new("Bloom / Glow").size(18.0).color(egui::Color32::WHITE),
+    )
+    .default_open(false)
+    .show(ui, |ui| {
+        ui.add_space(8.0);
+        egui::Grid::new("bloom_settings")
+            .num_columns(2)
+            .spacing([24.0, 10.0])
+            .show(ui, |ui| {
+                ui.label(label("Enabled"));
+                ui.add(egui::Checkbox::without_text(&mut config.effects.bloom_enabled));
+                ui.end_row();
+
+                ui.label(label("Threshold"));
+                ui.add(egui::Slider::new(&mut config.effects.bloom_threshold, 0.1..=0.9).text(""));
+                ui.end_row();
+
+                ui.label(label("Intensity"));
+                ui.add(egui::Slider::new(&mut config.effects.bloom_intensity, 0.0..=2.0).text(""));
+                ui.end_row();
+
+                ui.label(label("Radius"));
+                ui.add(egui::Slider::new(&mut config.effects.bloom_radius, 0.5..=5.0).text(""));
+                ui.end_row();
+            });
+    });
+
+    ui.add_space(16.0);
+    ui.separator();
+    ui.add_space(8.0);
+
+    egui::CollapsingHeader::new(
+        egui::RichText::new("Particles").size(18.0).color(egui::Color32::WHITE),
+    )
+    .default_open(false)
+    .show(ui, |ui| {
+        ui.add_space(8.0);
+        egui::Grid::new("particle_settings")
+            .num_columns(2)
+            .spacing([24.0, 10.0])
+            .show(ui, |ui| {
+                ui.label(label("Enabled"));
+                ui.add(egui::Checkbox::without_text(&mut config.effects.particles_enabled));
+                ui.end_row();
+
+                let mut count = config.effects.particles_count as f32;
+                ui.label(label("Count"));
+                if ui.add(egui::Slider::new(&mut count, 0.0..=4096.0).text("")).changed() {
+                    config.effects.particles_count = count as u32;
+                }
+                ui.end_row();
+
+                ui.label(label("Speed"));
+                ui.add(egui::Slider::new(&mut config.effects.particles_speed, 0.0..=5.0).text(""));
+                ui.end_row();
+            });
+    });
+
+    ui.add_space(16.0);
+    ui.separator();
+    ui.add_space(8.0);
+
+    egui::CollapsingHeader::new(
+        egui::RichText::new("CRT / Retro").size(18.0).color(egui::Color32::WHITE),
+    )
+    .default_open(false)
+    .show(ui, |ui| {
+        ui.add_space(8.0);
+        egui::Grid::new("crt_settings")
+            .num_columns(2)
+            .spacing([24.0, 10.0])
+            .show(ui, |ui| {
+                ui.label(label("Enabled"));
+                ui.add(egui::Checkbox::without_text(&mut config.effects.crt_enabled));
+                ui.end_row();
+
+                ui.label(label("Scanlines"));
+                ui.add(egui::Slider::new(&mut config.effects.scanline_intensity, 0.0..=1.0).text(""));
+                ui.end_row();
+
+                ui.label(label("Curvature"));
+                ui.add(egui::Slider::new(&mut config.effects.curvature, 0.0..=0.5).text(""));
+                ui.end_row();
+
+                ui.label(label("Vignette"));
+                ui.add(egui::Slider::new(&mut config.effects.vignette_strength, 0.0..=2.0).text(""));
+                ui.end_row();
+
+                ui.label(label("Chromatic Aberration"));
+                ui.add(egui::Slider::new(&mut config.effects.chromatic_aberration, 0.0..=5.0).text(""));
+                ui.end_row();
+
+                ui.label(label("Film Grain"));
+                ui.add(egui::Slider::new(&mut config.effects.grain_intensity, 0.0..=0.5).text(""));
+                ui.end_row();
+            });
+    });
+}
+
+fn render_text_tab(ui: &mut egui::Ui, config: &mut Config) {
+    ui.label(
+        egui::RichText::new("Cursor & Animation")
+            .size(18.0)
+            .color(egui::Color32::WHITE),
+    );
+    ui.add_space(12.0);
+
+    egui::Grid::new("cursor_settings")
+        .num_columns(2)
+        .spacing([24.0, 10.0])
+        .show(ui, |ui| {
+            ui.label(label("Text Animation"));
+            ui.add(egui::Checkbox::without_text(&mut config.effects.text_animation));
+            ui.end_row();
+
+            ui.label(label("Cursor Glow"));
+            ui.add(egui::Checkbox::without_text(&mut config.effects.cursor_glow));
+            ui.end_row();
+
+            ui.label(label("Cursor Trail"));
+            ui.add(egui::Checkbox::without_text(&mut config.effects.cursor_trail));
+            ui.end_row();
+
+            // Cursor style
+            ui.label(label("Cursor Style"));
+            egui::ComboBox::from_id_salt("cursor_style")
+                .selected_text(label(match config.cursor_style {
+                    crate::config::CursorStyle::Block => "Block",
+                    crate::config::CursorStyle::Beam => "Beam",
+                    crate::config::CursorStyle::Underline => "Underline",
+                }))
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut config.cursor_style, crate::config::CursorStyle::Block, "Block");
+                    ui.selectable_value(&mut config.cursor_style, crate::config::CursorStyle::Beam, "Beam");
+                    ui.selectable_value(&mut config.cursor_style, crate::config::CursorStyle::Underline, "Underline");
+                });
+            ui.end_row();
+
+            // Cursor blink rate
+            let mut blink = config.cursor_blink_ms as f32;
+            ui.label(label("Blink Rate"));
+            if ui.add(egui::Slider::new(&mut blink, 0.0..=1500.0).text("ms")).changed() {
+                config.cursor_blink_ms = blink as u64;
+            }
+            ui.end_row();
+        });
+}
 
