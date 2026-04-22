@@ -77,7 +77,7 @@ impl ScreenLayout {
     ) -> Self {
         let padding_x = padding_x + glyph_offset_x;
         let mut tree: TaffyTree<()> = TaffyTree::new();
-        let show_tab_bar = tab_count > 1;
+        let show_tab_bar = true; // always show tab bar
 
         // ── Build flexbox tree ──
         // Root: vertical column filling the window

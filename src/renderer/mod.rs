@@ -573,17 +573,18 @@ impl Renderer {
     ) {
         let tab_w = (zone.w / tabs.len() as f32).min(200.0);
 
-        let bar_bg = [(zone.x, zone.y, zone.w, zone.h, [0.15, 0.15, 0.18, 1.0])];
+        // Tab bar background — black
+        let bar_bg = [(zone.x, zone.y, zone.w, zone.h, [0.04, 0.04, 0.05, 1.0])];
         rects.draw_rects(gpu, view, encoder, &bar_bg);
 
+        // Individual tabs — dodger blue if selected, black if not
         let mut tab_rects = Vec::new();
         for (i, (_, active)) in tabs.iter().enumerate() {
             let x = zone.x + i as f32 * tab_w;
             let color = if *active {
-                let bg = config.bg();
-                [bg[0], bg[1], bg[2], 1.0]
+                [0.12, 0.56, 1.0, 1.0] // dodger blue — selected
             } else {
-                [0.18, 0.18, 0.22, 1.0]
+                [0.04, 0.04, 0.05, 1.0] // black — not selected
             };
             tab_rects.push((x, zone.y, tab_w - 1.0, zone.h, color));
         }

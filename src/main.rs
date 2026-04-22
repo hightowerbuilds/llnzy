@@ -307,6 +307,7 @@ impl App {
                 });
                 self.active_tab = self.tabs.len() - 1;
                 self.selection.clear();
+                self.recompute_layout();
                 self.request_redraw();
             }
             Err(e) => self.error_log.error(format!("Failed to create tab: {}", e)),
@@ -322,6 +323,7 @@ impl App {
             self.active_tab = self.tabs.len() - 1;
         }
         self.selection.clear();
+        self.recompute_layout();
         self.request_redraw();
     }
 
@@ -403,15 +405,8 @@ impl App {
         self.tabs
             .iter()
             .enumerate()
-            .map(|(i, tab)| {
-                let title = tab.root.active().display_name().to_string();
-                let short = if title.chars().count() > 20 {
-                    let truncated: String = title.chars().take(19).collect();
-                    format!("{}…", truncated)
-                } else {
-                    title
-                };
-                (short, i == self.active_tab)
+            .map(|(i, _tab)| {
+                (format!("Shell {}", i + 1), i == self.active_tab)
             })
             .collect()
     }
@@ -681,7 +676,27 @@ impl ApplicationHandler<UserEvent> for App {
             WindowEvent::MouseInput { state, button, .. } => {
                 let (row, col) = self.pixel_to_grid(self.cursor_pos);
 
-                    if button == MouseButton::Right && state == ElementState::Pressed {
+                // Tab bar click detection
+                if button == MouseButton::Left && state == ElementState::Pressed {
+                    if let Some(layout) = &self.screen_layout {
+                        let px = self.cursor_pos.x as f32;
+                        let py = self.cursor_pos.y as f32;
+                        let tab_bar = &layout.tab_bar;
+                        if py >= tab_bar.y && py < tab_bar.y + tab_bar.h && tab_bar.h > 0.0 {
+                            let tab_count = self.tabs.len();
+                            if tab_count > 0 {
+                                let tab_w = (tab_bar.w / tab_count as f32).min(200.0);
+                                let clicked_idx = ((px - tab_bar.x) / tab_w) as usize;
+                                if clicked_idx < tab_count {
+                                    self.switch_tab(clicked_idx);
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if button == MouseButton::Right && state == ElementState::Pressed {
                     if self.selection.is_active() {
                         self.copy_selection();
                     } else if let Some(cb) = &mut self.clipboard {

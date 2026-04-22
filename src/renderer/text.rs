@@ -325,12 +325,13 @@ impl TextSystem {
         let shaping = self.shaping;
 
         let mut buffers: Vec<Buffer> = Vec::new();
-        for (title, _) in tabs {
+        for (title, _active) in tabs {
             let mut buf = Buffer::new(&mut self.font_system, metrics);
             buf.set_size(&mut self.font_system, Some(tab_w - 16.0), Some(tab_h));
+            // White text for tab labels — always readable on both black and blue
             let attrs = Attrs::new()
                 .family(Family::Name(&font_family))
-                .color(Color::rgb(config.fg()[0], config.fg()[1], config.fg()[2]));
+                .color(Color::rgb(240, 240, 245));
             buf.set_text(&mut self.font_system, title, attrs, shaping);
             buf.shape_until_scroll(&mut self.font_system, false);
             buffers.push(buf);
