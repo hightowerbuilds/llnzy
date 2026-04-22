@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "sync", "io-util"] }
 winit = "0.30"
 wgpu = "22"
 glyphon = "0.6"
