@@ -1,6 +1,9 @@
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::SystemTime;
+
+use crate::keybindings::{self, KeyBindings};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CursorStyle {
@@ -67,8 +70,94 @@ pub struct Config {
     pub opacity: f32,
     pub scroll_lines: u32,
     pub effects: EffectsConfig,
+    pub keybindings: KeyBindings,
+    // Theme transition state
+    pub transition: Option<ColorTransition>,
+    // Time-of-day warmth shift
+    pub time_of_day_enabled: bool,
     config_path: Option<PathBuf>,
     config_mtime: Option<SystemTime>,
+}
+
+/// Smooth color transition between two color schemes.
+#[derive(Clone, Debug)]
+pub struct ColorTransition {
+    pub from: ColorScheme,
+    pub to: ColorScheme,
+    pub progress: f32,   // 0.0 to 1.0
+    pub duration: f32,   // seconds
+    pub elapsed: f32,
+}
+
+impl ColorTransition {
+    pub fn new(from: ColorScheme, to: ColorScheme, duration: f32) -> Self {
+        Self { from, to, progress: 0.0, duration, elapsed: 0.0 }
+    }
+
+    /// Advance the transition by dt seconds. Returns true when complete.
+    pub fn advance(&mut self, dt: f32) -> bool {
+        self.elapsed += dt;
+        self.progress = (self.elapsed / self.duration).min(1.0);
+        self.progress >= 1.0
+    }
+
+    /// Get the interpolated color scheme at the current progress.
+    pub fn current(&self) -> ColorScheme {
+        let t = self.progress * self.progress * (3.0 - 2.0 * self.progress); // smoothstep
+        ColorScheme {
+            ansi: std::array::from_fn(|i| lerp_rgb(self.from.ansi[i], self.to.ansi[i], t)),
+            foreground: lerp_rgb(self.from.foreground, self.to.foreground, t),
+            background: lerp_rgb(self.from.background, self.to.background, t),
+            cursor: lerp_rgb(self.from.cursor, self.to.cursor, t),
+            selection: lerp_rgb(self.from.selection, self.to.selection, t),
+            selection_alpha: self.from.selection_alpha + (self.to.selection_alpha - self.from.selection_alpha) * t,
+        }
+    }
+}
+
+fn lerp_rgb(a: [u8; 3], b: [u8; 3], t: f32) -> [u8; 3] {
+    [
+        (a[0] as f32 + (b[0] as f32 - a[0] as f32) * t) as u8,
+        (a[1] as f32 + (b[1] as f32 - a[1] as f32) * t) as u8,
+        (a[2] as f32 + (b[2] as f32 - a[2] as f32) * t) as u8,
+    ]
+}
+
+/// Apply time-of-day warmth shift to a color scheme.
+pub fn apply_time_of_day(colors: &mut ColorScheme) {
+    let hour = {
+        use std::time::SystemTime;
+        let secs = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        ((secs % 86400) / 3600) as f32 // 0-23 UTC
+        // Approximate local time using a rough offset — in production
+        // you'd use the system timezone, but this works as a reasonable default
+    };
+
+    // Warmth curve: cool during day (10-16h), warm at night (20-6h)
+    // Map hour to warmth factor: 0.0 = neutral, 1.0 = max warm
+    let warmth = if hour >= 6.0 && hour <= 18.0 {
+        // Day: cool blue tint
+        let day_progress = (hour - 6.0) / 12.0;
+        let mid = 1.0 - (day_progress - 0.5).abs() * 2.0; // peak at noon
+        -mid * 0.08 // slight cool shift
+    } else {
+        // Night: warm shift
+        0.12
+    };
+
+    // Apply warmth to foreground and background
+    fn shift_warm(c: &mut [u8; 3], w: f32) {
+        let r = (c[0] as f32 + w * 30.0).clamp(0.0, 255.0) as u8;
+        let b = (c[2] as f32 - w * 20.0).clamp(0.0, 255.0) as u8;
+        c[0] = r;
+        c[2] = b;
+    }
+
+    shift_warm(&mut colors.foreground, warmth);
+    shift_warm(&mut colors.background, warmth);
 }
 
 #[derive(Clone, Debug)]
@@ -143,6 +232,9 @@ impl Default for Config {
             opacity: 1.0,
             scroll_lines: 3,
             effects: EffectsConfig::default(),
+            keybindings: KeyBindings::default_bindings(),
+            transition: None,
+            time_of_day_enabled: false,
             config_path: None,
             config_mtime: None,
         }
@@ -393,6 +485,43 @@ impl Config {
                 self.effects.grain_intensity = g.clamp(0.0, 0.5);
             }
         }
+
+        if let Some(kb) = file.keybindings {
+            use keybindings::Action;
+            for (action_name, key_str) in kb {
+                let action = match action_name.as_str() {
+                    "copy" => Some(Action::Copy),
+                    "paste" => Some(Action::Paste),
+                    "select_all" => Some(Action::SelectAll),
+                    "search" | "find" => Some(Action::Search),
+                    "new_tab" => Some(Action::NewTab),
+                    "close_tab" => Some(Action::CloseTab),
+                    "next_tab" => Some(Action::NextTab),
+                    "prev_tab" => Some(Action::PrevTab),
+                    "split_vertical" => Some(Action::SplitVertical),
+                    "split_horizontal" => Some(Action::SplitHorizontal),
+                    "toggle_fullscreen" => Some(Action::ToggleFullscreen),
+                    "toggle_effects" => Some(Action::ToggleEffects),
+                    "toggle_fps" => Some(Action::ToggleFps),
+                    "toggle_error_panel" => Some(Action::ToggleErrorPanel),
+                    "scroll_page_up" => Some(Action::ScrollPageUp),
+                    "scroll_page_down" => Some(Action::ScrollPageDown),
+                    s if s.starts_with("switch_tab_") => {
+                        s.strip_prefix("switch_tab_")
+                            .and_then(|n| n.parse::<u8>().ok())
+                            .filter(|n| (1..=9).contains(n))
+                            .map(Action::SwitchTab)
+                    }
+                    _ => {
+                        log::warn!("Unknown keybinding action: {}", action_name);
+                        None
+                    }
+                };
+                if let (Some(action), Some(combo)) = (action, keybindings::parse_key_combo(&key_str)) {
+                    self.keybindings.set(action, combo);
+                }
+            }
+        }
     }
 }
 
@@ -407,6 +536,7 @@ struct ConfigFile {
     scrolling: Option<ScrollConfig>,
     shell: Option<ShellConfig>,
     effects: Option<EffectsFileConfig>,
+    keybindings: Option<HashMap<String, String>>,
 }
 
 #[derive(Deserialize)]

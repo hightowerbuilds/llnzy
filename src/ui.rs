@@ -20,10 +20,12 @@ pub enum SettingsTab {
 }
 
 /// A saved prompt in the stacker queue.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct StackerPrompt {
     pub text: String,
     pub label: String,
+    #[serde(default)]
+    pub category: String,
 }
 
 /// State for the egui-driven UI overlay.
@@ -46,6 +48,12 @@ pub struct UiState {
     pub stacker_prompts: Vec<StackerPrompt>,
     pub stacker_input: String,
     pub stacker_label_input: String,
+    pub stacker_category_input: String,
+    pub stacker_search: String,
+    pub stacker_filter_category: String, // empty = show all
+    pub stacker_editing: Option<usize>,  // index of prompt being edited
+    pub stacker_edit_text: String,
+    pub stacker_dirty: bool,             // needs save to disk
 }
 
 impl UiState {
@@ -81,6 +89,8 @@ impl UiState {
             false,
         );
 
+        let stacker_prompts = load_stacker_prompts();
+
         UiState {
             ctx,
             winit_state,
@@ -92,9 +102,15 @@ impl UiState {
             clipboard_text: None,
             show_fps: false,
             frame_times: std::collections::VecDeque::with_capacity(120),
-            stacker_prompts: Vec::new(),
+            stacker_prompts,
             stacker_input: String::new(),
             stacker_label_input: String::new(),
+            stacker_category_input: String::new(),
+            stacker_search: String::new(),
+            stacker_filter_category: String::new(),
+            stacker_editing: None,
+            stacker_edit_text: String::new(),
+            stacker_dirty: false,
         }
     }
 
@@ -130,7 +146,6 @@ impl UiState {
         window: &Window,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        _encoder: &mut wgpu::CommandEncoder,
         view: &wgpu::TextureView,
         screen_desc: egui_wgpu::ScreenDescriptor,
         config: &Config,
@@ -148,6 +163,12 @@ impl UiState {
         // Stacker state — extract for closure
         let mut stacker_prompts = std::mem::take(&mut self.stacker_prompts);
         let mut stacker_input = std::mem::take(&mut self.stacker_input);
+        let mut stacker_category_input = std::mem::take(&mut self.stacker_category_input);
+        let mut stacker_search = std::mem::take(&mut self.stacker_search);
+        let mut stacker_filter_category = std::mem::take(&mut self.stacker_filter_category);
+        let mut stacker_editing = self.stacker_editing;
+        let mut stacker_edit_text = std::mem::take(&mut self.stacker_edit_text);
+        let mut stacker_dirty = self.stacker_dirty;
         let show_fps = self.show_fps;
         let fps_info = if show_fps && !self.frame_times.is_empty() {
             let avg_dt: f32 = self.frame_times.iter().sum::<f32>() / self.frame_times.len() as f32;
@@ -248,46 +269,140 @@ impl UiState {
                                     .hint_text("Type or paste your prompt here...")
                                     .font(egui::TextStyle::Monospace),
                             );
-                            ui.add_space(8.0);
+                            ui.add_space(4.0);
 
-                            if ui.add_enabled(
-                                !stacker_input.trim().is_empty(),
-                                egui::Button::new(label("Save to Queue")),
-                            ).clicked() {
-                                let words: String = stacker_input.split_whitespace().take(6).collect::<Vec<_>>().join(" ");
-                                let prompt_label = if words.len() < stacker_input.trim().len() {
-                                    format!("{}...", words)
-                                } else {
-                                    words
-                                };
-                                stacker_prompts.push(StackerPrompt {
-                                    text: stacker_input.trim().to_string(),
-                                    label: prompt_label,
-                                });
-                                stacker_input.clear();
-                            }
+                            ui.horizontal(|ui| {
+                                ui.label(label("Category:"));
+                                ui.add(egui::TextEdit::singleline(&mut stacker_category_input)
+                                    .desired_width(150.0)
+                                    .hint_text("optional"));
+                                ui.add_space(16.0);
+                                if ui.add_enabled(
+                                    !stacker_input.trim().is_empty(),
+                                    egui::Button::new(label("Save to Queue")),
+                                ).clicked() {
+                                    let words: String = stacker_input.split_whitespace().take(6).collect::<Vec<_>>().join(" ");
+                                    let prompt_label = if words.len() < stacker_input.trim().len() {
+                                        format!("{}...", words)
+                                    } else {
+                                        words
+                                    };
+                                    stacker_prompts.push(StackerPrompt {
+                                        text: stacker_input.trim().to_string(),
+                                        label: prompt_label,
+                                        category: stacker_category_input.trim().to_string(),
+                                    });
+                                    stacker_input.clear();
+                                    stacker_category_input.clear();
+                                    stacker_dirty = true;
+                                }
+                            });
                         });
 
-                        ui.add_space(16.0);
+                        ui.add_space(12.0);
+
+                        // ── Search + filter bar ──
+                        ui.horizontal(|ui| {
+                            ui.label(label("Search:"));
+                            ui.add(egui::TextEdit::singleline(&mut stacker_search)
+                                .desired_width(200.0)
+                                .hint_text("filter prompts..."));
+                            ui.add_space(16.0);
+
+                            // Category filter dropdown
+                            let categories: Vec<String> = {
+                                let mut cats: Vec<String> = stacker_prompts.iter()
+                                    .map(|p| p.category.clone())
+                                    .filter(|c| !c.is_empty())
+                                    .collect();
+                                cats.sort();
+                                cats.dedup();
+                                cats
+                            };
+                            if !categories.is_empty() {
+                                ui.label(label("Category:"));
+                                let display = if stacker_filter_category.is_empty() { "All" } else { &stacker_filter_category };
+                                egui::ComboBox::from_id_salt("stacker_cat_filter")
+                                    .selected_text(display)
+                                    .show_ui(ui, |ui| {
+                                        if ui.selectable_label(stacker_filter_category.is_empty(), "All").clicked() {
+                                            stacker_filter_category.clear();
+                                        }
+                                        for cat in &categories {
+                                            if ui.selectable_label(stacker_filter_category == *cat, cat).clicked() {
+                                                stacker_filter_category = cat.clone();
+                                            }
+                                        }
+                                    });
+                            }
+
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                // Import / Export buttons
+                                if ui.small_button("Export").clicked() {
+                                    if let Some(path) = stacker_path() {
+                                        let export_path = path.with_extension("export.json");
+                                        let _ = export_prompts(&stacker_prompts, &export_path);
+                                    }
+                                }
+                                if ui.small_button("Import").clicked() {
+                                    if let Some(path) = stacker_path() {
+                                        let import_path = path.with_extension("export.json");
+                                        if let Ok(imported) = import_prompts(&import_path) {
+                                            for p in imported {
+                                                if !stacker_prompts.iter().any(|e| e.text == p.text) {
+                                                    stacker_prompts.push(p);
+                                                }
+                                            }
+                                            stacker_dirty = true;
+                                        }
+                                    }
+                                }
+                            });
+                        });
+
+                        ui.add_space(8.0);
                         ui.separator();
                         ui.add_space(8.0);
 
-                        // ── Prompt queue ──
-                        ui.label(egui::RichText::new(format!("Queue ({})", stacker_prompts.len()))
+                        // ── Filtered prompt list ──
+                        let search_lower = stacker_search.to_lowercase();
+                        let visible: Vec<usize> = (0..stacker_prompts.len())
+                            .filter(|&i| {
+                                let p = &stacker_prompts[i];
+                                let cat_ok = stacker_filter_category.is_empty() || p.category == stacker_filter_category;
+                                let search_ok = stacker_search.is_empty()
+                                    || p.text.to_lowercase().contains(&search_lower)
+                                    || p.label.to_lowercase().contains(&search_lower)
+                                    || p.category.to_lowercase().contains(&search_lower);
+                                cat_ok && search_ok
+                            })
+                            .collect();
+
+                        ui.label(egui::RichText::new(format!("Queue ({}/{})", visible.len(), stacker_prompts.len()))
                             .size(18.0).color(egui::Color32::WHITE));
                         ui.add_space(8.0);
 
                         if stacker_prompts.is_empty() {
                             ui.label(label("No prompts saved yet. Add one above."));
+                        } else if visible.is_empty() {
+                            ui.label(label("No prompts match the current filter."));
                         }
 
                         let mut remove_idx: Option<usize> = None;
                         egui::ScrollArea::vertical().show(ui, |ui| {
-                            for (i, prompt) in stacker_prompts.iter().enumerate() {
+                            for &i in &visible {
+                                let prompt = &stacker_prompts[i];
+                                let is_editing = stacker_editing == Some(i);
+
                                 ui.group(|ui| {
                                     ui.horizontal(|ui| {
+                                        // Title + category badge
                                         ui.label(egui::RichText::new(&prompt.label)
                                             .size(15.0).color(egui::Color32::WHITE).strong());
+                                        if !prompt.category.is_empty() {
+                                            ui.label(egui::RichText::new(format!("[{}]", prompt.category))
+                                                .size(12.0).color(egui::Color32::from_rgb(120, 180, 255)));
+                                        }
 
                                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                             if ui.small_button("Delete").clicked() {
@@ -296,14 +411,41 @@ impl UiState {
                                             if ui.button(label("Copy")).clicked() {
                                                 clipboard_copy = Some(prompt.text.clone());
                                             }
+                                            if !is_editing {
+                                                if ui.small_button("Edit").clicked() {
+                                                    stacker_editing = Some(i);
+                                                    stacker_edit_text = prompt.text.clone();
+                                                }
+                                            }
                                         });
                                     });
 
-                                    // Show preview of prompt text
-                                    let preview: String = prompt.text.lines().take(3).collect::<Vec<_>>().join("\n");
-                                    ui.label(egui::RichText::new(preview)
-                                        .size(13.0).color(egui::Color32::from_rgb(160, 160, 170))
-                                        .monospace());
+                                    if is_editing {
+                                        // Inline editor
+                                        ui.add(
+                                            egui::TextEdit::multiline(&mut stacker_edit_text)
+                                                .desired_rows(4)
+                                                .desired_width(f32::INFINITY)
+                                                .font(egui::TextStyle::Monospace),
+                                        );
+                                        ui.horizontal(|ui| {
+                                            if ui.button(label("Save")).clicked() {
+                                                stacker_editing = None;
+                                                stacker_dirty = true;
+                                                // Applied after closure (can't mutate stacker_prompts here)
+                                            }
+                                            if ui.button(label("Cancel")).clicked() {
+                                                stacker_editing = None;
+                                                stacker_edit_text.clear();
+                                            }
+                                        });
+                                    } else {
+                                        // Preview
+                                        let preview: String = prompt.text.lines().take(3).collect::<Vec<_>>().join("\n");
+                                        ui.label(egui::RichText::new(preview)
+                                            .size(13.0).color(egui::Color32::from_rgb(160, 160, 170))
+                                            .monospace());
+                                    }
                                 });
                                 ui.add_space(4.0);
                             }
@@ -311,6 +453,10 @@ impl UiState {
 
                         if let Some(idx) = remove_idx {
                             stacker_prompts.remove(idx);
+                            stacker_dirty = true;
+                            if stacker_editing == Some(idx) {
+                                stacker_editing = None;
+                            }
                         }
                     });
             }
@@ -332,10 +478,42 @@ impl UiState {
             }
         });
 
+        // Apply edit save (must happen before writeback)
+        if stacker_dirty && stacker_editing.is_none() && !stacker_edit_text.is_empty() {
+            // Find the prompt that was being edited and update it
+            // (stacker_editing was cleared on Save click, but edit_text is still set)
+        }
+        // Apply inline edit if Save was clicked (editing was Some, now None, edit_text has content)
+        if self.stacker_editing.is_some() && stacker_editing.is_none() && !stacker_edit_text.is_empty() {
+            let idx = self.stacker_editing.unwrap();
+            if idx < stacker_prompts.len() {
+                stacker_prompts[idx].text = stacker_edit_text.clone();
+                let words: String = stacker_prompts[idx].text.split_whitespace().take(6).collect::<Vec<_>>().join(" ");
+                stacker_prompts[idx].label = if words.len() < stacker_prompts[idx].text.trim().len() {
+                    format!("{}...", words)
+                } else {
+                    words
+                };
+                stacker_dirty = true;
+            }
+            stacker_edit_text.clear();
+        }
+
+        // Persist to disk when dirty
+        if stacker_dirty {
+            save_stacker_prompts(&stacker_prompts);
+        }
+
         // Apply state changes
         self.settings_tab = settings_tab;
         self.stacker_prompts = stacker_prompts;
         self.stacker_input = stacker_input;
+        self.stacker_category_input = stacker_category_input;
+        self.stacker_search = stacker_search;
+        self.stacker_filter_category = stacker_filter_category;
+        self.stacker_editing = stacker_editing;
+        self.stacker_edit_text = stacker_edit_text;
+        self.stacker_dirty = false;
 
         if let Some(view) = nav_target {
             self.active_view = view;
@@ -428,8 +606,9 @@ fn render_background_tab(ui: &mut egui::Ui, config: &mut Config) {
             egui::ComboBox::from_id_salt("bg_type")
                 .selected_text(label(&config.effects.background))
                 .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut config.effects.background, "smoke".to_string(), "smoke");
-                    ui.selectable_value(&mut config.effects.background, "none".to_string(), "none");
+                    for name in &["none", "smoke", "aurora", "matrix", "nebula", "tron"] {
+                        ui.selectable_value(&mut config.effects.background, name.to_string(), *name);
+                    }
                 });
             ui.end_row();
 
@@ -594,6 +773,10 @@ fn render_text_tab(ui: &mut egui::Ui, config: &mut Config) {
                 config.cursor_blink_ms = blink as u64;
             }
             ui.end_row();
+
+            ui.label(label("Time-of-Day Warmth"));
+            ui.add(egui::Checkbox::without_text(&mut config.time_of_day_enabled));
+            ui.end_row();
         });
 }
 
@@ -674,5 +857,37 @@ fn render_themes_tab(ui: &mut egui::Ui, config: &mut Config) {
         });
         ui.add_space(8.0);
     }
+}
+
+// ── Stacker persistence ──
+
+fn stacker_path() -> Option<std::path::PathBuf> {
+    dirs::config_dir().map(|d| d.join("llnzy").join("stacker.json"))
+}
+
+fn load_stacker_prompts() -> Vec<StackerPrompt> {
+    let Some(path) = stacker_path() else { return Vec::new() };
+    let Ok(data) = std::fs::read_to_string(&path) else { return Vec::new() };
+    serde_json::from_str(&data).unwrap_or_default()
+}
+
+fn save_stacker_prompts(prompts: &[StackerPrompt]) {
+    let Some(path) = stacker_path() else { return };
+    let _ = std::fs::create_dir_all(path.parent().unwrap());
+    if let Ok(json) = serde_json::to_string_pretty(prompts) {
+        let _ = std::fs::write(path, json);
+    }
+}
+
+/// Export prompts to a JSON file at the given path.
+pub fn export_prompts(prompts: &[StackerPrompt], path: &std::path::Path) -> Result<(), String> {
+    let json = serde_json::to_string_pretty(prompts).map_err(|e| e.to_string())?;
+    std::fs::write(path, json).map_err(|e| e.to_string())
+}
+
+/// Import prompts from a JSON file, returning the loaded prompts.
+pub fn import_prompts(path: &std::path::Path) -> Result<Vec<StackerPrompt>, String> {
+    let data = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    serde_json::from_str(&data).map_err(|e| e.to_string())
 }
 

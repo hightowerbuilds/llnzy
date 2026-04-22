@@ -1,4 +1,4 @@
-use crate::config::{ColorScheme, Config, CursorStyle, EffectsConfig};
+use crate::config::{ColorScheme, ColorTransition, Config, CursorStyle, EffectsConfig};
 
 /// A complete visual theme — bundles color scheme + all effect parameters.
 #[derive(Clone, Debug)]
@@ -11,8 +11,14 @@ pub struct VisualTheme {
 }
 
 impl VisualTheme {
-    /// Apply this theme to a config, overwriting visual settings.
+    /// Apply this theme to a config with a smooth color transition.
     pub fn apply_to(&self, config: &mut Config) {
+        // Start a smooth color transition
+        config.transition = Some(ColorTransition::new(
+            config.colors.clone(),
+            self.colors.clone(),
+            0.6, // 600ms transition
+        ));
         config.colors = self.colors.clone();
         config.effects = self.effects.clone();
         config.cursor_style = self.cursor_style;

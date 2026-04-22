@@ -16,6 +16,12 @@ pub struct TextSystem {
     swash_cache: SwashCache,
     atlas: TextAtlas,
     renderer: GlyphonRenderer,
+    // Separate renderer for overlay text (tab labels, search bar, error panel).
+    // Each GlyphonRenderer owns an internal vertex buffer; calling prepare()
+    // on one can reallocate (destroy) its buffer without affecting the other.
+    // This prevents a wgpu validation error when both grid text and overlay
+    // text are recorded into the same command encoder.
+    overlay_renderer: GlyphonRenderer,
     viewport: Viewport,
     pub cell_width: f32,
     pub cell_height: f32,
@@ -49,6 +55,12 @@ impl TextSystem {
         let cache = Cache::new(&gpu.device);
         let mut atlas = TextAtlas::new(&gpu.device, &gpu.queue, &cache, gpu.surface_config.format);
         let renderer = GlyphonRenderer::new(
+            &mut atlas,
+            &gpu.device,
+            wgpu::MultisampleState::default(),
+            None,
+        );
+        let overlay_renderer = GlyphonRenderer::new(
             &mut atlas,
             &gpu.device,
             wgpu::MultisampleState::default(),
@@ -107,6 +119,7 @@ impl TextSystem {
             swash_cache,
             atlas,
             renderer,
+            overlay_renderer,
             viewport,
             cell_width,
             cell_height,
@@ -304,7 +317,11 @@ impl TextSystem {
                 .render(&self.atlas, &self.viewport, &mut pass);
         }
 
-        // Trim atlas to free unused GPU textures
+    }
+
+    /// Trim the glyph atlas to free unused GPU textures.
+    /// MUST be called AFTER queue.submit() — not during pass recording.
+    pub fn trim_atlas(&mut self) {
         self.atlas.trim();
     }
 
@@ -357,7 +374,7 @@ impl TextSystem {
             .collect();
 
         if self
-            .renderer
+            .overlay_renderer
             .prepare(
                 &gpu.device,
                 &gpu.queue,
@@ -387,7 +404,7 @@ impl TextSystem {
                 ..Default::default()
             });
             let _ = self
-                .renderer
+                .overlay_renderer
                 .render(&self.atlas, &self.viewport, &mut pass);
         }
     }
@@ -441,7 +458,7 @@ impl TextSystem {
             .collect();
 
         if self
-            .renderer
+            .overlay_renderer
             .prepare(
                 &gpu.device,
                 &gpu.queue,
@@ -471,7 +488,7 @@ impl TextSystem {
                 ..Default::default()
             });
             let _ = self
-                .renderer
+                .overlay_renderer
                 .render(&self.atlas, &self.viewport, &mut pass);
         }
     }
@@ -525,7 +542,7 @@ impl TextSystem {
             .collect();
 
         if self
-            .renderer
+            .overlay_renderer
             .prepare(
                 &gpu.device,
                 &gpu.queue,
@@ -555,7 +572,7 @@ impl TextSystem {
                 ..Default::default()
             });
             let _ = self
-                .renderer
+                .overlay_renderer
                 .render(&self.atlas, &self.viewport, &mut pass);
         }
     }
