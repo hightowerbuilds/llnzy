@@ -1,6 +1,7 @@
 use winit::window::Window;
 
 use crate::config::Config;
+use crate::theme::{builtin_themes, VisualTheme};
 
 /// Which view is active.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -13,6 +14,7 @@ pub enum ActiveView {
 /// Which settings tab is active.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SettingsTab {
+    Themes,
     Background,
     Text,
 }
@@ -81,7 +83,7 @@ impl UiState {
             winit_state,
             wgpu_renderer,
             active_view: ActiveView::Shells,
-            settings_tab: SettingsTab::Background,
+            settings_tab: SettingsTab::Themes,
             footer_height: 36.0,
             pending_config: None,
             clipboard_text: None,
@@ -177,12 +179,16 @@ impl UiState {
                         ui.label(egui::RichText::new("Settings").size(22.0).color(egui::Color32::WHITE));
                         ui.add_space(16.0);
 
-                        if ui.selectable_label(settings_tab == SettingsTab::Background, label("Background")).clicked() {
-                            settings_tab = SettingsTab::Background;
-                        }
-                        ui.add_space(4.0);
-                        if ui.selectable_label(settings_tab == SettingsTab::Text, label("Text")).clicked() {
-                            settings_tab = SettingsTab::Text;
+                        let tabs = [
+                            ("Themes", SettingsTab::Themes),
+                            ("Background", SettingsTab::Background),
+                            ("Text", SettingsTab::Text),
+                        ];
+                        for (name, tab) in tabs {
+                            if ui.selectable_label(settings_tab == tab, label(name)).clicked() {
+                                settings_tab = tab;
+                            }
+                            ui.add_space(4.0);
                         }
                     });
 
@@ -192,6 +198,7 @@ impl UiState {
                     .show(ctx, |ui| {
                         egui::ScrollArea::vertical().show(ui, |ui| {
                             match settings_tab {
+                                SettingsTab::Themes => render_themes_tab(ui, &mut config_clone),
                                 SettingsTab::Background => render_background_tab(ui, &mut config_clone),
                                 SettingsTab::Text => render_text_tab(ui, &mut config_clone),
                             }
@@ -552,5 +559,84 @@ fn render_text_tab(ui: &mut egui::Ui, config: &mut Config) {
             }
             ui.end_row();
         });
+}
+
+fn render_themes_tab(ui: &mut egui::Ui, config: &mut Config) {
+    ui.label(
+        egui::RichText::new("Visual Themes")
+            .size(18.0)
+            .color(egui::Color32::WHITE),
+    );
+    ui.add_space(4.0);
+    ui.label(
+        egui::RichText::new("Select a theme to apply its color scheme and effects.")
+            .size(14.0)
+            .color(egui::Color32::from_rgb(160, 160, 170)),
+    );
+    ui.add_space(16.0);
+
+    let themes = builtin_themes();
+
+    for theme in &themes {
+        let is_frame = egui::Frame::none()
+            .fill(egui::Color32::from_rgb(28, 28, 38))
+            .rounding(egui::Rounding::same(6.0))
+            .inner_margin(egui::Margin::same(14.0))
+            .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(50, 50, 65)));
+
+        is_frame.show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(
+                        egui::RichText::new(&theme.name)
+                            .size(17.0)
+                            .color(egui::Color32::WHITE)
+                            .strong(),
+                    );
+                    ui.add_space(2.0);
+                    ui.label(
+                        egui::RichText::new(&theme.description)
+                            .size(13.0)
+                            .color(egui::Color32::from_rgb(150, 150, 165)),
+                    );
+                    ui.add_space(6.0);
+
+                    // Color preview swatches
+                    ui.horizontal(|ui| {
+                        let colors = [
+                            theme.colors.background,
+                            theme.colors.foreground,
+                            theme.colors.cursor,
+                            theme.colors.ansi[1],  // red
+                            theme.colors.ansi[2],  // green
+                            theme.colors.ansi[4],  // blue
+                            theme.colors.ansi[5],  // magenta
+                            theme.colors.ansi[6],  // cyan
+                        ];
+                        for c in colors {
+                            let (rect, _r) = ui.allocate_exact_size(
+                                egui::Vec2::new(18.0, 18.0),
+                                egui::Sense::hover(),
+                            );
+                            ui.painter().rect_filled(
+                                rect,
+                                egui::Rounding::same(3.0),
+                                egui::Color32::from_rgb(c[0], c[1], c[2]),
+                            );
+                        }
+                    });
+                });
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button(
+                        egui::RichText::new("Apply").size(15.0),
+                    ).clicked() {
+                        theme.apply_to(config);
+                    }
+                });
+            });
+        });
+        ui.add_space(8.0);
+    }
 }
 

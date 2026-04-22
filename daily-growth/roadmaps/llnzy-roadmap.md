@@ -1,184 +1,129 @@
-# llnzy Terminal Emulator — Roadmap to Alpha
+# llnzy Terminal Emulator — Roadmap
 
-> GPU-accelerated terminal emulator built from scratch in Rust.
-> Stack: Tokio, winit, wgpu, glyphon, alacritty_terminal, portable-pty
-
----
-
-## Phase 1: Foundation [COMPLETED]
-
-1.1 Project scaffold + Cargo workspace
-1.2 winit window creation
-1.3 wgpu GPU surface initialization
-1.4 glyphon text rendering pipeline
-1.5 PTY spawning via portable-pty
-1.6 alacritty_terminal integration (ANSI parsing, grid state)
-1.7 Grid → text buffer → GPU rendering
-1.8 Keyboard input → escape sequence encoding → PTY write
-1.9 Window resize → PTY + grid + surface propagation
-1.10 Bundled JetBrains Mono font (Regular + Bold)
+> GPU-accelerated, visually dynamic terminal emulator built from scratch in Rust.
+> Stack: winit, wgpu, glyphon, alacritty_terminal, portable-pty, egui, taffy
 
 ---
 
-## Phase 2: Core UX [COMPLETED]
+## Foundation Phases [COMPLETED]
 
-2.1 Cursor rendering (Block, Beam, Underline)
-2.2 Scrollback (mouse wheel, Shift+PageUp/Down)
-2.3 Cell background colors (batched non-default bg rects)
-2.4 Text selection (click + drag, highlight rendering)
-2.5 Clipboard integration (Cmd+C copy, Cmd+V paste, Cmd+A select all)
-2.6 Accurate cell sizing (glyph metrics via layout_runs)
-2.7 TOML config file (~/.config/llnzy/config.toml)
-2.8 256-color palette + true color (RGB) support
-2.9 Auto-scroll to bottom on keyboard input
+### Phase 1: Foundation [COMPLETED]
+- winit window + wgpu GPU surface
+- glyphon text rendering pipeline
+- PTY spawning via portable-pty
+- alacritty_terminal integration (ANSI parsing, grid state)
+- Keyboard input encoding, window resize propagation
+- Bundled JetBrains Mono font (Regular, Bold, Italic, BoldItalic)
 
----
-
-## Phase 3: Text Rendering Quality
-
-3.1 Bold attribute rendering (use loaded Bold font for flagged cells)
-3.2 Italic font loading + rendering
-3.3 Underline decoration (single, double, curly)
-3.4 Strikethrough decoration
-3.5 Configurable font family (load system or custom fonts)
-3.6 Font fallback chain (emoji, symbols, CJK characters)
-3.7 DPI / display scaling awareness (Retina, HiDPI)
-3.8 Ligature support with toggle
+### Phase 2: Core UX [COMPLETED]
+- Cursor rendering (Block, Beam, Underline)
+- Scrollback, cell backgrounds, text selection, clipboard
+- TOML config with hot-reload, 256-color + true color support
+- Bold/italic/underline/strikethrough text rendering
+- Mouse reporting (SGR, X10), bracketed paste
+- Tabs, split panes, search (regex + incremental), URL detection
 
 ---
 
-## Phase 4: Input & Interaction
+## Visual Effects Phases [COMPLETED]
 
-4.1 Alt/Option key combinations
-4.2 Full modifier matrix (Ctrl+Shift, Ctrl+Alt, etc.)
-4.3 Double-click word selection
-4.4 Triple-click line selection
-4.5 Mouse reporting protocol (SGR, X10 — enables vim, htop, etc.)
-4.6 Bracketed paste mode (\e[200~ ... \e[201~)
-4.7 URL detection + Cmd+click to open in browser
-4.8 Right-click context menu (copy, paste, select all, clear)
+### Phase VFX-0: Rendering Infrastructure [COMPLETED]
+- Frame uniforms (time, delta_time, resolution, frame count)
+- Dual offscreen scene textures for ping-pong post-processing
+- Fullscreen blit pipeline
+- Continuous animation mode (ControlFlow::Poll + VSync)
+- Conditional rendering: effects off = direct-to-swapchain (zero overhead)
 
----
+### Phase VFX-1: Animated Background Shader [COMPLETED]
+- Domain-warped fractal Brownian motion smoke shader
+- Theme-aware blue-grey color palette
+- Configurable intensity and speed via TOML + settings UI
 
-## Phase 5: Terminal Compliance
+### Phase VFX-2: Post-Processing Pipeline [COMPLETED]
+- **Bloom/Glow**: 6-pass (threshold + 2x H+V blur + composite), 13-tap Gaussian, brightness clamping
+- **CRT/Retro**: scanlines, barrel distortion, vignette, chromatic aberration, film grain
+- All effects as collapsible sections with independent toggles
 
-5.1 OSC sequence handling (window title, clipboard, hyperlinks)
-5.2 Bell / visual bell
-5.3 Alternate screen buffer verification (vim, less, man)
-5.4 Terminal mode flags (DECCKM, DECAWM, bracketed paste, etc.)
-5.5 24-bit true color conformance testing
-5.6 DEC special graphics line-drawing characters
-5.7 Tab stops (HTS, TBC, CHT)
-5.8 TERM / terminfo compatibility (xterm-256color baseline)
+### Phase VFX-3: GPU Particle System [COMPLETED]
+- Compute shader (@workgroup_size(256)) updating particles on GPU
+- Instanced quad rendering with soft circular falloff + additive blending
+- Pseudo-random respawn, sine wobble drift, life-based alpha fade
 
----
+### Phase VFX-4: Cursor Effects + Text Animations [COMPLETED]
+- SDF cursor glow with radial falloff + pulse + 12-position trail
+- Text entrance: fade-in + slide-up with smoothstep easing
 
-## Phase 6: Performance
-
-6.1 Dirty region tracking (only re-render changed cells)
-6.2 Text buffer caching (reuse buffers for unchanged lines)
-6.3 Vertex buffer streaming / reuse (avoid per-frame allocation)
-6.4 Adaptive frame rate (render only when content changes)
-6.5 PTY output batching (coalesce rapid small reads)
-6.6 GPU memory profiling and optimization
-6.7 Benchmark suite (latency: keystroke → pixel, throughput: cat large file)
+### Phase VFX-5: Theme Engine [COMPLETED]
+- `VisualTheme` struct bundling colors + effects + cursor style
+- 6 built-in presets: Minimalist, Cyberpunk, Retro, Deep Space, Synthwave, Forest
+- Theme selector in Settings with color swatch preview + one-click Apply
+- Themes override: color scheme, all effects, cursor style
 
 ---
 
-## Phase 7: Configuration & Theming
+## UI Framework [COMPLETED]
 
-7.1 Full color scheme support (16 ANSI colors configurable via TOML)
-7.2 Color scheme presets (Dracula, Solarized, One Dark, Nord, etc.)
-7.3 Keybinding customization
-7.4 Window padding / margins
-7.5 Window opacity / background transparency
-7.6 Font weight and style configuration
-7.7 Line height / cell spacing
-7.8 Cursor blink with configurable rate
-7.9 Selection color customization
-7.10 Scroll speed / mouse sensitivity
-7.11 Config hot-reload (watch file, apply without restart)
+### egui Integration [COMPLETED]
+- egui 0.29 + egui-wgpu + egui-winit for UI chrome
+- Renders after terminal pipeline via separate command encoder
+- Resolved wgpu 22 RenderPass<'static> lifetime issues
 
----
+### Taffy Layout Engine [COMPLETED]
+- CSS flexbox layout for screen zones (tab bar, content, footer)
+- ScreenLayout as single source of truth for geometry
 
-## Phase 8: Multi-Session & Layout
+### Three-View Navigation [COMPLETED]
+- Footer nav bar: Shells / Stacker / Settings
+- Active view highlighted, instant switching
 
-8.1 Tab support (multiple terminal sessions in one window)
-8.2 Tab bar rendering + keyboard navigation (Cmd+T, Cmd+W, Cmd+1-9)
-8.3 Horizontal split panes
-8.4 Vertical split panes
-8.5 Pane navigation (Cmd+Arrow or configurable)
-8.6 Pane resize (drag dividers or keyboard)
-8.7 Session naming / renaming
+### Interactive Settings Panel [COMPLETED]
+- Themes tab: browse + apply visual presets
+- Background tab: type dropdown, intensity/speed sliders, collapsible bloom/particles/CRT sections
+- Text tab: cursor style, glow, trail, blink rate toggles
+- Real-time config application via pending_config flow
 
----
-
-## Phase 9: Search & Navigation
-
-9.1 In-terminal text search (Cmd+F)
-9.2 Search result highlighting (all matches)
-9.3 Search navigation (Enter = next, Shift+Enter = prev)
-9.4 Regex search mode
-9.5 Incremental search (highlight as you type)
-9.6 Search within scrollback history
+### Stacker — Prompt Queue Manager [COMPLETED]
+- Full-screen prompt input + save to queue
+- Auto-labels from first 6 words
+- Copy to clipboard + delete
+- Scrollable queue list with preview
 
 ---
 
-## Phase 10: System Integration
+## Upcoming
 
-10.1 Shell exit detection (show exit code, optionally close tab/window)
-10.2 Process title tracking (show running command in titlebar)
-10.3 Working directory tracking (OSC 7)
-10.4 Desktop notifications (alert when long-running command completes)
-10.5 Native macOS menu bar integration
-10.6 Fullscreen support (Cmd+Enter or Cmd+Ctrl+F)
-10.7 Drag-and-drop files into terminal (inserts escaped path)
-10.8 Window state persistence (size, position on relaunch)
+### Phase 6: Polish & Performance
+- [ ] Adaptive quality (reduce effects when frame time exceeds budget)
+- [ ] Effect toggle keybind (Cmd+Shift+F)
+- [ ] Benchmark mode (--benchmark flag)
+- [ ] GPU error recovery (device lost, shader compilation failure)
+- [ ] Power-aware rendering (reduce effects on battery)
+- [ ] Frame time display / debug overlay
 
----
+### Phase 7: Terminal Robustness
+- [ ] OSC 7 working directory tracking
+- [ ] Keybinding customization
+- [ ] Session naming / renaming
+- [ ] Pane resize by dragging dividers
+- [ ] Desktop notifications for long-running commands
+- [ ] Native macOS menu bar integration
 
-## Phase 11: Error Handling & Stability
+### Phase 8: Stacker Enhancements
+- [ ] Persist prompts to disk (JSON/TOML file)
+- [ ] Prompt categories / folders
+- [ ] Search within saved prompts
+- [ ] Edit existing prompts
+- [ ] Import/export prompt collections
 
-11.1 PTY error recovery (detect dead shell, offer respawn)
-11.2 Graceful shutdown (SIGHUP to child, cleanup resources)
-11.3 GPU surface loss recovery (auto-recreate on device lost)
-11.4 Panic handler (catch unwinds, log crash context)
-11.5 Resource cleanup audit (no leaked threads, file descriptors)
-11.6 Structured logging (configurable levels, optional file output)
-11.7 Memory usage profiling and leak detection
+### Phase 9: Additional Visual Effects
+- [ ] More background shaders (aurora, matrix rain, nebula, tron grid)
+- [ ] User-loadable custom .wgsl background shaders
+- [ ] Animated theme transitions (smooth interpolation between presets)
+- [ ] Time-of-day awareness (shift warmth based on system clock)
 
----
-
-## Phase 12: Testing & Quality [IN PROGRESS]
-
-12.1 Unit tests — color resolution, input encoding, selection logic, config parsing [COMPLETED — 175 tests]
-12.2 Integration tests — terminal emulation (feed escape sequences, verify grid) [COMPLETED — 45 tests]
-12.3 Rendering snapshot tests (capture frames, compare against baseline)
-12.4 PTY round-trip tests (write input, verify output) [COMPLETED — 5 tests]
-12.5 vttest compatibility (standard terminal conformance suite)
-12.6 CI/CD pipeline (GitHub Actions: build, test, clippy, rustfmt) [COMPLETED]
-12.7 Fuzz testing (random byte streams into terminal parser)
-12.8 Performance regression tests (throughput benchmarks in CI)
-
----
-
-## Phase 13: Documentation & Distribution [IN PROGRESS]
-
-13.1 README with feature overview + screenshots [COMPLETED — thorough feature docs, build/test instructions, honest limitations]
-13.2 Build instructions (all platforms) [COMPLETED — in README]
-13.3 Configuration reference (all TOML keys documented) [COMPLETED — docs/configuration.md]
-13.4 LICENSE file (choose and apply license) [COMPLETED — MIT]
-13.5 CHANGELOG (keep from this point forward) [COMPLETED — CHANGELOG.md]
-13.6 Release binaries via GitHub Releases (macOS universal, Linux x86_64)
-13.7 Homebrew formula for macOS installation
-13.8 Man page (llnzy.1)
-13.9 Contributing guide
-
----
-
-## Alpha Gate
-
-Alpha readiness requires:
-- **Phases 1–11** fully complete
-- **Phase 12.1–12.6** passing (core test suite + CI)
-- **Phase 13.1–13.5** written (README, build docs, config reference, license, changelog)
+### Phase 10: Distribution
+- [ ] Release binaries via GitHub Releases (macOS universal)
+- [ ] Homebrew formula
+- [ ] Linux + Windows testing and support
+- [ ] App icon and .app bundle
+- [ ] Auto-update mechanism

@@ -10,7 +10,7 @@ pub enum CursorStyle {
 }
 
 /// The 16 ANSI colors plus fg/bg/cursor/selection.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ColorScheme {
     pub ansi: [[u8; 3]; 16],
     pub foreground: [u8; 3],
