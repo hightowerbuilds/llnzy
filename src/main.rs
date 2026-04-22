@@ -118,9 +118,13 @@ impl App {
     fn process_all_output(&mut self) {
         let mut any_changed = false;
         for tab in &mut self.tabs {
-            let (changed, clips) = tab.root.process_all();
+            let (changed, clips, bell) = tab.root.process_all();
             if changed {
                 any_changed = true;
+            }
+            if bell {
+                self.visual_bell_until =
+                    Some(Instant::now() + std::time::Duration::from_millis(150));
             }
             // Handle OSC 52 clipboard stores
             for text in clips {
@@ -363,8 +367,9 @@ impl App {
             .enumerate()
             .map(|(i, tab)| {
                 let title = tab.root.active().title.clone();
-                let short = if title.len() > 20 {
-                    format!("{}…", &title[..19])
+                let short = if title.chars().count() > 20 {
+                    let truncated: String = title.chars().take(19).collect();
+                    format!("{}…", truncated)
                 } else {
                     title
                 };
@@ -982,6 +987,14 @@ impl ApplicationHandler<UserEvent> for App {
                 }
                 self.request_redraw();
             }
+        }
+
+        // Continuous animation mode when effects are enabled.
+        // Use Poll so the event loop never sleeps — VSync (PresentMode::Fifo)
+        // handles frame pacing at the display refresh rate for smooth animation.
+        if self.config.effects.enabled {
+            event_loop.set_control_flow(ControlFlow::Poll);
+            self.request_redraw();
         }
     }
 }

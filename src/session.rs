@@ -26,13 +26,14 @@ impl Session {
         })
     }
 
-    /// Process all available PTY output. Returns (data_changed, clipboard_text).
-    pub fn process_output(&mut self) -> (bool, Option<String>) {
+    /// Process all available PTY output. Returns (data_changed, clipboard_text, bell_rang).
+    pub fn process_output(&mut self) -> (bool, Option<String>, bool) {
         let mut all_bytes = Vec::new();
         while let Some(bytes) = self.pty.try_read() {
             all_bytes.extend_from_slice(&bytes);
         }
         let mut clipboard_text = None;
+        let mut bell = false;
         if !all_bytes.is_empty() {
             self.terminal.process(&all_bytes);
             for event in self.terminal.drain_events() {
@@ -45,15 +46,17 @@ impl Session {
                     crate::terminal::TerminalEvent::ClipboardStore(t) => {
                         clipboard_text = Some(t);
                     }
-                    crate::terminal::TerminalEvent::Bell => {}
+                    crate::terminal::TerminalEvent::Bell => {
+                        bell = true;
+                    }
                     crate::terminal::TerminalEvent::ChildExit(code) => {
                         self.exited = Some(code);
                     }
                 }
             }
-            (true, clipboard_text)
+            (true, clipboard_text, bell)
         } else {
-            (false, None)
+            (false, None, false)
         }
     }
 
@@ -134,18 +137,18 @@ impl PaneNode {
     }
 
     /// Process PTY output for ALL sessions in this tree.
-    /// Returns (any_changed, Vec<clipboard_texts>).
-    pub fn process_all(&mut self) -> (bool, Vec<String>) {
+    /// Returns (any_changed, Vec<clipboard_texts>, bell_rang).
+    pub fn process_all(&mut self) -> (bool, Vec<String>, bool) {
         match self {
             PaneNode::Leaf(s) => {
-                let (changed, clip) = s.process_output();
-                (changed, clip.into_iter().collect())
+                let (changed, clip, bell) = s.process_output();
+                (changed, clip.into_iter().collect(), bell)
             }
             PaneNode::Split { first, second, .. } => {
-                let (a, mut ca) = first.process_all();
-                let (b, cb) = second.process_all();
+                let (a, mut ca, bell_a) = first.process_all();
+                let (b, cb, bell_b) = second.process_all();
                 ca.extend(cb);
-                (a || b, ca)
+                (a || b, ca, bell_a || bell_b)
             }
         }
     }
@@ -243,12 +246,6 @@ impl PaneNode {
         }
     }
 
-    pub fn pane_count(&self) -> usize {
-        match self {
-            PaneNode::Leaf(_) => 1,
-            PaneNode::Split { first, second, .. } => first.pane_count() + second.pane_count(),
-        }
-    }
 }
 
 /// Split the active pane. Takes ownership and returns the new tree.

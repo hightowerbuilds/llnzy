@@ -24,27 +24,27 @@ impl Default for ColorScheme {
     fn default() -> Self {
         Self {
             ansi: [
-                [0, 0, 0],       // 0  black
-                [170, 0, 0],     // 1  red
-                [0, 170, 0],     // 2  green
-                [170, 170, 0],   // 3  yellow
-                [0, 0, 170],     // 4  blue
-                [170, 0, 170],   // 5  magenta
-                [0, 170, 170],   // 6  cyan
-                [170, 170, 170], // 7  white
-                [85, 85, 85],    // 8  bright black
-                [255, 85, 85],   // 9  bright red
-                [85, 255, 85],   // 10 bright green
-                [255, 255, 85],  // 11 bright yellow
-                [85, 85, 255],   // 12 bright blue
-                [255, 85, 255],  // 13 bright magenta
-                [85, 255, 255],  // 14 bright cyan
+                [40, 44, 52],    // 0  black
+                [224, 108, 117], // 1  red
+                [152, 195, 121], // 2  green
+                [229, 192, 123], // 3  yellow
+                [97, 175, 239],  // 4  blue
+                [198, 120, 221], // 5  magenta
+                [86, 182, 194],  // 6  cyan
+                [171, 178, 191], // 7  white
+                [84, 88, 98],    // 8  bright black
+                [224, 108, 117], // 9  bright red
+                [152, 195, 121], // 10 bright green
+                [229, 192, 123], // 11 bright yellow
+                [97, 175, 239],  // 12 bright blue
+                [198, 120, 221], // 13 bright magenta
+                [86, 182, 194],  // 14 bright cyan
                 [255, 255, 255], // 15 bright white
             ],
-            foreground: [204, 204, 204],
-            background: [30, 30, 36],
-            cursor: [204, 204, 204],
-            selection: [77, 120, 204],
+            foreground: [171, 178, 191],
+            background: [40, 44, 52],
+            cursor: [82, 139, 255],
+            selection: [62, 68, 81],
             selection_alpha: 0.35,
         }
     }
@@ -66,8 +66,62 @@ pub struct Config {
     pub padding_y: f32,
     pub opacity: f32,
     pub scroll_lines: u32,
+    pub effects: EffectsConfig,
     config_path: Option<PathBuf>,
     config_mtime: Option<SystemTime>,
+}
+
+#[derive(Clone, Debug)]
+pub struct EffectsConfig {
+    pub enabled: bool,
+    pub fps_target: u32,
+    pub background: String,
+    pub background_intensity: f32,
+    pub background_speed: f32,
+    pub bloom_enabled: bool,
+    pub bloom_threshold: f32,
+    pub bloom_intensity: f32,
+    pub bloom_radius: f32,
+    pub particles_enabled: bool,
+    pub particles_count: u32,
+    pub particles_speed: f32,
+    pub cursor_glow: bool,
+    pub cursor_trail: bool,
+    pub text_animation: bool,
+    pub crt_enabled: bool,
+    pub scanline_intensity: f32,
+    pub curvature: f32,
+    pub vignette_strength: f32,
+    pub chromatic_aberration: f32,
+    pub grain_intensity: f32,
+}
+
+impl Default for EffectsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            fps_target: 60,
+            background: "none".to_string(),
+            background_intensity: 0.3,
+            background_speed: 1.0,
+            bloom_enabled: true,
+            bloom_threshold: 0.35,
+            bloom_intensity: 0.6,
+            bloom_radius: 1.5,
+            particles_enabled: true,
+            particles_count: 1500,
+            particles_speed: 1.0,
+            cursor_glow: true,
+            cursor_trail: true,
+            text_animation: true,
+            crt_enabled: false,
+            scanline_intensity: 0.15,
+            curvature: 0.08,
+            vignette_strength: 0.4,
+            chromatic_aberration: 0.5,
+            grain_intensity: 0.04,
+        }
+    }
 }
 
 impl Default for Config {
@@ -88,13 +142,14 @@ impl Default for Config {
             padding_y: 8.0,
             opacity: 1.0,
             scroll_lines: 3,
+            effects: EffectsConfig::default(),
             config_path: None,
             config_mtime: None,
         }
     }
 }
 
-// ── Convenience accessors (backward-compat) ──
+// ── Convenience accessors ──
 
 impl Config {
     pub fn fg(&self) -> [u8; 3] {
@@ -272,6 +327,72 @@ impl Config {
                 self.shell = p;
             }
         }
+
+        if let Some(effects) = file.effects {
+            if let Some(e) = effects.enabled {
+                self.effects.enabled = e;
+            }
+            if let Some(fps) = effects.fps_target {
+                self.effects.fps_target = fps.clamp(15, 240);
+            }
+            if let Some(bg) = effects.background {
+                self.effects.background = bg;
+            }
+            if let Some(i) = effects.background_intensity {
+                self.effects.background_intensity = i.clamp(0.0, 1.0);
+            }
+            if let Some(s) = effects.background_speed {
+                self.effects.background_speed = s.clamp(0.0, 10.0);
+            }
+            if let Some(b) = effects.bloom_enabled {
+                self.effects.bloom_enabled = b;
+            }
+            if let Some(t) = effects.bloom_threshold {
+                self.effects.bloom_threshold = t.clamp(0.0, 1.0);
+            }
+            if let Some(i) = effects.bloom_intensity {
+                self.effects.bloom_intensity = i.clamp(0.0, 3.0);
+            }
+            if let Some(r) = effects.bloom_radius {
+                self.effects.bloom_radius = r.clamp(0.5, 5.0);
+            }
+            if let Some(p) = effects.particles_enabled {
+                self.effects.particles_enabled = p;
+            }
+            if let Some(c) = effects.particles_count {
+                self.effects.particles_count = c.clamp(0, 4096);
+            }
+            if let Some(s) = effects.particles_speed {
+                self.effects.particles_speed = s.clamp(0.0, 5.0);
+            }
+            if let Some(g) = effects.cursor_glow {
+                self.effects.cursor_glow = g;
+            }
+            if let Some(t) = effects.cursor_trail {
+                self.effects.cursor_trail = t;
+            }
+            if let Some(t) = effects.text_animation {
+                self.effects.text_animation = t;
+            }
+            if let Some(c) = effects.crt_enabled {
+                self.effects.crt_enabled = c;
+            }
+            if let Some(s) = effects.scanline_intensity {
+                self.effects.scanline_intensity = s.clamp(0.0, 1.0);
+            }
+            if let Some(c) = effects.curvature {
+                self.effects.curvature = c.clamp(0.0, 0.5);
+            }
+            if let Some(v) = effects.vignette_strength {
+                self.effects.vignette_strength = v.clamp(0.0, 2.0);
+            }
+            if let Some(c) = effects.chromatic_aberration {
+                self.effects.chromatic_aberration = c.clamp(0.0, 5.0);
+            }
+            if let Some(g) = effects.grain_intensity {
+                self.effects.grain_intensity = g.clamp(0.0, 0.5);
+            }
+        }
     }
 }
 
@@ -285,6 +406,7 @@ struct ConfigFile {
     window: Option<WindowConfig>,
     scrolling: Option<ScrollConfig>,
     shell: Option<ShellConfig>,
+    effects: Option<EffectsFileConfig>,
 }
 
 #[derive(Deserialize)]
@@ -344,6 +466,31 @@ struct ScrollConfig {
 #[derive(Deserialize)]
 struct ShellConfig {
     program: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct EffectsFileConfig {
+    enabled: Option<bool>,
+    fps_target: Option<u32>,
+    background: Option<String>,
+    background_intensity: Option<f32>,
+    background_speed: Option<f32>,
+    bloom_enabled: Option<bool>,
+    bloom_threshold: Option<f32>,
+    bloom_intensity: Option<f32>,
+    bloom_radius: Option<f32>,
+    particles_enabled: Option<bool>,
+    particles_count: Option<u32>,
+    particles_speed: Option<f32>,
+    cursor_glow: Option<bool>,
+    cursor_trail: Option<bool>,
+    text_animation: Option<bool>,
+    crt_enabled: Option<bool>,
+    scanline_intensity: Option<f32>,
+    curvature: Option<f32>,
+    vignette_strength: Option<f32>,
+    chromatic_aberration: Option<f32>,
+    grain_intensity: Option<f32>,
 }
 
 // ── Color scheme presets ──
@@ -570,12 +717,12 @@ mod tests {
     #[test]
     fn indexed_color_ansi_range() {
         let scheme = ColorScheme::default();
-        // Index 0 = black
-        assert_eq!(indexed_color(0, &scheme), [0, 0, 0]);
+        // Index 0 = black (One Dark)
+        assert_eq!(indexed_color(0, &scheme), [40, 44, 52]);
         // Index 1 = red
-        assert_eq!(indexed_color(1, &scheme), [170, 0, 0]);
+        assert_eq!(indexed_color(1, &scheme), [224, 108, 117]);
         // Index 7 = white
-        assert_eq!(indexed_color(7, &scheme), [170, 170, 170]);
+        assert_eq!(indexed_color(7, &scheme), [171, 178, 191]);
         // Index 15 = bright white
         assert_eq!(indexed_color(15, &scheme), [255, 255, 255]);
     }
@@ -696,8 +843,8 @@ mod tests {
     #[test]
     fn default_color_scheme() {
         let scheme = ColorScheme::default();
-        assert_eq!(scheme.foreground, [204, 204, 204]);
-        assert_eq!(scheme.background, [30, 30, 36]);
+        assert_eq!(scheme.foreground, [171, 178, 191]);
+        assert_eq!(scheme.background, [40, 44, 52]);
         assert_eq!(scheme.selection_alpha, 0.35);
         assert_eq!(scheme.ansi.len(), 16);
     }

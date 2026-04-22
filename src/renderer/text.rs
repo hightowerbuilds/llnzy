@@ -26,6 +26,8 @@ pub struct TextSystem {
     line_buffers: Vec<Buffer>,
     line_hashes: Vec<u64>,
     cached_width: f32,
+    // Line age tracking for entrance animations (in frames)
+    line_ages: Vec<u32>,
 }
 
 impl TextSystem {
@@ -81,12 +83,14 @@ impl TextSystem {
         );
         measure_buf.shape_until_scroll(&mut font_system, false);
 
-        let mut cell_width = (physical_font_size * 0.6).ceil();
+        let mut cell_width = (physical_font_size * 0.6).round();
         let mut cell_height = line_height;
         if let Some(run) = measure_buf.layout_runs().next() {
             cell_height = run.line_height.ceil();
             if let Some(glyph) = run.glyphs.first() {
-                cell_width = glyph.w.ceil();
+                // Use the exact advance width so cursor placement matches
+                // glyphon's glyph layout — ceil() causes cumulative drift.
+                cell_width = glyph.w;
             }
         }
 
@@ -104,6 +108,7 @@ impl TextSystem {
             line_buffers: Vec::new(),
             line_hashes: Vec::new(),
             cached_width: 0.0,
+            line_ages: Vec::new(),
         }
     }
 
@@ -127,6 +132,7 @@ impl TextSystem {
         block_cursor: Option<(usize, usize)>,
         offset_x: f32,
         offset_y: f32,
+        text_animation: bool,
     ) {
         let (cols, rows) = terminal.size();
         let width = gpu.surface_config.width as f32;
@@ -190,30 +196,63 @@ impl TextSystem {
             buffer.shape_until_scroll(font_system, false);
         }
 
+        // Update line ages: reset to 0 when content changes, increment otherwise
+        self.line_ages.resize(rows, 60); // default to "fully visible"
+        for (row, &new_hash) in new_hashes.iter().enumerate().take(rows) {
+            let old_ok = row < self.line_hashes.len() && self.line_hashes[row] == new_hash;
+            if old_ok {
+                self.line_ages[row] = self.line_ages[row].saturating_add(1).min(60);
+            } else {
+                self.line_ages[row] = 0;
+            }
+        }
+
         self.line_hashes = new_hashes;
+
+        // Animation duration in frames (~12 frames at 60fps = 200ms)
+        let anim_frames = 12.0_f32;
 
         // Build text areas from cached buffers
         let text_areas: Vec<TextArea> = self
             .line_buffers
             .iter()
             .enumerate()
-            .map(|(row, buffer)| TextArea {
-                buffer,
-                left: offset_x,
-                top: row as f32 * self.cell_height + offset_y,
-                scale: 1.0,
-                bounds: TextBounds {
-                    left: 0,
-                    top: 0,
-                    right: gpu.surface_config.width as i32,
-                    bottom: gpu.surface_config.height as i32,
-                },
-                default_color: Color::rgb(config.fg()[0], config.fg()[1], config.fg()[2]),
-                custom_glyphs: &[],
+            .map(|(row, buffer)| {
+                let base_top = row as f32 * self.cell_height + offset_y;
+
+                // Entrance animation: fade-in + slide-up
+                let (top_offset, alpha) = if text_animation && self.line_ages[row] < anim_frames as u32 {
+                    let t = self.line_ages[row] as f32 / anim_frames;
+                    let ease = t * t * (3.0 - 2.0 * t); // smoothstep
+                    let slide = (1.0 - ease) * self.cell_height * 0.3; // slide up from 30% below
+                    let alpha_val = ease;
+                    (slide, alpha_val)
+                } else {
+                    (0.0, 1.0)
+                };
+
+                let fg = config.fg();
+                let a = (alpha * 255.0) as u8;
+
+                TextArea {
+                    buffer,
+                    left: offset_x,
+                    top: base_top + top_offset,
+                    scale: 1.0,
+                    bounds: TextBounds {
+                        left: 0,
+                        top: 0,
+                        right: gpu.surface_config.width as i32,
+                        bottom: gpu.surface_config.height as i32,
+                    },
+                    default_color: Color::rgba(fg[0], fg[1], fg[2], a),
+                    custom_glyphs: &[],
+                }
             })
             .collect();
 
-        self.renderer
+        if self
+            .renderer
             .prepare(
                 &gpu.device,
                 &gpu.queue,
@@ -223,7 +262,10 @@ impl TextSystem {
                 text_areas,
                 &mut self.swash_cache,
             )
-            .unwrap();
+            .is_err()
+        {
+            return;
+        }
 
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -239,9 +281,9 @@ impl TextSystem {
                 depth_stencil_attachment: None,
                 ..Default::default()
             });
-            self.renderer
-                .render(&self.atlas, &self.viewport, &mut pass)
-                .unwrap();
+            let _ = self
+                .renderer
+                .render(&self.atlas, &self.viewport, &mut pass);
         }
 
         // Trim atlas to free unused GPU textures
@@ -295,7 +337,8 @@ impl TextSystem {
             })
             .collect();
 
-        self.renderer
+        if self
+            .renderer
             .prepare(
                 &gpu.device,
                 &gpu.queue,
@@ -305,7 +348,10 @@ impl TextSystem {
                 text_areas,
                 &mut self.swash_cache,
             )
-            .unwrap();
+            .is_err()
+        {
+            return;
+        }
 
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -321,9 +367,9 @@ impl TextSystem {
                 depth_stencil_attachment: None,
                 ..Default::default()
             });
-            self.renderer
-                .render(&self.atlas, &self.viewport, &mut pass)
-                .unwrap();
+            let _ = self
+                .renderer
+                .render(&self.atlas, &self.viewport, &mut pass);
         }
     }
     /// Render multiple lines of text at a given Y offset (for the error panel).
@@ -374,7 +420,8 @@ impl TextSystem {
             })
             .collect();
 
-        self.renderer
+        if self
+            .renderer
             .prepare(
                 &gpu.device,
                 &gpu.queue,
@@ -384,7 +431,10 @@ impl TextSystem {
                 text_areas,
                 &mut self.swash_cache,
             )
-            .unwrap();
+            .is_err()
+        {
+            return;
+        }
 
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -400,9 +450,9 @@ impl TextSystem {
                 depth_stencil_attachment: None,
                 ..Default::default()
             });
-            self.renderer
-                .render(&self.atlas, &self.viewport, &mut pass)
-                .unwrap();
+            let _ = self
+                .renderer
+                .render(&self.atlas, &self.viewport, &mut pass);
         }
     }
 }
@@ -437,7 +487,11 @@ fn build_line_spans<'a>(
         };
 
         if flags.contains(Flags::DIM) && !is_cursor {
-            fg = [fg[0] * 2 / 3, fg[1] * 2 / 3, fg[2] * 2 / 3];
+            fg = [
+                (fg[0] as u16 * 2 / 3) as u8,
+                (fg[1] as u16 * 2 / 3) as u8,
+                (fg[2] as u16 * 2 / 3) as u8,
+            ];
         }
         if flags.contains(Flags::HIDDEN) && !is_cursor {
             let bg = config.bg();
