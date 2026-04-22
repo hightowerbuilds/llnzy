@@ -138,7 +138,7 @@ impl Default for Config {
             colors: ColorScheme::default(),
             cursor_style: CursorStyle::Block,
             cursor_blink_ms: 500,
-            padding_x: 8.0,
+            padding_x: 12.0,
             padding_y: 8.0,
             opacity: 1.0,
             scroll_lines: 3,

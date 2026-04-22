@@ -3,8 +3,10 @@ pub mod blit;
 pub mod bloom;
 pub mod crt;
 pub mod cursor;
+pub mod flip;
 pub mod particles;
 pub mod rect;
+pub mod settings_ui;
 pub mod state;
 pub mod text;
 
@@ -13,18 +15,18 @@ use winit::window::Window;
 
 use crate::config::{Config, CursorStyle};
 use crate::error_log::{ErrorLog, ErrorPanel};
+use crate::layout::ScreenLayout;
 use crate::session::{PaneNode, Rect as PaneRect};
 use background::BackgroundRenderer;
 use blit::BlitPipeline;
 use bloom::BloomEffect;
 use crt::CrtEffect;
 use cursor::CursorRenderer;
+use flip::FlipAnimation;
 use particles::ParticleSystem;
 use rect::RectRenderer;
 use state::GpuState;
 use text::TextSystem;
-
-pub const TAB_BAR_HEIGHT: f32 = 28.0;
 
 pub struct Renderer {
     gpu: GpuState,
@@ -36,6 +38,7 @@ pub struct Renderer {
     cursor_renderer: CursorRenderer,
     particles: ParticleSystem,
     background: BackgroundRenderer,
+    flip: FlipAnimation,
     config: Config,
     pub cursor_visible: bool,
 }
@@ -52,6 +55,7 @@ impl Renderer {
         let cursor_renderer = CursorRenderer::new(&gpu);
         let particles = ParticleSystem::new(&gpu, config.effects.particles_count);
         let background = BackgroundRenderer::new(&gpu);
+        let flip = FlipAnimation::new(&gpu);
         Renderer {
             gpu,
             text,
@@ -62,6 +66,7 @@ impl Renderer {
             cursor_renderer,
             particles,
             background,
+            flip,
             config,
             cursor_visible: true,
         }
@@ -76,6 +81,37 @@ impl Renderer {
 
     pub fn cell_dimensions(&self) -> (f32, f32) {
         self.text.cell_dimensions()
+    }
+
+    pub fn glyph_offset_x(&self) -> f32 {
+        self.text.glyph_offset_x()
+    }
+
+    pub fn glyph_offset_y(&self) -> f32 {
+        self.text.glyph_offset_y()
+    }
+
+    pub fn gpu_device(&self) -> &wgpu::Device {
+        &self.gpu.device
+    }
+
+    pub fn gpu_surface_format(&self) -> wgpu::TextureFormat {
+        self.gpu.surface_config.format
+    }
+
+    pub fn gpu_queue(&self) -> &wgpu::Queue {
+        &self.gpu.queue
+    }
+
+    pub fn screen_descriptor(&self) -> egui_wgpu::ScreenDescriptor {
+        egui_wgpu::ScreenDescriptor {
+            size_in_pixels: [self.gpu.surface_config.width, self.gpu.surface_config.height],
+            pixels_per_point: 1.0, // wgpu already renders at physical pixels
+        }
+    }
+
+    pub fn gpu_delta_time(&self) -> f32 {
+        self.gpu.current_delta
     }
 
     pub fn invalidate_text_cache(&mut self) {
@@ -94,21 +130,6 @@ impl Renderer {
         );
     }
 
-    /// Get the content rect (below tab bar, inside padding).
-    pub fn content_rect(&self, tab_count: usize) -> PaneRect {
-        let w = self.gpu.surface_config.width as f32;
-        let h = self.gpu.surface_config.height as f32;
-        let px = self.config.padding_x;
-        let py = self.config.padding_y;
-        let tab_h = if tab_count > 1 { TAB_BAR_HEIGHT } else { 0.0 };
-        PaneRect {
-            x: px,
-            y: tab_h + py,
-            w: w - px * 2.0,
-            h: h - tab_h - py * 2.0,
-        }
-    }
-
     #[allow(clippy::too_many_arguments)]
     pub fn render(
         &mut self,
@@ -119,6 +140,8 @@ impl Renderer {
         search_bar: Option<(&str, &str)>,
         error_panel: Option<(&ErrorPanel, &ErrorLog)>,
         visual_bell: bool,
+        screen_layout: &ScreenLayout,
+        egui_render: Option<&mut dyn FnMut(&wgpu::Device, &wgpu::Queue, &mut wgpu::CommandEncoder, &wgpu::TextureView, egui_wgpu::ScreenDescriptor)>,
     ) {
         // Update per-frame uniforms (time, resolution, frame count)
         self.gpu.update_frame_uniforms();
@@ -215,8 +238,14 @@ impl Renderer {
             );
         }
 
-        let (cw, ch) = self.text.cell_dimensions();
-        let content_rect = self.content_rect(tab_titles.len());
+        let cw = screen_layout.cell_w;
+        let ch = screen_layout.cell_h;
+        let content_rect = PaneRect {
+            x: screen_layout.content.x,
+            y: screen_layout.content.y,
+            w: screen_layout.content.w,
+            h: screen_layout.content.h,
+        };
 
         // For content passes, use a macro to pick the right target view.
         // This avoids holding a borrow on self.gpu.scene_view across &mut self calls.
@@ -231,7 +260,7 @@ impl Renderer {
         }
 
         // 2. Tab bar (only if multiple tabs)
-        if tab_titles.len() > 1 {
+        if screen_layout.show_tab_bar {
             let tv = if use_scene { &self.gpu.scene_view } else { &swapchain_view };
             Self::render_tab_bar_to(
                 &mut self.rects,
@@ -241,6 +270,7 @@ impl Renderer {
                 tv,
                 &mut encoder,
                 tab_titles,
+                &screen_layout.tab_bar,
             );
         }
 
@@ -321,16 +351,19 @@ impl Renderer {
                             cc_color[2] as f32 / 255.0,
                             1.0,
                         ];
+                        let gy = self.text.glyph_offset_y();
+                        let cursor_y = cr as f32 * ch + rect.y + gy;
+                        let cursor_h = ch - gy;
                         let cursor_rect = match self.config.cursor_style {
                             CursorStyle::Block => (
                                 cc as f32 * cw + rect.x,
-                                cr as f32 * ch + rect.y,
-                                cw, ch, color,
+                                cursor_y,
+                                cw, cursor_h, color,
                             ),
                             CursorStyle::Beam => (
                                 cc as f32 * cw + rect.x,
-                                cr as f32 * ch + rect.y,
-                                2.0, ch, color,
+                                cursor_y,
+                                2.0, cursor_h, color,
                             ),
                             CursorStyle::Underline => (
                                 cc as f32 * cw + rect.x,
@@ -410,61 +443,69 @@ impl Renderer {
             }
         }
 
-        // 8. Post-process and blit to swapchain (only when using offscreen rendering)
+        // 8. Post-process and blit to swapchain
         if use_scene {
             let has_bloom = self.config.effects.bloom_enabled;
             let has_crt = self.config.effects.crt_enabled;
 
             match (has_bloom, has_crt) {
                 (true, true) => {
-                    // Bloom reads scene_view, writes to scene_view_b.
-                    // CRT reads scene_view_b, writes to swapchain.
-                    self.bloom.apply(
-                        &self.gpu, &mut encoder,
-                        &self.gpu.scene_view, &self.gpu.scene_view_b,
-                        self.config.effects.bloom_threshold,
-                        self.config.effects.bloom_intensity,
-                        self.config.effects.bloom_radius,
-                    );
-                    self.crt.apply(
-                        &self.gpu, &mut encoder,
-                        &self.gpu.scene_view_b, &swapchain_view,
-                        self.config.effects.scanline_intensity,
-                        self.config.effects.curvature,
-                        self.config.effects.vignette_strength,
-                        self.config.effects.chromatic_aberration,
-                        self.config.effects.grain_intensity,
-                        self.gpu.current_time,
-                    );
-                }
-                (true, false) => {
-                    self.bloom.apply(
-                        &self.gpu, &mut encoder,
-                        &self.gpu.scene_view, &swapchain_view,
-                        self.config.effects.bloom_threshold,
-                        self.config.effects.bloom_intensity,
-                        self.config.effects.bloom_radius,
-                    );
-                }
-                (false, true) => {
-                    self.crt.apply(
-                        &self.gpu, &mut encoder,
-                        &self.gpu.scene_view, &swapchain_view,
-                        self.config.effects.scanline_intensity,
-                        self.config.effects.curvature,
-                        self.config.effects.vignette_strength,
-                        self.config.effects.chromatic_aberration,
-                        self.config.effects.grain_intensity,
-                        self.gpu.current_time,
-                    );
-                }
-                (false, false) => {
+                        self.bloom.apply(
+                            &self.gpu, &mut encoder,
+                            &self.gpu.scene_view, &self.gpu.scene_view_b,
+                            self.config.effects.bloom_threshold,
+                            self.config.effects.bloom_intensity,
+                            self.config.effects.bloom_radius,
+                        );
+                        self.crt.apply(
+                            &self.gpu, &mut encoder,
+                            &self.gpu.scene_view_b, &swapchain_view,
+                            self.config.effects.scanline_intensity,
+                            self.config.effects.curvature,
+                            self.config.effects.vignette_strength,
+                            self.config.effects.chromatic_aberration,
+                            self.config.effects.grain_intensity,
+                            self.gpu.current_time,
+                        );
+                    }
+                    (true, false) => {
+                        self.bloom.apply(
+                            &self.gpu, &mut encoder,
+                            &self.gpu.scene_view, &swapchain_view,
+                            self.config.effects.bloom_threshold,
+                            self.config.effects.bloom_intensity,
+                            self.config.effects.bloom_radius,
+                        );
+                    }
+                    (false, true) => {
+                        self.crt.apply(
+                            &self.gpu, &mut encoder,
+                            &self.gpu.scene_view, &swapchain_view,
+                            self.config.effects.scanline_intensity,
+                            self.config.effects.curvature,
+                            self.config.effects.vignette_strength,
+                            self.config.effects.chromatic_aberration,
+                            self.config.effects.grain_intensity,
+                            self.gpu.current_time,
+                        );
+                    }
+                    (false, false) => {
                     self.blit.draw(&mut encoder, &swapchain_view);
                 }
             }
         }
 
         self.gpu.queue.submit(std::iter::once(encoder.finish()));
+
+        // 9. egui overlay (footer, settings UI) — renders AFTER terminal content
+        if let Some(egui_fn) = egui_render {
+            let desc = self.screen_descriptor();
+            let mut egui_encoder = self.gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("egui_host_encoder"),
+            });
+            egui_fn(&self.gpu.device, &self.gpu.queue, &mut egui_encoder, &swapchain_view, desc);
+        }
+
         output.present();
     }
 
@@ -532,26 +573,26 @@ impl Renderer {
         view: &wgpu::TextureView,
         encoder: &mut wgpu::CommandEncoder,
         tabs: &[(String, bool)],
+        zone: &crate::layout::Zone,
     ) {
-        let w = gpu.surface_config.width as f32;
-        let tab_w = (w / tabs.len() as f32).min(200.0);
+        let tab_w = (zone.w / tabs.len() as f32).min(200.0);
 
-        let bar_bg = [(0.0, 0.0, w, TAB_BAR_HEIGHT, [0.15, 0.15, 0.18, 1.0])];
+        let bar_bg = [(zone.x, zone.y, zone.w, zone.h, [0.15, 0.15, 0.18, 1.0])];
         rects.draw_rects(gpu, view, encoder, &bar_bg);
 
         let mut tab_rects = Vec::new();
         for (i, (_, active)) in tabs.iter().enumerate() {
-            let x = i as f32 * tab_w;
+            let x = zone.x + i as f32 * tab_w;
             let color = if *active {
                 let bg = config.bg();
                 [bg[0], bg[1], bg[2], 1.0]
             } else {
                 [0.18, 0.18, 0.22, 1.0]
             };
-            tab_rects.push((x, 0.0, tab_w - 1.0, TAB_BAR_HEIGHT, color));
+            tab_rects.push((x, zone.y, tab_w - 1.0, zone.h, color));
         }
         rects.draw_rects(gpu, view, encoder, &tab_rects);
 
-        text.render_tab_labels(tabs, tab_w, TAB_BAR_HEIGHT, config, gpu, view, encoder);
+        text.render_tab_labels(tabs, tab_w, zone.h, config, gpu, view, encoder);
     }
 }

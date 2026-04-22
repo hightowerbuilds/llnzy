@@ -19,6 +19,8 @@ pub struct TextSystem {
     viewport: Viewport,
     pub cell_width: f32,
     pub cell_height: f32,
+    pub glyph_offset_x: f32, // extra left padding for first glyph bearing
+    pub glyph_offset_y: f32, // gap from top of cell to top of glyph (for cursor alignment)
     font_size: f32,
     font_family: String,
     shaping: Shaping,
@@ -85,12 +87,18 @@ impl TextSystem {
 
         let mut cell_width = (physical_font_size * 0.6).round();
         let mut cell_height = line_height;
+        let mut glyph_offset_x = 2.0; // default safety margin
+        let mut glyph_offset_y = 0.0;
         if let Some(run) = measure_buf.layout_runs().next() {
             cell_height = run.line_height.ceil();
+            // The glyph top = line_y - font ascent. The gap between
+            // cell top and glyph top is the cursor alignment offset.
+            glyph_offset_y = (cell_height - physical_font_size) * 0.5;
             if let Some(glyph) = run.glyphs.first() {
-                // Use the exact advance width so cursor placement matches
-                // glyphon's glyph layout — ceil() causes cumulative drift.
-                cell_width = glyph.w;
+                cell_width = glyph.w.ceil();
+                if glyph.x < 0.0 {
+                    glyph_offset_x = (-glyph.x).ceil();
+                }
             }
         }
 
@@ -102,6 +110,8 @@ impl TextSystem {
             viewport,
             cell_width,
             cell_height,
+            glyph_offset_x,
+            glyph_offset_y,
             font_size: physical_font_size,
             font_family,
             shaping,
@@ -114,6 +124,14 @@ impl TextSystem {
 
     pub fn cell_dimensions(&self) -> (f32, f32) {
         (self.cell_width, self.cell_height)
+    }
+
+    pub fn glyph_offset_x(&self) -> f32 {
+        self.glyph_offset_x
+    }
+
+    pub fn glyph_offset_y(&self) -> f32 {
+        self.glyph_offset_y
     }
 
     /// Invalidate the entire line cache (call on resize, scroll, etc.)
@@ -372,6 +390,91 @@ impl TextSystem {
                 .render(&self.atlas, &self.viewport, &mut pass);
         }
     }
+    /// Render text labels at specific (x, y) pixel positions.
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_labels_at(
+        &mut self,
+        labels: &[(&str, f32, f32, f32)], // (text, x, y, max_width)
+        height: f32,
+        config: &Config,
+        gpu: &GpuState,
+        view: &wgpu::TextureView,
+        encoder: &mut wgpu::CommandEncoder,
+    ) {
+        let metrics = Metrics::new(self.font_size * 0.75, height);
+        let font_family = self.font_family.clone();
+        let shaping = self.shaping;
+
+        let mut buffers: Vec<Buffer> = Vec::new();
+        for &(text, _, _, max_w) in labels {
+            let mut buf = Buffer::new(&mut self.font_system, metrics);
+            buf.set_size(&mut self.font_system, Some(max_w), Some(height));
+            let attrs = Attrs::new()
+                .family(Family::Name(&font_family))
+                .color(Color::rgb(config.fg()[0], config.fg()[1], config.fg()[2]));
+            buf.set_text(&mut self.font_system, text, attrs, shaping);
+            buf.shape_until_scroll(&mut self.font_system, false);
+            buffers.push(buf);
+        }
+
+        let text_areas: Vec<TextArea> = buffers
+            .iter()
+            .enumerate()
+            .map(|(i, buffer)| {
+                let (_, x, y, max_w) = labels[i];
+                TextArea {
+                    buffer,
+                    left: x,
+                    top: y,
+                    scale: 1.0,
+                    bounds: TextBounds {
+                        left: x as i32,
+                        top: y as i32,
+                        right: (x + max_w) as i32,
+                        bottom: (y + height) as i32,
+                    },
+                    default_color: Color::rgb(config.fg()[0], config.fg()[1], config.fg()[2]),
+                    custom_glyphs: &[],
+                }
+            })
+            .collect();
+
+        if self
+            .renderer
+            .prepare(
+                &gpu.device,
+                &gpu.queue,
+                &mut self.font_system,
+                &mut self.atlas,
+                &self.viewport,
+                text_areas,
+                &mut self.swash_cache,
+            )
+            .is_err()
+        {
+            return;
+        }
+
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("labels_text_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                ..Default::default()
+            });
+            let _ = self
+                .renderer
+                .render(&self.atlas, &self.viewport, &mut pass);
+        }
+    }
+
     /// Render multiple lines of text at a given Y offset (for the error panel).
     #[allow(clippy::too_many_arguments)]
     pub fn render_panel_lines(
