@@ -15,6 +15,16 @@ impl Pty {
         rows: u16,
         proxy: winit::event_loop::EventLoopProxy<crate::UserEvent>,
     ) -> io::Result<Self> {
+        Self::spawn_in(shell, cols, rows, proxy, None)
+    }
+
+    pub fn spawn_in(
+        shell: &str,
+        cols: u16,
+        rows: u16,
+        proxy: winit::event_loop::EventLoopProxy<crate::UserEvent>,
+        cwd: Option<&str>,
+    ) -> io::Result<Self> {
         let pty_system = native_pty_system();
         let size = PtySize {
             rows,
@@ -26,9 +36,12 @@ impl Pty {
         let pair = pty_system.openpty(size).map_err(io::Error::other)?;
 
         let mut cmd = CommandBuilder::new(shell);
-        cmd.arg("-l"); // Start as a login shell to load user $PATH
+        cmd.arg("-l");
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
+        if let Some(dir) = cwd {
+            cmd.cwd(dir);
+        }
 
         let _child = pair.slave.spawn_command(cmd).map_err(io::Error::other)?;
 

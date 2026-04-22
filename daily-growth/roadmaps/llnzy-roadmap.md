@@ -92,13 +92,14 @@
 
 ## Upcoming
 
-### Phase 6: Polish & Performance
+### Phase 6: Polish & Performance [COMPLETED]
+- [x] Effect toggle keybind (Cmd+Shift+F)
+- [x] FPS debug overlay (Cmd+Shift+P)
+- [x] Dead code cleanup — zero warnings, 184 tests passing
+- [x] README rewrite
 - [ ] Adaptive quality (reduce effects when frame time exceeds budget)
-- [ ] Effect toggle keybind (Cmd+Shift+F)
-- [ ] Benchmark mode (--benchmark flag)
 - [ ] GPU error recovery (device lost, shader compilation failure)
 - [ ] Power-aware rendering (reduce effects on battery)
-- [ ] Frame time display / debug overlay
 
 ### Phase 7: Terminal Robustness
 - [ ] OSC 7 working directory tracking

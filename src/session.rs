@@ -6,7 +6,9 @@ pub struct Session {
     pub terminal: Terminal,
     pub pty: Pty,
     pub title: String,
-    pub exited: Option<i32>, // exit code if shell has exited
+    pub cwd: Option<String>,  // working directory from OSC 7 or title
+    pub custom_name: Option<String>, // user-assigned session name
+    pub exited: Option<i32>,  // exit code if shell has exited
 }
 
 impl Session {
@@ -16,12 +18,24 @@ impl Session {
         config: &Config,
         proxy: winit::event_loop::EventLoopProxy<crate::UserEvent>,
     ) -> std::io::Result<Self> {
+        Self::new_in_dir(cols, rows, config, proxy, None)
+    }
+
+    pub fn new_in_dir(
+        cols: u16,
+        rows: u16,
+        config: &Config,
+        proxy: winit::event_loop::EventLoopProxy<crate::UserEvent>,
+        cwd: Option<&str>,
+    ) -> std::io::Result<Self> {
         let terminal = Terminal::new(cols, rows);
-        let pty = Pty::spawn(&config.shell, cols, rows, proxy)?;
+        let pty = Pty::spawn_in(&config.shell, cols, rows, proxy, cwd)?;
         Ok(Session {
             terminal,
             pty,
             title: "shell".to_string(),
+            cwd: cwd.map(|s| s.to_string()),
+            custom_name: None,
             exited: None,
         })
     }
@@ -38,7 +52,13 @@ impl Session {
             self.terminal.process(&all_bytes);
             for event in self.terminal.drain_events() {
                 match event {
-                    crate::terminal::TerminalEvent::Title(t) => self.title = t,
+                    crate::terminal::TerminalEvent::Title(t) => {
+                        // Try to extract CWD from title (e.g. "user@host: /path" or just "/path")
+                        if let Some(path) = extract_cwd_from_title(&t) {
+                            self.cwd = Some(path);
+                        }
+                        self.title = t;
+                    }
                     crate::terminal::TerminalEvent::ResetTitle => self.title = "shell".to_string(),
                     crate::terminal::TerminalEvent::PtyWrite(t) => {
                         self.pty.write(t.as_bytes());
@@ -65,10 +85,62 @@ impl Session {
         self.pty.resize(cols, rows);
     }
 
+    /// Display name: custom name > title > "shell"
+    pub fn display_name(&self) -> &str {
+        if let Some(name) = &self.custom_name {
+            name
+        } else if !self.title.is_empty() && self.title != "shell" {
+            &self.title
+        } else {
+            "shell"
+        }
+    }
+
     pub fn write(&mut self, data: &[u8]) {
         self.terminal.scroll_to_bottom();
         self.pty.write(data);
     }
+}
+
+/// Extract a working directory path from a terminal title string.
+/// Handles common formats:
+///   "user@host: /path/to/dir"
+///   "user@host:/path/to/dir"
+///   "/path/to/dir"
+///   "~" or "~/subdir"
+fn extract_cwd_from_title(title: &str) -> Option<String> {
+    let title = title.trim();
+
+    // Look for ": /path" or ":/path" pattern
+    if let Some(pos) = title.find(": /").or_else(|| title.find(":/")) {
+        let path = title[pos..].trim_start_matches(':').trim();
+        if path.starts_with('/') {
+            return Some(path.to_string());
+        }
+    }
+
+    // Look for ": ~" pattern
+    if let Some(pos) = title.find(": ~").or_else(|| title.find(":~")) {
+        let path = title[pos..].trim_start_matches(':').trim();
+        if path.starts_with('~') {
+            if let Some(home) = dirs::home_dir() {
+                let expanded = path.replacen('~', &home.to_string_lossy(), 1);
+                return Some(expanded);
+            }
+        }
+    }
+
+    // Plain path
+    if title.starts_with('/') {
+        return Some(title.to_string());
+    }
+    if title.starts_with('~') {
+        if let Some(home) = dirs::home_dir() {
+            return Some(title.replacen('~', &home.to_string_lossy(), 1));
+        }
+    }
+
+    None
 }
 
 // ── Split pane tree ──
