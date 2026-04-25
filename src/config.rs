@@ -84,14 +84,20 @@ pub struct Config {
 pub struct ColorTransition {
     pub from: ColorScheme,
     pub to: ColorScheme,
-    pub progress: f32,   // 0.0 to 1.0
-    pub duration: f32,   // seconds
+    pub progress: f32, // 0.0 to 1.0
+    pub duration: f32, // seconds
     pub elapsed: f32,
 }
 
 impl ColorTransition {
     pub fn new(from: ColorScheme, to: ColorScheme, duration: f32) -> Self {
-        Self { from, to, progress: 0.0, duration, elapsed: 0.0 }
+        Self {
+            from,
+            to,
+            progress: 0.0,
+            duration,
+            elapsed: 0.0,
+        }
     }
 
     /// Advance the transition by dt seconds. Returns true when complete.
@@ -110,7 +116,8 @@ impl ColorTransition {
             background: lerp_rgb(self.from.background, self.to.background, t),
             cursor: lerp_rgb(self.from.cursor, self.to.cursor, t),
             selection: lerp_rgb(self.from.selection, self.to.selection, t),
-            selection_alpha: self.from.selection_alpha + (self.to.selection_alpha - self.from.selection_alpha) * t,
+            selection_alpha: self.from.selection_alpha
+                + (self.to.selection_alpha - self.from.selection_alpha) * t,
         }
     }
 }
@@ -132,8 +139,8 @@ pub fn apply_time_of_day(colors: &mut ColorScheme) {
             .unwrap_or_default()
             .as_secs();
         ((secs % 86400) / 3600) as f32 // 0-23 UTC
-        // Approximate local time using a rough offset — in production
-        // you'd use the system timezone, but this works as a reasonable default
+                                       // Approximate local time using a rough offset — in production
+                                       // you'd use the system timezone, but this works as a reasonable default
     };
 
     // Warmth curve: cool during day (10-16h), warm at night (20-6h)
@@ -167,6 +174,8 @@ pub struct EffectsConfig {
     pub background: String,
     pub background_intensity: f32,
     pub background_speed: f32,
+    /// Custom color for smoke/aurora backgrounds. None = derive from terminal bg.
+    pub background_color: Option<[u8; 3]>,
     pub bloom_enabled: bool,
     pub bloom_threshold: f32,
     pub bloom_intensity: f32,
@@ -183,6 +192,23 @@ pub struct EffectsConfig {
     pub vignette_strength: f32,
     pub chromatic_aberration: f32,
     pub grain_intensity: f32,
+    /// Whether post-processing shaders affect the sidebar/footer UI.
+    pub effects_on_ui: bool,
+}
+
+impl EffectsConfig {
+    /// True when at least one visual effect is actually running.
+    /// Used to decide whether we need the offscreen scene texture
+    /// and continuous rendering.
+    pub fn any_active(&self) -> bool {
+        self.enabled
+            && (self.background != "none"
+                || self.bloom_enabled
+                || self.particles_enabled
+                || self.crt_enabled
+                || self.cursor_glow
+                || self.text_animation)
+    }
 }
 
 impl Default for EffectsConfig {
@@ -193,6 +219,7 @@ impl Default for EffectsConfig {
             background: "none".to_string(),
             background_intensity: 0.3,
             background_speed: 1.0,
+            background_color: None,
             bloom_enabled: false,
             bloom_threshold: 0.35,
             bloom_intensity: 0.6,
@@ -209,6 +236,7 @@ impl Default for EffectsConfig {
             vignette_strength: 0.4,
             chromatic_aberration: 0.5,
             grain_intensity: 0.04,
+            effects_on_ui: true,
         }
     }
 }
@@ -506,18 +534,19 @@ impl Config {
                     "toggle_error_panel" => Some(Action::ToggleErrorPanel),
                     "scroll_page_up" => Some(Action::ScrollPageUp),
                     "scroll_page_down" => Some(Action::ScrollPageDown),
-                    s if s.starts_with("switch_tab_") => {
-                        s.strip_prefix("switch_tab_")
-                            .and_then(|n| n.parse::<u8>().ok())
-                            .filter(|n| (1..=9).contains(n))
-                            .map(Action::SwitchTab)
-                    }
+                    s if s.starts_with("switch_tab_") => s
+                        .strip_prefix("switch_tab_")
+                        .and_then(|n| n.parse::<u8>().ok())
+                        .filter(|n| (1..=9).contains(n))
+                        .map(Action::SwitchTab),
                     _ => {
                         log::warn!("Unknown keybinding action: {}", action_name);
                         None
                     }
                 };
-                if let (Some(action), Some(combo)) = (action, keybindings::parse_key_combo(&key_str)) {
+                if let (Some(action), Some(combo)) =
+                    (action, keybindings::parse_key_combo(&key_str))
+                {
                     self.keybindings.set(action, combo);
                 }
             }

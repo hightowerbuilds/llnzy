@@ -146,18 +146,19 @@ impl Search {
         }
     }
 
+    const MATCH_COLOR: [f32; 4] = [0.8, 0.6, 0.1, 0.35];
+    const FOCUS_COLOR: [f32; 4] = [0.9, 0.7, 0.1, 0.6];
+
     /// Generate highlight rects for all matches.
     /// Focused match gets a brighter color.
     pub fn highlight_rects(&self, cell_w: f32, cell_h: f32) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         let mut rects = Vec::new();
-        let match_color = [0.8, 0.6, 0.1, 0.35]; // amber
-        let focus_color = [0.9, 0.7, 0.1, 0.6]; // brighter amber
 
         for (i, m) in self.matches.iter().enumerate() {
             let color = if i == self.focus {
-                focus_color
+                Self::FOCUS_COLOR
             } else {
-                match_color
+                Self::MATCH_COLOR
             };
             let x = m.col_start as f32 * cell_w;
             let y = m.row as f32 * cell_h;

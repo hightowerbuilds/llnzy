@@ -1,13 +1,21 @@
+use std::time::Instant;
 use winit::window::Window;
 
 use crate::config::Config;
+use crate::stacker::{
+    apply_prompt_edit, export_prompts, import_prompts, load_stacker_prompts, merge_unique_prompts,
+    new_prompt, save_stacker_prompts, stacker_path, StackerPrompt,
+};
 use crate::theme::builtin_themes;
+
+pub const SIDEBAR_WIDTH: f32 = 200.0;
 
 /// Which view is active.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ActiveView {
     Shells,
     Stacker,
+    Appearances,
     Settings,
 }
 
@@ -19,14 +27,16 @@ pub enum SettingsTab {
     Text,
 }
 
-/// A saved prompt in the stacker queue.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct StackerPrompt {
+/// A ghost-text animation that floats up and fades when a prompt is copied.
+pub struct CopyGhost {
     pub text: String,
-    pub label: String,
-    #[serde(default)]
-    pub category: String,
+    pub x: f32,
+    pub y: f32,
+    pub created: Instant,
 }
+
+const GHOST_DURATION_SECS: f32 = 0.9;
+const GHOST_FLOAT_PX: f32 = 50.0;
 
 /// State for the egui-driven UI overlay.
 pub struct UiState {
@@ -41,19 +51,28 @@ pub struct UiState {
     pub pending_config: Option<Config>,
     /// Text copied to clipboard by Stacker (main loop applies it)
     pub clipboard_text: Option<String>,
+    pub sidebar_open: bool,
     // Debug overlay
     pub show_fps: bool,
     frame_times: std::collections::VecDeque<f32>,
     // Stacker state
     pub stacker_prompts: Vec<StackerPrompt>,
     pub stacker_input: String,
-    pub stacker_label_input: String,
     pub stacker_category_input: String,
     pub stacker_search: String,
     pub stacker_filter_category: String, // empty = show all
     pub stacker_editing: Option<usize>,  // index of prompt being edited
     pub stacker_edit_text: String,
-    pub stacker_dirty: bool,             // needs save to disk
+    pub stacker_dirty: bool, // needs save to disk
+    pub copy_ghosts: Vec<CopyGhost>,
+    // Tab renaming
+    pub editing_tab: Option<usize>,
+    pub editing_tab_text: String,
+    pub saved_tab_name: Option<(usize, String)>, // (tab_index, new_name) to apply after render
+    pub last_tab_click: Option<(usize, Instant)>, // (tab_index, time) for double-click detection
+    // Tab context for rendering interaction
+    pub tab_count: usize,
+    pub active_tab_index: usize,
 }
 
 impl UiState {
@@ -100,17 +119,24 @@ impl UiState {
             footer_height: 36.0,
             pending_config: None,
             clipboard_text: None,
+            sidebar_open: false,
             show_fps: false,
             frame_times: std::collections::VecDeque::with_capacity(120),
             stacker_prompts,
             stacker_input: String::new(),
-            stacker_label_input: String::new(),
             stacker_category_input: String::new(),
             stacker_search: String::new(),
             stacker_filter_category: String::new(),
             stacker_editing: None,
             stacker_edit_text: String::new(),
             stacker_dirty: false,
+            copy_ghosts: Vec::new(),
+            editing_tab: None,
+            editing_tab_text: String::new(),
+            saved_tab_name: None,
+            last_tab_click: None,
+            tab_count: 0,
+            active_tab_index: 0,
         }
     }
 
@@ -122,7 +148,42 @@ impl UiState {
 
     /// Whether the terminal is covered by a full-screen view.
     pub fn settings_open(&self) -> bool {
-        self.active_view != ActiveView::Shells
+        matches!(self.active_view, ActiveView::Appearances | ActiveView::Settings | ActiveView::Stacker)
+    }
+
+    pub fn toggle_sidebar(&mut self) {
+        self.sidebar_open = !self.sidebar_open;
+    }
+
+    pub fn sidebar_width(&self) -> f32 {
+        if self.sidebar_open {
+            SIDEBAR_WIDTH
+        } else {
+            0.0
+        }
+    }
+
+    /// Start editing a tab's name. Initializes the edit state with the current or default name.
+    pub fn start_editing_tab(&mut self, tab_index: usize, current_name: Option<&str>) {
+        self.editing_tab = Some(tab_index);
+        self.editing_tab_text = current_name.unwrap_or("").to_string();
+    }
+
+    /// Cancel tab editing without saving.
+    pub fn cancel_editing_tab(&mut self) {
+        self.editing_tab = None;
+        self.editing_tab_text.clear();
+    }
+
+    /// Update tab context (called before rendering).
+    pub fn set_tab_context(&mut self, tab_count: usize, active_tab_index: usize) {
+        self.tab_count = tab_count;
+        self.active_tab_index = active_tab_index;
+    }
+
+    /// Retrieve and clear any pending tab name change.
+    pub fn take_saved_tab_name(&mut self) -> Option<(usize, String)> {
+        self.saved_tab_name.take()
     }
 
     /// Run the egui frame and render. Returns the clipping info for the footer.
@@ -169,6 +230,8 @@ impl UiState {
         let mut stacker_editing = self.stacker_editing;
         let mut stacker_edit_text = std::mem::take(&mut self.stacker_edit_text);
         let mut stacker_dirty = self.stacker_dirty;
+        let mut saved_edit_idx: Option<usize> = None;
+        let mut copy_ghosts = std::mem::take(&mut self.copy_ghosts);
         let show_fps = self.show_fps;
         let fps_info = if show_fps && !self.frame_times.is_empty() {
             let avg_dt: f32 = self.frame_times.iter().sum::<f32>() / self.frame_times.len() as f32;
@@ -178,46 +241,230 @@ impl UiState {
             None
         };
 
+        let sidebar_open = self.sidebar_open;
+        let mut editing_tab = self.editing_tab;
+        let mut editing_tab_text = std::mem::take(&mut self.editing_tab_text);
+        let tab_count = self.tab_count;
+        let mut last_tab_click = self.last_tab_click.take();
+        let mut saved_tab_name_out: Option<(usize, String)> = None;
+
         let full_output = self.ctx.run(raw_input, |ctx| {
-            // ── Footer nav bar (ALWAYS visible) ──
+            // ── Theme-derived colors ──
+            let bg = config_clone.colors.background;
+            let fg = config_clone.colors.foreground;
+            let cursor_c = config_clone.colors.cursor;
+            let chrome_bg = egui::Color32::from_rgb(
+                (bg[0] as f32 * 0.65) as u8,
+                (bg[1] as f32 * 0.65) as u8,
+                (bg[2] as f32 * 0.65) as u8,
+            );
+            let active_btn = egui::Color32::from_rgb(
+                (cursor_c[0] as f32 * 0.4) as u8,
+                (cursor_c[1] as f32 * 0.4) as u8,
+                (cursor_c[2] as f32 * 0.4) as u8,
+            );
+            let text_color = egui::Color32::from_rgb(fg[0], fg[1], fg[2]);
+
+            // ── Footer bar (blank) ──
             egui::TopBottomPanel::bottom("footer")
                 .exact_height(footer_height)
-                .frame(egui::Frame::none().fill(egui::Color32::from_rgb(28, 28, 36)))
-                .show(ctx, |ui| {
-                    ui.add_space(4.0);
-                    ui.horizontal(|ui| {
+                .frame(egui::Frame::none().fill(chrome_bg))
+                .show(ctx, |_ui| {});
+
+            // ── Tab bar interaction (for renaming) ──
+            let tab_bar_height = 32.0;
+            const DOUBLE_CLICK_TIME_MS: u128 = 300;
+
+            // Create interactive areas over each tab for double-click detection
+            if tab_count > 0 && matches!(current_view, ActiveView::Shells) {
+                let viewport_rect = ctx.screen_rect();
+                let tab_w = (viewport_rect.width() / tab_count as f32).min(200.0);
+                let sidebar_offset = if sidebar_open { SIDEBAR_WIDTH } else { 0.0 };
+
+                // Check for clicks on tabs
+                let mut tab_clicked: Option<usize> = None;
+                ctx.input(|input| {
+                    if input.pointer.button_pressed(egui::PointerButton::Primary) {
+                        if let Some(pos) = input.pointer.latest_pos() {
+                            if pos.y >= viewport_rect.top() && pos.y < viewport_rect.top() + tab_bar_height {
+                                let rel_x = pos.x - viewport_rect.left() - sidebar_offset;
+                                if rel_x >= 0.0 && rel_x < viewport_rect.width() - sidebar_offset {
+                                    let tab_idx = (rel_x / tab_w).floor() as usize;
+                                    if tab_idx < tab_count {
+                                        tab_clicked = Some(tab_idx);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+
+                // Detect double-click based on last click time
+                if let Some(tab_idx) = tab_clicked {
+                    if let Some((last_idx, last_time)) = last_tab_click {
+                        if last_idx == tab_idx && last_time.elapsed().as_millis() < DOUBLE_CLICK_TIME_MS {
+                            // Double-click detected!
+                            editing_tab = Some(tab_idx);
+                            editing_tab_text.clear();
+                            last_tab_click = None;
+                        } else {
+                            // Single click on different tab or too late
+                            last_tab_click = Some((tab_idx, Instant::now()));
+                        }
+                    } else {
+                        // First click
+                        last_tab_click = Some((tab_idx, Instant::now()));
+                    }
+                }
+
+                // If editing a tab, show a text input area overlay
+                if let Some(edit_idx) = editing_tab {
+                    let tab_x = sidebar_offset + edit_idx as f32 * tab_w;
+
+                    egui::Area::new(egui::Id::new(("tab_edit", edit_idx)))
+                        .fixed_pos(egui::pos2(tab_x + 4.0, viewport_rect.top() + 4.0))
+                        .show(ctx, |ui| {
+                            ui.set_max_width(tab_w - 8.0);
+                            let mut text = editing_tab_text.clone();
+                            let response = ui.text_edit_singleline(&mut text);
+                            editing_tab_text = text;
+
+                            // Request focus on this input
+                            response.request_focus();
+
+                            // Check for Enter or Escape
+                            let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                            let escape_pressed = ui.input(|i| i.key_pressed(egui::Key::Escape));
+
+                            if enter_pressed {
+                                // Save the edited name
+                                saved_tab_name_out = Some((edit_idx, editing_tab_text.clone()));
+                                editing_tab = None;
+                                editing_tab_text.clear();
+                                last_tab_click = None;
+                            } else if escape_pressed {
+                                // Cancel editing
+                                editing_tab = None;
+                                editing_tab_text.clear();
+                                last_tab_click = None;
+                            }
+                        });
+                }
+            }
+
+            // Navigation sidebar (toggle with Cmd+B) ──
+            if sidebar_open {
+                egui::SidePanel::left("nav_sidebar")
+                    .exact_width(SIDEBAR_WIDTH)
+                    .frame(
+                        egui::Frame::none()
+                            .fill(chrome_bg)
+                            .inner_margin(egui::Margin::same(12.0)),
+                    )
+                    .show(ctx, |ui| {
                         ui.add_space(8.0);
+                        ui.label(
+                            egui::RichText::new("llnzy")
+                                .size(20.0)
+                                .color(text_color)
+                                .strong(),
+                        );
+                        ui.add_space(16.0);
 
                         let views = [
                             ("Shells", ActiveView::Shells),
                             ("Stacker", ActiveView::Stacker),
+                            ("Appearances", ActiveView::Appearances),
                             ("Settings", ActiveView::Settings),
                         ];
 
                         for (name, view) in views {
                             let text = egui::RichText::new(name).size(16.0);
                             let btn = if current_view == view {
-                                ui.add(egui::Button::new(text.color(egui::Color32::WHITE))
-                                    .fill(egui::Color32::from_rgb(50, 50, 65)))
+                                ui.add(
+                                    egui::Button::new(text.color(egui::Color32::WHITE))
+                                        .fill(active_btn)
+                                        .min_size(egui::Vec2::new(ui.available_width(), 32.0)),
+                                )
                             } else {
-                                ui.button(text)
+                                ui.add(
+                                    egui::Button::new(text.color(text_color))
+                                        .fill(egui::Color32::TRANSPARENT)
+                                        .min_size(egui::Vec2::new(ui.available_width(), 32.0)),
+                                )
                             };
                             if btn.clicked() && current_view != view {
                                 nav_target = Some(view);
                             }
+                            ui.add_space(4.0);
+                        }
+
+                        // ── Prompt queue ──
+                        if !stacker_prompts.is_empty() {
+                            ui.add_space(8.0);
+                            ui.separator();
+                            ui.add_space(4.0);
+                            ui.label(
+                                egui::RichText::new("Queue")
+                                    .size(13.0)
+                                    .color(egui::Color32::from_rgb(
+                                        (fg[0] as f32 * 0.6) as u8,
+                                        (fg[1] as f32 * 0.6) as u8,
+                                        (fg[2] as f32 * 0.6) as u8,
+                                    )),
+                            );
+                            ui.add_space(4.0);
+
+                            egui::ScrollArea::vertical()
+                                .id_salt("sidebar_queue")
+                                .show(ui, |ui| {
+                                    for prompt in &stacker_prompts {
+                                        let btn = ui.add(
+                                            egui::Button::new(
+                                                egui::RichText::new(&prompt.label)
+                                                    .size(13.0)
+                                                    .color(text_color),
+                                            )
+                                            .fill(egui::Color32::TRANSPARENT)
+                                            .min_size(egui::Vec2::new(
+                                                ui.available_width(),
+                                                24.0,
+                                            ))
+                                            .wrap_mode(egui::TextWrapMode::Truncate),
+                                        );
+                                        if btn.clicked() {
+                                            clipboard_copy = Some(prompt.text.clone());
+                                            let r = btn.rect;
+                                            copy_ghosts.push(CopyGhost {
+                                                text: prompt.label.clone(),
+                                                x: r.left(),
+                                                y: r.center().y,
+                                                created: Instant::now(),
+                                            });
+                                        }
+                                        btn.on_hover_text("Click to copy to clipboard");
+                                    }
+                                });
                         }
                     });
-                });
+            }
 
-            // ── Settings view ──
-            if current_view == ActiveView::Settings {
-                egui::SidePanel::left("settings_sidebar")
+            // ── Appearances view ──
+            if current_view == ActiveView::Appearances {
+                egui::SidePanel::left("appearances_sidebar")
                     .exact_width(170.0)
-                    .frame(egui::Frame::none().fill(egui::Color32::from_rgb(24, 24, 32))
-                        .inner_margin(egui::Margin::same(12.0)))
+                    .frame(
+                        egui::Frame::none()
+                            .fill(egui::Color32::from_rgb(24, 24, 32))
+                            .inner_margin(egui::Margin::same(12.0)),
+                    )
                     .show(ctx, |ui| {
                         ui.add_space(8.0);
-                        ui.label(egui::RichText::new("Settings").size(22.0).color(egui::Color32::WHITE));
+                        ui.label(
+                            egui::RichText::new("Appearances")
+                                .size(22.0)
+                                .color(egui::Color32::WHITE),
+                        );
                         ui.add_space(16.0);
 
                         let tabs = [
@@ -226,7 +473,10 @@ impl UiState {
                             ("Text", SettingsTab::Text),
                         ];
                         for (name, tab) in tabs {
-                            if ui.selectable_label(settings_tab == tab, label(name)).clicked() {
+                            if ui
+                                .selectable_label(settings_tab == tab, label(name))
+                                .clicked()
+                            {
                                 settings_tab = tab;
                             }
                             ui.add_space(4.0);
@@ -234,15 +484,16 @@ impl UiState {
                     });
 
                 egui::CentralPanel::default()
-                    .frame(egui::Frame::none().fill(egui::Color32::from_rgb(20, 20, 26))
-                        .inner_margin(egui::Margin::same(20.0)))
+                    .frame(
+                        egui::Frame::none()
+                            .fill(egui::Color32::from_rgb(20, 20, 26))
+                            .inner_margin(egui::Margin::same(20.0)),
+                    )
                     .show(ctx, |ui| {
-                        egui::ScrollArea::vertical().show(ui, |ui| {
-                            match settings_tab {
-                                SettingsTab::Themes => render_themes_tab(ui, &mut config_clone),
-                                SettingsTab::Background => render_background_tab(ui, &mut config_clone),
-                                SettingsTab::Text => render_text_tab(ui, &mut config_clone),
-                            }
+                        egui::ScrollArea::vertical().show(ui, |ui| match settings_tab {
+                            SettingsTab::Themes => render_themes_tab(ui, &mut config_clone),
+                            SettingsTab::Background => render_background_tab(ui, &mut config_clone),
+                            SettingsTab::Text => render_text_tab(ui, &mut config_clone),
                         });
                     });
             }
@@ -250,11 +501,17 @@ impl UiState {
             // ── Stacker view ──
             if current_view == ActiveView::Stacker {
                 egui::CentralPanel::default()
-                    .frame(egui::Frame::none().fill(egui::Color32::from_rgb(20, 20, 26))
-                        .inner_margin(egui::Margin::same(20.0)))
+                    .frame(
+                        egui::Frame::none()
+                            .fill(egui::Color32::from_rgb(20, 20, 26))
+                            .inner_margin(egui::Margin::same(20.0)),
+                    )
                     .show(ctx, |ui| {
-                        ui.label(egui::RichText::new("Stacker — Prompt Queue")
-                            .size(22.0).color(egui::Color32::WHITE));
+                        ui.label(
+                            egui::RichText::new("Stacker — Prompt Queue")
+                                .size(22.0)
+                                .color(egui::Color32::WHITE),
+                        );
                         ui.add_space(12.0);
 
                         // ── Input area ──
@@ -273,28 +530,27 @@ impl UiState {
 
                             ui.horizontal(|ui| {
                                 ui.label(label("Category:"));
-                                ui.add(egui::TextEdit::singleline(&mut stacker_category_input)
-                                    .desired_width(150.0)
-                                    .hint_text("optional"));
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut stacker_category_input)
+                                        .desired_width(150.0)
+                                        .hint_text("optional"),
+                                );
                                 ui.add_space(16.0);
-                                if ui.add_enabled(
-                                    !stacker_input.trim().is_empty(),
-                                    egui::Button::new(label("Save to Queue")),
-                                ).clicked() {
-                                    let words: String = stacker_input.split_whitespace().take(6).collect::<Vec<_>>().join(" ");
-                                    let prompt_label = if words.len() < stacker_input.trim().len() {
-                                        format!("{}...", words)
-                                    } else {
-                                        words
-                                    };
-                                    stacker_prompts.push(StackerPrompt {
-                                        text: stacker_input.trim().to_string(),
-                                        label: prompt_label,
-                                        category: stacker_category_input.trim().to_string(),
-                                    });
-                                    stacker_input.clear();
-                                    stacker_category_input.clear();
-                                    stacker_dirty = true;
+                                if ui
+                                    .add_enabled(
+                                        !stacker_input.trim().is_empty(),
+                                        egui::Button::new(label("Save to Queue")),
+                                    )
+                                    .clicked()
+                                {
+                                    if let Some(prompt) =
+                                        new_prompt(&stacker_input, &stacker_category_input)
+                                    {
+                                        stacker_prompts.push(prompt);
+                                        stacker_input.clear();
+                                        stacker_category_input.clear();
+                                        stacker_dirty = true;
+                                    }
                                 }
                             });
                         });
@@ -304,14 +560,17 @@ impl UiState {
                         // ── Search + filter bar ──
                         ui.horizontal(|ui| {
                             ui.label(label("Search:"));
-                            ui.add(egui::TextEdit::singleline(&mut stacker_search)
-                                .desired_width(200.0)
-                                .hint_text("filter prompts..."));
+                            ui.add(
+                                egui::TextEdit::singleline(&mut stacker_search)
+                                    .desired_width(200.0)
+                                    .hint_text("filter prompts..."),
+                            );
                             ui.add_space(16.0);
 
                             // Category filter dropdown
                             let categories: Vec<String> = {
-                                let mut cats: Vec<String> = stacker_prompts.iter()
+                                let mut cats: Vec<String> = stacker_prompts
+                                    .iter()
                                     .map(|p| p.category.clone())
                                     .filter(|c| !c.is_empty())
                                     .collect();
@@ -321,43 +580,63 @@ impl UiState {
                             };
                             if !categories.is_empty() {
                                 ui.label(label("Category:"));
-                                let display = if stacker_filter_category.is_empty() { "All" } else { &stacker_filter_category };
+                                let display = if stacker_filter_category.is_empty() {
+                                    "All"
+                                } else {
+                                    &stacker_filter_category
+                                };
                                 egui::ComboBox::from_id_salt("stacker_cat_filter")
                                     .selected_text(display)
                                     .show_ui(ui, |ui| {
-                                        if ui.selectable_label(stacker_filter_category.is_empty(), "All").clicked() {
+                                        if ui
+                                            .selectable_label(
+                                                stacker_filter_category.is_empty(),
+                                                "All",
+                                            )
+                                            .clicked()
+                                        {
                                             stacker_filter_category.clear();
                                         }
                                         for cat in &categories {
-                                            if ui.selectable_label(stacker_filter_category == *cat, cat).clicked() {
+                                            if ui
+                                                .selectable_label(
+                                                    stacker_filter_category == *cat,
+                                                    cat,
+                                                )
+                                                .clicked()
+                                            {
                                                 stacker_filter_category = cat.clone();
                                             }
                                         }
                                     });
                             }
 
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                // Import / Export buttons
-                                if ui.small_button("Export").clicked() {
-                                    if let Some(path) = stacker_path() {
-                                        let export_path = path.with_extension("export.json");
-                                        let _ = export_prompts(&stacker_prompts, &export_path);
-                                    }
-                                }
-                                if ui.small_button("Import").clicked() {
-                                    if let Some(path) = stacker_path() {
-                                        let import_path = path.with_extension("export.json");
-                                        if let Ok(imported) = import_prompts(&import_path) {
-                                            for p in imported {
-                                                if !stacker_prompts.iter().any(|e| e.text == p.text) {
-                                                    stacker_prompts.push(p);
-                                                }
-                                            }
-                                            stacker_dirty = true;
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    // Import / Export buttons
+                                    if ui.small_button("Export").clicked() {
+                                        if let Some(path) = stacker_path() {
+                                            let export_path = path.with_extension("export.json");
+                                            let _ = export_prompts(&stacker_prompts, &export_path);
                                         }
                                     }
-                                }
-                            });
+                                    if ui.small_button("Import").clicked() {
+                                        if let Some(path) = stacker_path() {
+                                            let import_path = path.with_extension("export.json");
+                                            if let Ok(imported) = import_prompts(&import_path) {
+                                                if merge_unique_prompts(
+                                                    &mut stacker_prompts,
+                                                    imported,
+                                                ) > 0
+                                                {
+                                                    stacker_dirty = true;
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                            );
                         });
 
                         ui.add_space(8.0);
@@ -369,7 +648,8 @@ impl UiState {
                         let visible: Vec<usize> = (0..stacker_prompts.len())
                             .filter(|&i| {
                                 let p = &stacker_prompts[i];
-                                let cat_ok = stacker_filter_category.is_empty() || p.category == stacker_filter_category;
+                                let cat_ok = stacker_filter_category.is_empty()
+                                    || p.category == stacker_filter_category;
                                 let search_ok = stacker_search.is_empty()
                                     || p.text.to_lowercase().contains(&search_lower)
                                     || p.label.to_lowercase().contains(&search_lower)
@@ -378,8 +658,15 @@ impl UiState {
                             })
                             .collect();
 
-                        ui.label(egui::RichText::new(format!("Queue ({}/{})", visible.len(), stacker_prompts.len()))
-                            .size(18.0).color(egui::Color32::WHITE));
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "Queue ({}/{})",
+                                visible.len(),
+                                stacker_prompts.len()
+                            ))
+                            .size(18.0)
+                            .color(egui::Color32::WHITE),
+                        );
                         ui.add_space(8.0);
 
                         if stacker_prompts.is_empty() {
@@ -397,27 +684,39 @@ impl UiState {
                                 ui.group(|ui| {
                                     ui.horizontal(|ui| {
                                         // Title + category badge
-                                        ui.label(egui::RichText::new(&prompt.label)
-                                            .size(15.0).color(egui::Color32::WHITE).strong());
+                                        ui.label(
+                                            egui::RichText::new(&prompt.label)
+                                                .size(15.0)
+                                                .color(egui::Color32::WHITE)
+                                                .strong(),
+                                        );
                                         if !prompt.category.is_empty() {
-                                            ui.label(egui::RichText::new(format!("[{}]", prompt.category))
-                                                .size(12.0).color(egui::Color32::from_rgb(120, 180, 255)));
+                                            ui.label(
+                                                egui::RichText::new(format!(
+                                                    "[{}]",
+                                                    prompt.category
+                                                ))
+                                                .size(12.0)
+                                                .color(egui::Color32::from_rgb(120, 180, 255)),
+                                            );
                                         }
 
-                                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                            if ui.small_button("Delete").clicked() {
-                                                remove_idx = Some(i);
-                                            }
-                                            if ui.button(label("Copy")).clicked() {
-                                                clipboard_copy = Some(prompt.text.clone());
-                                            }
-                                            if !is_editing {
-                                                if ui.small_button("Edit").clicked() {
+                                        ui.with_layout(
+                                            egui::Layout::right_to_left(egui::Align::Center),
+                                            |ui| {
+                                                if ui.small_button("Delete").clicked() {
+                                                    remove_idx = Some(i);
+                                                }
+                                                if ui.button(label("Copy")).clicked() {
+                                                    clipboard_copy = Some(prompt.text.clone());
+                                                }
+                                                if !is_editing && ui.small_button("Edit").clicked()
+                                                {
                                                     stacker_editing = Some(i);
                                                     stacker_edit_text = prompt.text.clone();
                                                 }
-                                            }
-                                        });
+                                            },
+                                        );
                                     });
 
                                     if is_editing {
@@ -430,9 +729,8 @@ impl UiState {
                                         );
                                         ui.horizontal(|ui| {
                                             if ui.button(label("Save")).clicked() {
+                                                saved_edit_idx = stacker_editing;
                                                 stacker_editing = None;
-                                                stacker_dirty = true;
-                                                // Applied after closure (can't mutate stacker_prompts here)
                                             }
                                             if ui.button(label("Cancel")).clicked() {
                                                 stacker_editing = None;
@@ -441,10 +739,18 @@ impl UiState {
                                         });
                                     } else {
                                         // Preview
-                                        let preview: String = prompt.text.lines().take(3).collect::<Vec<_>>().join("\n");
-                                        ui.label(egui::RichText::new(preview)
-                                            .size(13.0).color(egui::Color32::from_rgb(160, 160, 170))
-                                            .monospace());
+                                        let preview: String = prompt
+                                            .text
+                                            .lines()
+                                            .take(3)
+                                            .collect::<Vec<_>>()
+                                            .join("\n");
+                                        ui.label(
+                                            egui::RichText::new(preview)
+                                                .size(13.0)
+                                                .color(egui::Color32::from_rgb(160, 160, 170))
+                                                .monospace(),
+                                        );
                                     }
                                 });
                                 ui.add_space(4.0);
@@ -461,6 +767,46 @@ impl UiState {
                     });
             }
 
+            // ── Settings view (blank for now) ──
+            if current_view == ActiveView::Settings {
+                egui::CentralPanel::default()
+                    .frame(
+                        egui::Frame::none()
+                            .fill(egui::Color32::from_rgb(20, 20, 26))
+                            .inner_margin(egui::Margin::same(20.0)),
+                    )
+                    .show(ctx, |ui| {
+                        ui.label(
+                            egui::RichText::new("Settings")
+                                .size(22.0)
+                                .color(egui::Color32::WHITE),
+                        );
+                    });
+            }
+
+            // ── Copy ghost animations ──
+            let now = Instant::now();
+            copy_ghosts.retain(|g| now.duration_since(g.created).as_secs_f32() < GHOST_DURATION_SECS);
+            for (i, ghost) in copy_ghosts.iter().enumerate() {
+                let t = now.duration_since(ghost.created).as_secs_f32() / GHOST_DURATION_SECS;
+                let alpha = ((1.0 - t) * 200.0) as u8;
+                let y_offset = t * GHOST_FLOAT_PX;
+                egui::Area::new(egui::Id::new("copy_ghost").with(i))
+                    .fixed_pos(egui::Pos2::new(ghost.x, ghost.y - y_offset))
+                    .interactable(false)
+                    .order(egui::Order::Tooltip)
+                    .show(ctx, |ui| {
+                        ui.label(
+                            egui::RichText::new(&ghost.text)
+                                .size(12.0)
+                                .color(egui::Color32::from_rgba_unmultiplied(255, 255, 255, alpha)),
+                        );
+                    });
+            }
+            if !copy_ghosts.is_empty() {
+                ctx.request_repaint();
+            }
+
             // FPS overlay
             if let Some((fps, ms)) = fps_info {
                 egui::Area::new(egui::Id::new("fps_overlay"))
@@ -471,29 +817,20 @@ impl UiState {
                             .rounding(egui::Rounding::same(4.0))
                             .inner_margin(egui::Margin::symmetric(8.0, 4.0))
                             .show(ui, |ui| {
-                                ui.label(egui::RichText::new(format!("{:.0} FPS  {:.1}ms", fps, ms))
-                                    .size(12.0).color(egui::Color32::from_rgb(150, 255, 150)).monospace());
+                                ui.label(
+                                    egui::RichText::new(format!("{:.0} FPS  {:.1}ms", fps, ms))
+                                        .size(12.0)
+                                        .color(egui::Color32::from_rgb(150, 255, 150))
+                                        .monospace(),
+                                );
                             });
                     });
             }
         });
 
-        // Apply edit save (must happen before writeback)
-        if stacker_dirty && stacker_editing.is_none() && !stacker_edit_text.is_empty() {
-            // Find the prompt that was being edited and update it
-            // (stacker_editing was cleared on Save click, but edit_text is still set)
-        }
-        // Apply inline edit if Save was clicked (editing was Some, now None, edit_text has content)
-        if self.stacker_editing.is_some() && stacker_editing.is_none() && !stacker_edit_text.is_empty() {
-            let idx = self.stacker_editing.unwrap();
-            if idx < stacker_prompts.len() {
-                stacker_prompts[idx].text = stacker_edit_text.clone();
-                let words: String = stacker_prompts[idx].text.split_whitespace().take(6).collect::<Vec<_>>().join(" ");
-                stacker_prompts[idx].label = if words.len() < stacker_prompts[idx].text.trim().len() {
-                    format!("{}...", words)
-                } else {
-                    words
-                };
+        // Apply inline edit after egui releases its temporary borrows.
+        if let Some(idx) = saved_edit_idx {
+            if apply_prompt_edit(&mut stacker_prompts, idx, &stacker_edit_text) {
                 stacker_dirty = true;
             }
             stacker_edit_text.clear();
@@ -514,6 +851,13 @@ impl UiState {
         self.stacker_editing = stacker_editing;
         self.stacker_edit_text = stacker_edit_text;
         self.stacker_dirty = false;
+        self.copy_ghosts = copy_ghosts;
+
+        // Restore tab editing state
+        self.editing_tab = editing_tab;
+        self.editing_tab_text = editing_tab_text;
+        self.saved_tab_name = saved_tab_name_out;
+        self.last_tab_click = last_tab_click;
 
         if let Some(view) = nav_target {
             self.active_view = view;
@@ -522,8 +866,8 @@ impl UiState {
             self.clipboard_text = Some(text);
         }
 
-        // Push config changes when on settings view
-        if current_view == ActiveView::Settings {
+        // Push config changes when on appearances view
+        if current_view == ActiveView::Appearances {
             self.pending_config = Some(config_clone);
         }
 
@@ -554,9 +898,10 @@ impl UiState {
         // wgpu 22's RenderPass has 'static lifetime, so we create+finish the encoder
         // in a way that satisfies the borrow checker.
         {
-            let mut render_encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("egui_render"),
-            });
+            let mut render_encoder =
+                device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("egui_render"),
+                });
             let pass = render_encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("egui_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -571,7 +916,8 @@ impl UiState {
                 ..Default::default()
             });
             let mut static_pass = pass.forget_lifetime();
-            self.wgpu_renderer.render(&mut static_pass, &tris, &screen_desc);
+            self.wgpu_renderer
+                .render(&mut static_pass, &tris, &screen_desc);
             drop(static_pass);
             queue.submit(std::iter::once(render_encoder.finish()));
         }
@@ -580,7 +926,6 @@ impl UiState {
             self.wgpu_renderer.free_texture(id);
         }
     }
-
 }
 
 const S: f32 = 16.0; // settings panel font size
@@ -606,8 +951,12 @@ fn render_background_tab(ui: &mut egui::Ui, config: &mut Config) {
             egui::ComboBox::from_id_salt("bg_type")
                 .selected_text(label(&config.effects.background))
                 .show_ui(ui, |ui| {
-                    for name in &["none", "smoke", "aurora", "matrix", "nebula", "tron"] {
-                        ui.selectable_value(&mut config.effects.background, name.to_string(), *name);
+                    for name in &["none", "smoke", "aurora"] {
+                        ui.selectable_value(
+                            &mut config.effects.background,
+                            name.to_string(),
+                            *name,
+                        );
                     }
                 });
             ui.end_row();
@@ -621,6 +970,30 @@ fn render_background_tab(ui: &mut egui::Ui, config: &mut Config) {
             ui.label(label("Speed"));
             ui.add(egui::Slider::new(&mut config.effects.background_speed, 0.1..=5.0).text(""));
             ui.end_row();
+
+            // Color picker — only for smoke/aurora
+            if config.effects.background == "smoke" || config.effects.background == "aurora" {
+                let mut use_custom = config.effects.background_color.is_some();
+                ui.label(label("Custom Color"));
+                if ui.add(egui::Checkbox::without_text(&mut use_custom)).changed() {
+                    if use_custom {
+                        let bg = config.colors.background;
+                        config.effects.background_color = Some(bg);
+                    } else {
+                        config.effects.background_color = None;
+                    }
+                }
+                ui.end_row();
+
+                if let Some(ref mut color) = config.effects.background_color {
+                    ui.label(label("Color"));
+                    let mut c = [color[0], color[1], color[2]];
+                    if ui.color_edit_button_srgb(&mut c).changed() {
+                        *color = c;
+                    }
+                    ui.end_row();
+                }
+            }
         });
 
     ui.add_space(16.0);
@@ -628,7 +1001,9 @@ fn render_background_tab(ui: &mut egui::Ui, config: &mut Config) {
     ui.add_space(8.0);
 
     egui::CollapsingHeader::new(
-        egui::RichText::new("Bloom / Glow").size(18.0).color(egui::Color32::WHITE),
+        egui::RichText::new("Bloom / Glow")
+            .size(18.0)
+            .color(egui::Color32::WHITE),
     )
     .default_open(false)
     .show(ui, |ui| {
@@ -638,7 +1013,9 @@ fn render_background_tab(ui: &mut egui::Ui, config: &mut Config) {
             .spacing([24.0, 10.0])
             .show(ui, |ui| {
                 ui.label(label("Enabled"));
-                ui.add(egui::Checkbox::without_text(&mut config.effects.bloom_enabled));
+                ui.add(egui::Checkbox::without_text(
+                    &mut config.effects.bloom_enabled,
+                ));
                 ui.end_row();
 
                 ui.label(label("Threshold"));
@@ -660,7 +1037,9 @@ fn render_background_tab(ui: &mut egui::Ui, config: &mut Config) {
     ui.add_space(8.0);
 
     egui::CollapsingHeader::new(
-        egui::RichText::new("Particles").size(18.0).color(egui::Color32::WHITE),
+        egui::RichText::new("Particles")
+            .size(18.0)
+            .color(egui::Color32::WHITE),
     )
     .default_open(false)
     .show(ui, |ui| {
@@ -670,12 +1049,17 @@ fn render_background_tab(ui: &mut egui::Ui, config: &mut Config) {
             .spacing([24.0, 10.0])
             .show(ui, |ui| {
                 ui.label(label("Enabled"));
-                ui.add(egui::Checkbox::without_text(&mut config.effects.particles_enabled));
+                ui.add(egui::Checkbox::without_text(
+                    &mut config.effects.particles_enabled,
+                ));
                 ui.end_row();
 
                 let mut count = config.effects.particles_count as f32;
                 ui.label(label("Count"));
-                if ui.add(egui::Slider::new(&mut count, 0.0..=4096.0).text("")).changed() {
+                if ui
+                    .add(egui::Slider::new(&mut count, 0.0..=4096.0).text(""))
+                    .changed()
+                {
                     config.effects.particles_count = count as u32;
                 }
                 ui.end_row();
@@ -691,7 +1075,9 @@ fn render_background_tab(ui: &mut egui::Ui, config: &mut Config) {
     ui.add_space(8.0);
 
     egui::CollapsingHeader::new(
-        egui::RichText::new("CRT / Retro").size(18.0).color(egui::Color32::WHITE),
+        egui::RichText::new("CRT / Retro")
+            .size(18.0)
+            .color(egui::Color32::WHITE),
     )
     .default_open(false)
     .show(ui, |ui| {
@@ -701,11 +1087,15 @@ fn render_background_tab(ui: &mut egui::Ui, config: &mut Config) {
             .spacing([24.0, 10.0])
             .show(ui, |ui| {
                 ui.label(label("Enabled"));
-                ui.add(egui::Checkbox::without_text(&mut config.effects.crt_enabled));
+                ui.add(egui::Checkbox::without_text(
+                    &mut config.effects.crt_enabled,
+                ));
                 ui.end_row();
 
                 ui.label(label("Scanlines"));
-                ui.add(egui::Slider::new(&mut config.effects.scanline_intensity, 0.0..=1.0).text(""));
+                ui.add(
+                    egui::Slider::new(&mut config.effects.scanline_intensity, 0.0..=1.0).text(""),
+                );
                 ui.end_row();
 
                 ui.label(label("Curvature"));
@@ -713,11 +1103,15 @@ fn render_background_tab(ui: &mut egui::Ui, config: &mut Config) {
                 ui.end_row();
 
                 ui.label(label("Vignette"));
-                ui.add(egui::Slider::new(&mut config.effects.vignette_strength, 0.0..=2.0).text(""));
+                ui.add(
+                    egui::Slider::new(&mut config.effects.vignette_strength, 0.0..=2.0).text(""),
+                );
                 ui.end_row();
 
                 ui.label(label("Chromatic Aberration"));
-                ui.add(egui::Slider::new(&mut config.effects.chromatic_aberration, 0.0..=5.0).text(""));
+                ui.add(
+                    egui::Slider::new(&mut config.effects.chromatic_aberration, 0.0..=5.0).text(""),
+                );
                 ui.end_row();
 
                 ui.label(label("Film Grain"));
@@ -740,15 +1134,21 @@ fn render_text_tab(ui: &mut egui::Ui, config: &mut Config) {
         .spacing([24.0, 10.0])
         .show(ui, |ui| {
             ui.label(label("Text Animation"));
-            ui.add(egui::Checkbox::without_text(&mut config.effects.text_animation));
+            ui.add(egui::Checkbox::without_text(
+                &mut config.effects.text_animation,
+            ));
             ui.end_row();
 
             ui.label(label("Cursor Glow"));
-            ui.add(egui::Checkbox::without_text(&mut config.effects.cursor_glow));
+            ui.add(egui::Checkbox::without_text(
+                &mut config.effects.cursor_glow,
+            ));
             ui.end_row();
 
             ui.label(label("Cursor Trail"));
-            ui.add(egui::Checkbox::without_text(&mut config.effects.cursor_trail));
+            ui.add(egui::Checkbox::without_text(
+                &mut config.effects.cursor_trail,
+            ));
             ui.end_row();
 
             // Cursor style
@@ -760,22 +1160,39 @@ fn render_text_tab(ui: &mut egui::Ui, config: &mut Config) {
                     crate::config::CursorStyle::Underline => "Underline",
                 }))
                 .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut config.cursor_style, crate::config::CursorStyle::Block, "Block");
-                    ui.selectable_value(&mut config.cursor_style, crate::config::CursorStyle::Beam, "Beam");
-                    ui.selectable_value(&mut config.cursor_style, crate::config::CursorStyle::Underline, "Underline");
+                    ui.selectable_value(
+                        &mut config.cursor_style,
+                        crate::config::CursorStyle::Block,
+                        "Block",
+                    );
+                    ui.selectable_value(
+                        &mut config.cursor_style,
+                        crate::config::CursorStyle::Beam,
+                        "Beam",
+                    );
+                    ui.selectable_value(
+                        &mut config.cursor_style,
+                        crate::config::CursorStyle::Underline,
+                        "Underline",
+                    );
                 });
             ui.end_row();
 
             // Cursor blink rate
             let mut blink = config.cursor_blink_ms as f32;
             ui.label(label("Blink Rate"));
-            if ui.add(egui::Slider::new(&mut blink, 0.0..=1500.0).text("ms")).changed() {
+            if ui
+                .add(egui::Slider::new(&mut blink, 0.0..=1500.0).text("ms"))
+                .changed()
+            {
                 config.cursor_blink_ms = blink as u64;
             }
             ui.end_row();
 
             ui.label(label("Time-of-Day Warmth"));
-            ui.add(egui::Checkbox::without_text(&mut config.time_of_day_enabled));
+            ui.add(egui::Checkbox::without_text(
+                &mut config.time_of_day_enabled,
+            ));
             ui.end_row();
         });
 }
@@ -826,11 +1243,11 @@ fn render_themes_tab(ui: &mut egui::Ui, config: &mut Config) {
                             theme.colors.background,
                             theme.colors.foreground,
                             theme.colors.cursor,
-                            theme.colors.ansi[1],  // red
-                            theme.colors.ansi[2],  // green
-                            theme.colors.ansi[4],  // blue
-                            theme.colors.ansi[5],  // magenta
-                            theme.colors.ansi[6],  // cyan
+                            theme.colors.ansi[1], // red
+                            theme.colors.ansi[2], // green
+                            theme.colors.ansi[4], // blue
+                            theme.colors.ansi[5], // magenta
+                            theme.colors.ansi[6], // cyan
                         ];
                         for c in colors {
                             let (rect, _r) = ui.allocate_exact_size(
@@ -847,9 +1264,7 @@ fn render_themes_tab(ui: &mut egui::Ui, config: &mut Config) {
                 });
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button(
-                        egui::RichText::new("Apply").size(15.0),
-                    ).clicked() {
+                    if ui.button(egui::RichText::new("Apply").size(15.0)).clicked() {
                         theme.apply_to(config);
                     }
                 });
@@ -858,36 +1273,3 @@ fn render_themes_tab(ui: &mut egui::Ui, config: &mut Config) {
         ui.add_space(8.0);
     }
 }
-
-// ── Stacker persistence ──
-
-fn stacker_path() -> Option<std::path::PathBuf> {
-    dirs::config_dir().map(|d| d.join("llnzy").join("stacker.json"))
-}
-
-fn load_stacker_prompts() -> Vec<StackerPrompt> {
-    let Some(path) = stacker_path() else { return Vec::new() };
-    let Ok(data) = std::fs::read_to_string(&path) else { return Vec::new() };
-    serde_json::from_str(&data).unwrap_or_default()
-}
-
-fn save_stacker_prompts(prompts: &[StackerPrompt]) {
-    let Some(path) = stacker_path() else { return };
-    let _ = std::fs::create_dir_all(path.parent().unwrap());
-    if let Ok(json) = serde_json::to_string_pretty(prompts) {
-        let _ = std::fs::write(path, json);
-    }
-}
-
-/// Export prompts to a JSON file at the given path.
-pub fn export_prompts(prompts: &[StackerPrompt], path: &std::path::Path) -> Result<(), String> {
-    let json = serde_json::to_string_pretty(prompts).map_err(|e| e.to_string())?;
-    std::fs::write(path, json).map_err(|e| e.to_string())
-}
-
-/// Import prompts from a JSON file, returning the loaded prompts.
-pub fn import_prompts(path: &std::path::Path) -> Result<Vec<StackerPrompt>, String> {
-    let data = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-    serde_json::from_str(&data).map_err(|e| e.to_string())
-}
-

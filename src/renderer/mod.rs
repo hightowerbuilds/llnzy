@@ -3,10 +3,8 @@ pub mod blit;
 pub mod bloom;
 pub mod crt;
 pub mod cursor;
-pub mod flip;
 pub mod particles;
 pub mod rect;
-pub mod settings_ui;
 pub mod state;
 pub mod text;
 
@@ -25,7 +23,47 @@ use cursor::CursorRenderer;
 use particles::ParticleSystem;
 use rect::RectRenderer;
 use state::GpuState;
-use text::TextSystem;
+use text::{TextCacheKey, TextSystem};
+
+pub type EguiRenderCallback<'a> =
+    &'a mut dyn FnMut(&wgpu::Device, &wgpu::Queue, &wgpu::TextureView, egui_wgpu::ScreenDescriptor);
+
+pub struct RenderRequest<'a> {
+    pub pane_root: &'a PaneNode,
+    pub tab_titles: &'a [(String, bool)],
+    pub selection_rects: &'a [(f32, f32, f32, f32, [f32; 4])],
+    pub search_rects: &'a [(f32, f32, f32, f32, [f32; 4])],
+    pub search_bar: Option<(&'a str, &'a str)>,
+    pub error_panel: Option<(&'a ErrorPanel, &'a ErrorLog)>,
+    pub visual_bell: bool,
+    pub screen_layout: &'a ScreenLayout,
+    pub egui_render: Option<EguiRenderCallback<'a>>,
+    /// When true, egui renders to the scene texture so post-processing
+    /// shaders (bloom, CRT) affect the UI. False for settings/stacker views.
+    pub apply_effects_to_ui: bool,
+}
+
+struct ContentPass<'a> {
+    pane_root: &'a PaneNode,
+    selection_rects: &'a [(f32, f32, f32, f32, [f32; 4])],
+    search_rects: &'a [(f32, f32, f32, f32, [f32; 4])],
+    screen_layout: &'a ScreenLayout,
+}
+
+struct OverlayPass<'a> {
+    search_bar: Option<(&'a str, &'a str)>,
+    error_panel: Option<(&'a ErrorPanel, &'a ErrorLog)>,
+    visual_bell: bool,
+}
+
+struct UiRenderPass<'a> {
+    rects: &'a mut RectRenderer,
+    text: &'a mut TextSystem,
+    gpu: &'a GpuState,
+    config: &'a Config,
+    view: &'a wgpu::TextureView,
+    encoder: &'a mut wgpu::CommandEncoder,
+}
 
 pub struct Renderer {
     gpu: GpuState,
@@ -39,6 +77,7 @@ pub struct Renderer {
     background: BackgroundRenderer,
     config: Config,
     pub cursor_visible: bool,
+    scale_factor: f32,
 }
 
 impl Renderer {
@@ -65,6 +104,7 @@ impl Renderer {
             background,
             config,
             cursor_visible: true,
+            scale_factor: scale_factor as f32,
         }
     }
 
@@ -101,9 +141,16 @@ impl Renderer {
 
     pub fn screen_descriptor(&self) -> egui_wgpu::ScreenDescriptor {
         egui_wgpu::ScreenDescriptor {
-            size_in_pixels: [self.gpu.surface_config.width, self.gpu.surface_config.height],
-            pixels_per_point: 1.0, // wgpu already renders at physical pixels
+            size_in_pixels: [
+                self.gpu.surface_config.width,
+                self.gpu.surface_config.height,
+            ],
+            pixels_per_point: self.scale_factor,
         }
+    }
+
+    pub fn set_scale_factor(&mut self, scale_factor: f32) {
+        self.scale_factor = scale_factor;
     }
 
     pub fn gpu_delta_time(&self) -> f32 {
@@ -127,162 +174,226 @@ impl Renderer {
             self.config.effects.background_intensity,
             self.config.effects.background_speed,
             self.config.bg(),
+            self.config.effects.background_color,
         );
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub fn render(
-        &mut self,
-        pane_root: &PaneNode,
-        tab_titles: &[(String, bool)],
-        selection_rects: &[(f32, f32, f32, f32, [f32; 4])],
-        search_rects: &[(f32, f32, f32, f32, [f32; 4])],
-        search_bar: Option<(&str, &str)>,
-        error_panel: Option<(&ErrorPanel, &ErrorLog)>,
-        visual_bell: bool,
-        screen_layout: &ScreenLayout,
-        egui_render: Option<&mut dyn FnMut(&wgpu::Device, &wgpu::Queue, &wgpu::TextureView, egui_wgpu::ScreenDescriptor)>,
-    ) {
-        // Update per-frame uniforms (time, resolution, frame count)
+    pub fn render(&mut self, request: RenderRequest<'_>) {
         self.gpu.update_frame_uniforms();
 
-        let output = match self.gpu.surface.get_current_texture() {
-            Ok(t) => t,
+        let Some(output) = self.acquire_surface_texture() else {
+            return;
+        };
+        let swapchain_view = output
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        let mut encoder = self.create_render_encoder();
+        let use_scene = self.config.effects.any_active();
+
+        self.clear_frame(&mut encoder, &swapchain_view, use_scene);
+        self.render_scene_background(&mut encoder, use_scene);
+        self.render_tab_bar(&mut encoder, &swapchain_view, use_scene, &request);
+        self.render_terminal_content(
+            &mut encoder,
+            &swapchain_view,
+            use_scene,
+            ContentPass {
+                pane_root: request.pane_root,
+                selection_rects: request.selection_rects,
+                search_rects: request.search_rects,
+                screen_layout: request.screen_layout,
+            },
+        );
+        self.render_overlays(
+            &mut encoder,
+            &swapchain_view,
+            use_scene,
+            OverlayPass {
+                search_bar: request.search_bar,
+                error_panel: request.error_panel,
+                visual_bell: request.visual_bell,
+            },
+        );
+
+        // Submit terminal content before egui overlay
+        self.gpu.queue.submit(std::iter::once(encoder.finish()));
+
+        // Route egui rendering based on whether shaders should affect the UI.
+        // Shells view: render egui to scene texture so bloom/CRT affect the sidebar.
+        // Settings/Stacker: post-process first, then render egui clean on top.
+        let egui_to_scene = use_scene && request.apply_effects_to_ui;
+        if egui_to_scene {
+            self.render_egui_overlay(request.egui_render, &self.gpu.scene_view);
+            let mut pp_encoder = self.create_render_encoder();
+            self.apply_post_processing(&mut pp_encoder, &swapchain_view, use_scene);
+            self.gpu.queue.submit(std::iter::once(pp_encoder.finish()));
+        } else {
+            if use_scene {
+                let mut pp_encoder = self.create_render_encoder();
+                self.apply_post_processing(&mut pp_encoder, &swapchain_view, use_scene);
+                self.gpu.queue.submit(std::iter::once(pp_encoder.finish()));
+            }
+            self.render_egui_overlay(request.egui_render, &swapchain_view);
+        }
+
+        output.present();
+        self.text.trim_atlas();
+    }
+
+    fn acquire_surface_texture(&mut self) -> Option<wgpu::SurfaceTexture> {
+        match self.gpu.surface.get_current_texture() {
+            Ok(texture) => Some(texture),
             Err(wgpu::SurfaceError::Lost) => {
                 self.gpu.resize(
                     self.gpu.surface_config.width,
                     self.gpu.surface_config.height,
                 );
-                return;
+                None
             }
             Err(wgpu::SurfaceError::OutOfMemory) => {
                 log::error!("GPU out of memory");
-                return;
+                None
             }
             Err(e) => {
                 log::warn!("Surface error: {:?}", e);
-                return;
+                None
             }
-        };
+        }
+    }
 
-        let swapchain_view = output
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
-
-        let mut encoder = self
-            .gpu
+    fn create_render_encoder(&self) -> wgpu::CommandEncoder {
+        self.gpu
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("render_encoder"),
-            });
+            })
+    }
 
-        // When effects are enabled, render to offscreen scene texture then blit.
-        // When effects are off, render directly to swapchain (zero overhead).
-        let use_scene = self.config.effects.enabled;
-
-        // Pick render target: scene texture (for effects) or swapchain (direct)
-        // We store which view to use for content passes.
-        // Since we can't hold a reference across &mut self calls, we use a flag
-        // and access the right view at each call site.
-
-        // 1. Clear background
-        {
-            let bg = self.config.bg();
-            let target = if use_scene {
-                &self.gpu.scene_view
-            } else {
-                &swapchain_view
-            };
-            let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("clear_pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: target,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: bg[0] as f64,
-                            g: bg[1] as f64,
-                            b: bg[2] as f64,
-                            a: bg[3] as f64,
-                        }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                ..Default::default()
-            });
+    fn target_view<'a>(
+        gpu: &'a GpuState,
+        swapchain_view: &'a wgpu::TextureView,
+        use_scene: bool,
+    ) -> &'a wgpu::TextureView {
+        if use_scene {
+            &gpu.scene_view
+        } else {
+            swapchain_view
         }
+    }
 
-        // 1b. Background effect (only when effects enabled)
+    fn clear_frame(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        swapchain_view: &wgpu::TextureView,
+        use_scene: bool,
+    ) {
+        let bg = self.config.bg();
+        let target = Self::target_view(&self.gpu, swapchain_view, use_scene);
+        let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("clear_pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color {
+                        r: bg[0] as f64,
+                        g: bg[1] as f64,
+                        b: bg[2] as f64,
+                        a: bg[3] as f64,
+                    }),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            ..Default::default()
+        });
+    }
+
+    fn render_scene_background(&mut self, encoder: &mut wgpu::CommandEncoder, use_scene: bool) {
         if use_scene && self.config.effects.background != "none" {
             self.background.update_uniforms(
                 &self.gpu,
                 self.config.effects.background_intensity,
                 self.config.effects.background_speed,
                 self.config.bg(),
+                self.config.effects.background_color,
             );
-            self.background
-                .draw(&self.gpu, &mut encoder, &self.gpu.scene_view, &self.config.effects.background);
+            self.background.draw(
+                &self.gpu,
+                encoder,
+                &self.gpu.scene_view,
+                &self.config.effects.background,
+            );
         }
 
-        // 1c. Particles (floating behind terminal content)
         if use_scene && self.config.effects.particles_enabled {
-            self.particles.set_count(self.config.effects.particles_count);
+            self.particles
+                .set_count(self.config.effects.particles_count);
             self.particles.update_and_draw(
                 &self.gpu,
-                &mut encoder,
+                encoder,
                 &self.gpu.scene_view,
                 self.gpu.current_time,
                 self.gpu.current_delta,
                 self.config.effects.particles_speed,
             );
         }
+    }
 
-        let cw = screen_layout.cell_w;
-        let ch = screen_layout.cell_h;
-        let content_rect = PaneRect {
-            x: screen_layout.content.x,
-            y: screen_layout.content.y,
-            w: screen_layout.content.w,
-            h: screen_layout.content.h,
-        };
-
-        // For content passes, use a macro to pick the right target view.
-        // This avoids holding a borrow on self.gpu.scene_view across &mut self calls.
-        macro_rules! target {
-            () => {
-                if use_scene {
-                    &self.gpu.scene_view
-                } else {
-                    &swapchain_view
-                }
+    fn render_tab_bar(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        swapchain_view: &wgpu::TextureView,
+        use_scene: bool,
+        request: &RenderRequest<'_>,
+    ) {
+        if request.screen_layout.show_tab_bar {
+            let target = Self::target_view(&self.gpu, swapchain_view, use_scene);
+            let mut ui_pass = UiRenderPass {
+                rects: &mut self.rects,
+                text: &mut self.text,
+                gpu: &self.gpu,
+                config: &self.config,
+                view: target,
+                encoder,
             };
-        }
-
-        // 2. Tab bar (only if multiple tabs)
-        if screen_layout.show_tab_bar {
-            let tv = if use_scene { &self.gpu.scene_view } else { &swapchain_view };
             Self::render_tab_bar_to(
-                &mut self.rects,
-                &mut self.text,
-                &self.gpu,
-                &self.config,
-                tv,
-                &mut encoder,
-                tab_titles,
-                &screen_layout.tab_bar,
+                &mut ui_pass,
+                request.tab_titles,
+                &request.screen_layout.tab_bar,
             );
         }
+    }
 
-        // 3. Divider lines between panes
-        let dividers = pane_root.collect_dividers(content_rect);
+    fn render_terminal_content(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        swapchain_view: &wgpu::TextureView,
+        use_scene: bool,
+        pass: ContentPass<'_>,
+    ) {
+        let target = Self::target_view(&self.gpu, swapchain_view, use_scene);
+        let cw = pass.screen_layout.cell_w;
+        let ch = pass.screen_layout.cell_h;
+        let content_rect = PaneRect {
+            x: pass.screen_layout.content.x,
+            y: pass.screen_layout.content.y,
+            w: pass.screen_layout.content.w,
+            h: pass.screen_layout.content.h,
+        };
+
+        let dividers = pass.pane_root.collect_dividers(content_rect);
         if !dividers.is_empty() {
-            self.rects
-                .draw_rects(&self.gpu, target!(), &mut encoder, &dividers);
+            self.rects.draw_rects(&self.gpu, target, encoder, &dividers);
         }
 
-        // 4. Render each pane
-        let panes = pane_root.collect_panes(content_rect, true);
+        let panes = pass.pane_root.collect_panes(content_rect, true);
+        let active_cache_keys = panes
+            .iter()
+            .map(|(session, _, _)| *session as *const _ as TextCacheKey)
+            .collect();
+        self.text.retain_caches(&active_cache_keys);
+
         for (session, rect, is_focused) in &panes {
             let terminal = &session.terminal;
 
@@ -293,8 +404,7 @@ impl Renderer {
                 .map(|(x, y, w, h, c)| (x + rect.x, y + rect.y, w, h, c))
                 .collect();
             if !bg_rects.is_empty() {
-                self.rects
-                    .draw_rects(&self.gpu, target!(), &mut encoder, &bg_rects);
+                self.rects.draw_rects(&self.gpu, target, encoder, &bg_rects);
             }
 
             // Decorations
@@ -305,25 +415,27 @@ impl Renderer {
                 .collect();
             if !deco_rects.is_empty() {
                 self.rects
-                    .draw_rects(&self.gpu, target!(), &mut encoder, &deco_rects);
+                    .draw_rects(&self.gpu, target, encoder, &deco_rects);
             }
 
             // Search highlights (for focused pane)
-            if *is_focused && !search_rects.is_empty() {
-                let sr: Vec<_> = search_rects
+            if *is_focused && !pass.search_rects.is_empty() {
+                let sr: Vec<_> = pass
+                    .search_rects
                     .iter()
                     .map(|&(x, y, w, h, c)| (x + rect.x, y + rect.y, w, h, c))
                     .collect();
-                self.rects.draw_rects(&self.gpu, target!(), &mut encoder, &sr);
+                self.rects.draw_rects(&self.gpu, target, encoder, &sr);
             }
 
             // Selection (only for focused pane)
-            if *is_focused && !selection_rects.is_empty() {
-                let sel: Vec<_> = selection_rects
+            if *is_focused && !pass.selection_rects.is_empty() {
+                let sel: Vec<_> = pass
+                    .selection_rects
                     .iter()
                     .map(|&(x, y, w, h, c)| (x + rect.x, y + rect.y, w, h, c))
                     .collect();
-                self.rects.draw_rects(&self.gpu, target!(), &mut encoder, &sel);
+                self.rects.draw_rects(&self.gpu, target, encoder, &sel);
             }
 
             // Cursor (only for focused pane when visible)
@@ -333,10 +445,14 @@ impl Renderer {
                         // Shader-driven cursor with glow + pulse + trail
                         self.cursor_renderer.draw(
                             &self.gpu,
-                            &mut encoder,
-                            target!(),
-                            cr, cc, cw, ch,
-                            rect.x, rect.y,
+                            encoder,
+                            target,
+                            cr,
+                            cc,
+                            cw,
+                            ch,
+                            rect.x,
+                            rect.y,
                             self.config.cursor_style,
                             self.config.cursor_color(),
                             self.gpu.current_time,
@@ -355,24 +471,22 @@ impl Renderer {
                         let cursor_y = cr as f32 * ch + rect.y + gy;
                         let cursor_h = ch - gy;
                         let cursor_rect = match self.config.cursor_style {
-                            CursorStyle::Block => (
-                                cc as f32 * cw + rect.x,
-                                cursor_y,
-                                cw, cursor_h, color,
-                            ),
-                            CursorStyle::Beam => (
-                                cc as f32 * cw + rect.x,
-                                cursor_y,
-                                2.0, cursor_h, color,
-                            ),
+                            CursorStyle::Block => {
+                                (cc as f32 * cw + rect.x, cursor_y, cw, cursor_h, color)
+                            }
+                            CursorStyle::Beam => {
+                                (cc as f32 * cw + rect.x, cursor_y, 2.0, cursor_h, color)
+                            }
                             CursorStyle::Underline => (
                                 cc as f32 * cw + rect.x,
                                 cr as f32 * ch + rect.y + ch - 2.0,
-                                cw, 2.0, color,
+                                cw,
+                                2.0,
+                                color,
                             ),
                         };
                         self.rects
-                            .draw_rects(&self.gpu, target!(), &mut encoder, &[cursor_rect]);
+                            .draw_rects(&self.gpu, target, encoder, &[cursor_rect]);
                     }
                 }
             }
@@ -387,168 +501,168 @@ impl Renderer {
                 None
             };
 
-            self.text.invalidate_cache();
             let text_anim = use_scene && self.config.effects.text_animation;
             self.text.render_grid_at(
+                *session as *const _ as TextCacheKey,
                 terminal,
                 &self.config,
                 &self.gpu,
-                target!(),
-                &mut encoder,
+                target,
+                encoder,
                 block_cursor,
                 rect.x,
                 rect.y,
                 text_anim,
             );
         }
+    }
 
-        // 5. Visual bell overlay
-        if visual_bell {
+    fn render_overlays(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        swapchain_view: &wgpu::TextureView,
+        use_scene: bool,
+        pass: OverlayPass<'_>,
+    ) {
+        let target = Self::target_view(&self.gpu, swapchain_view, use_scene);
+
+        if pass.visual_bell {
             let w = self.gpu.surface_config.width as f32;
             let h = self.gpu.surface_config.height as f32;
             let flash = [(0.0, 0.0, w, h, [1.0, 1.0, 1.0, 0.15])];
-            self.rects
-                .draw_rects(&self.gpu, target!(), &mut encoder, &flash);
+            self.rects.draw_rects(&self.gpu, target, encoder, &flash);
         }
 
-        // 6. Search bar at bottom
-        if let Some((query, status)) = search_bar {
-            let tv = if use_scene { &self.gpu.scene_view } else { &swapchain_view };
-            Self::render_search_bar_to(
-                &mut self.rects,
-                &mut self.text,
-                &self.gpu,
-                &self.config,
-                tv,
-                &mut encoder,
-                query,
-                status,
-            );
+        if let Some((query, status)) = pass.search_bar {
+            let mut ui_pass = UiRenderPass {
+                rects: &mut self.rects,
+                text: &mut self.text,
+                gpu: &self.gpu,
+                config: &self.config,
+                view: target,
+                encoder,
+            };
+            Self::render_search_bar_to(&mut ui_pass, query, status);
         }
 
-        // 7. Error/diagnostics panel overlay
-        if let Some((panel, log)) = error_panel {
+        if let Some((panel, log)) = pass.error_panel {
             if panel.visible {
-                let tv = if use_scene { &self.gpu.scene_view } else { &swapchain_view };
-                Self::render_error_panel_to(
-                    &mut self.rects,
-                    &mut self.text,
-                    &self.gpu,
-                    &self.config,
-                    tv,
-                    &mut encoder,
-                    panel,
-                    log,
-                );
+                let mut ui_pass = UiRenderPass {
+                    rects: &mut self.rects,
+                    text: &mut self.text,
+                    gpu: &self.gpu,
+                    config: &self.config,
+                    view: target,
+                    encoder,
+                };
+                Self::render_error_panel_to(&mut ui_pass, panel, log);
             }
         }
+    }
 
-        // 8. Post-process and blit to swapchain
+    fn apply_post_processing(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        swapchain_view: &wgpu::TextureView,
+        use_scene: bool,
+    ) {
         if use_scene {
             let has_bloom = self.config.effects.bloom_enabled;
             let has_crt = self.config.effects.crt_enabled;
 
             match (has_bloom, has_crt) {
                 (true, true) => {
-                        self.bloom.apply(
-                            &self.gpu, &mut encoder,
-                            &self.gpu.scene_view, &self.gpu.scene_view_b,
-                            self.config.effects.bloom_threshold,
-                            self.config.effects.bloom_intensity,
-                            self.config.effects.bloom_radius,
-                        );
-                        self.crt.apply(
-                            &self.gpu, &mut encoder,
-                            &self.gpu.scene_view_b, &swapchain_view,
-                            self.config.effects.scanline_intensity,
-                            self.config.effects.curvature,
-                            self.config.effects.vignette_strength,
-                            self.config.effects.chromatic_aberration,
-                            self.config.effects.grain_intensity,
-                            self.gpu.current_time,
-                        );
-                    }
-                    (true, false) => {
-                        self.bloom.apply(
-                            &self.gpu, &mut encoder,
-                            &self.gpu.scene_view, &swapchain_view,
-                            self.config.effects.bloom_threshold,
-                            self.config.effects.bloom_intensity,
-                            self.config.effects.bloom_radius,
-                        );
-                    }
-                    (false, true) => {
-                        self.crt.apply(
-                            &self.gpu, &mut encoder,
-                            &self.gpu.scene_view, &swapchain_view,
-                            self.config.effects.scanline_intensity,
-                            self.config.effects.curvature,
-                            self.config.effects.vignette_strength,
-                            self.config.effects.chromatic_aberration,
-                            self.config.effects.grain_intensity,
-                            self.gpu.current_time,
-                        );
-                    }
-                    (false, false) => {
-                    self.blit.draw(&mut encoder, &swapchain_view);
+                    self.bloom.apply(
+                        &self.gpu,
+                        encoder,
+                        &self.gpu.scene_view,
+                        &self.gpu.scene_view_b,
+                        self.config.effects.bloom_threshold,
+                        self.config.effects.bloom_intensity,
+                        self.config.effects.bloom_radius,
+                    );
+                    self.crt.apply(
+                        &self.gpu,
+                        encoder,
+                        &self.gpu.scene_view_b,
+                        swapchain_view,
+                        self.config.effects.scanline_intensity,
+                        self.config.effects.curvature,
+                        self.config.effects.vignette_strength,
+                        self.config.effects.chromatic_aberration,
+                        self.config.effects.grain_intensity,
+                        self.gpu.current_time,
+                    );
+                }
+                (true, false) => {
+                    self.bloom.apply(
+                        &self.gpu,
+                        encoder,
+                        &self.gpu.scene_view,
+                        swapchain_view,
+                        self.config.effects.bloom_threshold,
+                        self.config.effects.bloom_intensity,
+                        self.config.effects.bloom_radius,
+                    );
+                }
+                (false, true) => {
+                    self.crt.apply(
+                        &self.gpu,
+                        encoder,
+                        &self.gpu.scene_view,
+                        swapchain_view,
+                        self.config.effects.scanline_intensity,
+                        self.config.effects.curvature,
+                        self.config.effects.vignette_strength,
+                        self.config.effects.chromatic_aberration,
+                        self.config.effects.grain_intensity,
+                        self.gpu.current_time,
+                    );
+                }
+                (false, false) => {
+                    self.blit.draw(encoder, swapchain_view);
                 }
             }
         }
-
-        self.gpu.queue.submit(std::iter::once(encoder.finish()));
-
-        // 9. egui overlay (footer, settings UI) — renders AFTER terminal content
-        //    egui creates and submits its own command encoders internally.
-        if let Some(egui_fn) = egui_render {
-            let desc = self.screen_descriptor();
-            egui_fn(&self.gpu.device, &self.gpu.queue, &swapchain_view, desc);
-        }
-
-        output.present();
-
-        // Trim glyph atlas AFTER present — GPU work is complete, safe to free buffers.
-        // Must NOT be called before present(); submit() is async and the GPU may
-        // still be reading vertex/texture data owned by the atlas.
-        self.text.trim_atlas();
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn render_search_bar_to(
-        rects: &mut RectRenderer,
-        text: &mut TextSystem,
-        gpu: &GpuState,
-        config: &Config,
-        view: &wgpu::TextureView,
-        encoder: &mut wgpu::CommandEncoder,
-        query: &str,
-        status: &str,
+    fn render_egui_overlay(
+        &self,
+        egui_render: Option<EguiRenderCallback<'_>>,
+        swapchain_view: &wgpu::TextureView,
     ) {
-        let w = gpu.surface_config.width as f32;
-        let h = gpu.surface_config.height as f32;
+        if let Some(egui_fn) = egui_render {
+            let desc = self.screen_descriptor();
+            egui_fn(&self.gpu.device, &self.gpu.queue, swapchain_view, desc);
+        }
+    }
+
+    fn render_search_bar_to(pass: &mut UiRenderPass<'_>, query: &str, status: &str) {
+        let w = pass.gpu.surface_config.width as f32;
+        let h = pass.gpu.surface_config.height as f32;
         let bar_h = 28.0;
         let bar_y = h - bar_h;
 
         let bg = [(0.0, bar_y, w, bar_h, [0.15, 0.15, 0.18, 0.95])];
-        rects.draw_rects(gpu, view, encoder, &bg);
+        pass.rects
+            .draw_rects(pass.gpu, pass.view, &mut *pass.encoder, &bg);
 
         let display = format!("Find: {}  {}", query, status);
-        text.render_tab_labels(&[(display, true)], w, bar_h, config, gpu, view, encoder);
+        pass.text.render_tab_labels(
+            &[(display, true)],
+            w,
+            bar_h,
+            pass.config,
+            pass.gpu,
+            pass.view,
+            &mut *pass.encoder,
+        );
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn render_error_panel_to(
-        rects: &mut RectRenderer,
-        text: &mut TextSystem,
-        gpu: &GpuState,
-        config: &Config,
-        view: &wgpu::TextureView,
-        encoder: &mut wgpu::CommandEncoder,
-        panel: &ErrorPanel,
-        log: &ErrorLog,
-    ) {
-        let w = gpu.surface_config.width as f32;
-        let h = gpu.surface_config.height as f32;
-        let (_, ch) = text.cell_dimensions();
+    fn render_error_panel_to(pass: &mut UiRenderPass<'_>, panel: &ErrorPanel, log: &ErrorLog) {
+        let w = pass.gpu.surface_config.width as f32;
+        let h = pass.gpu.surface_config.height as f32;
+        let (_, ch) = pass.text.cell_dimensions();
         let line_h = ch;
         let panel_h = (h * 0.4).max(line_h * 5.0);
         let panel_y = h - panel_h;
@@ -559,22 +673,25 @@ impl Renderer {
             .into_iter()
             .map(|(x, y, rw, rh, c)| (x, y + panel_y, rw, rh, c))
             .collect();
-        rects.draw_rects(gpu, view, encoder, &offset_rects);
+        pass.rects
+            .draw_rects(pass.gpu, pass.view, &mut *pass.encoder, &offset_rects);
 
         if !lines.is_empty() {
             let line_strs: Vec<&str> = lines.iter().map(|(s, _)| s.as_str()).collect();
-            text.render_panel_lines(&line_strs, panel_y, line_h, config, gpu, view, encoder);
+            pass.text.render_panel_lines(
+                &line_strs,
+                panel_y,
+                line_h,
+                pass.config,
+                pass.gpu,
+                pass.view,
+                &mut *pass.encoder,
+            );
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn render_tab_bar_to(
-        rects: &mut RectRenderer,
-        text: &mut TextSystem,
-        gpu: &GpuState,
-        config: &Config,
-        view: &wgpu::TextureView,
-        encoder: &mut wgpu::CommandEncoder,
+        pass: &mut UiRenderPass<'_>,
         tabs: &[(String, bool)],
         zone: &crate::layout::Zone,
     ) {
@@ -582,7 +699,8 @@ impl Renderer {
 
         // Tab bar background — black
         let bar_bg = [(zone.x, zone.y, zone.w, zone.h, [0.04, 0.04, 0.05, 1.0])];
-        rects.draw_rects(gpu, view, encoder, &bar_bg);
+        pass.rects
+            .draw_rects(pass.gpu, pass.view, &mut *pass.encoder, &bar_bg);
 
         // Individual tabs — dodger blue if selected, black if not
         let mut tab_rects = Vec::new();
@@ -595,8 +713,17 @@ impl Renderer {
             };
             tab_rects.push((x, zone.y, tab_w - 1.0, zone.h, color));
         }
-        rects.draw_rects(gpu, view, encoder, &tab_rects);
+        pass.rects
+            .draw_rects(pass.gpu, pass.view, &mut *pass.encoder, &tab_rects);
 
-        text.render_tab_labels(tabs, tab_w, zone.h, config, gpu, view, encoder);
+        pass.text.render_tab_labels(
+            tabs,
+            tab_w,
+            zone.h,
+            pass.config,
+            pass.gpu,
+            pass.view,
+            &mut *pass.encoder,
+        );
     }
 }

@@ -1,4 +1,4 @@
-use std::collections::hash_map::DefaultHasher;
+use std::collections::{hash_map::DefaultHasher, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 
 use alacritty_terminal::term::cell::Flags;
@@ -10,6 +10,26 @@ use glyphon::{
 use crate::config::Config;
 use crate::renderer::state::GpuState;
 use crate::terminal::Terminal;
+
+pub type TextCacheKey = usize;
+
+struct LineCache {
+    buffers: Vec<Buffer>,
+    hashes: Vec<u64>,
+    width: f32,
+    ages: Vec<u32>,
+}
+
+impl Default for LineCache {
+    fn default() -> Self {
+        Self {
+            buffers: Vec::new(),
+            hashes: Vec::new(),
+            width: 0.0,
+            ages: Vec::new(),
+        }
+    }
+}
 
 pub struct TextSystem {
     font_system: FontSystem,
@@ -30,12 +50,8 @@ pub struct TextSystem {
     font_size: f32,
     font_family: String,
     shaping: Shaping,
-    // Line-level cache
-    line_buffers: Vec<Buffer>,
-    line_hashes: Vec<u64>,
-    cached_width: f32,
-    // Line age tracking for entrance animations (in frames)
-    line_ages: Vec<u32>,
+    // Line-level cache per rendered terminal pane.
+    line_caches: HashMap<TextCacheKey, LineCache>,
 }
 
 impl TextSystem {
@@ -128,10 +144,7 @@ impl TextSystem {
             font_size: physical_font_size,
             font_family,
             shaping,
-            line_buffers: Vec::new(),
-            line_hashes: Vec::new(),
-            cached_width: 0.0,
-            line_ages: Vec::new(),
+            line_caches: HashMap::new(),
         }
     }
 
@@ -149,12 +162,18 @@ impl TextSystem {
 
     /// Invalidate the entire line cache (call on resize, scroll, etc.)
     pub fn invalidate_cache(&mut self) {
-        self.line_hashes.clear();
+        self.line_caches.clear();
+    }
+
+    pub fn retain_caches(&mut self, active_keys: &HashSet<TextCacheKey>) {
+        self.line_caches
+            .retain(|cache_key, _| active_keys.contains(cache_key));
     }
 
     #[allow(clippy::too_many_arguments)]
     pub fn render_grid_at(
         &mut self,
+        cache_key: TextCacheKey,
         terminal: &Terminal,
         config: &Config,
         gpu: &GpuState,
@@ -167,11 +186,12 @@ impl TextSystem {
     ) {
         let (cols, rows) = terminal.size();
         let width = gpu.surface_config.width as f32;
+        let cache = self.line_caches.entry(cache_key).or_default();
 
-        // Invalidate cache if width changed
-        if (width - self.cached_width).abs() > 0.5 {
-            self.invalidate_cache();
-            self.cached_width = width;
+        // Invalidate this pane only if its render width changed.
+        if (width - cache.width).abs() > 0.5 {
+            cache.hashes.clear();
+            cache.width = width;
         }
 
         let metrics = Metrics::new(self.font_size, self.cell_height);
@@ -191,12 +211,12 @@ impl TextSystem {
 
         // Ensure we have enough buffers
         let font_system = &mut self.font_system;
-        while self.line_buffers.len() < rows {
+        while cache.buffers.len() < rows {
             let mut buf = Buffer::new(font_system, metrics);
             buf.set_size(font_system, Some(width), Some(self.cell_height));
-            self.line_buffers.push(buf);
+            cache.buffers.push(buf);
         }
-        self.line_buffers.truncate(rows);
+        cache.buffers.truncate(rows);
 
         // Rebuild only changed lines
         let font_family = &self.font_family;
@@ -205,12 +225,12 @@ impl TextSystem {
         let font_system = &mut self.font_system;
 
         for (row, &new_hash) in new_hashes.iter().enumerate().take(rows) {
-            let cached_ok = row < self.line_hashes.len() && self.line_hashes[row] == new_hash;
+            let cached_ok = row < cache.hashes.len() && cache.hashes[row] == new_hash;
             if cached_ok {
                 continue;
             }
 
-            let buffer = &mut self.line_buffers[row];
+            let buffer = &mut cache.buffers[row];
             buffer.set_metrics(font_system, metrics);
             buffer.set_size(font_system, Some(width), Some(cell_height));
 
@@ -228,32 +248,33 @@ impl TextSystem {
         }
 
         // Update line ages: reset to 0 when content changes, increment otherwise
-        self.line_ages.resize(rows, 60); // default to "fully visible"
+        cache.ages.resize(rows, 60); // default to "fully visible"
         for (row, &new_hash) in new_hashes.iter().enumerate().take(rows) {
-            let old_ok = row < self.line_hashes.len() && self.line_hashes[row] == new_hash;
+            let old_ok = row < cache.hashes.len() && cache.hashes[row] == new_hash;
             if old_ok {
-                self.line_ages[row] = self.line_ages[row].saturating_add(1).min(60);
+                cache.ages[row] = cache.ages[row].saturating_add(1).min(60);
             } else {
-                self.line_ages[row] = 0;
+                cache.ages[row] = 0;
             }
         }
 
-        self.line_hashes = new_hashes;
+        cache.hashes = new_hashes;
 
         // Animation duration in frames (~12 frames at 60fps = 200ms)
         let anim_frames = 12.0_f32;
 
         // Build text areas from cached buffers
-        let text_areas: Vec<TextArea> = self
-            .line_buffers
+        let text_areas: Vec<TextArea> = cache
+            .buffers
             .iter()
             .enumerate()
             .map(|(row, buffer)| {
                 let base_top = row as f32 * self.cell_height + offset_y;
 
                 // Entrance animation: fade-in + slide-up
-                let (top_offset, alpha) = if text_animation && self.line_ages[row] < anim_frames as u32 {
-                    let t = self.line_ages[row] as f32 / anim_frames;
+                let (top_offset, alpha) = if text_animation && cache.ages[row] < anim_frames as u32
+                {
+                    let t = cache.ages[row] as f32 / anim_frames;
                     let ease = t * t * (3.0 - 2.0 * t); // smoothstep
                     let slide = (1.0 - ease) * self.cell_height * 0.3; // slide up from 30% below
                     let alpha_val = ease;
@@ -312,11 +333,8 @@ impl TextSystem {
                 depth_stencil_attachment: None,
                 ..Default::default()
             });
-            let _ = self
-                .renderer
-                .render(&self.atlas, &self.viewport, &mut pass);
+            let _ = self.renderer.render(&self.atlas, &self.viewport, &mut pass);
         }
-
     }
 
     /// Trim the glyph atlas to free unused GPU textures.

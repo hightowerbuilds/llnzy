@@ -148,79 +148,87 @@ impl BloomEffect {
             ..Default::default()
         });
 
-        let (bloom_a, bloom_a_view) = create_bloom_texture(&gpu.device, half_width, half_height, format, "bloom_a");
-        let (bloom_b, bloom_b_view) = create_bloom_texture(&gpu.device, half_width, half_height, format, "bloom_b");
+        let (bloom_a, bloom_a_view) =
+            create_bloom_texture(&gpu.device, half_width, half_height, format, "bloom_a");
+        let (bloom_b, bloom_b_view) =
+            create_bloom_texture(&gpu.device, half_width, half_height, format, "bloom_b");
 
         // Single-texture bind group layout (for threshold + blur passes)
-        let tex_layout = gpu.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("bloom_tex_layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+        let tex_layout = gpu
+            .device
+            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("bloom_tex_layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
                     },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-            ],
-        });
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
 
         // Composite bind group layout (scene + bloom + sampler)
-        let composite_layout = gpu.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("bloom_composite_layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-            ],
-        });
+        let composite_layout =
+            gpu.device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("bloom_composite_layout"),
+                    entries: &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Texture {
+                                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                                view_dimension: wgpu::TextureViewDimension::D2,
+                                multisampled: false,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Texture {
+                                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                                view_dimension: wgpu::TextureViewDimension::D2,
+                                multisampled: false,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 2,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                            count: None,
+                        },
+                    ],
+                });
 
         // Params uniform layout
-        let params_layout = gpu.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("bloom_params_layout"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            }],
-        });
+        let params_layout = gpu
+            .device
+            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("bloom_params_layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
 
         let params_buffer = gpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("bloom_params"),
@@ -239,113 +247,131 @@ impl BloomEffect {
         });
 
         // Threshold + blur shader module
-        let threshold_blur_shader = gpu.device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("bloom_threshold_blur"),
-            source: wgpu::ShaderSource::Wgsl(BLOOM_THRESHOLD_SHADER.into()),
-        });
+        let threshold_blur_shader = gpu
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("bloom_threshold_blur"),
+                source: wgpu::ShaderSource::Wgsl(BLOOM_THRESHOLD_SHADER.into()),
+            });
 
         // Composite shader module
-        let composite_shader = gpu.device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("bloom_composite"),
-            source: wgpu::ShaderSource::Wgsl(BLOOM_COMPOSITE_SHADER.into()),
-        });
+        let composite_shader = gpu
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("bloom_composite"),
+                source: wgpu::ShaderSource::Wgsl(BLOOM_COMPOSITE_SHADER.into()),
+            });
 
         // Threshold pipeline (full-res scene -> half-res bloom_a)
-        let threshold_pipeline = gpu.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("bloom_threshold"),
-            layout: Some(&gpu.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: None,
-                bind_group_layouts: &[&tex_layout, &params_layout],
-                push_constant_ranges: &[],
-            })),
-            vertex: wgpu::VertexState {
-                module: &threshold_blur_shader,
-                entry_point: "vs_main",
-                buffers: &[],
-                compilation_options: Default::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &threshold_blur_shader,
-                entry_point: "fs_threshold",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: Default::default(),
-            }),
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-            cache: None,
-        });
+        let threshold_pipeline =
+            gpu.device
+                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some("bloom_threshold"),
+                    layout: Some(&gpu.device.create_pipeline_layout(
+                        &wgpu::PipelineLayoutDescriptor {
+                            label: None,
+                            bind_group_layouts: &[&tex_layout, &params_layout],
+                            push_constant_ranges: &[],
+                        },
+                    )),
+                    vertex: wgpu::VertexState {
+                        module: &threshold_blur_shader,
+                        entry_point: "vs_main",
+                        buffers: &[],
+                        compilation_options: Default::default(),
+                    },
+                    fragment: Some(wgpu::FragmentState {
+                        module: &threshold_blur_shader,
+                        entry_point: "fs_threshold",
+                        targets: &[Some(wgpu::ColorTargetState {
+                            format,
+                            blend: None,
+                            write_mask: wgpu::ColorWrites::ALL,
+                        })],
+                        compilation_options: Default::default(),
+                    }),
+                    primitive: wgpu::PrimitiveState::default(),
+                    depth_stencil: None,
+                    multisample: wgpu::MultisampleState::default(),
+                    multiview: None,
+                    cache: None,
+                });
 
         // Blur pipeline (ping-pong between bloom_a and bloom_b)
-        let blur_pipeline = gpu.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("bloom_blur"),
-            layout: Some(&gpu.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: None,
-                bind_group_layouts: &[&tex_layout, &params_layout],
-                push_constant_ranges: &[],
-            })),
-            vertex: wgpu::VertexState {
-                module: &threshold_blur_shader,
-                entry_point: "vs_main",
-                buffers: &[],
-                compilation_options: Default::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &threshold_blur_shader,
-                entry_point: "fs_blur",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: Default::default(),
-            }),
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-            cache: None,
-        });
+        let blur_pipeline =
+            gpu.device
+                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some("bloom_blur"),
+                    layout: Some(&gpu.device.create_pipeline_layout(
+                        &wgpu::PipelineLayoutDescriptor {
+                            label: None,
+                            bind_group_layouts: &[&tex_layout, &params_layout],
+                            push_constant_ranges: &[],
+                        },
+                    )),
+                    vertex: wgpu::VertexState {
+                        module: &threshold_blur_shader,
+                        entry_point: "vs_main",
+                        buffers: &[],
+                        compilation_options: Default::default(),
+                    },
+                    fragment: Some(wgpu::FragmentState {
+                        module: &threshold_blur_shader,
+                        entry_point: "fs_blur",
+                        targets: &[Some(wgpu::ColorTargetState {
+                            format,
+                            blend: None,
+                            write_mask: wgpu::ColorWrites::ALL,
+                        })],
+                        compilation_options: Default::default(),
+                    }),
+                    primitive: wgpu::PrimitiveState::default(),
+                    depth_stencil: None,
+                    multisample: wgpu::MultisampleState::default(),
+                    multiview: None,
+                    cache: None,
+                });
 
         // Composite pipeline (scene + bloom -> output)
-        let composite_pipeline = gpu.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("bloom_composite"),
-            layout: Some(&gpu.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: None,
-                bind_group_layouts: &[&composite_layout, &params_layout],
-                push_constant_ranges: &[],
-            })),
-            vertex: wgpu::VertexState {
-                module: &composite_shader,
-                entry_point: "vs_main",
-                buffers: &[],
-                compilation_options: Default::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &composite_shader,
-                entry_point: "fs_composite",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: Default::default(),
-            }),
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-            cache: None,
-        });
+        let composite_pipeline =
+            gpu.device
+                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some("bloom_composite"),
+                    layout: Some(&gpu.device.create_pipeline_layout(
+                        &wgpu::PipelineLayoutDescriptor {
+                            label: None,
+                            bind_group_layouts: &[&composite_layout, &params_layout],
+                            push_constant_ranges: &[],
+                        },
+                    )),
+                    vertex: wgpu::VertexState {
+                        module: &composite_shader,
+                        entry_point: "vs_main",
+                        buffers: &[],
+                        compilation_options: Default::default(),
+                    },
+                    fragment: Some(wgpu::FragmentState {
+                        module: &composite_shader,
+                        entry_point: "fs_composite",
+                        targets: &[Some(wgpu::ColorTargetState {
+                            format,
+                            blend: None,
+                            write_mask: wgpu::ColorWrites::ALL,
+                        })],
+                        compilation_options: Default::default(),
+                    }),
+                    primitive: wgpu::PrimitiveState::default(),
+                    depth_stencil: None,
+                    multisample: wgpu::MultisampleState::default(),
+                    multiview: None,
+                    cache: None,
+                });
 
         BloomEffect {
-            bloom_a, bloom_a_view,
-            bloom_b, bloom_b_view,
+            bloom_a,
+            bloom_a_view,
+            bloom_b,
+            bloom_b_view,
             sampler,
             threshold_pipeline,
             blur_pipeline,
@@ -394,7 +420,12 @@ impl BloomEffect {
         // -- Step 1: Threshold (extract bright pixels, downsample to half-res)
         self.write_params(gpu, threshold, intensity, radius, 0.0);
         let scene_bg = self.make_tex_bind_group(gpu, scene_view);
-        self.fullscreen_pass(encoder, &self.threshold_pipeline, &scene_bg, &self.bloom_a_view);
+        self.fullscreen_pass(
+            encoder,
+            &self.threshold_pipeline,
+            &scene_bg,
+            &self.bloom_a_view,
+        );
 
         // -- Step 2: First horizontal blur (bloom_a -> bloom_b)
         self.write_params(gpu, threshold, intensity, radius, 0.0);
@@ -436,12 +467,30 @@ impl BloomEffect {
                 },
             ],
         });
-        self.fullscreen_pass(encoder, &self.composite_pipeline, &composite_bg, output_view);
+        self.fullscreen_pass(
+            encoder,
+            &self.composite_pipeline,
+            &composite_bg,
+            output_view,
+        );
     }
 
-    fn write_params(&self, gpu: &GpuState, threshold: f32, intensity: f32, radius: f32, direction: f32) {
-        let params = BloomUniforms { threshold, intensity, radius, direction };
-        gpu.queue.write_buffer(&self.params_buffer, 0, bytemuck::cast_slice(&[params]));
+    fn write_params(
+        &self,
+        gpu: &GpuState,
+        threshold: f32,
+        intensity: f32,
+        radius: f32,
+        direction: f32,
+    ) {
+        let params = BloomUniforms {
+            threshold,
+            intensity,
+            radius,
+            direction,
+        };
+        gpu.queue
+            .write_buffer(&self.params_buffer, 0, bytemuck::cast_slice(&[params]));
     }
 
     fn make_tex_bind_group(&self, gpu: &GpuState, view: &wgpu::TextureView) -> wgpu::BindGroup {
@@ -497,7 +546,11 @@ fn create_bloom_texture(
 ) -> (wgpu::Texture, wgpu::TextureView) {
     let tex = device.create_texture(&wgpu::TextureDescriptor {
         label: Some(label),
-        size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,

@@ -18,6 +18,7 @@ pub enum Action {
     ToggleEffects,
     ToggleFps,
     ToggleErrorPanel,
+    ToggleSidebar,
     CyclePaneForward,
     CyclePaneBackward,
     ScrollPageUp,
@@ -50,19 +51,31 @@ impl KeyBindings {
     pub fn default_bindings() -> Self {
         use Action::*;
         let cmd = |key: &str| KeyCombo {
-            super_key: true, ctrl: false, alt: false, shift: false,
+            super_key: true,
+            ctrl: false,
+            alt: false,
+            shift: false,
             key: KeyMatch::Char(key.to_string()),
         };
         let cmd_shift = |key: &str| KeyCombo {
-            super_key: true, ctrl: false, alt: false, shift: true,
+            super_key: true,
+            ctrl: false,
+            alt: false,
+            shift: true,
             key: KeyMatch::Char(key.to_string()),
         };
         let cmd_named = |named: NamedKey| KeyCombo {
-            super_key: true, ctrl: false, alt: false, shift: false,
+            super_key: true,
+            ctrl: false,
+            alt: false,
+            shift: false,
             key: KeyMatch::Named(named),
         };
         let shift_named = |named: NamedKey| KeyCombo {
-            super_key: false, ctrl: false, alt: false, shift: true,
+            super_key: false,
+            ctrl: false,
+            alt: false,
+            shift: true,
             key: KeyMatch::Named(named),
         };
 
@@ -83,6 +96,7 @@ impl KeyBindings {
             (cmd_shift("f"), ToggleEffects),
             (cmd_shift("p"), ToggleFps),
             (cmd_shift("e"), ToggleErrorPanel),
+            (cmd("b"), ToggleSidebar),
             (cmd_named(NamedKey::ArrowRight), CyclePaneForward),
             (cmd_named(NamedKey::ArrowDown), CyclePaneForward),
             (cmd_named(NamedKey::ArrowLeft), CyclePaneBackward),
@@ -101,16 +115,24 @@ impl KeyBindings {
     /// Match a key event against the bindings. Returns the first matching action.
     pub fn match_key(&self, event: &KeyEvent, modifiers: ModifiersState) -> Option<Action> {
         for (combo, action) in &self.bindings {
-            if combo.super_key != modifiers.super_key() { continue; }
-            if combo.ctrl != modifiers.control_key() { continue; }
-            if combo.alt != modifiers.alt_key() { continue; }
+            if combo.super_key != modifiers.super_key() {
+                continue;
+            }
+            if combo.ctrl != modifiers.control_key() {
+                continue;
+            }
+            if combo.alt != modifiers.alt_key() {
+                continue;
+            }
 
             match &combo.key {
                 KeyMatch::Named(named) => {
                     if let Key::Named(k) = &event.logical_key {
                         if k == named {
                             // For shift-specific bindings, check shift matches
-                            if combo.shift != modifiers.shift_key() { continue; }
+                            if combo.shift != modifiers.shift_key() {
+                                continue;
+                            }
                             return Some(action.clone());
                         }
                     }
@@ -120,7 +142,9 @@ impl KeyBindings {
                         let input = c.as_str();
                         if input.eq_ignore_ascii_case(ch) {
                             // For Cmd+Shift+F vs Cmd+F: only match if shift matches
-                            if combo.shift != modifiers.shift_key() { continue; }
+                            if combo.shift != modifiers.shift_key() {
+                                continue;
+                            }
                             return Some(action.clone());
                         }
                     }
@@ -141,10 +165,15 @@ impl KeyBindings {
 /// Parse a key string like "cmd+shift+f" into a KeyCombo.
 pub fn parse_key_combo(s: &str) -> Option<KeyCombo> {
     let parts: Vec<&str> = s.split('+').map(|p| p.trim()).collect();
-    if parts.is_empty() { return None; }
+    if parts.is_empty() {
+        return None;
+    }
 
     let mut combo = KeyCombo {
-        super_key: false, ctrl: false, alt: false, shift: false,
+        super_key: false,
+        ctrl: false,
+        alt: false,
+        shift: false,
         key: KeyMatch::Char(String::new()),
     };
 
