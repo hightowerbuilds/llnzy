@@ -14,7 +14,7 @@ pub enum PtyReadResult {
 
 pub struct Pty {
     master: Box<dyn MasterPty + Send>,
-    writer: Box<dyn Write + Send>,
+    write_tx: mpsc::Sender<Vec<u8>>,
     output_rx: mpsc::Receiver<Vec<u8>>,
     /// Set to true once the reader channel disconnects (child exited).
     dead: bool,
@@ -61,9 +61,10 @@ impl Pty {
         drop(pair.slave);
 
         let mut reader = pair.master.try_clone_reader().map_err(io::Error::other)?;
-        let writer = pair.master.take_writer().map_err(io::Error::other)?;
+        let mut writer = pair.master.take_writer().map_err(io::Error::other)?;
 
-        let (tx, rx) = mpsc::channel();
+        let (read_tx, read_rx) = mpsc::channel();
+        let (write_tx, write_rx) = mpsc::channel::<Vec<u8>>();
 
         // Spawn a dedicated thread for reading PTY output
         std::thread::spawn(move || {
@@ -72,7 +73,7 @@ impl Pty {
                 match reader.read(&mut buf) {
                     Ok(0) => break,
                     Ok(n) => {
-                        if tx.send(buf[..n].to_vec()).is_err() {
+                        if read_tx.send(buf[..n].to_vec()).is_err() {
                             break;
                         }
                         // Wake the event loop so it processes the output
@@ -83,10 +84,22 @@ impl Pty {
             }
         });
 
+        // Spawn a dedicated thread for writing PTY input.
+        // This prevents large pastes from blocking the main/render thread
+        // (macOS PTY buffers are ~4KB; write_all blocks when the buffer is full).
+        std::thread::spawn(move || {
+            while let Ok(data) = write_rx.recv() {
+                if writer.write_all(&data).is_err() {
+                    break;
+                }
+                let _ = writer.flush();
+            }
+        });
+
         Ok(Pty {
             master: pair.master,
-            writer,
-            output_rx: rx,
+            write_tx,
+            output_rx: read_rx,
             dead: false,
         })
     }
@@ -112,13 +125,14 @@ impl Pty {
         self.dead
     }
 
-    /// Write input bytes to the PTY. Skips writes if the child is dead.
+    /// Write input bytes to the PTY (non-blocking).
+    /// Data is sent to a background write thread that handles the
+    /// potentially-blocking PTY write, keeping the main thread free.
     pub fn write(&mut self, data: &[u8]) {
         if self.dead {
             return;
         }
-        let _ = self.writer.write_all(data);
-        let _ = self.writer.flush();
+        let _ = self.write_tx.send(data.to_vec());
     }
 
     /// Resize the PTY.

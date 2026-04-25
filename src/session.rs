@@ -6,9 +6,9 @@ pub struct Session {
     pub terminal: Terminal,
     pub pty: Pty,
     pub title: String,
-    pub cwd: Option<String>,  // working directory from OSC 7 or title
+    pub cwd: Option<String>,         // working directory from OSC 7 or title
     pub custom_name: Option<String>, // user-assigned session name
-    pub exited: Option<i32>,  // exit code if shell has exited
+    pub exited: Option<i32>,         // exit code if shell has exited
 }
 
 impl Session {
@@ -321,21 +321,21 @@ impl PaneNode {
         match self {
             PaneNode::Leaf(_) => None,
             PaneNode::Split {
-                dir, ratio, first, second, ..
+                dir,
+                ratio,
+                first,
+                second,
+                ..
             } => {
                 let (r1, r2) = split_rect(rect, *dir, *ratio);
                 let hit = match dir {
                     SplitDir::Vertical => {
                         let div_x = r1.x + r1.w;
-                        (px - div_x).abs() <= tolerance
-                            && py >= rect.y
-                            && py <= rect.y + rect.h
+                        (px - div_x).abs() <= tolerance && py >= rect.y && py <= rect.y + rect.h
                     }
                     SplitDir::Horizontal => {
                         let div_y = r1.y + r1.h;
-                        (py - div_y).abs() <= tolerance
-                            && px >= rect.x
-                            && px <= rect.x + rect.w
+                        (py - div_y).abs() <= tolerance && px >= rect.x && px <= rect.x + rect.w
                     }
                 };
                 if hit {
@@ -363,7 +363,10 @@ impl PaneNode {
     pub fn set_ratio_at(&mut self, path: &[bool], new_ratio: f32) {
         match self {
             PaneNode::Split {
-                ratio, first, second, ..
+                ratio,
+                first,
+                second,
+                ..
             } => {
                 if path.is_empty() {
                     *ratio = new_ratio.clamp(0.1, 0.9);
@@ -399,7 +402,6 @@ impl PaneNode {
             }
         }
     }
-
 }
 
 /// Split the active pane. Takes ownership and returns the new tree.

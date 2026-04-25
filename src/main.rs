@@ -8,17 +8,18 @@ use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::window::{Fullscreen, Window, WindowAttributes, WindowId};
 
 use llnzy::config::Config;
+use llnzy::diagnostics::write_diagnostic;
 use llnzy::error_log::{ErrorLog, ErrorPanel};
 use llnzy::input;
-use llnzy::layout::ScreenLayout;
 use llnzy::keybindings::Action;
-use llnzy::renderer::Renderer;
-use llnzy::ui::UiState;
+use llnzy::layout::ScreenLayout;
+use llnzy::renderer::{RenderRequest, Renderer};
 use llnzy::search::Search;
 use llnzy::selection::Selection;
 use llnzy::session::{split_pane, PaneNode, Rect as PaneRect, Session, SplitDir};
-use winit::window::CursorIcon;
+use llnzy::ui::UiState;
 use llnzy::UserEvent;
+use winit::window::CursorIcon;
 
 struct ClickState {
     last_time: Instant,
@@ -53,6 +54,7 @@ impl ClickState {
 /// A tab contains a pane tree (which may be a single pane or splits).
 struct Tab {
     root: PaneNode,
+    name: Option<String>,
 }
 
 /// Tracks an active divider drag for pane resizing.
@@ -83,8 +85,6 @@ struct App {
     screen_layout: Option<ScreenLayout>,
     visual_bell_until: Option<Instant>,
     last_ui_config_change: Instant,
-    last_pty_output: Instant,
-    notified_idle: bool,
     last_blink_toggle: Instant,
     last_keypress: Instant,
     last_config_check: Instant,
@@ -114,8 +114,6 @@ impl App {
             screen_layout: None,
             visual_bell_until: None,
             last_ui_config_change: Instant::now() - std::time::Duration::from_secs(60),
-            last_pty_output: Instant::now(),
-            notified_idle: false,
             last_blink_toggle: Instant::now(),
             last_keypress: Instant::now(),
             last_config_check: Instant::now(),
@@ -157,41 +155,6 @@ impl App {
             }
         }
 
-        // Track PTY output timing for long-command notifications
-        if any_changed {
-            let now = Instant::now();
-            let since_keypress = now.duration_since(self.last_keypress).as_secs();
-            let since_last_output = now.duration_since(self.last_pty_output).as_secs();
-
-            // If we haven't typed in >15 seconds and there was a gap in output >3 seconds,
-            // this likely means a long command just finished — notify the user
-            if since_keypress > 15 && since_last_output > 3 && !self.notified_idle {
-                self.notified_idle = true;
-                let title = self.active_session()
-                    .map(|s| s.display_name().to_string())
-                    .unwrap_or_else(|| "llnzy".to_string());
-                std::thread::spawn(move || {
-                    let _ = std::process::Command::new("osascript")
-                        .args([
-                            "-e",
-                            &format!(
-                                "display notification \"Command completed\" with title \"llnzy — {}\"",
-                                title.replace('"', "\\\"")
-                            ),
-                        ])
-                        .output();
-                });
-            }
-
-            self.last_pty_output = now;
-            // Reset notification flag when user types again
-        }
-
-        // Reset notification flag on keypress (handled in keypress event already via last_keypress)
-        if Instant::now().duration_since(self.last_keypress).as_secs() < 2 {
-            self.notified_idle = false;
-        }
-
         // Update window title from active session
         if any_changed {
             if let (Some(window), Some(session)) = (&self.window, self.active_session()) {
@@ -226,14 +189,27 @@ impl App {
         if let Some(renderer) = &self.renderer {
             let (cw, ch) = renderer.cell_dimensions();
             let gox = renderer.glyph_offset_x();
-            let w = self.window.as_ref().map(|w| w.inner_size().width as f32).unwrap_or(900.0);
-            let h = self.window.as_ref().map(|w| w.inner_size().height as f32).unwrap_or(600.0);
+            let w = self
+                .window
+                .as_ref()
+                .map(|w| w.inner_size().width as f32)
+                .unwrap_or(900.0);
+            let h = self
+                .window
+                .as_ref()
+                .map(|w| w.inner_size().height as f32)
+                .unwrap_or(600.0);
+                let sidebar_w = self.ui.as_ref().map(|u| u.sidebar_width()).unwrap_or(0.0);
             self.screen_layout = Some(ScreenLayout::compute(
-                w, h, cw, ch,
+                w,
+                h,
+                cw,
+                ch,
                 self.tabs.len(),
                 self.config.padding_x,
                 self.config.padding_y,
                 gox,
+                sidebar_w,
             ));
         }
     }
@@ -271,9 +247,11 @@ impl App {
             .active_session()
             .is_some_and(|s| s.terminal.bracketed_paste());
         if bracketed {
-            self.write_to_active(b"\x1b[200~");
-            self.write_to_active(text.as_bytes());
-            self.write_to_active(b"\x1b[201~");
+            let mut bytes = Vec::with_capacity(text.len() + 12);
+            bytes.extend_from_slice(b"\x1b[200~");
+            bytes.extend_from_slice(text.as_bytes());
+            bytes.extend_from_slice(b"\x1b[201~");
+            self.write_to_active(&bytes);
         } else {
             self.write_to_active(text.as_bytes());
         }
@@ -294,8 +272,10 @@ impl App {
 
     fn content_rect(&self) -> Option<PaneRect> {
         self.screen_layout.as_ref().map(|l| PaneRect {
-            x: l.content.x, y: l.content.y,
-            w: l.content.w, h: l.content.h,
+            x: l.content.x,
+            y: l.content.y,
+            w: l.content.w,
+            h: l.content.h,
         })
     }
 
@@ -314,6 +294,37 @@ impl App {
             .is_some_and(|s| s.terminal.sgr_mouse())
     }
 
+    fn invalidate_and_redraw(&mut self) {
+        if let Some(r) = &mut self.renderer {
+            r.invalidate_text_cache();
+        }
+        self.request_redraw();
+    }
+
+    fn do_paste(&mut self) {
+        if let Some(cb) = &mut self.clipboard {
+            if let Ok(text) = cb.get_text() {
+                self.paste_text(&text);
+            }
+        }
+    }
+
+    fn do_select_all(&mut self) {
+        if let Some(s) = self.active_session() {
+            let (cols, rows) = s.terminal.size();
+            self.selection.select_all(rows, cols);
+        }
+        self.request_redraw();
+    }
+
+    fn toggle_effects(&mut self) {
+        self.config.effects.enabled = !self.config.effects.enabled;
+        if let Some(renderer) = &mut self.renderer {
+            renderer.update_config(self.config.clone());
+        }
+        self.request_redraw();
+    }
+
     fn new_tab(&mut self) {
         let (cols, rows) = self.grid_size();
         // Spawn new tab in the current session's working directory
@@ -322,6 +333,7 @@ impl App {
             Ok(session) => {
                 self.tabs.push(Tab {
                     root: PaneNode::Leaf(Box::new(session)),
+                    name: None,
                 });
                 self.active_tab = self.tabs.len() - 1;
                 self.selection.clear();
@@ -349,10 +361,7 @@ impl App {
         if idx < self.tabs.len() && idx != self.active_tab {
             self.active_tab = idx;
             self.selection.clear();
-            if let Some(renderer) = &mut self.renderer {
-                renderer.invalidate_text_cache();
-            }
-            self.request_redraw();
+            self.invalidate_and_redraw();
         }
     }
 
@@ -360,7 +369,12 @@ impl App {
         let (cols, rows) = self.grid_size();
         // Compute layout info before borrowing tabs mutably
         let layout_info = self.screen_layout.as_ref().map(|l| {
-            let rect = PaneRect { x: l.content.x, y: l.content.y, w: l.content.w, h: l.content.h };
+            let rect = PaneRect {
+                x: l.content.x,
+                y: l.content.y,
+                w: l.content.w,
+                h: l.content.h,
+            };
             (l.cell_w, l.cell_h, rect)
         });
 
@@ -384,10 +398,7 @@ impl App {
             }
         }
 
-        if let Some(renderer) = &mut self.renderer {
-            renderer.invalidate_text_cache();
-        }
-        self.request_redraw();
+        self.invalidate_and_redraw();
     }
 
     fn toggle_fullscreen(&self) {
@@ -423,8 +434,13 @@ impl App {
         self.tabs
             .iter()
             .enumerate()
-            .map(|(i, _tab)| {
-                (format!("Shell {}", i + 1), i == self.active_tab)
+            .map(|(i, tab)| {
+                let title = tab
+                    .name
+                    .as_ref()
+                    .cloned()
+                    .unwrap_or_else(|| format!("Shell {}", i + 1));
+                (title, i == self.active_tab)
             })
             .collect()
     }
@@ -459,14 +475,24 @@ impl ApplicationHandler<UserEvent> for App {
         }
 
         let window = Arc::new(event_loop.create_window(attrs).unwrap());
+        // Wispr Flow and input methods can deliver text through AppKit's IME/text-input path.
+        // winit disables that by default, so opt in for terminal text entry.
+        window.set_ime_allowed(true);
         let renderer = pollster::block_on(Renderer::new(window.clone(), self.config.clone()));
 
         let (cw, ch) = renderer.cell_dimensions();
         let gox = renderer.glyph_offset_x();
         let size = window.inner_size();
         let layout = ScreenLayout::compute(
-            size.width as f32, size.height as f32, cw, ch, 1,
-            self.config.padding_x, self.config.padding_y, gox,
+            size.width as f32,
+            size.height as f32,
+            cw,
+            ch,
+            1,
+            self.config.padding_x,
+            self.config.padding_y,
+            gox,
+            0.0, // sidebar closed at startup
         );
         let cols = layout.grid_cols;
         let rows = layout.grid_rows;
@@ -476,6 +502,7 @@ impl ApplicationHandler<UserEvent> for App {
             Ok(session) => {
                 self.tabs.push(Tab {
                     root: PaneNode::Leaf(Box::new(session)),
+                    name: None,
                 });
             }
             Err(e) => {
@@ -510,7 +537,7 @@ impl ApplicationHandler<UserEvent> for App {
         if let (Some(window), Some(ui)) = (&self.window, &mut self.ui) {
             let response = ui.handle_event(window, &event);
             // If egui consumed a mouse/keyboard event, don't pass to terminal
-            if response && ui.settings_open() {
+            if response && (ui.settings_open() || ui.sidebar_open) {
                 self.request_redraw();
                 match &event {
                     WindowEvent::CloseRequested | WindowEvent::Resized(_) => {}
@@ -521,10 +548,15 @@ impl ApplicationHandler<UserEvent> for App {
 
         match event {
             WindowEvent::CloseRequested => {
-                eprintln!("llnzy: CloseRequested received");
-                let _ = std::fs::write("/tmp/llnzy-close.log", "CloseRequested event received\n");
+                self.error_log.info("Close requested");
                 self.save_window_state();
                 event_loop.exit();
+            }
+
+            WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                if let Some(renderer) = &mut self.renderer {
+                    renderer.set_scale_factor(scale_factor as f32);
+                }
             }
 
             WindowEvent::Resized(size) => {
@@ -535,8 +567,10 @@ impl ApplicationHandler<UserEvent> for App {
                 self.recompute_layout();
                 if let Some(layout) = &self.screen_layout {
                     let rect = PaneRect {
-                        x: layout.content.x, y: layout.content.y,
-                        w: layout.content.w, h: layout.content.h,
+                        x: layout.content.x,
+                        y: layout.content.y,
+                        w: layout.content.w,
+                        h: layout.content.h,
                     };
                     let (cw, ch) = (layout.cell_w, layout.cell_h);
                     for tab in &mut self.tabs {
@@ -599,31 +633,49 @@ impl ApplicationHandler<UserEvent> for App {
                     (&mut self.renderer, self.tabs.get(self.active_tab))
                 {
                     if let Some(layout) = &self.screen_layout {
+                        // Apply shaders to egui only on the Shells view (not Settings/Stacker)
+                        // and only if the active theme allows it (effects_on_ui)
+                        let effects_on_ui = !self
+                            .ui
+                            .as_ref()
+                            .map_or(false, |u| u.settings_open()) && self.config.effects.effects_on_ui;
+                        // Update tab context for tab bar interaction
+                        if let Some(ui) = self.ui.as_mut() {
+                            ui.set_tab_context(self.tabs.len(), self.active_tab);
+                        }
                         let ui_state = &mut self.ui;
                         let window_ref = &self.window;
                         let config_ref = &self.config;
-                        let mut egui_cb = |device: &wgpu::Device, queue: &wgpu::Queue, view: &wgpu::TextureView, desc: egui_wgpu::ScreenDescriptor| {
-                            if let (Some(ui), Some(window)) = (ui_state.as_mut(), window_ref.as_ref()) {
-                                ui.render(window, device, queue, view, desc, config_ref);
-                            }
-                        };
-                        renderer.render(
-                            &tab.root,
-                            &titles,
-                            &sel_info,
-                            &search_rects,
-                            search_bar_ref,
-                            err_panel,
-                            bell_active,
-                            layout,
-                            Some(&mut egui_cb),
-                        );
+                        let mut egui_cb =
+                            |device: &wgpu::Device,
+                             queue: &wgpu::Queue,
+                             view: &wgpu::TextureView,
+                             desc: egui_wgpu::ScreenDescriptor| {
+                                if let (Some(ui), Some(window)) =
+                                    (ui_state.as_mut(), window_ref.as_ref())
+                                {
+                                    ui.render(window, device, queue, view, desc, config_ref);
+                                }
+                            };
+                        renderer.render(RenderRequest {
+                            pane_root: &tab.root,
+                            tab_titles: &titles,
+                            selection_rects: &sel_info,
+                            search_rects: &search_rects,
+                            search_bar: search_bar_ref,
+                            error_panel: err_panel,
+                            visual_bell: bell_active,
+                            screen_layout: layout,
+                            egui_render: Some(&mut egui_cb),
+                            apply_effects_to_ui: effects_on_ui,
+                        });
                     }
                 }
 
-                // Apply config changes from settings UI after render
+                // Apply config changes and tab renames from UI after render
                 let mut need_redraw = false;
                 let mut clip_text: Option<String> = None;
+                let mut tab_rename: Option<(usize, String)> = None;
                 if let Some(ui) = &mut self.ui {
                     if let Some(new_config) = ui.take_config() {
                         self.config = new_config;
@@ -634,6 +686,7 @@ impl ApplicationHandler<UserEvent> for App {
                         need_redraw = true;
                     }
                     clip_text = ui.clipboard_text.take();
+                    tab_rename = ui.take_saved_tab_name();
                 }
                 if need_redraw {
                     self.request_redraw();
@@ -641,6 +694,17 @@ impl ApplicationHandler<UserEvent> for App {
                 if let Some(text) = clip_text {
                     if let Some(cb) = &mut self.clipboard {
                         let _ = cb.set_text(text);
+                    }
+                }
+                // Apply tab name changes
+                if let Some((tab_idx, new_name)) = tab_rename {
+                    if let Some(tab) = self.tabs.get_mut(tab_idx) {
+                        if new_name.trim().is_empty() {
+                            tab.name = None; // Clear custom name to show default
+                        } else {
+                            tab.name = Some(new_name);
+                        }
+                        self.request_redraw();
                     }
                 }
             }
@@ -688,10 +752,7 @@ impl ApplicationHandler<UserEvent> for App {
                         if let Some(session) = self.active_session_mut() {
                             session.terminal.scroll(lines);
                         }
-                        if let Some(renderer) = &mut self.renderer {
-                            renderer.invalidate_text_cache();
-                        }
-                        self.request_redraw();
+                        self.invalidate_and_redraw();
                     }
                 }
             }
@@ -730,7 +791,11 @@ impl ApplicationHandler<UserEvent> for App {
                         tab.root.find_divider_at(cr, px, py, 5.0, &mut path)
                     });
                     if let Some((p, dir, parent)) = hit {
-                        self.divider_drag = Some(DividerDrag { path: p, dir, parent_rect: parent });
+                        self.divider_drag = Some(DividerDrag {
+                            path: p,
+                            dir,
+                            parent_rect: parent,
+                        });
                         return;
                     }
                 }
@@ -820,17 +885,16 @@ impl ApplicationHandler<UserEvent> for App {
                 // Handle active divider drag
                 if let Some(drag) = &self.divider_drag {
                     let new_ratio = match drag.dir {
-                        SplitDir::Vertical => {
-                            (px - drag.parent_rect.x) / drag.parent_rect.w
-                        }
-                        SplitDir::Horizontal => {
-                            (py - drag.parent_rect.y) / drag.parent_rect.h
-                        }
+                        SplitDir::Vertical => (px - drag.parent_rect.x) / drag.parent_rect.w,
+                        SplitDir::Horizontal => (py - drag.parent_rect.y) / drag.parent_rect.h,
                     };
                     let path = drag.path.clone();
                     let content_rect = self.content_rect();
-                    let (cw, ch) = self.renderer.as_ref()
-                        .map(|r| r.cell_dimensions()).unwrap_or((1.0, 1.0));
+                    let (cw, ch) = self
+                        .renderer
+                        .as_ref()
+                        .map(|r| r.cell_dimensions())
+                        .unwrap_or((1.0, 1.0));
                     if let Some(tab) = self.active_tab_mut() {
                         tab.root.set_ratio_at(&path, new_ratio);
                         if let Some(cr) = content_rect {
@@ -972,27 +1036,19 @@ impl ApplicationHandler<UserEvent> for App {
                 }
 
                 // Dispatch through keybinding registry
-                if let Some(action) = self.config.keybindings.match_key(&key_event, self.modifiers) {
+                if let Some(action) = self
+                    .config
+                    .keybindings
+                    .match_key(&key_event, self.modifiers)
+                {
                     match action {
                         Action::Search => {
                             self.search.open();
                             self.request_redraw();
                         }
                         Action::Copy => self.copy_selection(),
-                        Action::Paste => {
-                            if let Some(cb) = &mut self.clipboard {
-                                if let Ok(text) = cb.get_text() {
-                                    self.paste_text(&text);
-                                }
-                            }
-                        }
-                        Action::SelectAll => {
-                            if let Some(s) = self.active_session() {
-                                let (cols, rows) = s.terminal.size();
-                                self.selection.select_all(rows, cols);
-                            }
-                            self.request_redraw();
-                        }
+                        Action::Paste => self.do_paste(),
+                        Action::SelectAll => self.do_select_all(),
                         Action::NewTab => self.new_tab(),
                         Action::CloseTab => self.close_tab(),
                         Action::NextTab => {
@@ -1010,15 +1066,7 @@ impl ApplicationHandler<UserEvent> for App {
                         Action::SplitVertical => self.split_active_pane(SplitDir::Vertical),
                         Action::SplitHorizontal => self.split_active_pane(SplitDir::Horizontal),
                         Action::ToggleFullscreen => self.toggle_fullscreen(),
-                        Action::ToggleEffects => {
-                            self.config.effects.enabled = !self.config.effects.enabled;
-                            if let Some(renderer) = &mut self.renderer {
-                                renderer.update_config(self.config.clone());
-                            }
-                            let state = if self.config.effects.enabled { "ON" } else { "OFF" };
-                            self.error_log.info(format!("Visual effects: {}", state));
-                            self.request_redraw();
-                        }
+                        Action::ToggleEffects => self.toggle_effects(),
                         Action::ToggleFps => {
                             if let Some(ui) = &mut self.ui {
                                 ui.show_fps = !ui.show_fps;
@@ -1029,25 +1077,39 @@ impl ApplicationHandler<UserEvent> for App {
                             self.error_panel.toggle();
                             self.request_redraw();
                         }
+                        Action::ToggleSidebar => {
+                            if let Some(ui) = &mut self.ui {
+                                ui.toggle_sidebar();
+                            }
+                            self.recompute_layout();
+                            if let Some(layout) = &self.screen_layout {
+                                let rect = PaneRect {
+                                    x: layout.content.x,
+                                    y: layout.content.y,
+                                    w: layout.content.w,
+                                    h: layout.content.h,
+                                };
+                                let (cw, ch) = (layout.cell_w, layout.cell_h);
+                                for tab in &mut self.tabs {
+                                    tab.root.resize_all(rect, cw, ch);
+                                }
+                            }
+                            self.selection.clear();
+                            self.invalidate_and_redraw();
+                        }
                         Action::CyclePaneForward | Action::CyclePaneBackward => {
                             if let Some(tab) = self.active_tab_mut() {
                                 tab.root.cycle_focus();
                             }
                             self.selection.clear();
-                            if let Some(r) = &mut self.renderer {
-                                r.invalidate_text_cache();
-                            }
-                            self.request_redraw();
+                            self.invalidate_and_redraw();
                         }
                         Action::ScrollPageUp => {
                             if !self.mouse_reporting() {
                                 if let Some(s) = self.active_session_mut() {
                                     s.terminal.scroll_page_up();
                                 }
-                                if let Some(r) = &mut self.renderer {
-                                    r.invalidate_text_cache();
-                                }
-                                self.request_redraw();
+                                self.invalidate_and_redraw();
                             }
                         }
                         Action::ScrollPageDown => {
@@ -1055,10 +1117,7 @@ impl ApplicationHandler<UserEvent> for App {
                                 if let Some(s) = self.active_session_mut() {
                                     s.terminal.scroll_page_down();
                                 }
-                                if let Some(r) = &mut self.renderer {
-                                    r.invalidate_text_cache();
-                                }
-                                self.request_redraw();
+                                self.invalidate_and_redraw();
                             }
                         }
                         Action::SwitchTab(n) => {
@@ -1120,7 +1179,7 @@ impl ApplicationHandler<UserEvent> for App {
 
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
-            UserEvent::PtyOutput => self.process_all_output(),
+            UserEvent::PtyOutput => self.request_redraw(),
             #[cfg(target_os = "macos")]
             UserEvent::MenuAction(action) => {
                 use llnzy::menu::MenuAction;
@@ -1128,20 +1187,8 @@ impl ApplicationHandler<UserEvent> for App {
                     MenuAction::NewTab => self.new_tab(),
                     MenuAction::CloseTab => self.close_tab(),
                     MenuAction::Copy => self.copy_selection(),
-                    MenuAction::Paste => {
-                        if let Some(cb) = &mut self.clipboard {
-                            if let Ok(text) = cb.get_text() {
-                                self.paste_text(&text);
-                            }
-                        }
-                    }
-                    MenuAction::SelectAll => {
-                        if let Some(s) = self.active_session() {
-                            let (cols, rows) = s.terminal.size();
-                            self.selection.select_all(rows, cols);
-                        }
-                        self.request_redraw();
-                    }
+                    MenuAction::Paste => self.do_paste(),
+                    MenuAction::SelectAll => self.do_select_all(),
                     MenuAction::Find => {
                         self.search.open();
                         self.request_redraw();
@@ -1149,13 +1196,7 @@ impl ApplicationHandler<UserEvent> for App {
                     MenuAction::ToggleFullscreen => self.toggle_fullscreen(),
                     MenuAction::SplitVertical => self.split_active_pane(SplitDir::Vertical),
                     MenuAction::SplitHorizontal => self.split_active_pane(SplitDir::Horizontal),
-                    MenuAction::ToggleEffects => {
-                        self.config.effects.enabled = !self.config.effects.enabled;
-                        if let Some(renderer) = &mut self.renderer {
-                            renderer.update_config(self.config.clone());
-                        }
-                        self.request_redraw();
-                    }
+                    MenuAction::ToggleEffects => self.toggle_effects(),
                 }
             }
         }
@@ -1194,7 +1235,11 @@ impl ApplicationHandler<UserEvent> for App {
 
         // Advance theme color transition
         if let Some(ref mut trans) = self.config.transition {
-            let dt = self.renderer.as_ref().map(|r| r.gpu_delta_time()).unwrap_or(1.0 / 60.0);
+            let dt = self
+                .renderer
+                .as_ref()
+                .map(|r| r.gpu_delta_time())
+                .unwrap_or(1.0 / 60.0);
             let done = trans.advance(dt);
             let blended = trans.current();
             // Apply blended colors to renderer without overwriting the target config
@@ -1223,7 +1268,10 @@ impl ApplicationHandler<UserEvent> for App {
         // Config hot-reload from disk (skip when settings UI is open or recently changed)
         let settings_active = self.ui.as_ref().map_or(false, |u| u.settings_open());
         let recently_changed = now.duration_since(self.last_ui_config_change).as_secs() < 10;
-        if !settings_active && !recently_changed && now.duration_since(self.last_config_check).as_secs() >= 2 {
+        if !settings_active
+            && !recently_changed
+            && now.duration_since(self.last_config_check).as_secs() >= 2
+        {
             self.last_config_check = now;
             if self.config.check_reload() {
                 self.error_log.info("Config reloaded from disk");
@@ -1234,9 +1282,9 @@ impl ApplicationHandler<UserEvent> for App {
             }
         }
 
-        // Continuous animation mode
+        // Continuous animation mode — only when effects actually need it
         let ui_active = self.ui.as_ref().map_or(false, |u| u.settings_open());
-        if self.config.effects.enabled || ui_active {
+        if self.config.effects.any_active() || ui_active {
             event_loop.set_control_flow(ControlFlow::Poll);
             self.request_redraw();
         }
@@ -1260,12 +1308,11 @@ fn load_window_state() -> Option<(u32, u32)> {
 fn main() {
     env_logger::init();
 
-    // Install panic handler that logs to a file so we can see panics even if stderr is lost
+    // Install panic handler that logs to disk so panics remain visible when stderr is lost.
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let msg = format!("llnzy panic: {}\n", info);
-        eprintln!("{}", msg);
-        let _ = std::fs::write("/tmp/llnzy-crash.log", &msg);
+        let _ = write_diagnostic("crash.log", &msg);
         default_hook(info);
     }));
 
@@ -1286,9 +1333,9 @@ fn main() {
     app.error_log.info("llnzy starting up");
 
     let result = event_loop.run_app(&mut app);
-    // If we get here, the event loop exited — log WHY
-    let exit_msg = format!("llnzy event loop exited: {:?}\n", result);
-    eprintln!("{}", exit_msg);
-    let _ = std::fs::write("/tmp/llnzy-exit.log", &exit_msg);
+    if let Err(err) = &result {
+        let exit_msg = format!("llnzy event loop exited with error: {:?}\n", err);
+        let _ = write_diagnostic("exit.log", exit_msg);
+    }
     result.unwrap();
 }

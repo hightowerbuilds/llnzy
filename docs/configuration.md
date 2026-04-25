@@ -177,3 +177,9 @@ llnzy checks the config file's modification time every 2 seconds. When a change 
 If the config file has a syntax error, the reload is silently skipped and the previous configuration remains in effect. A warning is logged to the diagnostics panel (Cmd+Shift+E).
 
 New tabs and panes created after a config change use the updated settings. Existing sessions keep their terminal state but pick up visual changes (colors, font, cursor style) on the next frame.
+
+## Diagnostics
+
+Runtime diagnostics are shown in the in-app diagnostics panel with `Cmd+Shift+E`. Crash and event-loop failure logs are written under the LLNZY app config directory:
+
+`~/Library/Application Support/llnzy/logs/` on macOS.
