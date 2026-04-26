@@ -1,6 +1,7 @@
 pub mod config;
 pub mod diagnostics;
 pub mod error_log;
+pub mod explorer;
 pub mod input;
 pub mod keybindings;
 pub mod layout;

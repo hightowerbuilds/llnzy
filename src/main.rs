@@ -644,7 +644,8 @@ impl ApplicationHandler<UserEvent> for App {
                         let effects_on_ui = self.ui.as_ref().is_some_and(|u| match u.active_view {
                             ActiveView::Shells => self.config.effects.effects_on_ui,
                             ActiveView::Sketch => true,
-                            ActiveView::Stacker
+                            ActiveView::Explorer
+                            | ActiveView::Stacker
                             | ActiveView::Appearances
                             | ActiveView::Settings => false,
                         });
