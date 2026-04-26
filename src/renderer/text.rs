@@ -356,6 +356,7 @@ impl TextSystem {
         tabs: &[(String, bool)],
         tab_w: f32,
         tab_h: f32,
+        tab_x_offset: f32,
         config: &Config,
         gpu: &GpuState,
         view: &wgpu::TextureView,
@@ -383,7 +384,7 @@ impl TextSystem {
             .enumerate()
             .map(|(i, buffer)| TextArea {
                 buffer,
-                left: i as f32 * tab_w + 8.0,
+                left: tab_x_offset + i as f32 * tab_w + 8.0,
                 top: 0.0,
                 scale: 1.0,
                 bounds: TextBounds {

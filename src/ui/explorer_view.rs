@@ -33,6 +33,8 @@ pub struct EditorViewState {
     pub rename_input: Option<String>,
     /// Debounce: last time LSP didChange was sent.
     last_change_sent: Instant,
+    /// File to open as a workspace tab (set by sidebar click, consumed by main loop).
+    pub pending_file_tab: Option<(std::path::PathBuf, usize)>,
 }
 
 /// State for the auto-completion popup.
@@ -65,6 +67,7 @@ impl Default for EditorViewState {
             symbols_filter: String::new(),
             rename_input: None,
             last_change_sent: Instant::now(),
+            pending_file_tab: None,
         }
     }
 }
@@ -330,6 +333,9 @@ impl EditorViewState {
     }
 }
 
+/// Render the code editor for the active buffer.
+/// Called when a CodeFile tab is active — no tab bar or back button needed,
+/// since workspace tabs handle that.
 pub(crate) fn render_explorer_view(
     ui: &mut egui::Ui,
     explorer: &mut ExplorerState,
@@ -337,83 +343,9 @@ pub(crate) fn render_explorer_view(
 ) {
     ui.visuals_mut().override_text_color = Some(egui::Color32::WHITE);
 
-    // ── Fuzzy finder overlay (takes over the view when open) ──
-    if explorer.finder_open {
-        render_finder(ui, explorer, editor_state);
+    if editor_state.editor.is_empty() {
         return;
     }
-
-    // ── Editor mode: show tabs + active buffer ──
-    if !editor_state.editor.is_empty() {
-        render_editor_tabs(ui, explorer, editor_state);
-    } else if explorer.open_file.is_some() {
-        render_image_viewer(ui, explorer);
-    } else {
-        // No files open — show hint
-        ui.vertical_centered(|ui| {
-            ui.add_space(ui.available_height() / 3.0);
-            ui.label(
-                egui::RichText::new("Open a file from the sidebar")
-                    .size(16.0)
-                    .color(egui::Color32::from_rgb(100, 105, 120)),
-            );
-            ui.add_space(8.0);
-            ui.label(
-                egui::RichText::new("or press Cmd+P to find a file")
-                    .size(13.0)
-                    .color(egui::Color32::from_rgb(80, 85, 95)),
-            );
-        });
-    }
-}
-
-/// Render the tab bar and active buffer editor.
-fn render_editor_tabs(ui: &mut egui::Ui, explorer: &mut ExplorerState, editor_state: &mut EditorViewState) {
-    let tabs = editor_state.editor.tab_info();
-    let mut switch_to: Option<usize> = None;
-    let mut close_tab: Option<usize> = None;
-
-    ui.horizontal(|ui| {
-        if ui
-            .add(
-                egui::Button::new(
-                    egui::RichText::new("< Files").size(13.0).color(egui::Color32::from_rgb(100, 180, 255)),
-                )
-                .fill(egui::Color32::TRANSPARENT),
-            )
-            .clicked()
-        {
-            // Go back to file browser without closing buffers
-        }
-
-        ui.add_space(8.0);
-
-        for (i, &(name, active, modified)) in tabs.iter().enumerate() {
-            let label = if modified { format!("{name} *") } else { name.to_string() };
-            let btn_color = if active { egui::Color32::from_rgb(50, 80, 130) } else { egui::Color32::from_rgb(35, 35, 45) };
-            let text_color = if active { egui::Color32::WHITE } else { egui::Color32::from_rgb(160, 160, 175) };
-            let tab_btn = ui.add(
-                egui::Button::new(egui::RichText::new(&label).size(12.0).color(text_color))
-                    .fill(btn_color)
-                    .rounding(egui::Rounding { nw: 4.0, ne: 4.0, sw: 0.0, se: 0.0 }),
-            );
-            if tab_btn.clicked() { switch_to = Some(i); }
-            if tab_btn.middle_clicked() || tab_btn.secondary_clicked() { close_tab = Some(i); }
-        }
-
-        if let Some(msg) = &editor_state.status_msg {
-            ui.add_space(12.0);
-            ui.label(egui::RichText::new(msg).size(11.0).color(egui::Color32::from_rgb(150, 150, 160)));
-        }
-    });
-
-    if let Some(idx) = switch_to { editor_state.editor.switch_to(idx); }
-    if let Some(idx) = close_tab {
-        editor_state.editor.close(idx);
-        if editor_state.editor.is_empty() { return; }
-    }
-
-    ui.add_space(2.0);
 
     // Reparse syntax tree if dirty
     editor_state.editor.reparse_active();
@@ -717,10 +649,8 @@ fn render_tree_nodes(
                     *action = Some(TreeAction::Toggle(indices));
                 }
             } else {
-                let icon = file_icon(&node.name);
-                let label = format!("{icon} {}", node.name);
                 let resp = ui.add(
-                    egui::Label::new(egui::RichText::new(&label).size(13.0).color(file_color))
+                    egui::Label::new(egui::RichText::new(&node.name).size(13.0).color(file_color))
                         .sense(egui::Sense::click()),
                 );
                 if node.size > 0 {
@@ -780,10 +710,8 @@ fn render_tree_children(
                     *action = Some(TreeAction::Toggle(indices));
                 }
             } else {
-                let icon = file_icon(&node.name);
-                let label = format!("{icon} {}", node.name);
                 let resp = ui.add(
-                    egui::Label::new(egui::RichText::new(&label).size(13.0).color(file_color))
+                    egui::Label::new(egui::RichText::new(&node.name).size(13.0).color(file_color))
                         .sense(egui::Sense::click()),
                 );
                 if node.size > 0 {
@@ -814,29 +742,6 @@ fn toggle_at(tree: &mut [crate::explorer::TreeNode], indices: &[usize]) {
         tree[idx].toggle();
     } else if let Some(children) = &mut tree[idx].children {
         toggle_at(children, &indices[1..]);
-    }
-}
-
-/// Simple file type icon based on extension.
-fn file_icon(name: &str) -> &'static str {
-    let ext = name.rsplit('.').next().unwrap_or("").to_lowercase();
-    match ext.as_str() {
-        "rs" => "R",
-        "js" | "mjs" | "cjs" => "J",
-        "ts" | "mts" | "cts" => "T",
-        "tsx" | "jsx" => "X",
-        "py" => "P",
-        "go" => "G",
-        "c" | "h" => "C",
-        "cpp" | "hpp" | "cc" => "C",
-        "json" => "{",
-        "toml" | "yaml" | "yml" => "*",
-        "html" | "htm" => "<",
-        "css" | "scss" => "#",
-        "sh" | "bash" | "zsh" => "$",
-        "md" | "txt" => "=",
-        "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" => "I",
-        _ => " ",
     }
 }
 
@@ -906,7 +811,6 @@ fn render_finder(
             for (i, path) in explorer.finder_results.iter().enumerate() {
                 let rel = explorer.relative_path(path);
                 let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                let icon = file_icon(name);
 
                 let bg = if i == explorer.finder_selected { selected_color } else { egui::Color32::TRANSPARENT };
                 let text_color = if i == explorer.finder_selected { egui::Color32::WHITE } else { egui::Color32::from_rgb(200, 205, 215) };
@@ -914,7 +818,6 @@ fn render_finder(
                 let frame = egui::Frame::none().fill(bg).inner_margin(egui::Margin::symmetric(4.0, 2.0));
                 frame.show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new(icon).size(12.0).color(egui::Color32::from_rgb(100, 180, 255)).monospace());
                         ui.label(egui::RichText::new(name).size(13.0).color(text_color));
                         ui.label(egui::RichText::new(&rel).size(11.0).color(egui::Color32::from_rgb(100, 105, 120)));
                     });
@@ -960,8 +863,13 @@ pub(crate) fn render_sidebar_tree(
             if is_image_ext(&path) {
                 explorer.open(path);
             } else {
+                let file_path = path.clone();
                 match editor_state.open_file(path) {
-                    Ok(_) => editor_state.status_msg = None,
+                    Ok(idx) => {
+                        editor_state.status_msg = None;
+                        // Signal main loop to create a CodeFile tab
+                        editor_state.pending_file_tab = Some((file_path, idx));
+                    }
                     Err(e) => editor_state.status_msg = Some(e),
                 }
             }

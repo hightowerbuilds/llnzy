@@ -48,25 +48,6 @@ pub fn render_home_view(
                 let btn_width = 240.0;
                 let btn_height = 48.0;
 
-                // Terminal button
-                if ui
-                    .add_sized(
-                        [btn_width, btn_height],
-                        egui::Button::new(
-                            egui::RichText::new("Terminal")
-                                .size(18.0)
-                                .color(egui::Color32::WHITE),
-                        )
-                        .fill(egui::Color32::from_rgb(40, 80, 160))
-                        .rounding(egui::Rounding::same(8.0)),
-                    )
-                    .clicked()
-                {
-                    action.nav_target = Some(ActiveView::Shells);
-                }
-
-                ui.add_space(12.0);
-
                 // Open Project button
                 if ui
                     .add_sized(
@@ -86,7 +67,7 @@ pub fn render_home_view(
                         .pick_folder()
                     {
                         action.open_project = Some(path);
-                        action.nav_target = Some(ActiveView::Explorer);
+                        action.nav_target = Some(ActiveView::Shells);
                     }
                 }
 
@@ -132,7 +113,7 @@ pub fn render_home_view(
                             .on_hover_text(&path_str);
                         if btn.clicked() {
                             action.open_project = Some(project.clone());
-                            action.nav_target = Some(ActiveView::Explorer);
+                            action.nav_target = Some(ActiveView::Shells);
                         }
                     }
                 }

@@ -14,7 +14,7 @@ use winit::window::Window;
 use crate::config::{Config, CursorStyle};
 use crate::error_log::{ErrorLog, ErrorPanel};
 use crate::layout::ScreenLayout;
-use crate::session::{PaneNode, Rect as PaneRect};
+use crate::session::{Rect as PaneRect, Session};
 use background::BackgroundRenderer;
 use blit::BlitPipeline;
 use bloom::{BloomEffect, BloomParams};
@@ -29,7 +29,10 @@ pub type EguiRenderCallback<'a> =
     &'a mut dyn FnMut(&wgpu::Device, &wgpu::Queue, &wgpu::TextureView, egui_wgpu::ScreenDescriptor);
 
 pub struct RenderRequest<'a> {
-    pub pane_root: &'a PaneNode,
+    /// The terminal session to render, if the active tab is a terminal.
+    pub terminal: Option<&'a Session>,
+    /// Unique ID for the active tab (used for text cache management).
+    pub tab_id: u64,
     pub tab_titles: &'a [(String, bool)],
     pub selection_rects: &'a [(f32, f32, f32, f32, [f32; 4])],
     pub search_rects: &'a [(f32, f32, f32, f32, [f32; 4])],
@@ -47,7 +50,8 @@ pub struct RenderRequest<'a> {
 }
 
 struct ContentPass<'a> {
-    pane_root: &'a PaneNode,
+    terminal: Option<&'a Session>,
+    tab_id: u64,
     selection_rects: &'a [(f32, f32, f32, f32, [f32; 4])],
     search_rects: &'a [(f32, f32, f32, f32, [f32; 4])],
     screen_layout: &'a ScreenLayout,
@@ -195,13 +199,14 @@ impl Renderer {
 
         self.clear_frame(&mut encoder, &swapchain_view, use_scene);
         self.render_scene_background(&mut encoder, use_scene);
-        self.render_tab_bar(&mut encoder, &swapchain_view, use_scene, &request);
+        // Tab bar is now rendered by egui — skip wgpu tab bar
         self.render_terminal_content(
             &mut encoder,
             &swapchain_view,
             use_scene,
             ContentPass {
-                pane_root: request.pane_root,
+                terminal: request.terminal,
+                tab_id: request.tab_id,
                 selection_rects: request.selection_rects,
                 search_rects: request.search_rects,
                 screen_layout: request.screen_layout,
@@ -383,149 +388,142 @@ impl Renderer {
         use_scene: bool,
         pass: ContentPass<'_>,
     ) {
+        let Some(session) = pass.terminal else {
+            // No terminal to render (non-terminal tab or no tabs)
+            self.text.retain_caches(&std::collections::HashSet::new());
+            return;
+        };
+
         let target = Self::target_view(&self.gpu, swapchain_view, use_scene);
         let cw = pass.screen_layout.cell_w;
         let ch = pass.screen_layout.cell_h;
-        let content_rect = PaneRect {
+        let rect = PaneRect {
             x: pass.screen_layout.content.x,
             y: pass.screen_layout.content.y,
             w: pass.screen_layout.content.w,
             h: pass.screen_layout.content.h,
         };
 
-        let dividers = pass.pane_root.collect_dividers(content_rect);
-        if !dividers.is_empty() {
-            self.rects.draw_rects(&self.gpu, target, encoder, &dividers);
+        // Cache management — only keep the active tab's text cache
+        let cache_key = pass.tab_id as TextCacheKey;
+        self.text.retain_caches(&std::collections::HashSet::from([cache_key]));
+
+        let terminal = &session.terminal;
+
+        // Cell backgrounds
+        let bg_rects: Vec<_> = terminal
+            .background_rects(&self.config, cw, ch)
+            .into_iter()
+            .map(|(x, y, w, h, c)| (x + rect.x, y + rect.y, w, h, c))
+            .collect();
+        if !bg_rects.is_empty() {
+            self.rects.draw_rects(&self.gpu, target, encoder, &bg_rects);
         }
 
-        let panes = pass.pane_root.collect_panes(content_rect, true);
-        let active_cache_keys = panes
-            .iter()
-            .map(|(session, _, _)| *session as *const _ as TextCacheKey)
+        // Decorations
+        let deco_rects: Vec<_> = terminal
+            .decoration_rects(&self.config, cw, ch)
+            .into_iter()
+            .map(|(x, y, w, h, c)| (x + rect.x, y + rect.y, w, h, c))
             .collect();
-        self.text.retain_caches(&active_cache_keys);
+        if !deco_rects.is_empty() {
+            self.rects
+                .draw_rects(&self.gpu, target, encoder, &deco_rects);
+        }
 
-        for (session, rect, is_focused) in &panes {
-            let terminal = &session.terminal;
-
-            // Cell backgrounds
-            let bg_rects: Vec<_> = terminal
-                .background_rects(&self.config, cw, ch)
-                .into_iter()
-                .map(|(x, y, w, h, c)| (x + rect.x, y + rect.y, w, h, c))
+        // Search highlights
+        if !pass.search_rects.is_empty() {
+            let sr: Vec<_> = pass
+                .search_rects
+                .iter()
+                .map(|&(x, y, w, h, c)| (x + rect.x, y + rect.y, w, h, c))
                 .collect();
-            if !bg_rects.is_empty() {
-                self.rects.draw_rects(&self.gpu, target, encoder, &bg_rects);
-            }
+            self.rects.draw_rects(&self.gpu, target, encoder, &sr);
+        }
 
-            // Decorations
-            let deco_rects: Vec<_> = terminal
-                .decoration_rects(&self.config, cw, ch)
-                .into_iter()
-                .map(|(x, y, w, h, c)| (x + rect.x, y + rect.y, w, h, c))
+        // Selection
+        if !pass.selection_rects.is_empty() {
+            let sel: Vec<_> = pass
+                .selection_rects
+                .iter()
+                .map(|&(x, y, w, h, c)| (x + rect.x, y + rect.y, w, h, c))
                 .collect();
-            if !deco_rects.is_empty() {
-                self.rects
-                    .draw_rects(&self.gpu, target, encoder, &deco_rects);
-            }
+            self.rects.draw_rects(&self.gpu, target, encoder, &sel);
+        }
 
-            // Search highlights (for focused pane)
-            if *is_focused && !pass.search_rects.is_empty() {
-                let sr: Vec<_> = pass
-                    .search_rects
-                    .iter()
-                    .map(|&(x, y, w, h, c)| (x + rect.x, y + rect.y, w, h, c))
-                    .collect();
-                self.rects.draw_rects(&self.gpu, target, encoder, &sr);
-            }
-
-            // Selection (only for focused pane)
-            if *is_focused && !pass.selection_rects.is_empty() {
-                let sel: Vec<_> = pass
-                    .selection_rects
-                    .iter()
-                    .map(|&(x, y, w, h, c)| (x + rect.x, y + rect.y, w, h, c))
-                    .collect();
-                self.rects.draw_rects(&self.gpu, target, encoder, &sel);
-            }
-
-            // Cursor (only for focused pane when visible)
-            if *is_focused && self.cursor_visible {
-                if let Some((cr, cc)) = terminal.cursor_point() {
-                    if use_scene && self.config.effects.cursor_glow {
-                        // Shader-driven cursor with glow + pulse + trail
-                        self.cursor_renderer.draw(CursorDrawRequest {
-                            gpu: &self.gpu,
-                            encoder,
-                            target,
-                            cursor_row: cr,
-                            cursor_col: cc,
-                            cell_w: cw,
-                            cell_h: ch,
-                            offset_x: rect.x,
-                            offset_y: rect.y,
-                            cursor_style: self.config.cursor_style,
-                            cursor_color: self.config.cursor_color(),
-                            time: self.gpu.current_time,
-                            trail_enabled: self.config.effects.cursor_trail,
-                        });
-                    } else {
-                        // Flat rect cursor (no effects)
-                        let cc_color = self.config.cursor_color();
-                        let color = [
-                            cc_color[0] as f32 / 255.0,
-                            cc_color[1] as f32 / 255.0,
-                            cc_color[2] as f32 / 255.0,
-                            1.0,
-                        ];
-                        let gy = self.text.glyph_offset_y();
-                        let cursor_y = cr as f32 * ch + rect.y + gy;
-                        let cursor_h = ch - gy;
-                        let cursor_rect = match self.config.cursor_style {
-                            CursorStyle::Block => {
-                                (cc as f32 * cw + rect.x, cursor_y, cw, cursor_h, color)
-                            }
-                            CursorStyle::Beam => {
-                                (cc as f32 * cw + rect.x, cursor_y, 2.0, cursor_h, color)
-                            }
-                            CursorStyle::Underline => (
-                                cc as f32 * cw + rect.x,
-                                cr as f32 * ch + rect.y + ch - 2.0,
-                                cw,
-                                2.0,
-                                color,
-                            ),
-                        };
-                        self.rects
-                            .draw_rects(&self.gpu, target, encoder, &[cursor_rect]);
-                    }
+        // Cursor
+        if self.cursor_visible {
+            if let Some((cr, cc)) = terminal.cursor_point() {
+                if use_scene && self.config.effects.cursor_glow {
+                    self.cursor_renderer.draw(CursorDrawRequest {
+                        gpu: &self.gpu,
+                        encoder,
+                        target,
+                        cursor_row: cr,
+                        cursor_col: cc,
+                        cell_w: cw,
+                        cell_h: ch,
+                        offset_x: rect.x,
+                        offset_y: rect.y,
+                        cursor_style: self.config.cursor_style,
+                        cursor_color: self.config.cursor_color(),
+                        time: self.gpu.current_time,
+                        trail_enabled: self.config.effects.cursor_trail,
+                    });
+                } else {
+                    let cc_color = self.config.cursor_color();
+                    let color = [
+                        cc_color[0] as f32 / 255.0,
+                        cc_color[1] as f32 / 255.0,
+                        cc_color[2] as f32 / 255.0,
+                        1.0,
+                    ];
+                    let gy = self.text.glyph_offset_y();
+                    let cursor_y = cr as f32 * ch + rect.y + gy;
+                    let cursor_h = ch - gy;
+                    let cursor_rect = match self.config.cursor_style {
+                        CursorStyle::Block => {
+                            (cc as f32 * cw + rect.x, cursor_y, cw, cursor_h, color)
+                        }
+                        CursorStyle::Beam => {
+                            (cc as f32 * cw + rect.x, cursor_y, 2.0, cursor_h, color)
+                        }
+                        CursorStyle::Underline => (
+                            cc as f32 * cw + rect.x,
+                            cr as f32 * ch + rect.y + ch - 2.0,
+                            cw,
+                            2.0,
+                            color,
+                        ),
+                    };
+                    self.rects
+                        .draw_rects(&self.gpu, target, encoder, &[cursor_rect]);
                 }
             }
-
-            // Text
-            let block_cursor = if *is_focused
-                && self.cursor_visible
-                && self.config.cursor_style == CursorStyle::Block
-            {
-                terminal.cursor_point()
-            } else {
-                None
-            };
-
-            let text_anim = use_scene && self.config.effects.text_animation;
-            self.text.render_grid_at(
-                *session as *const _ as TextCacheKey,
-                terminal,
-                &self.config,
-                &self.gpu,
-                target,
-                encoder,
-                block_cursor,
-                rect.x,
-                rect.y,
-                text_anim,
-            );
         }
+
+        // Text
+        let block_cursor = if self.cursor_visible
+            && self.config.cursor_style == CursorStyle::Block
+        {
+            terminal.cursor_point()
+        } else {
+            None
+        };
+
+        let text_anim = use_scene && self.config.effects.text_animation;
+        self.text.render_grid_at(
+            cache_key,
+            terminal,
+            &self.config,
+            &self.gpu,
+            target,
+            encoder,
+            block_cursor,
+            rect.x,
+            rect.y,
+            text_anim,
+        );
     }
 
     fn render_overlays(
@@ -675,6 +673,7 @@ impl Renderer {
             &[(display, true)],
             w,
             bar_h,
+            0.0,
             pass.config,
             pass.gpu,
             pass.view,
@@ -739,10 +738,17 @@ impl Renderer {
         pass.rects
             .draw_rects(pass.gpu, pass.view, &mut *pass.encoder, &tab_rects);
 
+        // Render tab name + close "x" button
+        // Append " x" to each tab title so it renders as part of the label
+        let tabs_with_close: Vec<(String, bool)> = tabs
+            .iter()
+            .map(|(title, active)| (format!("{}  x", title), *active))
+            .collect();
         pass.text.render_tab_labels(
-            tabs,
+            &tabs_with_close,
             tab_w,
             zone.h,
+            zone.x,
             pass.config,
             pass.gpu,
             pass.view,

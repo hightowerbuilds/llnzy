@@ -258,8 +258,8 @@ impl Default for Config {
             colors: ColorScheme::default(),
             cursor_style: CursorStyle::Block,
             cursor_blink_ms: 0,
-            padding_x: 12.0,
-            padding_y: 8.0,
+            padding_x: 20.0,
+            padding_y: 70.0,
             opacity: 1.0,
             scroll_lines: 3,
             effects: EffectsConfig::default(),
@@ -1000,8 +1000,8 @@ mod tests {
         assert_eq!(config.line_height, 1.4);
         assert_eq!(config.cursor_style, CursorStyle::Block);
         assert_eq!(config.cursor_blink_ms, 0);
-        assert_eq!(config.padding_x, 12.0);
-        assert_eq!(config.padding_y, 8.0);
+        assert_eq!(config.padding_x, 20.0);
+        assert_eq!(config.padding_y, 70.0);
         assert_eq!(config.opacity, 1.0);
         assert_eq!(config.scroll_lines, 3);
     }
