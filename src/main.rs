@@ -639,13 +639,27 @@ impl ApplicationHandler<UserEvent> for App {
                     if let Some(layout) = &self.screen_layout {
                         // Shells honors the theme-level UI shader flag so app chrome can stay
                         // clean. Sketch opts into the real shader path so the canvas gets CRT,
-                        // bloom, and background effects instead of a painter-only approximation.
+                        // bloom, and background effects. A CRT mask restricts effects to just the
+                        // canvas rect so sidebar/footer stay clean.
                         let effects_on_ui = self.ui.as_ref().is_some_and(|u| match u.active_view {
                             ActiveView::Shells => self.config.effects.effects_on_ui,
                             ActiveView::Sketch => true,
                             ActiveView::Stacker
                             | ActiveView::Appearances
                             | ActiveView::Settings => false,
+                        });
+                        // Build CRT effects mask: restrict effects to the canvas rect on Sketch view
+                        let effects_mask = self.ui.as_ref().and_then(|u| {
+                            u.sketch_canvas_px.and_then(|px| {
+                                if matches!(u.active_view, ActiveView::Sketch) {
+                                    let size = self.window.as_ref()?.inner_size();
+                                    let w = size.width as f32;
+                                    let h = size.height as f32;
+                                    Some([px[0] / w, px[1] / h, px[2] / w, px[3] / h])
+                                } else {
+                                    None
+                                }
+                            })
                         });
                         // Update tab context for tab bar interaction
                         if let Some(ui) = self.ui.as_mut() {
@@ -676,6 +690,7 @@ impl ApplicationHandler<UserEvent> for App {
                             screen_layout: layout,
                             egui_render: Some(&mut egui_cb),
                             apply_effects_to_ui: effects_on_ui,
+                            effects_mask,
                         });
                     }
                 }

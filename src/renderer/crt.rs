@@ -11,7 +11,9 @@ pub struct CrtUniforms {
     pub chromatic_aberration: f32,
     pub grain_intensity: f32,
     pub time: f32,
-    pub _padding: [f32; 2],
+    /// UV rect within which CRT effects apply. [0,0]–[1,1] = fullscreen.
+    pub mask_min: [f32; 2],
+    pub mask_max: [f32; 2],
 }
 
 #[derive(Clone, Copy)]
@@ -22,6 +24,9 @@ pub struct CrtParams {
     pub chromatic_aberration: f32,
     pub grain_intensity: f32,
     pub time: f32,
+    /// UV rect for masked effects. [0,0]–[1,1] = fullscreen (no masking).
+    pub mask_min: [f32; 2],
+    pub mask_max: [f32; 2],
 }
 
 const CRT_SHADER: &str = r#"
@@ -35,7 +40,8 @@ struct CrtUniforms {
     chromatic_aberration: f32,
     grain_intensity: f32,
     time: f32,
-    _padding: vec2<f32>,
+    mask_min: vec2<f32>,
+    mask_max: vec2<f32>,
 };
 @group(1) @binding(0) var<uniform> crt: CrtUniforms;
 
@@ -72,6 +78,12 @@ fn barrel_distort(uv: vec2<f32>, amount: f32) -> vec2<f32> {
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let tex_size = vec2<f32>(textureDimensions(src_tex));
     var uv = in.uv;
+
+    // ── Effects mask — skip CRT outside the designated region ──
+    if (uv.x < crt.mask_min.x || uv.x > crt.mask_max.x
+     || uv.y < crt.mask_min.y || uv.y > crt.mask_max.y) {
+        return textureSample(src_tex, src_sampler, uv);
+    }
 
     // ── Barrel distortion (CRT curvature) ──
     if (crt.curvature > 0.0) {
@@ -260,7 +272,8 @@ impl CrtEffect {
             chromatic_aberration: params.chromatic_aberration,
             grain_intensity: params.grain_intensity,
             time: params.time,
-            _padding: [0.0; 2],
+            mask_min: params.mask_min,
+            mask_max: params.mask_max,
         };
         gpu.queue
             .write_buffer(&self.uniform_buffer, 0, bytemuck::cast_slice(&[uniforms]));
