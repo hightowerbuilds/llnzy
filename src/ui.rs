@@ -3,7 +3,8 @@ use winit::window::Window;
 
 use crate::config::Config;
 use crate::sketch::{
-    save_default_document, DraftElement, SketchElement, SketchPoint, SketchState, SketchTool,
+    save_default_document, DraftElement, RectElement, SketchElement, SketchPoint, SketchState,
+    SketchTool,
 };
 use crate::stacker::{
     apply_prompt_edit, export_prompts, import_prompts, load_stacker_prompts, merge_unique_prompts,
@@ -790,6 +791,11 @@ impl UiState {
             // ── Sketch view ──
             if current_view == ActiveView::Sketch {
                 let sketch_bg = egui::Color32::from_rgb(bg[0], bg[1], bg[2]);
+                let sketch_appearance = SketchAppearance {
+                    canvas_bg: sketch_bg,
+                    text_color,
+                    active_btn,
+                };
                 egui::CentralPanel::default()
                     .frame(
                         egui::Frame::none()
@@ -797,7 +803,7 @@ impl UiState {
                             .inner_margin(egui::Margin::same(14.0)),
                     )
                     .show(ctx, |ui| {
-                        render_sketch_view(ctx, ui, &mut sketch, sketch_bg, text_color, active_btn);
+                        render_sketch_view(ctx, ui, &mut sketch, &sketch_appearance);
                     });
             }
 
@@ -973,13 +979,18 @@ fn label(text: &str) -> egui::RichText {
     egui::RichText::new(text).size(S)
 }
 
+#[derive(Clone, Copy)]
+struct SketchAppearance {
+    canvas_bg: egui::Color32,
+    text_color: egui::Color32,
+    active_btn: egui::Color32,
+}
+
 fn render_sketch_view(
     ctx: &egui::Context,
     ui: &mut egui::Ui,
     sketch: &mut SketchState,
-    sketch_bg: egui::Color32,
-    text_color: egui::Color32,
-    active_btn: egui::Color32,
+    appearance: &SketchAppearance,
 ) {
     sketch_shortcuts(ui, sketch);
 
@@ -995,17 +1006,17 @@ fn render_sketch_view(
             sketch,
             SketchTool::Select,
             "Select",
-            active_btn,
-            text_color,
+            appearance.active_btn,
+            appearance.text_color,
         )
-        .on_hover_text("Select and delete elements");
+        .on_hover_text("Select, move, and delete elements");
         tool_button(
             ui,
             sketch,
             SketchTool::Marker,
             "Marker",
-            active_btn,
-            text_color,
+            appearance.active_btn,
+            appearance.text_color,
         )
         .on_hover_text("Draw freehand strokes");
         tool_button(
@@ -1013,12 +1024,19 @@ fn render_sketch_view(
             sketch,
             SketchTool::Rectangle,
             "Rect",
-            active_btn,
-            text_color,
+            appearance.active_btn,
+            appearance.text_color,
         )
-        .on_hover_text("Drag to create a rectangle");
-        tool_button(ui, sketch, SketchTool::Text, "Text", active_btn, text_color)
-            .on_hover_text("Click to place a text box");
+        .on_hover_text("Drag to create a rectangle. Shift makes a square, Alt draws from center");
+        tool_button(
+            ui,
+            sketch,
+            SketchTool::Text,
+            "Text",
+            appearance.active_btn,
+            appearance.text_color,
+        )
+        .on_hover_text("Click to place a text box. Double-click existing text to edit");
 
         ui.separator();
 
@@ -1082,11 +1100,11 @@ fn render_sketch_view(
         ui.allocate_exact_size(canvas_size, egui::Sense::click_and_drag());
     let painter = ui.painter_at(canvas_rect);
 
-    painter.rect_filled(canvas_rect, egui::Rounding::same(4.0), sketch_bg);
+    painter.rect_filled(canvas_rect, egui::Rounding::same(4.0), appearance.canvas_bg);
     painter.rect_stroke(
         canvas_rect,
         egui::Rounding::same(4.0),
-        egui::Stroke::new(1.0, active_btn),
+        egui::Stroke::new(1.0, appearance.active_btn),
     );
 
     handle_sketch_pointer(sketch, &response, canvas_rect);
@@ -1154,6 +1172,7 @@ fn handle_sketch_pointer(
         return;
     };
     let point = screen_to_canvas(pointer_pos, canvas_rect);
+    let modifiers = response.ctx.input(|input| input.modifiers);
 
     match sketch.tool {
         SketchTool::Marker => {
@@ -1169,10 +1188,12 @@ fn handle_sketch_pointer(
         SketchTool::Rectangle => {
             if response.drag_started() {
                 sketch.begin_rectangle(point);
+                sketch.update_rectangle_with_modifiers(point, modifiers.shift, modifiers.alt);
             } else if response.dragged() {
-                sketch.update_rectangle(point);
+                sketch.update_rectangle_with_modifiers(point, modifiers.shift, modifiers.alt);
             }
             if response.drag_stopped() {
+                sketch.update_rectangle_with_modifiers(point, modifiers.shift, modifiers.alt);
                 sketch.finish_rectangle();
             }
         }
@@ -1182,6 +1203,26 @@ fn handle_sketch_pointer(
             }
         }
         SketchTool::Select => {
+            if response.double_clicked() {
+                if let Some(index) = sketch.hit_test(point) {
+                    if matches!(
+                        sketch.document.elements.get(index),
+                        Some(SketchElement::Text(_))
+                    ) {
+                        sketch.edit_text_box(index);
+                        return;
+                    }
+                }
+            }
+            if response.drag_started() {
+                sketch.select_at(point);
+                sketch.begin_move_selected(point);
+            } else if response.dragged() {
+                sketch.update_move_selected(point);
+            }
+            if response.drag_stopped() {
+                sketch.finish_move_selected();
+            }
             if response.clicked() {
                 sketch.select_at(point);
             }
@@ -1209,17 +1250,10 @@ fn paint_sketch_document(painter: &egui::Painter, canvas_rect: egui::Rect, sketc
                 stroke.style.stroke_width,
             );
         }
-        Some(DraftElement::Rectangle {
-            start,
-            current,
-            style,
-        }) => {
-            let rect = rect_from_points(canvas_rect, *start, *current);
-            painter.rect_stroke(
-                rect,
-                egui::Rounding::same(2.0),
-                egui::Stroke::new(style.stroke_width, color32(style.stroke_color)),
-            );
+        Some(DraftElement::Rectangle { .. }) => {
+            if let Some(rect) = sketch.draft_rectangle() {
+                paint_rectangle(painter, canvas_rect, &rect, false);
+            }
         }
         None => {}
     }
@@ -1242,21 +1276,7 @@ fn paint_sketch_element(
             );
         }
         SketchElement::Rectangle(rect) => {
-            let screen_rect = egui::Rect::from_min_size(
-                canvas_to_screen(canvas_rect, SketchPoint::new(rect.x, rect.y)),
-                egui::Vec2::new(rect.w, rect.h),
-            );
-            if let Some(fill) = rect.style.fill_color {
-                painter.rect_filled(screen_rect, egui::Rounding::same(2.0), color32(fill));
-            }
-            painter.rect_stroke(
-                screen_rect,
-                egui::Rounding::same(2.0),
-                egui::Stroke::new(rect.style.stroke_width, color32(rect.style.stroke_color)),
-            );
-            if selected {
-                paint_selection(painter, screen_rect);
-            }
+            paint_rectangle(painter, canvas_rect, rect, selected);
         }
         SketchElement::Text(text) => {
             if text.text.is_empty() {
@@ -1296,6 +1316,29 @@ fn paint_stroke(
         screen_points,
         egui::Stroke::new(width, color32(color)),
     ));
+}
+
+fn paint_rectangle(
+    painter: &egui::Painter,
+    canvas_rect: egui::Rect,
+    rect: &RectElement,
+    selected: bool,
+) {
+    let screen_rect = egui::Rect::from_min_size(
+        canvas_to_screen(canvas_rect, SketchPoint::new(rect.x, rect.y)),
+        egui::Vec2::new(rect.w, rect.h),
+    );
+    if let Some(fill) = rect.style.fill_color {
+        painter.rect_filled(screen_rect, egui::Rounding::same(2.0), color32(fill));
+    }
+    painter.rect_stroke(
+        screen_rect,
+        egui::Rounding::same(2.0),
+        egui::Stroke::new(rect.style.stroke_width, color32(rect.style.stroke_color)),
+    );
+    if selected {
+        paint_selection(painter, screen_rect);
+    }
 }
 
 fn paint_selection(painter: &egui::Painter, rect: egui::Rect) {
@@ -1379,17 +1422,6 @@ fn screen_to_canvas(pos: egui::Pos2, canvas_rect: egui::Rect) -> SketchPoint {
 
 fn canvas_to_screen(canvas_rect: egui::Rect, point: SketchPoint) -> egui::Pos2 {
     egui::pos2(canvas_rect.min.x + point.x, canvas_rect.min.y + point.y)
-}
-
-fn rect_from_points(
-    canvas_rect: egui::Rect,
-    start: SketchPoint,
-    current: SketchPoint,
-) -> egui::Rect {
-    egui::Rect::from_two_pos(
-        canvas_to_screen(canvas_rect, start),
-        canvas_to_screen(canvas_rect, current),
-    )
 }
 
 fn color32(color: [u8; 4]) -> egui::Color32 {

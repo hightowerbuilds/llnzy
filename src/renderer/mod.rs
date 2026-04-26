@@ -39,7 +39,7 @@ pub struct RenderRequest<'a> {
     pub screen_layout: &'a ScreenLayout,
     pub egui_render: Option<EguiRenderCallback<'a>>,
     /// When true, egui renders to the scene texture so post-processing
-    /// shaders (bloom, CRT) affect the UI. False for settings/stacker views.
+    /// shaders (bloom, CRT) affect the active UI view.
     pub apply_effects_to_ui: bool,
 }
 
@@ -218,9 +218,9 @@ impl Renderer {
         // Submit terminal content before egui overlay
         self.gpu.queue.submit(std::iter::once(encoder.finish()));
 
-        // Route egui rendering based on whether shaders should affect the UI.
-        // Shells view: render egui to scene texture so bloom/CRT affect the sidebar.
-        // Settings/Stacker: post-process first, then render egui clean on top.
+        // Route egui rendering based on whether shaders should affect the active UI view.
+        // Shadered views render egui to the scene texture before post-processing.
+        // Clean views post-process terminal content first, then draw egui on top.
         let egui_to_scene = use_scene && request.apply_effects_to_ui;
         if egui_to_scene {
             self.render_egui_overlay(request.egui_render, &self.gpu.scene_view);
