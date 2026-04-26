@@ -25,20 +25,6 @@ pub(crate) fn render_text_editor(
     clipboard_in: &mut Option<String>,
 ) -> EditorFrameResult {
     let mut result = EditorFrameResult::default();
-    // Breadcrumbs bar
-    let _breadcrumb_h = 20.0;
-    if let Some(path) = buf.path() {
-        let display = path.to_string_lossy();
-        ui.horizontal(|ui| {
-            ui.add_space(4.0);
-            for (i, segment) in display.split('/').filter(|s| !s.is_empty()).enumerate() {
-                if i > 0 {
-                    ui.label(egui::RichText::new(" > ").size(11.0).color(egui::Color32::from_rgb(80, 85, 100)));
-                }
-                ui.label(egui::RichText::new(segment).size(11.0).color(egui::Color32::from_rgb(160, 165, 180)));
-            }
-        });
-    }
 
     let line_count = buf.line_count();
     let gutter_digits = ((line_count as f64).log10().floor() as usize + 1).max(2);

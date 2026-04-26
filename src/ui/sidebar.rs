@@ -2,8 +2,14 @@ use crate::explorer::ExplorerState;
 use super::explorer_view;
 use super::types::{BUMPER_WIDTH, SIDEBAR_WIDTH};
 
+/// Result of rendering the sidebar.
+pub struct SidebarResult {
+    pub open: bool,
+    /// Width of the file tree panel (not including bumper).
+    pub panel_width: f32,
+}
+
 /// Render the sidebar (file tree + bumper) or just the bumper when closed.
-/// Returns the new sidebar_open state.
 pub fn render_sidebar(
     ctx: &egui::Context,
     sidebar_open: bool,
@@ -12,7 +18,7 @@ pub fn render_sidebar(
     text_color: egui::Color32,
     explorer: &mut ExplorerState,
     editor_view: &mut explorer_view::EditorViewState,
-) -> bool {
+) -> SidebarResult {
     let mut open = sidebar_open;
     let bumper_bg = egui::Color32::from_rgb(
         (bg[0] as f32 * 0.5) as u8,
@@ -20,8 +26,10 @@ pub fn render_sidebar(
         (bg[2] as f32 * 0.5) as u8,
     );
 
+    let mut panel_width = SIDEBAR_WIDTH - BUMPER_WIDTH;
+
     if open {
-        render_file_tree(ctx, chrome_bg, text_color, explorer, editor_view);
+        panel_width = render_file_tree(ctx, chrome_bg, text_color, explorer, editor_view);
         if render_bumper(ctx, bumper_bg, true) {
             open = false;
         }
@@ -29,19 +37,25 @@ pub fn render_sidebar(
         open = true;
     }
 
-    open
+    SidebarResult { open, panel_width }
 }
 
-/// Render the file tree panel (left of bumper when sidebar is open).
+/// Render the file tree panel. Returns the actual panel width.
 fn render_file_tree(
     ctx: &egui::Context,
     chrome_bg: egui::Color32,
     text_color: egui::Color32,
     explorer: &mut ExplorerState,
     editor_view: &mut explorer_view::EditorViewState,
-) {
-    egui::SidePanel::left("file_sidebar")
-        .exact_width(SIDEBAR_WIDTH - BUMPER_WIDTH)
+) -> f32 {
+    let default_width = SIDEBAR_WIDTH - BUMPER_WIDTH;
+    let min_width = 140.0;
+    let max_width = 400.0;
+
+    let response = egui::SidePanel::left("file_sidebar")
+        .default_width(default_width)
+        .width_range(min_width..=max_width)
+        .resizable(true)
         .frame(
             egui::Frame::none()
                 .fill(chrome_bg)
@@ -82,10 +96,11 @@ fn render_file_tree(
                     });
             }
         });
+
+    response.response.rect.width()
 }
 
 /// Render the bumper strip. Returns true if the user clicked it.
-/// When `is_open` is true, shows « (close). When false, shows » (open).
 fn render_bumper(ctx: &egui::Context, bumper_bg: egui::Color32, is_open: bool) -> bool {
     let mut clicked = false;
     egui::SidePanel::left("sidebar_bumper")

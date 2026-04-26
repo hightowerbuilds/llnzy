@@ -25,6 +25,8 @@ pub enum MenuAction {
     SplitVertical,
     SplitHorizontal,
     ToggleEffects,
+    OpenProject,
+    CloseProject,
 }
 
 static EVENT_PROXY: OnceLock<winit::event_loop::EventLoopProxy<UserEvent>> = OnceLock::new();
@@ -74,6 +76,16 @@ define_class!(
         #[unsafe(method(llnzySplitHorizontal:))]
         fn split_horizontal(&self, _sender: &AnyObject) {
             send_action(MenuAction::SplitHorizontal);
+        }
+
+        #[unsafe(method(llnzyOpenProject:))]
+        fn open_project(&self, _sender: &AnyObject) {
+            send_action(MenuAction::OpenProject);
+        }
+
+        #[unsafe(method(llnzyCloseProject:))]
+        fn close_project(&self, _sender: &AnyObject) {
+            send_action(MenuAction::CloseProject);
         }
     }
 
@@ -135,6 +147,21 @@ pub fn setup_menu_bar(proxy: winit::event_loop::EventLoopProxy<UserEvent>) {
         "Close Tab",
         sel!(llnzyCloseTab:),
         "w",
+    ));
+    file_menu.addItem(&NSMenuItem::separatorItem(mtm));
+    file_menu.addItem(&make_app_item(
+        mtm,
+        target,
+        "Open Project...",
+        sel!(llnzyOpenProject:),
+        "o",
+    ));
+    file_menu.addItem(&make_app_item(
+        mtm,
+        target,
+        "Close Project",
+        sel!(llnzyCloseProject:),
+        "",
     ));
     let file_item = NSMenuItem::new(mtm);
     file_item.setSubmenu(Some(&file_menu));

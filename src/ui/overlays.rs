@@ -25,7 +25,8 @@ pub fn handle_tab_bar(
     const TAB_BAR_HEIGHT: f32 = 32.0;
     const DOUBLE_CLICK_TIME_MS: u128 = 300;
 
-    if tab_count == 0 || !matches!(current_view, ActiveView::Shells) {
+    // Tab renaming works on any view that shows tabs (not overlays like Home/Appearances/Settings)
+    if tab_count == 0 || matches!(current_view, ActiveView::Home | ActiveView::Appearances | ActiveView::Settings) {
         return;
     }
 

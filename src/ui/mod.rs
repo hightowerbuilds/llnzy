@@ -8,6 +8,7 @@ mod settings_tabs;
 mod sidebar;
 mod sketch_view;
 mod stacker_view;
+pub mod tab_bar;
 pub mod types;
 
 use std::time::Instant;
@@ -20,6 +21,7 @@ use crate::stacker::{
     apply_prompt_edit, load_stacker_prompts, save_stacker_prompts, StackerPrompt,
 };
 
+pub use footer::FooterAction;
 pub use types::{ActiveView, CopyGhost, SettingsTab, BUMPER_WIDTH, SIDEBAR_WIDTH};
 
 /// State for the egui-driven UI overlay.
@@ -36,6 +38,8 @@ pub struct UiState {
     /// Text copied to clipboard by Stacker (main loop applies it)
     pub clipboard_text: Option<String>,
     pub sidebar_open: bool,
+    /// Actual sidebar panel width (tracked dynamically for layout).
+    pub sidebar_actual_width: f32,
     // Debug overlay
     pub show_fps: bool,
     frame_times: std::collections::VecDeque<f32>,
@@ -75,6 +79,14 @@ pub struct UiState {
     pub recent_projects: Vec<std::path::PathBuf>,
     /// Project path to open (set by Home screen, applied by main loop)
     pub open_project: Option<std::path::PathBuf>,
+    /// Footer action from the last render (consumed by main loop)
+    pub footer_action: Option<FooterAction>,
+    /// Active tab kind (set by main loop before render, used by footer highlighting)
+    pub active_tab_kind: Option<crate::workspace::TabKind>,
+    /// Tab bar action from the last render (consumed by main loop)
+    pub tab_bar_action: Option<tab_bar::TabBarAction>,
+    /// Workspace tabs reference for egui tab bar rendering (set by main loop before render)
+    pub tab_names: Vec<(String, bool)>,
 }
 
 impl UiState {
@@ -124,6 +136,7 @@ impl UiState {
             pending_config: None,
             clipboard_text: None,
             sidebar_open: false,
+            sidebar_actual_width: SIDEBAR_WIDTH,
             show_fps: false,
             frame_times: std::collections::VecDeque::with_capacity(120),
             stacker_prompts,
@@ -151,6 +164,10 @@ impl UiState {
             palette_command: None,
             recent_projects: crate::explorer::load_recent_projects(),
             open_project: None,
+            footer_action: None,
+            active_tab_kind: None,
+            tab_bar_action: None,
+            tab_names: Vec::new(),
         }
     }
 
@@ -160,19 +177,15 @@ impl UiState {
         response.consumed
     }
 
-    /// Whether the terminal is completely covered by a full-screen view.
-    /// When the terminal panel is open in Explorer, the terminal is NOT covered.
+    /// Whether the wgpu terminal content is completely covered.
+    /// True when an overlay is showing or the active tab is not a terminal.
     pub fn settings_open(&self) -> bool {
-        match self.active_view {
-            ActiveView::Explorer if self.terminal_panel_open => false,
-            ActiveView::Home
-            | ActiveView::Appearances
-            | ActiveView::Settings
-            | ActiveView::Stacker
-            | ActiveView::Sketch
-            | ActiveView::Explorer => true,
-            _ => false,
+        // Overlay views always cover the terminal
+        if matches!(self.active_view, ActiveView::Home | ActiveView::Appearances | ActiveView::Settings) {
+            return true;
         }
+        // Non-terminal tabs cover the terminal content area
+        !matches!(self.active_tab_kind, Some(crate::workspace::TabKind::Terminal))
     }
 
     pub fn toggle_terminal_panel(&mut self) {
@@ -180,7 +193,7 @@ impl UiState {
     }
 
     pub fn captures_terminal_input(&self) -> bool {
-        matches!(self.active_view, ActiveView::Sketch)
+        matches!(self.active_tab_kind, Some(crate::workspace::TabKind::Sketch))
     }
 
     pub fn toggle_sidebar(&mut self) {
@@ -190,7 +203,7 @@ impl UiState {
     /// Total width consumed by sidebar UI (bumper is always visible).
     pub fn sidebar_width(&self) -> f32 {
         if self.sidebar_open {
-            SIDEBAR_WIDTH
+            self.sidebar_actual_width + BUMPER_WIDTH
         } else {
             BUMPER_WIDTH
         }
@@ -251,6 +264,8 @@ impl UiState {
         let footer_height = self.footer_height;
         let settings_tab = self.settings_tab;
         let mut nav_target: Option<ActiveView> = None;
+        let mut footer_action_out: Option<FooterAction> = None;
+        let active_tab_kind = self.active_tab_kind;
         let mut config_clone = config.clone();
         let mut clipboard_copy: Option<String> = None;
 
@@ -269,8 +284,8 @@ impl UiState {
         let mut sketch_canvas_px: Option<[f32; 4]> = None;
         let mut explorer = std::mem::take(&mut self.explorer);
         let mut editor_view = std::mem::take(&mut self.editor_view);
-        let terminal_panel_open = self.terminal_panel_open;
-        let terminal_panel_ratio = self.terminal_panel_ratio;
+        let _terminal_panel_open = self.terminal_panel_open;
+        let _terminal_panel_ratio = self.terminal_panel_ratio;
         let mut palette = std::mem::take(&mut self.palette);
         let mut palette_command: Option<command_palette::CommandId> = None;
         let recent_projects = self.recent_projects.clone();
@@ -285,11 +300,16 @@ impl UiState {
         };
 
         let mut sidebar_open = self.sidebar_open;
+        let mut sidebar_panel_width = self.sidebar_actual_width;
         let mut editing_tab = self.editing_tab;
         let mut editing_tab_text = std::mem::take(&mut self.editing_tab_text);
         let tab_count = self.tab_count;
+        let active_tab_index = self.active_tab_index;
+        let tab_names = std::mem::take(&mut self.tab_names);
         let mut last_tab_click = self.last_tab_click.take();
         let mut saved_tab_name_out: Option<(usize, String)> = None;
+        let mut tab_switch: Option<usize> = None;
+        let mut tab_close: Option<usize> = None;
 
         let full_output = self.ctx.run(raw_input, |ctx| {
             // ── Theme-derived colors ──
@@ -309,32 +329,99 @@ impl UiState {
             let text_color = egui::Color32::from_rgb(fg[0], fg[1], fg[2]);
 
             // ── Footer ──
-            if let Some(view) = footer::render_footer(
-                ctx, footer_height, current_view, chrome_bg, active_btn, text_color,
+            let active_singleton = active_tab_kind.and_then(|k| {
+                if matches!(k, crate::workspace::TabKind::Stacker | crate::workspace::TabKind::Sketch) {
+                    Some(k)
+                } else {
+                    None
+                }
+            });
+            if let Some(action) = footer::render_footer(
+                ctx, footer_height, current_view, active_singleton, active_tab_kind, chrome_bg, active_btn, text_color,
             ) {
-                nav_target = Some(view);
+                match action {
+                    footer::FooterAction::ShowOverlay(view) => {
+                        nav_target = Some(view);
+                    }
+                    footer::FooterAction::OpenSingletonTab(kind) => {
+                        footer_action_out = Some(footer::FooterAction::OpenSingletonTab(kind));
+                    }
+                    footer::FooterAction::NewTerminalTab => {
+                        footer_action_out = Some(footer::FooterAction::NewTerminalTab);
+                    }
+                }
             }
 
-            // ── Tab bar interaction ──
-            let mut tab_state = overlays::TabBarState {
-                editing_tab,
-                editing_tab_text: editing_tab_text.clone(),
-                last_tab_click,
-                saved_tab_name: None,
-            };
-            overlays::handle_tab_bar(ctx, tab_count, current_view, sidebar_open, &mut tab_state);
-            editing_tab = tab_state.editing_tab;
-            editing_tab_text = tab_state.editing_tab_text;
-            last_tab_click = tab_state.last_tab_click;
-            if tab_state.saved_tab_name.is_some() {
-                saved_tab_name_out = tab_state.saved_tab_name;
+            // ── Tab bar (egui) ──
+            if !tab_names.is_empty() && current_view != ActiveView::Home {
+                egui::TopBottomPanel::top("workspace_tab_bar")
+                    .exact_height(30.0)
+                    .frame(
+                        egui::Frame::none()
+                            .fill(egui::Color32::from_rgb(
+                                (bg[0] as f32 * 0.4) as u8,
+                                (bg[1] as f32 * 0.4) as u8,
+                                (bg[2] as f32 * 0.4) as u8,
+                            ))
+                            .inner_margin(egui::Margin::symmetric(4.0, 0.0)),
+                    )
+                    .show(ctx, |ui| {
+                        ui.horizontal_centered(|ui| {
+                            ui.spacing_mut().item_spacing.x = 2.0;
+                            for (i, (name, _is_active)) in tab_names.iter().enumerate() {
+                                let active = i == active_tab_index;
+                                let tab_bg = if active {
+                                    egui::Color32::from_rgb(50, 80, 140)
+                                } else {
+                                    egui::Color32::from_rgb(30, 32, 40)
+                                };
+                                let txt_color = if active {
+                                    egui::Color32::WHITE
+                                } else {
+                                    egui::Color32::from_rgb(160, 165, 180)
+                                };
+                                egui::Frame::none()
+                                    .fill(tab_bg)
+                                    .rounding(egui::Rounding { nw: 4.0, ne: 4.0, sw: 0.0, se: 0.0 })
+                                    .inner_margin(egui::Margin::symmetric(10.0, 4.0))
+                                    .show(ui, |ui| {
+                                        ui.horizontal(|ui| {
+                                            let label = ui.add(
+                                                egui::Label::new(
+                                                    egui::RichText::new(name).size(12.0).color(txt_color),
+                                                ).sense(egui::Sense::click()),
+                                            );
+                                            if label.clicked() { tab_switch = Some(i); }
+
+                                            ui.add_space(6.0);
+                                            let x_color = if active {
+                                                egui::Color32::from_rgb(200, 200, 210)
+                                            } else {
+                                                egui::Color32::from_rgb(100, 105, 115)
+                                            };
+                                            let x_btn = ui.add(
+                                                egui::Label::new(
+                                                    egui::RichText::new("x").size(11.0).color(x_color),
+                                                ).sense(egui::Sense::click()),
+                                            );
+                                            if x_btn.clicked() { tab_close = Some(i); }
+                                            if x_btn.hovered() {
+                                                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                                            }
+                                        });
+                                    });
+                            }
+                        });
+                    });
             }
 
             // ── Sidebar ──
-            sidebar_open = sidebar::render_sidebar(
+            let sidebar_result = sidebar::render_sidebar(
                 ctx, sidebar_open, chrome_bg, bg, text_color,
                 &mut explorer, &mut editor_view,
             );
+            sidebar_open = sidebar_result.open;
+            sidebar_panel_width = sidebar_result.panel_width;
 
             // ── Home view ──
             if current_view == ActiveView::Home {
@@ -343,123 +430,74 @@ impl UiState {
                 if action.open_project.is_some() { open_project = action.open_project; }
             }
 
-            // ── Appearances view ──
-            if current_view == ActiveView::Appearances {
-                egui::CentralPanel::default()
-                    .frame(
-                        egui::Frame::none()
-                            .fill(egui::Color32::from_rgb(20, 20, 26))
-                            .inner_margin(egui::Margin::same(20.0)),
-                    )
-                    .show(ctx, |ui| {
-                        egui::ScrollArea::vertical()
-                            .auto_shrink([false; 2])
-                            .show(ui, |ui| {
-                                settings_tabs::render_themes_tab(ui, &mut config_clone);
-                                ui.add_space(24.0);
-                                ui.separator();
-                                ui.add_space(16.0);
-                                settings_tabs::render_background_tab(ui, &mut config_clone);
-                                ui.add_space(24.0);
-                                ui.separator();
-                                ui.add_space(16.0);
-                                settings_tabs::render_text_tab(ui, &mut config_clone);
+            // ── Tab content views (rendered when Home overlay is not active) ──
+            if current_view != ActiveView::Home {
+                use crate::workspace::TabKind;
+                match active_tab_kind {
+                    Some(TabKind::Stacker) => {
+                        egui::CentralPanel::default()
+                            .frame(egui::Frame::none().fill(egui::Color32::from_rgb(20, 20, 26)).inner_margin(egui::Margin::same(20.0)))
+                            .show(ctx, |ui| {
+                                stacker_view::render_stacker_view(
+                                    ui, &mut stacker_prompts, &mut stacker_input,
+                                    &mut stacker_category_input, &mut stacker_search,
+                                    &mut stacker_filter_category, &mut stacker_editing,
+                                    &mut stacker_edit_text, &mut stacker_dirty,
+                                    &mut saved_edit_idx, &mut clipboard_copy,
+                                );
                             });
-                    });
-            }
-
-            // ── Stacker view ──
-            if current_view == ActiveView::Stacker {
-                egui::CentralPanel::default()
-                    .frame(
-                        egui::Frame::none()
-                            .fill(egui::Color32::from_rgb(20, 20, 26))
-                            .inner_margin(egui::Margin::same(20.0)),
-                    )
-                    .show(ctx, |ui| {
-                        stacker_view::render_stacker_view(
-                            ui,
-                            &mut stacker_prompts,
-                            &mut stacker_input,
-                            &mut stacker_category_input,
-                            &mut stacker_search,
-                            &mut stacker_filter_category,
-                            &mut stacker_editing,
-                            &mut stacker_edit_text,
-                            &mut stacker_dirty,
-                            &mut saved_edit_idx,
-                            &mut clipboard_copy,
-                        );
-                    });
-            }
-
-            // ── Explorer view ──
-            if current_view == ActiveView::Explorer {
-                if terminal_panel_open {
-                    let screen_h = ctx.screen_rect().height();
-                    let terminal_h = (screen_h * terminal_panel_ratio).max(80.0);
-                    egui::TopBottomPanel::bottom("terminal_panel_spacer")
-                        .exact_height(terminal_h)
-                        .frame(egui::Frame::none().fill(egui::Color32::TRANSPARENT))
-                        .show(ctx, |ui| {
-                            ui.add(egui::Separator::default().horizontal());
-                        });
+                    }
+                    Some(TabKind::CodeFile) => {
+                        egui::CentralPanel::default()
+                            .frame(egui::Frame::none().fill(egui::Color32::from_rgb(bg[0], bg[1], bg[2])).inner_margin(egui::Margin::same(20.0)))
+                            .show(ctx, |ui| {
+                                explorer_view::render_explorer_view(ui, &mut explorer, &mut editor_view);
+                            });
+                    }
+                    Some(TabKind::Sketch) => {
+                        let sketch_bg = egui::Color32::from_rgb(bg[0], bg[1], bg[2]);
+                        let sketch_appearance = sketch_view::SketchAppearance { canvas_bg: sketch_bg, text_color, active_btn };
+                        let mut canvas_rect_out = None;
+                        egui::CentralPanel::default()
+                            .frame(egui::Frame::none().fill(sketch_bg).inner_margin(egui::Margin::same(14.0)))
+                            .show(ctx, |ui| {
+                                canvas_rect_out = Some(sketch_view::render_sketch_view(ctx, ui, &mut sketch, &sketch_appearance));
+                            });
+                        if let Some(rect) = canvas_rect_out {
+                            let ppp = ctx.pixels_per_point();
+                            sketch_canvas_px = Some([rect.left() * ppp, rect.top() * ppp, rect.right() * ppp, rect.bottom() * ppp]);
+                        }
+                    }
+                    Some(TabKind::Appearances) => {
+                        egui::CentralPanel::default()
+                            .frame(egui::Frame::none().fill(egui::Color32::from_rgb(20, 20, 26)).inner_margin(egui::Margin::same(20.0)))
+                            .show(ctx, |ui| {
+                                egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
+                                    settings_tabs::render_themes_tab(ui, &mut config_clone);
+                                    ui.add_space(24.0); ui.separator(); ui.add_space(16.0);
+                                    settings_tabs::render_background_tab(ui, &mut config_clone);
+                                    ui.add_space(24.0); ui.separator(); ui.add_space(16.0);
+                                    settings_tabs::render_text_tab(ui, &mut config_clone);
+                                });
+                            });
+                    }
+                    Some(TabKind::Settings) => {
+                        egui::CentralPanel::default()
+                            .frame(egui::Frame::none().fill(egui::Color32::from_rgb(20, 20, 26)).inner_margin(egui::Margin::same(20.0)))
+                            .show(ctx, |ui| {
+                                ui.label(egui::RichText::new("Settings").size(22.0).color(egui::Color32::WHITE));
+                            });
+                    }
+                    Some(TabKind::Terminal) => {
+                        // Terminal content rendered by wgpu — no egui panel needed
+                    }
+                    None => {
+                        // No tabs — empty background
+                        egui::CentralPanel::default()
+                            .frame(egui::Frame::none().fill(egui::Color32::from_rgb(bg[0], bg[1], bg[2])))
+                            .show(ctx, |_ui| {});
+                    }
                 }
-                egui::CentralPanel::default()
-                    .frame(
-                        egui::Frame::none()
-                            .fill(egui::Color32::from_rgb(bg[0], bg[1], bg[2]))
-                            .inner_margin(egui::Margin::same(20.0)),
-                    )
-                    .show(ctx, |ui| {
-                        explorer_view::render_explorer_view(ui, &mut explorer, &mut editor_view);
-                    });
-            }
-
-            // ── Sketch view ──
-            if current_view == ActiveView::Sketch {
-                let sketch_bg = egui::Color32::from_rgb(bg[0], bg[1], bg[2]);
-                let sketch_appearance = sketch_view::SketchAppearance {
-                    canvas_bg: sketch_bg,
-                    text_color,
-                    active_btn,
-                };
-                let mut canvas_rect_out = None;
-                egui::CentralPanel::default()
-                    .frame(
-                        egui::Frame::none()
-                            .fill(sketch_bg)
-                            .inner_margin(egui::Margin::same(14.0)),
-                    )
-                    .show(ctx, |ui| {
-                        canvas_rect_out = Some(sketch_view::render_sketch_view(ctx, ui, &mut sketch, &sketch_appearance));
-                    });
-                if let Some(rect) = canvas_rect_out {
-                    let ppp = ctx.pixels_per_point();
-                    sketch_canvas_px = Some([
-                        rect.left() * ppp,
-                        rect.top() * ppp,
-                        rect.right() * ppp,
-                        rect.bottom() * ppp,
-                    ]);
-                }
-            }
-
-            // ── Settings view ──
-            if current_view == ActiveView::Settings {
-                egui::CentralPanel::default()
-                    .frame(
-                        egui::Frame::none()
-                            .fill(egui::Color32::from_rgb(20, 20, 26))
-                            .inner_margin(egui::Margin::same(20.0)),
-                    )
-                    .show(ctx, |ui| {
-                        ui.label(
-                            egui::RichText::new("Settings")
-                                .size(22.0)
-                                .color(egui::Color32::WHITE),
-                        );
-                    });
             }
 
             // ── Overlays ──
@@ -499,6 +537,7 @@ impl UiState {
         }
         self.sketch = sketch;
         self.sidebar_open = sidebar_open;
+        self.sidebar_actual_width = sidebar_panel_width;
         self.explorer = explorer;
         self.editor_view = editor_view;
         self.palette = palette;
@@ -512,6 +551,15 @@ impl UiState {
         self.saved_tab_name = saved_tab_name_out;
         self.last_tab_click = last_tab_click;
 
+        self.footer_action = footer_action_out;
+        self.tab_bar_action = if tab_switch.is_some() || tab_close.is_some() {
+            Some(tab_bar::TabBarAction {
+                switch_to: tab_switch,
+                close_tab: tab_close,
+            })
+        } else {
+            None
+        };
         if let Some(view) = nav_target {
             self.active_view = view;
         }
@@ -523,8 +571,8 @@ impl UiState {
             self.clipboard_text = Some(text);
         }
 
-        // Push config changes when on appearances view
-        if current_view == ActiveView::Appearances {
+        // Push config changes when appearances tab is active
+        if active_tab_kind == Some(crate::workspace::TabKind::Appearances) {
             self.pending_config = Some(config_clone);
         }
 

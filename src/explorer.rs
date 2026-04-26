@@ -159,6 +159,18 @@ impl ExplorerState {
         }
     }
 
+    /// Clear the project — reset to empty state.
+    pub fn clear(&mut self) {
+        self.root = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+        self.tree.clear();
+        self.open_file = None;
+        self.error = None;
+        self.file_index = None;
+        self.finder_open = false;
+        self.finder_query.clear();
+        self.finder_results.clear();
+    }
+
     /// Set the project root and rebuild the tree.
     pub fn set_root(&mut self, path: PathBuf) {
         self.root = path;

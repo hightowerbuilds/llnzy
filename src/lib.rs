@@ -19,6 +19,7 @@ pub mod stacker;
 pub mod terminal;
 pub mod theme;
 pub mod ui;
+pub mod workspace;
 
 #[derive(Debug)]
 pub enum UserEvent {

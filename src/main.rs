@@ -16,10 +16,11 @@ use llnzy::layout::{LayoutInputs, ScreenLayout};
 use llnzy::renderer::{RenderRequest, Renderer};
 use llnzy::search::Search;
 use llnzy::selection::Selection;
-use llnzy::session::{split_pane, PaneNode, Rect as PaneRect, Session, SplitDir};
+use llnzy::session::{Rect as PaneRect, Session};
 use llnzy::ui::{ActiveView, UiState, BUMPER_WIDTH};
+use llnzy::workspace::{TabContent, WorkspaceTab};
 use llnzy::UserEvent;
-use winit::window::CursorIcon;
+
 
 struct ClickState {
     last_time: Instant,
@@ -51,25 +52,13 @@ impl ClickState {
     }
 }
 
-/// A tab contains a pane tree (which may be a single pane or splits).
-struct Tab {
-    root: PaneNode,
-    name: Option<String>,
-}
-
-/// Tracks an active divider drag for pane resizing.
-struct DividerDrag {
-    path: Vec<bool>,
-    dir: SplitDir,
-    parent_rect: PaneRect,
-}
-
 struct App {
     config: Config,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
-    tabs: Vec<Tab>,
+    tabs: Vec<WorkspaceTab>,
     active_tab: usize,
+    next_tab_id: u64,
     proxy: winit::event_loop::EventLoopProxy<UserEvent>,
     modifiers: ModifiersState,
     selection: Selection,
@@ -79,7 +68,6 @@ struct App {
     clipboard: Option<arboard::Clipboard>,
     cursor_pos: winit::dpi::PhysicalPosition<f64>,
     mouse_pressed: bool,
-    divider_drag: Option<DividerDrag>,
     click_state: ClickState,
     ui: Option<UiState>,
     screen_layout: Option<ScreenLayout>,
@@ -99,6 +87,7 @@ impl App {
             renderer: None,
             tabs: Vec::new(),
             active_tab: 0,
+            next_tab_id: 1,
             proxy,
             modifiers: ModifiersState::empty(),
             selection: Selection::new(),
@@ -108,7 +97,6 @@ impl App {
             clipboard,
             cursor_pos: winit::dpi::PhysicalPosition::new(0.0, 0.0),
             mouse_pressed: false,
-            divider_drag: None,
             click_state: ClickState::new(),
             ui: None,
             screen_layout: None,
@@ -120,37 +108,50 @@ impl App {
         }
     }
 
-    fn active_tab(&self) -> Option<&Tab> {
+    fn alloc_tab_id(&mut self) -> u64 {
+        let id = self.next_tab_id;
+        self.next_tab_id += 1;
+        id
+    }
+
+    fn active_tab(&self) -> Option<&WorkspaceTab> {
         self.tabs.get(self.active_tab)
     }
 
-    fn active_tab_mut(&mut self) -> Option<&mut Tab> {
+    fn active_tab_mut(&mut self) -> Option<&mut WorkspaceTab> {
         self.tabs.get_mut(self.active_tab)
     }
 
     fn active_session(&self) -> Option<&Session> {
-        self.active_tab().map(|t| t.root.active())
+        match self.active_tab()?.content {
+            TabContent::Terminal(ref s) => Some(s),
+            _ => None,
+        }
     }
 
     fn active_session_mut(&mut self) -> Option<&mut Session> {
-        self.active_tab_mut().map(|t| t.root.active_mut())
+        match self.active_tab_mut()?.content {
+            TabContent::Terminal(ref mut s) => Some(s),
+            _ => None,
+        }
     }
 
     fn process_all_output(&mut self) {
         let mut any_changed = false;
         for tab in &mut self.tabs {
-            let (changed, clips, bell) = tab.root.process_all();
-            if changed {
-                any_changed = true;
-            }
-            if bell {
-                self.visual_bell_until =
-                    Some(Instant::now() + std::time::Duration::from_millis(150));
-            }
-            // Handle OSC 52 clipboard stores
-            for text in clips {
-                if let Some(cb) = &mut self.clipboard {
-                    let _ = cb.set_text(text);
+            if let TabContent::Terminal(ref mut session) = tab.content {
+                let (changed, clip, bell) = session.process_output();
+                if changed {
+                    any_changed = true;
+                }
+                if bell {
+                    self.visual_bell_until =
+                        Some(Instant::now() + std::time::Duration::from_millis(150));
+                }
+                if let Some(text) = clip {
+                    if let Some(cb) = &mut self.clipboard {
+                        let _ = cb.set_text(text);
+                    }
                 }
             }
         }
@@ -168,18 +169,21 @@ impl App {
             self.request_redraw();
         }
 
-        // Auto-close tabs whose shells have exited
+        // Auto-close terminal tabs whose shells have exited
         let before = self.tabs.len();
-        self.tabs.retain(|tab| tab.root.active().exited.is_none());
+        self.tabs.retain(|tab| {
+            if let TabContent::Terminal(ref session) = tab.content {
+                session.exited.is_none()
+            } else {
+                true // non-terminal tabs never auto-close
+            }
+        });
         let closed = before - self.tabs.len();
         if closed > 0 {
             self.error_log
                 .info(format!("{} tab(s) closed (shell exited)", closed));
         }
-        if self.tabs.is_empty() {
-            self.error_log.info("All shells exited, spawning new tab");
-            self.new_tab();
-        } else if self.active_tab >= self.tabs.len() {
+        if self.active_tab >= self.tabs.len() && !self.tabs.is_empty() {
             self.active_tab = self.tabs.len() - 1;
             self.request_redraw();
         }
@@ -269,24 +273,25 @@ impl App {
         }
     }
 
-    fn content_rect(&self) -> Option<PaneRect> {
-        self.screen_layout.as_ref().map(|l| {
-            let mut rect = PaneRect {
-                x: l.content.x,
-                y: l.content.y,
-                w: l.content.w,
-                h: l.content.h,
-            };
-            // When terminal panel is open in Explorer, terminal gets only the bottom portion
-            if let Some(ui) = &self.ui {
-                if ui.terminal_panel_open && ui.active_view == ActiveView::Explorer {
-                    let panel_h = (l.content.h * ui.terminal_panel_ratio).max(80.0);
-                    let editor_h = l.content.h - panel_h;
-                    rect.y = l.content.y + editor_h;
-                    rect.h = panel_h;
+    /// Resize all terminal sessions to the current content rect.
+    fn resize_terminal_tabs(&mut self) {
+        if let Some(layout) = &self.screen_layout {
+            let (cols, rows) = (layout.grid_cols, layout.grid_rows);
+            for tab in &mut self.tabs {
+                if let TabContent::Terminal(ref mut session) = tab.content {
+                    session.resize(cols, rows);
                 }
             }
-            rect
+        }
+    }
+
+    #[allow(dead_code)] // Will be used in Phase 3 (conditional rendering)
+    fn content_rect(&self) -> Option<PaneRect> {
+        self.screen_layout.as_ref().map(|l| PaneRect {
+            x: l.content.x,
+            y: l.content.y,
+            w: l.content.w,
+            h: l.content.h,
         })
     }
 
@@ -338,13 +343,27 @@ impl App {
 
     fn new_tab(&mut self) {
         let (cols, rows) = self.grid_size();
-        // Spawn new tab in the current session's working directory
-        let cwd = self.active_session().and_then(|s| s.cwd.clone());
+        // Use CWD from active terminal, or fall back to the project root
+        let cwd = self
+            .active_session()
+            .and_then(|s| s.cwd.clone())
+            .or_else(|| {
+                self.ui.as_ref().and_then(|ui| {
+                    let root = &ui.explorer.root;
+                    if !ui.explorer.tree.is_empty() {
+                        Some(root.to_string_lossy().into_owned())
+                    } else {
+                        None
+                    }
+                })
+            });
         match Session::new_in_dir(cols, rows, &self.config, self.proxy.clone(), cwd.as_deref()) {
             Ok(session) => {
-                self.tabs.push(Tab {
-                    root: PaneNode::Leaf(Box::new(session)),
+                let id = self.alloc_tab_id();
+                self.tabs.push(WorkspaceTab {
+                    content: TabContent::Terminal(Box::new(session)),
                     name: None,
+                    id,
                 });
                 self.active_tab = self.tabs.len() - 1;
                 self.selection.clear();
@@ -356,11 +375,17 @@ impl App {
     }
 
     fn close_tab(&mut self) {
-        if self.tabs.len() <= 1 {
+        if self.tabs.is_empty() {
             return;
         }
         self.tabs.remove(self.active_tab);
-        if self.active_tab >= self.tabs.len() {
+        if self.tabs.is_empty() {
+            self.active_tab = 0;
+            // Return to Home when all tabs are closed
+            if let Some(ui) = &mut self.ui {
+                ui.active_view = ActiveView::Home;
+            }
+        } else if self.active_tab >= self.tabs.len() {
             self.active_tab = self.tabs.len() - 1;
         }
         self.selection.clear();
@@ -374,42 +399,6 @@ impl App {
             self.selection.clear();
             self.invalidate_and_redraw();
         }
-    }
-
-    fn split_active_pane(&mut self, dir: SplitDir) {
-        let (cols, rows) = self.grid_size();
-        // Compute layout info before borrowing tabs mutably
-        let layout_info = self.screen_layout.as_ref().map(|l| {
-            let rect = PaneRect {
-                x: l.content.x,
-                y: l.content.y,
-                w: l.content.w,
-                h: l.content.h,
-            };
-            (l.cell_w, l.cell_h, rect)
-        });
-
-        if let Some(tab) = self.tabs.get_mut(self.active_tab) {
-            let dummy_session = match Session::new(1, 1, &self.config, self.proxy.clone()) {
-                Ok(s) => s,
-                Err(e) => {
-                    log::error!("Failed to split: {}", e);
-                    return;
-                }
-            };
-            let root = std::mem::replace(&mut tab.root, PaneNode::Leaf(Box::new(dummy_session)));
-            match split_pane(root, dir, &self.config, cols, rows, self.proxy.clone()) {
-                Ok(new_root) => {
-                    tab.root = new_root;
-                    if let Some((cw, ch, rect)) = layout_info {
-                        tab.root.resize_all(rect, cw, ch);
-                    }
-                }
-                Err(e) => self.error_log.error(format!("Failed to split pane: {}", e)),
-            }
-        }
-
-        self.invalidate_and_redraw();
     }
 
     fn toggle_fullscreen(&self) {
@@ -446,11 +435,7 @@ impl App {
             .iter()
             .enumerate()
             .map(|(i, tab)| {
-                let title = tab
-                    .name
-                    .as_ref()
-                    .cloned()
-                    .unwrap_or_else(|| format!("Shell {}", i + 1));
+                let title = tab.display_name(i);
                 (title, i == self.active_tab)
             })
             .collect()
@@ -504,23 +489,7 @@ impl ApplicationHandler<UserEvent> for App {
             glyph_offset_x: gox,
             sidebar_w: BUMPER_WIDTH, // bumper always visible
         });
-        let cols = layout.grid_cols;
-        let rows = layout.grid_rows;
         self.screen_layout = Some(layout);
-
-        match Session::new(cols, rows, &self.config, self.proxy.clone()) {
-            Ok(session) => {
-                self.tabs.push(Tab {
-                    root: PaneNode::Leaf(Box::new(session)),
-                    name: None,
-                });
-            }
-            Err(e) => {
-                log::error!("Failed to spawn shell: {}", e);
-                event_loop.exit();
-                return;
-            }
-        }
 
         let ui_state = UiState::new(
             &window,
@@ -583,18 +552,7 @@ impl ApplicationHandler<UserEvent> for App {
                     renderer.invalidate_text_cache();
                 }
                 self.recompute_layout();
-                if let Some(layout) = &self.screen_layout {
-                    let rect = self.content_rect().unwrap_or(PaneRect {
-                        x: layout.content.x,
-                        y: layout.content.y,
-                        w: layout.content.w,
-                        h: layout.content.h,
-                    });
-                    let (cw, ch) = (layout.cell_w, layout.cell_h);
-                    for tab in &mut self.tabs {
-                        tab.root.resize_all(rect, cw, ch);
-                    }
-                }
+                self.resize_terminal_tabs();
                 self.selection.clear();
             }
 
@@ -620,10 +578,9 @@ impl ApplicationHandler<UserEvent> for App {
                     .map(|r| r.cell_dimensions())
                     .unwrap_or((1.0, 1.0));
                 let sel_info = self
-                    .tabs
-                    .get(self.active_tab)
-                    .map(|tab| {
-                        let cols = tab.root.active().terminal.size().0;
+                    .active_session()
+                    .map(|session| {
+                        let cols = session.terminal.size().0;
                         self.selection.rects(
                             cw,
                             ch,
@@ -650,27 +607,17 @@ impl ApplicationHandler<UserEvent> for App {
                 // Snapshot sidebar width before egui render so we can detect bumper clicks
                 let sidebar_w_before = self.ui.as_ref().map(|u| u.sidebar_width()).unwrap_or(0.0);
 
-                if let (Some(renderer), Some(tab)) =
-                    (&mut self.renderer, self.tabs.get(self.active_tab))
-                {
+                if let Some(renderer) = &mut self.renderer {
                     if let Some(layout) = &self.screen_layout {
-                        // Shells honors the theme-level UI shader flag so app chrome can stay
-                        // clean. Sketch opts into the real shader path so the canvas gets CRT,
-                        // bloom, and background effects. A CRT mask restricts effects to just the
-                        // canvas rect so sidebar/footer stay clean.
-                        let effects_on_ui = self.ui.as_ref().is_some_and(|u| match u.active_view {
-                            ActiveView::Shells => self.config.effects.effects_on_ui,
-                            ActiveView::Sketch => true,
-                            ActiveView::Home
-                            | ActiveView::Explorer
-                            | ActiveView::Stacker
-                            | ActiveView::Appearances
-                            | ActiveView::Settings => false,
-                        });
-                        // Build CRT effects mask: restrict effects to the canvas rect on Sketch view
+                        let active_kind = self.tabs.get(self.active_tab).map(|t| t.content.kind());
+                        let effects_on_ui = match active_kind {
+                            Some(llnzy::workspace::TabKind::Terminal) => self.config.effects.effects_on_ui,
+                            Some(llnzy::workspace::TabKind::Sketch) => true,
+                            _ => false,
+                        };
                         let effects_mask = self.ui.as_ref().and_then(|u| {
                             u.sketch_canvas_px.and_then(|px| {
-                                if matches!(u.active_view, ActiveView::Sketch) {
+                                if matches!(active_kind, Some(llnzy::workspace::TabKind::Sketch)) {
                                     let size = self.window.as_ref()?.inner_size();
                                     let w = size.width as f32;
                                     let h = size.height as f32;
@@ -687,13 +634,20 @@ impl ApplicationHandler<UserEvent> for App {
                                     ui.editor_view.clipboard_in = Some(text);
                                 }
                             }
-                            // Ensure the LSP manager is initialized
                             ui.editor_view.init_lsp(self.proxy.clone());
                         }
-                        // Update tab context for tab bar interaction
                         if let Some(ui) = self.ui.as_mut() {
                             ui.set_tab_context(self.tabs.len(), self.active_tab);
+                            ui.active_tab_kind = self.tabs.get(self.active_tab).map(|t| t.content.kind());
+                            // Populate tab names for egui tab bar
+                            ui.tab_names = titles.clone();
                         }
+
+                        // Get the active terminal session (if any) for the renderer
+                        let active_tab = self.tabs.get(self.active_tab);
+                        let terminal_session = active_tab.and_then(|t| t.content.as_terminal());
+                        let tab_id = active_tab.map(|t| t.id).unwrap_or(0);
+
                         let ui_state = &mut self.ui;
                         let window_ref = &self.window;
                         let config_ref = &self.config;
@@ -709,7 +663,8 @@ impl ApplicationHandler<UserEvent> for App {
                                 }
                             };
                         renderer.render(RenderRequest {
-                            pane_root: &tab.root,
+                            terminal: terminal_session,
+                            tab_id,
                             tab_titles: &titles,
                             selection_rects: &sel_info,
                             search_rects: &search_rects,
@@ -728,18 +683,7 @@ impl ApplicationHandler<UserEvent> for App {
                 let sidebar_w_after = self.ui.as_ref().map(|u| u.sidebar_width()).unwrap_or(0.0);
                 if (sidebar_w_after - sidebar_w_before).abs() > 0.1 {
                     self.recompute_layout();
-                    if let Some(layout) = &self.screen_layout {
-                        let rect = PaneRect {
-                            x: layout.content.x,
-                            y: layout.content.y,
-                            w: layout.content.w,
-                            h: layout.content.h,
-                        };
-                        let (cw, ch) = (layout.cell_w, layout.cell_h);
-                        for tab in &mut self.tabs {
-                            tab.root.resize_all(rect, cw, ch);
-                        }
-                    }
+                    self.resize_terminal_tabs();
                     self.selection.clear();
                     self.invalidate_and_redraw();
                 }
@@ -749,6 +693,22 @@ impl ApplicationHandler<UserEvent> for App {
                 let mut sidebar_changed = false;
                 let mut clip_text: Option<String> = None;
                 let mut tab_rename: Option<(usize, String)> = None;
+                // Extract pending actions before borrowing ui for other state
+                let footer_action = self.ui.as_mut().and_then(|u| u.footer_action.take());
+                let pending_file = self.ui.as_mut().and_then(|u| u.editor_view.pending_file_tab.take());
+                let tab_bar_action = self.ui.as_mut().and_then(|u| u.tab_bar_action.take());
+
+                // Handle egui tab bar clicks
+                if let Some(action) = tab_bar_action {
+                    if let Some(idx) = action.close_tab {
+                        self.active_tab = idx;
+                        self.close_tab();
+                        need_redraw = true;
+                    } else if let Some(idx) = action.switch_to {
+                        self.switch_tab(idx);
+                        need_redraw = true;
+                    }
+                }
                 if let Some(ui) = &mut self.ui {
                     if let Some(new_config) = ui.take_config() {
                         self.config = new_config;
@@ -769,21 +729,67 @@ impl ApplicationHandler<UserEvent> for App {
                         need_redraw = true;
                     }
                 }
+                // Handle footer singleton tab actions (after releasing ui borrow)
+                if let Some(llnzy::ui::FooterAction::NewTerminalTab) = &footer_action {
+                    self.new_tab();
+                    if let Some(ui) = &mut self.ui {
+                        ui.active_view = ActiveView::Shells;
+                    }
+                    need_redraw = true;
+                }
+                if let Some(llnzy::ui::FooterAction::OpenSingletonTab(kind)) = footer_action {
+                    use llnzy::workspace::{find_singleton, TabKind};
+                    if let Some(idx) = find_singleton(&self.tabs, kind) {
+                        self.active_tab = idx;
+                    } else {
+                        let id = self.alloc_tab_id();
+                        let content = match kind {
+                            TabKind::Stacker => TabContent::Stacker,
+                            TabKind::Sketch => TabContent::Sketch,
+                            TabKind::Appearances => TabContent::Appearances,
+                            TabKind::Settings => TabContent::Settings,
+                            _ => unreachable!(),
+                        };
+                        self.tabs.push(WorkspaceTab {
+                            content,
+                            name: None,
+                            id,
+                        });
+                        self.active_tab = self.tabs.len() - 1;
+                    }
+                    // Dismiss any overlay
+                    if let Some(ui) = &mut self.ui {
+                        ui.active_view = ActiveView::Shells;
+                    }
+                    need_redraw = true;
+                }
+                // Handle file opened from sidebar → create CodeFile tab
+                if let Some((path, buffer_idx)) = pending_file {
+                    // Check if a tab for this file already exists
+                    let existing = self.tabs.iter().position(|t| {
+                        matches!(&t.content, TabContent::CodeFile { path: p, .. } if *p == path)
+                    });
+                    if let Some(idx) = existing {
+                        self.active_tab = idx;
+                    } else {
+                        let id = self.alloc_tab_id();
+                        self.tabs.push(WorkspaceTab {
+                            content: TabContent::CodeFile { path, buffer_idx },
+                            name: None,
+                            id,
+                        });
+                        self.active_tab = self.tabs.len() - 1;
+                    }
+                    // Dismiss any overlay to show the file
+                    if let Some(ui) = &mut self.ui {
+                        ui.active_view = ActiveView::Shells;
+                    }
+                    need_redraw = true;
+                }
                 // Recompute layout if sidebar changed via Open Project
                 if sidebar_changed {
                     self.recompute_layout();
-                    if let Some(layout) = &self.screen_layout {
-                        let rect = PaneRect {
-                            x: layout.content.x,
-                            y: layout.content.y,
-                            w: layout.content.w,
-                            h: layout.content.h,
-                        };
-                        let (cw, ch) = (layout.cell_w, layout.cell_h);
-                        for tab in &mut self.tabs {
-                            tab.root.resize_all(rect, cw, ch);
-                        }
-                    }
+                    self.resize_terminal_tabs();
                 }
                 if need_redraw {
                     self.request_redraw();
@@ -858,53 +864,8 @@ impl ApplicationHandler<UserEvent> for App {
             WindowEvent::MouseInput { state, button, .. } => {
                 let (row, col) = self.pixel_to_grid(self.cursor_pos);
 
-                // Tab bar click detection
-                if button == MouseButton::Left && state == ElementState::Pressed {
-                    if let Some(layout) = &self.screen_layout {
-                        let px = self.cursor_pos.x as f32;
-                        let py = self.cursor_pos.y as f32;
-                        let tab_bar = &layout.tab_bar;
-                        if py >= tab_bar.y && py < tab_bar.y + tab_bar.h && tab_bar.h > 0.0 {
-                            let tab_count = self.tabs.len();
-                            if tab_count > 0 {
-                                let tab_w = (tab_bar.w / tab_count as f32).min(200.0);
-                                let clicked_idx = ((px - tab_bar.x) / tab_w) as usize;
-                                if clicked_idx < tab_count {
-                                    self.switch_tab(clicked_idx);
-                                    return;
-                                }
-                            }
-                        }
-                    }
-                }
 
-                // Divider drag detection
-                if button == MouseButton::Left && state == ElementState::Pressed {
-                    let px = self.cursor_pos.x as f32;
-                    let py = self.cursor_pos.y as f32;
-                    let hit = self.content_rect().and_then(|cr| {
-                        let tab = self.tabs.get(self.active_tab)?;
-                        let mut path = Vec::new();
-                        tab.root.find_divider_at(cr, px, py, 5.0, &mut path)
-                    });
-                    if let Some((p, dir, parent)) = hit {
-                        self.divider_drag = Some(DividerDrag {
-                            path: p,
-                            dir,
-                            parent_rect: parent,
-                        });
-                        return;
-                    }
-                }
-                if button == MouseButton::Left
-                    && state == ElementState::Released
-                    && self.divider_drag.take().is_some()
-                {
-                    if let Some(window) = &self.window {
-                        window.set_cursor(CursorIcon::Default);
-                    }
-                    return;
-                }
+
 
                 if button == MouseButton::Right && state == ElementState::Pressed {
                     if self.selection.is_active() {
@@ -941,10 +902,8 @@ impl ApplicationHandler<UserEvent> for App {
                                         );
                                         view.cursor.clear_selection();
                                         view.cursor.desired_col = None;
-                                        ui.active_view = ActiveView::Explorer;
-                                        if !ui.terminal_panel_open {
-                                            ui.terminal_panel_open = true;
-                                        }
+                                        // Dismiss any overlay to show the editor
+                                        ui.active_view = ActiveView::Shells;
                                     }
                                     Err(e) => {
                                         self.error_log.error(format!("Cannot open file: {e}"));
@@ -986,16 +945,14 @@ impl ApplicationHandler<UserEvent> for App {
                             let click_count = self.click_state.click(row, col);
                             match click_count {
                                 2 => {
-                                    if let Some(tab) = self.tabs.get(self.active_tab) {
-                                        let terminal = &tab.root.active().terminal;
+                                    if let Some(terminal) = self.tabs.get(self.active_tab).and_then(|t| t.content.as_terminal()).map(|s| &s.terminal) {
                                         self.selection.select_word(row, col, terminal);
                                     }
                                 }
                                 3 => {
                                     let cols = self
-                                        .tabs
-                                        .get(self.active_tab)
-                                        .map(|t| t.root.active().terminal.size().0)
+                                        .active_session()
+                                        .map(|s| s.terminal.size().0)
                                         .unwrap_or(80);
                                     self.selection.select_line(row, cols);
                                 }
@@ -1011,53 +968,6 @@ impl ApplicationHandler<UserEvent> for App {
 
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor_pos = position;
-                let px = position.x as f32;
-                let py = position.y as f32;
-
-                // Handle active divider drag
-                if let Some(drag) = &self.divider_drag {
-                    let new_ratio = match drag.dir {
-                        SplitDir::Vertical => (px - drag.parent_rect.x) / drag.parent_rect.w,
-                        SplitDir::Horizontal => (py - drag.parent_rect.y) / drag.parent_rect.h,
-                    };
-                    let path = drag.path.clone();
-                    let content_rect = self.content_rect();
-                    let (cw, ch) = self
-                        .renderer
-                        .as_ref()
-                        .map(|r| r.cell_dimensions())
-                        .unwrap_or((1.0, 1.0));
-                    if let Some(tab) = self.active_tab_mut() {
-                        tab.root.set_ratio_at(&path, new_ratio);
-                        if let Some(cr) = content_rect {
-                            tab.root.resize_all(cr, cw, ch);
-                        }
-                    }
-                    if let Some(r) = &mut self.renderer {
-                        r.invalidate_text_cache();
-                    }
-                    self.request_redraw();
-                    return;
-                }
-
-                // Hover cursor icon for dividers
-                if !self.mouse_pressed {
-                    let near_divider = self.content_rect().and_then(|cr| {
-                        self.tabs.get(self.active_tab).and_then(|tab| {
-                            let mut path = Vec::new();
-                            tab.root.find_divider_at(cr, px, py, 5.0, &mut path)
-                        })
-                    });
-                    if let (Some(window), Some((_, dir, _))) = (&self.window, near_divider) {
-                        let icon = match dir {
-                            SplitDir::Vertical => CursorIcon::ColResize,
-                            SplitDir::Horizontal => CursorIcon::RowResize,
-                        };
-                        window.set_cursor(icon);
-                    } else if let Some(window) = &self.window {
-                        window.set_cursor(CursorIcon::Default);
-                    }
-                }
 
                 if self.mouse_pressed {
                     let (row, col) = self.pixel_to_grid(position);
@@ -1130,8 +1040,7 @@ impl ApplicationHandler<UserEvent> for App {
                             return;
                         }
                         Key::Named(NamedKey::Backspace) => {
-                            if let Some(tab) = self.tabs.get(self.active_tab) {
-                                let terminal = &tab.root.active().terminal;
+                            if let Some(terminal) = self.tabs.get(self.active_tab).and_then(|t| t.content.as_terminal()).map(|s| &s.terminal) {
                                 self.search.pop_char(terminal);
                             }
                             self.request_redraw();
@@ -1143,8 +1052,8 @@ impl ApplicationHandler<UserEvent> for App {
                                 if let Key::Character(c) = &key_event.logical_key {
                                     if c.as_str() == "r" {
                                         self.search.toggle_regex();
-                                        if let Some(tab) = self.tabs.get(self.active_tab) {
-                                            self.search.update_matches(&tab.root.active().terminal);
+                                        if let Some(terminal) = self.tabs.get(self.active_tab).and_then(|t| t.content.as_terminal()).map(|s| &s.terminal) {
+                                            self.search.update_matches(terminal);
                                         }
                                         self.request_redraw();
                                         return;
@@ -1155,8 +1064,8 @@ impl ApplicationHandler<UserEvent> for App {
                             if let Some(ref text) = key_event.text {
                                 for ch in text.chars() {
                                     if !ch.is_control() {
-                                        if let Some(tab) = self.tabs.get(self.active_tab) {
-                                            self.search.push_char(ch, &tab.root.active().terminal);
+                                        if let Some(terminal) = self.tabs.get(self.active_tab).and_then(|t| t.content.as_terminal()).map(|s| &s.terminal) {
+                                            self.search.push_char(ch, terminal);
                                         }
                                     }
                                 }
@@ -1175,8 +1084,11 @@ impl ApplicationHandler<UserEvent> for App {
                 {
                     match action {
                         Action::Search => {
-                            self.search.open();
-                            self.request_redraw();
+                            // Search only works on terminal tabs
+                            if self.active_session().is_some() {
+                                self.search.open();
+                                self.request_redraw();
+                            }
                         }
                         Action::Copy => self.copy_selection(),
                         Action::Paste => self.do_paste(),
@@ -1195,8 +1107,10 @@ impl ApplicationHandler<UserEvent> for App {
                             };
                             self.switch_tab(prev);
                         }
-                        Action::SplitVertical => self.split_active_pane(SplitDir::Vertical),
-                        Action::SplitHorizontal => self.split_active_pane(SplitDir::Horizontal),
+                        Action::SplitVertical | Action::SplitHorizontal => {
+                            // Split panes removed — open a new terminal tab instead
+                            self.new_tab();
+                        }
                         Action::ToggleFullscreen => self.toggle_fullscreen(),
                         Action::ToggleEffects => self.toggle_effects(),
                         Action::ToggleFps => {
@@ -1214,27 +1128,12 @@ impl ApplicationHandler<UserEvent> for App {
                                 ui.toggle_sidebar();
                             }
                             self.recompute_layout();
-                            if let Some(layout) = &self.screen_layout {
-                                let rect = PaneRect {
-                                    x: layout.content.x,
-                                    y: layout.content.y,
-                                    w: layout.content.w,
-                                    h: layout.content.h,
-                                };
-                                let (cw, ch) = (layout.cell_w, layout.cell_h);
-                                for tab in &mut self.tabs {
-                                    tab.root.resize_all(rect, cw, ch);
-                                }
-                            }
+                            self.resize_terminal_tabs();
                             self.selection.clear();
                             self.invalidate_and_redraw();
                         }
                         Action::CyclePaneForward | Action::CyclePaneBackward => {
-                            if let Some(tab) = self.active_tab_mut() {
-                                tab.root.cycle_focus();
-                            }
-                            self.selection.clear();
-                            self.invalidate_and_redraw();
+                            // Pane cycling removed — these are no-ops now
                         }
                         Action::ScrollPageUp => {
                             if !self.mouse_reporting() {
@@ -1253,29 +1152,7 @@ impl ApplicationHandler<UserEvent> for App {
                             }
                         }
                         Action::ToggleTerminalPanel => {
-                            if let Some(ui) = &mut self.ui {
-                                ui.toggle_terminal_panel();
-                                // When opening terminal panel, switch to Explorer if on Shells
-                                if ui.terminal_panel_open && ui.active_view == ActiveView::Shells {
-                                    ui.active_view = ActiveView::Explorer;
-                                }
-                            }
-                            self.recompute_layout();
-                            // Resize terminal panes to the new content rect
-                            if let Some(layout) = &self.screen_layout {
-                                let rect = self.content_rect().unwrap_or(PaneRect {
-                                    x: layout.content.x,
-                                    y: layout.content.y,
-                                    w: layout.content.w,
-                                    h: layout.content.h,
-                                });
-                                let (cw, ch) = (layout.cell_w, layout.cell_h);
-                                for tab in &mut self.tabs {
-                                    tab.root.resize_all(rect, cw, ch);
-                                }
-                            }
-                            self.selection.clear();
-                            self.invalidate_and_redraw();
+                            // Terminal panel in explorer removed — no-op
                         }
                         Action::SwitchTab(n) => {
                             self.switch_tab((n - 1) as usize);
@@ -1284,50 +1161,55 @@ impl ApplicationHandler<UserEvent> for App {
                     return;
                 }
 
-                if self.selection.is_active() {
-                    self.selection.clear();
-                    self.request_redraw();
-                }
+                // Only send raw keys to PTY if active tab is a terminal
+                if self.active_session().is_some() {
+                    if self.selection.is_active() {
+                        self.selection.clear();
+                        self.request_redraw();
+                    }
 
-                self.last_keypress = Instant::now();
-                let app_cursor = self.app_cursor();
-                if let Some(bytes) = input::encode_key(&key_event, self.modifiers, app_cursor) {
-                    self.write_to_active(&bytes);
+                    self.last_keypress = Instant::now();
+                    let app_cursor = self.app_cursor();
+                    if let Some(bytes) = input::encode_key(&key_event, self.modifiers, app_cursor)
+                    {
+                        self.write_to_active(&bytes);
+                    }
                 }
             }
 
             // IME (input method) events — handles composed text from
             // non-US keyboards, dead keys, and CJK input methods.
             WindowEvent::Ime(ime) => {
-                match ime {
-                    Ime::Commit(text) => {
-                        if self.search.active {
-                            for ch in text.chars() {
-                                if !ch.is_control() {
-                                    if let Some(tab) = self.tabs.get(self.active_tab) {
-                                        self.search.push_char(ch, &tab.root.active().terminal);
+                if self.active_session().is_some() {
+                    match ime {
+                        Ime::Commit(text) => {
+                            if self.search.active {
+                                if let Some(terminal) = self.tabs.get(self.active_tab).and_then(|t| t.content.as_terminal()).map(|s| &s.terminal) {
+                                    for ch in text.chars() {
+                                        if !ch.is_control() {
+                                            self.search.push_char(ch, terminal);
+                                        }
                                     }
                                 }
+                                self.request_redraw();
+                            } else {
+                                self.write_to_active(text.as_bytes());
                             }
-                            self.request_redraw();
-                        } else {
-                            self.write_to_active(text.as_bytes());
                         }
+                        Ime::Preedit(_, _) => {}
+                        Ime::Enabled | Ime::Disabled => {}
                     }
-                    Ime::Preedit(_, _) => {
-                        // TODO: show preedit text overlay for CJK input methods
-                    }
-                    Ime::Enabled | Ime::Disabled => {}
                 }
             }
 
-            // Drag-and-drop: insert escaped file path
+            // Drag-and-drop: insert escaped file path into terminal
             WindowEvent::DroppedFile(path) => {
-                let path_str = path.to_string_lossy();
-                // Shell-escape the path (wrap in single quotes, escape existing quotes)
-                let escaped = format!("'{}'", path_str.replace('\'', "'\\''"));
-                self.write_to_active(escaped.as_bytes());
-                self.write_to_active(b" ");
+                if self.active_session().is_some() {
+                    let path_str = path.to_string_lossy();
+                    let escaped = format!("'{}'", path_str.replace('\'', "'\\''"));
+                    self.write_to_active(escaped.as_bytes());
+                    self.write_to_active(b" ");
+                }
             }
 
             _ => {}
@@ -1352,9 +1234,39 @@ impl ApplicationHandler<UserEvent> for App {
                         self.request_redraw();
                     }
                     MenuAction::ToggleFullscreen => self.toggle_fullscreen(),
-                    MenuAction::SplitVertical => self.split_active_pane(SplitDir::Vertical),
-                    MenuAction::SplitHorizontal => self.split_active_pane(SplitDir::Horizontal),
+                    MenuAction::SplitVertical | MenuAction::SplitHorizontal => self.new_tab(),
                     MenuAction::ToggleEffects => self.toggle_effects(),
+                    MenuAction::OpenProject => {
+                        if let Some(path) = rfd::FileDialog::new()
+                            .set_title("Open Project Folder")
+                            .pick_folder()
+                        {
+                            if let Some(ui) = &mut self.ui {
+                                ui.explorer.set_root(path.clone());
+                                llnzy::explorer::add_recent_project(
+                                    &mut ui.recent_projects,
+                                    path,
+                                );
+                                ui.sidebar_open = true;
+                                ui.active_view = ActiveView::Shells;
+                            }
+                            self.recompute_layout();
+                            self.resize_terminal_tabs();
+                            self.request_redraw();
+                        }
+                    }
+                    MenuAction::CloseProject => {
+                        if let Some(ui) = &mut self.ui {
+                            ui.explorer.clear();
+                            ui.sidebar_open = false;
+                            ui.active_view = ActiveView::Home;
+                        }
+                        // Close all tabs
+                        self.tabs.clear();
+                        self.active_tab = 0;
+                        self.recompute_layout();
+                        self.request_redraw();
+                    }
                 }
             }
         }
