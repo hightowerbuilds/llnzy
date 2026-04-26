@@ -82,7 +82,7 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
         );
         p.max_life = 3.0 + hash(seed + 4.0) * 6.0;  // 3-9 seconds
         p.life = p.max_life;
-        p.size = 1.5 + hash(seed + 5.0) * 3.0;  // 1.5-4.5 px
+        p.size = 1.0 + hash(seed + 5.0) * 1.5;  // 1.0-2.5 px
 
         // Soft blue-white color with variation
         let hue = hash(seed + 6.0);
@@ -208,7 +208,7 @@ impl ParticleSystem {
                 color: [0.0; 4],
                 life: 0.0,
                 max_life: 1.0,
-                size: 2.0,
+                size: 1.5,
                 _pad: 0.0,
             })
             .collect();

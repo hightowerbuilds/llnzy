@@ -176,6 +176,8 @@ pub struct EffectsConfig {
     pub background_speed: f32,
     /// Custom color for smoke/aurora backgrounds. None = derive from terminal bg.
     pub background_color: Option<[u8; 3]>,
+    /// File path for custom background image (when background == "image").
+    pub background_image: Option<String>,
     pub bloom_enabled: bool,
     pub bloom_threshold: f32,
     pub bloom_intensity: f32,
@@ -220,6 +222,7 @@ impl Default for EffectsConfig {
             background_intensity: 0.3,
             background_speed: 1.0,
             background_color: None,
+            background_image: None,
             bloom_enabled: false,
             bloom_threshold: 0.35,
             bloom_intensity: 0.6,
@@ -464,6 +467,9 @@ impl Config {
             if let Some(s) = effects.background_speed {
                 self.effects.background_speed = s.clamp(0.0, 10.0);
             }
+            if let Some(p) = effects.background_image {
+                self.effects.background_image = Some(p);
+            }
             if let Some(b) = effects.bloom_enabled {
                 self.effects.bloom_enabled = b;
             }
@@ -634,6 +640,7 @@ struct EffectsFileConfig {
     background: Option<String>,
     background_intensity: Option<f32>,
     background_speed: Option<f32>,
+    background_image: Option<String>,
     bloom_enabled: Option<bool>,
     bloom_threshold: Option<f32>,
     bloom_intensity: Option<f32>,

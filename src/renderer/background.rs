@@ -150,10 +150,43 @@ fn builtin_shaders() -> Vec<(&'static str, String)> {
         .collect()
 }
 
+// ── Image background blit shader ──
+
+const IMAGE_SHADER: &str = r#"
+@group(0) @binding(0) var img_tex: texture_2d<f32>;
+@group(0) @binding(1) var img_sampler: sampler;
+
+struct VertexOutput {
+    @builtin(position) position: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+};
+
+@vertex
+fn vs_main(@builtin(vertex_index) vi: u32) -> VertexOutput {
+    var out: VertexOutput;
+    let x = f32(i32(vi & 1u) * 4 - 1);
+    let y = f32(i32(vi >> 1u) * 4 - 1);
+    out.position = vec4<f32>(x, y, 0.0, 1.0);
+    out.uv = vec2<f32>(x * 0.5 + 0.5, 1.0 - (y * 0.5 + 0.5));
+    return out;
+}
+
+@fragment
+fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    return textureSample(img_tex, img_sampler, in.uv);
+}
+"#;
+
 pub struct BackgroundRenderer {
     pipelines: HashMap<String, wgpu::RenderPipeline>,
     uniform_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
+    // Image background support
+    image_pipeline: wgpu::RenderPipeline,
+    image_tex_layout: wgpu::BindGroupLayout,
+    image_sampler: wgpu::Sampler,
+    image_bind_group: Option<wgpu::BindGroup>,
+    loaded_image_path: Option<String>,
 }
 
 impl BackgroundRenderer {
@@ -230,10 +263,93 @@ impl BackgroundRenderer {
             }
         }
 
+        // Image background pipeline (separate bind group layout: texture + sampler)
+        let image_tex_layout =
+            gpu.device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("bg_image_tex_layout"),
+                    entries: &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Texture {
+                                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                                view_dimension: wgpu::TextureViewDimension::D2,
+                                multisampled: false,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                            count: None,
+                        },
+                    ],
+                });
+
+        let image_sampler = gpu.device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("bg_image_sampler"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+
+        let image_shader = gpu
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("bg_image_shader"),
+                source: wgpu::ShaderSource::Wgsl(IMAGE_SHADER.into()),
+            });
+
+        let image_pipeline_layout =
+            gpu.device
+                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("bg_image_pipeline_layout"),
+                    bind_group_layouts: &[&image_tex_layout],
+                    push_constant_ranges: &[],
+                });
+
+        let image_pipeline =
+            gpu.device
+                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some("bg_image_pipeline"),
+                    layout: Some(&image_pipeline_layout),
+                    vertex: wgpu::VertexState {
+                        module: &image_shader,
+                        entry_point: "vs_main",
+                        buffers: &[],
+                        compilation_options: Default::default(),
+                    },
+                    fragment: Some(wgpu::FragmentState {
+                        module: &image_shader,
+                        entry_point: "fs_main",
+                        targets: &[Some(wgpu::ColorTargetState {
+                            format: gpu.surface_config.format,
+                            blend: None,
+                            write_mask: wgpu::ColorWrites::ALL,
+                        })],
+                        compilation_options: Default::default(),
+                    }),
+                    primitive: wgpu::PrimitiveState {
+                        topology: wgpu::PrimitiveTopology::TriangleList,
+                        ..Default::default()
+                    },
+                    depth_stencil: None,
+                    multisample: wgpu::MultisampleState::default(),
+                    multiview: None,
+                    cache: None,
+                });
+
         BackgroundRenderer {
             pipelines,
             uniform_buffer,
             bind_group,
+            image_pipeline,
+            image_tex_layout,
+            image_sampler,
+            image_bind_group: None,
+            loaded_image_path: None,
         }
     }
 
@@ -356,5 +472,109 @@ impl BackgroundRenderer {
         let mut names: Vec<String> = self.pipelines.keys().cloned().collect();
         names.sort();
         names
+    }
+
+    /// Load an image from disk and upload it as a GPU texture.
+    /// Skips if the path matches the already-loaded image.
+    pub fn load_image(&mut self, gpu: &GpuState, path: &str) {
+        if self.loaded_image_path.as_deref() == Some(path) {
+            return;
+        }
+
+        let img = match image::open(path) {
+            Ok(img) => img.to_rgba8(),
+            Err(e) => {
+                log::warn!("Failed to load background image: {e}");
+                self.image_bind_group = None;
+                self.loaded_image_path = None;
+                return;
+            }
+        };
+
+        let (width, height) = (img.width(), img.height());
+        let rgba = img.into_raw();
+
+        let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("bg_image_texture"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+
+        gpu.queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &rgba,
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * width),
+                rows_per_image: Some(height),
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        self.image_bind_group = Some(gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("bg_image_bind_group"),
+            layout: &self.image_tex_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.image_sampler),
+                },
+            ],
+        }));
+
+        self.loaded_image_path = Some(path.to_string());
+    }
+
+    /// Draw the background image to the target view.
+    pub fn draw_image(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+    ) {
+        let Some(bind_group) = &self.image_bind_group else {
+            return;
+        };
+
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("background_image_pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            ..Default::default()
+        });
+
+        pass.set_pipeline(&self.image_pipeline);
+        pass.set_bind_group(0, bind_group, &[]);
+        pass.draw(0..3, 0..1);
     }
 }

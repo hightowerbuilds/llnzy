@@ -662,6 +662,14 @@ impl ApplicationHandler<UserEvent> for App {
                                 }
                             })
                         });
+                        // Supply clipboard content to editor for paste
+                        if let Some(ui) = self.ui.as_mut() {
+                            if let Some(cb) = &mut self.clipboard {
+                                if let Ok(text) = cb.get_text() {
+                                    ui.editor_view.clipboard_in = Some(text);
+                                }
+                            }
+                        }
                         // Update tab context for tab bar interaction
                         if let Some(ui) = self.ui.as_mut() {
                             ui.set_tab_context(self.tabs.len(), self.active_tab);
