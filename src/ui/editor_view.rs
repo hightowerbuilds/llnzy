@@ -24,6 +24,21 @@ pub(crate) fn render_text_editor(
     clipboard_in: &mut Option<String>,
 ) -> EditorFrameResult {
     let mut result = EditorFrameResult::default();
+    // Breadcrumbs bar
+    let _breadcrumb_h = 20.0;
+    if let Some(path) = buf.path() {
+        let display = path.to_string_lossy();
+        ui.horizontal(|ui| {
+            ui.add_space(4.0);
+            for (i, segment) in display.split('/').filter(|s| !s.is_empty()).enumerate() {
+                if i > 0 {
+                    ui.label(egui::RichText::new(" > ").size(11.0).color(egui::Color32::from_rgb(80, 85, 100)));
+                }
+                ui.label(egui::RichText::new(segment).size(11.0).color(egui::Color32::from_rgb(160, 165, 180)));
+            }
+        });
+    }
+
     let line_count = buf.line_count();
     let gutter_digits = ((line_count as f64).log10().floor() as usize + 1).max(2);
     let char_width = 8.0;
@@ -209,15 +224,69 @@ pub(crate) fn render_text_editor(
         ui.ctx().request_repaint();
     }
 
-    // Scrollbar
-    if line_count > visible_lines {
-        let track_h = rect.height();
-        let thumb_h = (track_h * visible_lines as f32 / line_count as f32).max(20.0);
-        let thumb_top = (view.scroll_line as f32 / line_count as f32) * track_h;
+    // Minimap (right edge, replaces scrollbar)
+    let minimap_w = 50.0;
+    let minimap_x = rect.right() - minimap_w;
+    if line_count > 1 {
+        // Background
         painter.rect_filled(
-            egui::Rect::from_min_size(egui::pos2(rect.right() - 6.0, rect.top() + thumb_top), egui::Vec2::new(4.0, thumb_h)),
-            2.0, egui::Color32::from_rgba_unmultiplied(180, 180, 200, 40),
+            egui::Rect::from_min_size(egui::pos2(minimap_x, rect.top()), egui::Vec2::new(minimap_w, rect.height())),
+            0.0, egui::Color32::from_rgba_unmultiplied(20, 22, 28, 200),
         );
+
+        // Viewport indicator
+        let track_h = rect.height();
+        let view_top = (view.scroll_line as f32 / line_count as f32) * track_h;
+        let view_h = (visible_lines as f32 / line_count as f32) * track_h;
+        painter.rect_filled(
+            egui::Rect::from_min_size(egui::pos2(minimap_x, rect.top() + view_top), egui::Vec2::new(minimap_w, view_h.max(4.0))),
+            0.0, egui::Color32::from_rgba_unmultiplied(80, 120, 200, 30),
+        );
+
+        // Line density: draw a tiny colored dot per line (sampled for perf)
+        let line_h = (track_h / line_count as f32).max(0.5).min(2.0);
+        let sample_step = if line_count > 2000 { line_count / 1000 } else { 1 };
+        for line_idx in (0..line_count).step_by(sample_step.max(1)) {
+            let y = rect.top() + (line_idx as f32 / line_count as f32) * track_h;
+            let line_text = buf.line(line_idx);
+            if line_text.trim().is_empty() { continue; }
+
+            // Color from first syntax span if available, else dim white
+            let color = if line_idx < highlight_spans.len() + view.scroll_line && line_idx >= view.scroll_line {
+                let span_idx = line_idx - view.scroll_line;
+                highlight_spans.get(span_idx)
+                    .and_then(|spans| spans.first())
+                    .map(|s| {
+                        let rgb = crate::editor::syntax::group_color(s.group);
+                        egui::Color32::from_rgba_unmultiplied(rgb[0], rgb[1], rgb[2], 120)
+                    })
+                    .unwrap_or(egui::Color32::from_rgba_unmultiplied(150, 155, 165, 60))
+            } else {
+                egui::Color32::from_rgba_unmultiplied(150, 155, 165, 40)
+            };
+
+            let text_w = (line_text.len() as f32 * 0.4).min(minimap_w - 4.0);
+            painter.rect_filled(
+                egui::Rect::from_min_size(egui::pos2(minimap_x + 2.0, y), egui::Vec2::new(text_w, line_h)),
+                0.0, color,
+            );
+        }
+
+        // Diagnostic markers in minimap
+        if let Some(diags) = diagnostics {
+            for diag in diags {
+                let dy = rect.top() + (diag.line as f32 / line_count as f32) * track_h;
+                let color = match diag.severity {
+                    DiagSeverity::Error => egui::Color32::from_rgb(255, 80, 80),
+                    DiagSeverity::Warning => egui::Color32::from_rgb(230, 180, 50),
+                    _ => continue,
+                };
+                painter.rect_filled(
+                    egui::Rect::from_min_size(egui::pos2(minimap_x, dy), egui::Vec2::new(3.0, 2.0)),
+                    0.0, color,
+                );
+            }
+        }
     }
 
     // Hover tooltip
