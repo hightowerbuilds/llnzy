@@ -12,6 +12,32 @@ use tokio::runtime::Runtime;
 use client::{uri_to_path, LspClient};
 use registry::find_server;
 
+/// A text edit from formatting or workspace edits.
+#[derive(Clone, Debug)]
+pub struct FormatEdit {
+    pub start_line: u32,
+    pub start_col: u32,
+    pub end_line: u32,
+    pub end_col: u32,
+    pub new_text: String,
+}
+
+/// A simplified code action for the UI.
+#[derive(Clone, Debug)]
+pub struct CodeAction {
+    pub title: String,
+    pub edits: Vec<(PathBuf, Vec<FormatEdit>)>,
+}
+
+/// A simplified document symbol for the UI.
+#[derive(Clone, Debug)]
+pub struct SymbolInfo {
+    pub name: String,
+    pub kind: String,
+    pub line: u32,
+    pub col: u32,
+}
+
 /// A simplified completion item for the UI.
 #[derive(Clone, Debug)]
 pub struct CompletionItem {
@@ -250,6 +276,90 @@ impl LspManager {
         })
     }
 
+    /// Request document formatting (blocking). Returns text edits to apply.
+    pub fn format(&mut self, path: &Path, lang_id: &str) -> Vec<FormatEdit> {
+        let Some(client) = self.clients.get(lang_id) else { return Vec::new() };
+        if !client.is_running() { return Vec::new(); }
+        let path = path.to_path_buf();
+        self.runtime.block_on(async {
+            match client.formatting(&path).await {
+                Ok(edits) => edits.into_iter().map(|e| FormatEdit {
+                    start_line: e.range.start.line,
+                    start_col: e.range.start.character,
+                    end_line: e.range.end.line,
+                    end_col: e.range.end.character,
+                    new_text: e.new_text,
+                }).collect(),
+                Err(e) => { log::warn!("formatting failed: {e}"); Vec::new() }
+            }
+        })
+    }
+
+    /// Request rename (blocking). Returns edits per file.
+    pub fn rename(&mut self, path: &Path, lang_id: &str, line: u32, col: u32, new_name: &str) -> Vec<(PathBuf, Vec<FormatEdit>)> {
+        let Some(client) = self.clients.get(lang_id) else { return Vec::new() };
+        if !client.is_running() { return Vec::new(); }
+        let path = path.to_path_buf();
+        let new_name = new_name.to_string();
+        self.runtime.block_on(async {
+            match client.rename(&path, line, col, &new_name).await {
+                Ok(Some(workspace_edit)) => parse_workspace_edit(workspace_edit),
+                _ => Vec::new(),
+            }
+        })
+    }
+
+    /// Request code actions (blocking).
+    pub fn code_actions(&mut self, path: &Path, lang_id: &str, start_line: u32, start_col: u32, end_line: u32, end_col: u32) -> Vec<CodeAction> {
+        let Some(client) = self.clients.get(lang_id) else { return Vec::new() };
+        if !client.is_running() { return Vec::new(); }
+        let path = path.to_path_buf();
+        self.runtime.block_on(async {
+            match client.code_actions(&path, start_line, start_col, end_line, end_col).await {
+                Ok(actions) => actions.into_iter().filter_map(|a| {
+                    match a {
+                        lsp_types::CodeActionOrCommand::CodeAction(ca) => Some(CodeAction {
+                            title: ca.title,
+                            edits: ca.edit.map(parse_workspace_edit).unwrap_or_default(),
+                        }),
+                        lsp_types::CodeActionOrCommand::Command(cmd) => Some(CodeAction {
+                            title: cmd.title,
+                            edits: Vec::new(),
+                        }),
+                    }
+                }).collect(),
+                Err(e) => { log::warn!("code actions failed: {e}"); Vec::new() }
+            }
+        })
+    }
+
+    /// Request document symbols (blocking).
+    pub fn document_symbols(&mut self, path: &Path, lang_id: &str) -> Vec<SymbolInfo> {
+        let Some(client) = self.clients.get(lang_id) else { return Vec::new() };
+        if !client.is_running() { return Vec::new(); }
+        let path = path.to_path_buf();
+        self.runtime.block_on(async {
+            match client.document_symbols(&path).await {
+                Ok(Some(resp)) => match resp {
+                    lsp_types::DocumentSymbolResponse::Flat(symbols) => {
+                        symbols.into_iter().map(|s| SymbolInfo {
+                            name: s.name,
+                            kind: format!("{:?}", s.kind),
+                            line: s.location.range.start.line,
+                            col: s.location.range.start.character,
+                        }).collect()
+                    }
+                    lsp_types::DocumentSymbolResponse::Nested(symbols) => {
+                        let mut result = Vec::new();
+                        flatten_symbols(&symbols, &mut result, 0);
+                        result
+                    }
+                },
+                _ => Vec::new(),
+            }
+        })
+    }
+
     /// Get diagnostics for a specific file.
     pub fn get_diagnostics(&self, path: &Path) -> &[FileDiagnostic] {
         self.diagnostics
@@ -310,6 +420,38 @@ impl LspManager {
                 }
             }
             dir = dir.parent()?;
+        }
+    }
+}
+
+fn parse_workspace_edit(edit: lsp_types::WorkspaceEdit) -> Vec<(PathBuf, Vec<FormatEdit>)> {
+    let mut result = Vec::new();
+    if let Some(changes) = edit.changes {
+        for (uri, edits) in changes {
+            let Some(path) = uri_to_path(&uri) else { continue };
+            let file_edits: Vec<FormatEdit> = edits.into_iter().map(|e| FormatEdit {
+                start_line: e.range.start.line,
+                start_col: e.range.start.character,
+                end_line: e.range.end.line,
+                end_col: e.range.end.character,
+                new_text: e.new_text,
+            }).collect();
+            result.push((path, file_edits));
+        }
+    }
+    result
+}
+
+fn flatten_symbols(symbols: &[lsp_types::DocumentSymbol], result: &mut Vec<SymbolInfo>, _depth: usize) {
+    for sym in symbols {
+        result.push(SymbolInfo {
+            name: sym.name.clone(),
+            kind: format!("{:?}", sym.kind),
+            line: sym.selection_range.start.line,
+            col: sym.selection_range.start.character,
+        });
+        if let Some(children) = &sym.children {
+            flatten_symbols(children, result, _depth + 1);
         }
     }
 }
