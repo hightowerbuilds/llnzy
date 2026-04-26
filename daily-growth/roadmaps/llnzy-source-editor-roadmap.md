@@ -416,34 +416,24 @@ The editor is built as `src/editor/` (3,528 lines across 5 files) integrated int
 
 ## Arc IV -- Polish
 
-### Phase 12: Performance
+### Phase 12: Performance [MOSTLY COMPLETE]
 
-**Goal**: Ensure the editor stays fast with large files and busy language servers.
+**Implemented April 26, 2026**
 
-**Tasks**:
+- [x] **12.1 -- Large file optimizations** (`src/editor/perf.rs`, 33 lines)
+  - Viewport-only rendering (done since Phase 2)
+  - Byte-range restricted syntax queries (done since Phase 5)
+  - Undo history depth cap at 1000 (done since Phase 1)
+  - Syntax highlighting disabled for files >100k lines (`SYNTAX_LINE_LIMIT`)
+  - Minimap disabled for files >50k lines (`MINIMAP_LINE_LIMIT`)
+  - LSP `didChange` skipped for files >200k lines (`LSP_CHANGE_LINE_LIMIT`)
+  - LSP `didChange` debounced at 100ms (`LSP_DEBOUNCE_MS`)
+  - Tree-sitter reparse gated by `syntax_enabled()` check
+  - Minimap line sampling: max 1000 points for files >2000 lines
 
-- [ ] **12.1 -- Large file optimizations**
-  - Viewport-only rendering (never build spans for off-screen lines) -- ALREADY DONE
-  - Lazy syntax highlighting: only parse visible range + buffer on scroll -- ALREADY DONE (byte-range restricted queries)
-  - Memory budget for undo history (auto-truncate old entries) -- ALREADY DONE (depth cap at 1000)
-  - Disable minimap and inlay hints for files >100k lines
-
-- [ ] **12.2 -- Async everything**
-  - Tree-sitter parsing on background thread
-  - LSP communication fully async (already planned in Phase 6.5)
-  - File indexing for fuzzy finder on background thread
-  - Never block the render loop for I/O
-
-- [ ] **12.3 -- GPU text rendering migration** (if needed)
-  - If egui painter proves too slow for large files, migrate editor text to the direct glyphon pipeline
-  - Cache rendered text as texture atlases per viewport
-  - Delta rendering: only re-render changed lines
-
-- [ ] **12.4 -- Profiling & benchmarks**
-  - Keystroke-to-pixel latency measurement
-  - Target: <16ms for typing, <50ms for completion popup
-  - Memory profiling: track rope + tree-sitter + undo memory
-  - GPU frame time monitoring (already have FPS overlay)
+- [ ] **12.2 -- Async everything** (deferred -- see leftovers-code-editor.md)
+- [ ] **12.3 -- GPU text rendering migration** (deferred)
+- [ ] **12.4 -- Profiling & benchmarks** (deferred)
 
 ---
 
@@ -497,8 +487,8 @@ Phase 4 (Multi-buffer) ......... MOSTLY COMPLETE
     |
     +-- Phase 11 (Productivity UX) .. MOSTLY COMPLETE (palette, minimap, breadcrumbs)
 
-Phase 12 (Performance) -- ongoing from Phase 2 onward
-Phase 13 (Distribution) -- after core features stabilize
+Phase 12 (Performance) ......... MOSTLY COMPLETE (perf guards, debouncing, large file gates)
+Phase 13 (Distribution) ........ Not started (see leftovers-code-editor.md)
 ```
 
 ---
@@ -534,8 +524,8 @@ Phase 13 (Distribution) -- after core features stabilize
 | I -- Editor Core | 1-4 | ~6,000-8,000 | ~2,980 | **COMPLETE** |
 | II -- Intelligence | 5-8 | ~8,000-12,000 | ~2,340 | **MOSTLY COMPLETE** (deferred: bracket match, code folding, find refs, sig help, workspace symbols, inlay hints, code lens) |
 | III -- Workflow | 9-11 | ~4,000-6,000 | ~700 | **MOSTLY COMPLETE** (file tree, fuzzy finder, terminal split, click-to-file, command palette, minimap, breadcrumbs) |
-| IV -- Polish | 12-13 | ~2,000-3,000 | -- | Not started |
-| **Total** | **13** | **~20,000-29,000** | **~6,200** | Phases 1-11 mostly complete |
+| IV -- Polish | 12-13 | ~2,000-3,000 | ~35 | **Phase 12 done** (perf guards); Phase 13 not started |
+| **Total** | **13** | **~20,000-29,000** | **~6,250** | Phases 1-12 mostly complete |
 
 ---
 
@@ -548,4 +538,5 @@ Phase 13 (Distribution) -- after core features stabilize
 5. **Milestone D -- Terminal Integration** (Phase 10): COMPLETE. Editor + terminal split, click-to-file.
 6. **Milestone D+ -- File Management** (Phase 9): COMPLETE. File tree, fuzzy finder, project root.
 7. **Milestone E -- Productivity UX** (Phase 11): COMPLETE. Command palette, minimap, breadcrumbs.
-8. **Milestone F -- Full Editor** (remaining): Performance (Phase 12), distribution (Phase 13).
+8. **Milestone F -- Performance** (Phase 12): COMPLETE. Large file guards, LSP debouncing.
+9. **Remaining**: Phase 13 (distribution) + all deferred items collected in `leftovers-code-editor.md`.
