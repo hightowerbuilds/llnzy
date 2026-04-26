@@ -48,6 +48,8 @@ pub struct UiState {
     pub sketch: SketchState,
     // Explorer state
     pub explorer: ExplorerState,
+    // Editor view state (cursor, scroll, etc.)
+    pub editor_view: explorer_view::EditorViewState,
     // Tab renaming
     pub editing_tab: Option<usize>,
     pub editing_tab_text: String,
@@ -120,6 +122,7 @@ impl UiState {
             copy_ghosts: Vec::new(),
             sketch: SketchState::load_default(),
             explorer: ExplorerState::new(),
+            editor_view: explorer_view::EditorViewState::default(),
             editing_tab: None,
             editing_tab_text: String::new(),
             saved_tab_name: None,
@@ -217,7 +220,7 @@ impl UiState {
         // Extract state to avoid borrowing self inside the closure
         let current_view = self.active_view;
         let footer_height = self.footer_height;
-        let mut settings_tab = self.settings_tab;
+        let settings_tab = self.settings_tab;
         let mut nav_target: Option<ActiveView> = None;
         let mut config_clone = config.clone();
         let mut clipboard_copy: Option<String> = None;
@@ -236,6 +239,7 @@ impl UiState {
         let mut sketch = std::mem::take(&mut self.sketch);
         let mut sketch_canvas_px: Option<[f32; 4]> = None;
         let mut explorer = std::mem::take(&mut self.explorer);
+        let mut editor_view = std::mem::take(&mut self.editor_view);
         let show_fps = self.show_fps;
         let fps_info = if show_fps && !self.frame_times.is_empty() {
             let avg_dt: f32 = self.frame_times.iter().sum::<f32>() / self.frame_times.len() as f32;
@@ -456,38 +460,6 @@ impl UiState {
 
             // ── Appearances view ──
             if current_view == ActiveView::Appearances {
-                egui::SidePanel::left("appearances_sidebar")
-                    .exact_width(170.0)
-                    .frame(
-                        egui::Frame::none()
-                            .fill(egui::Color32::from_rgb(24, 24, 32))
-                            .inner_margin(egui::Margin::same(12.0)),
-                    )
-                    .show(ctx, |ui| {
-                        ui.add_space(8.0);
-                        ui.label(
-                            egui::RichText::new("Appearances")
-                                .size(22.0)
-                                .color(egui::Color32::WHITE),
-                        );
-                        ui.add_space(16.0);
-
-                        let tabs = [
-                            ("Themes", SettingsTab::Themes),
-                            ("Background", SettingsTab::Background),
-                            ("Text", SettingsTab::Text),
-                        ];
-                        for (name, tab) in tabs {
-                            if ui
-                                .selectable_label(settings_tab == tab, label(name))
-                                .clicked()
-                            {
-                                settings_tab = tab;
-                            }
-                            ui.add_space(4.0);
-                        }
-                    });
-
                 egui::CentralPanel::default()
                     .frame(
                         egui::Frame::none()
@@ -495,11 +467,19 @@ impl UiState {
                             .inner_margin(egui::Margin::same(20.0)),
                     )
                     .show(ctx, |ui| {
-                        egui::ScrollArea::vertical().show(ui, |ui| match settings_tab {
-                            SettingsTab::Themes => settings_tabs::render_themes_tab(ui, &mut config_clone),
-                            SettingsTab::Background => settings_tabs::render_background_tab(ui, &mut config_clone),
-                            SettingsTab::Text => settings_tabs::render_text_tab(ui, &mut config_clone),
-                        });
+                        egui::ScrollArea::vertical()
+                            .auto_shrink([false; 2])
+                            .show(ui, |ui| {
+                                settings_tabs::render_themes_tab(ui, &mut config_clone);
+                                ui.add_space(24.0);
+                                ui.separator();
+                                ui.add_space(16.0);
+                                settings_tabs::render_background_tab(ui, &mut config_clone);
+                                ui.add_space(24.0);
+                                ui.separator();
+                                ui.add_space(16.0);
+                                settings_tabs::render_text_tab(ui, &mut config_clone);
+                            });
                     });
             }
 
@@ -537,7 +517,7 @@ impl UiState {
                             .inner_margin(egui::Margin::same(20.0)),
                     )
                     .show(ctx, |ui| {
-                        explorer_view::render_explorer_view(ui, &mut explorer);
+                        explorer_view::render_explorer_view(ui, &mut explorer, &mut editor_view);
                     });
             }
 
@@ -661,6 +641,7 @@ impl UiState {
         }
         self.sketch = sketch;
         self.explorer = explorer;
+        self.editor_view = editor_view;
         self.sketch_canvas_px = sketch_canvas_px;
 
         // Restore tab editing state
@@ -673,6 +654,10 @@ impl UiState {
             self.active_view = view;
         }
         if let Some(text) = clipboard_copy {
+            self.clipboard_text = Some(text);
+        }
+        // Editor clipboard: copy/cut puts text here for the main loop
+        if let Some(text) = self.editor_view.clipboard_out.take() {
             self.clipboard_text = Some(text);
         }
 
@@ -736,11 +721,5 @@ impl UiState {
             self.wgpu_renderer.free_texture(id);
         }
     }
-}
-
-const S: f32 = 16.0;
-
-fn label(text: &str) -> egui::RichText {
-    egui::RichText::new(text).size(S)
 }
 

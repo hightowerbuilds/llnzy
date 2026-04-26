@@ -315,19 +315,26 @@ impl Renderer {
 
     fn render_scene_background(&mut self, encoder: &mut wgpu::CommandEncoder, use_scene: bool) {
         if use_scene && self.config.effects.background != "none" {
-            self.background.update_uniforms(
-                &self.gpu,
-                self.config.effects.background_intensity,
-                self.config.effects.background_speed,
-                self.config.bg(),
-                self.config.effects.background_color,
-            );
-            self.background.draw(
-                &self.gpu,
-                encoder,
-                &self.gpu.scene_view,
-                &self.config.effects.background,
-            );
+            if self.config.effects.background == "image" {
+                if let Some(path) = self.config.effects.background_image.clone() {
+                    self.background.load_image(&self.gpu, &path);
+                    self.background.draw_image(encoder, &self.gpu.scene_view);
+                }
+            } else {
+                self.background.update_uniforms(
+                    &self.gpu,
+                    self.config.effects.background_intensity,
+                    self.config.effects.background_speed,
+                    self.config.bg(),
+                    self.config.effects.background_color,
+                );
+                self.background.draw(
+                    &self.gpu,
+                    encoder,
+                    &self.gpu.scene_view,
+                    &self.config.effects.background,
+                );
+            }
         }
 
         if use_scene && self.config.effects.particles_enabled {

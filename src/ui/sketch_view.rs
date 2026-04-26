@@ -63,28 +63,9 @@ pub(crate) fn render_sketch_view(
 
         ui.separator();
 
-        for color in [
-            [235, 238, 245, 255],
-            [92, 160, 255, 255],
-            [84, 220, 150, 255],
-            [255, 205, 92, 255],
-            [255, 105, 150, 255],
-            [28, 30, 38, 255],
-        ] {
-            let (rect, response) =
-                ui.allocate_exact_size(egui::Vec2::splat(22.0), egui::Sense::click());
-            ui.painter()
-                .rect_filled(rect.shrink(3.0), egui::Rounding::same(3.0), color32(color));
-            if sketch.style.stroke_color == color {
-                ui.painter().rect_stroke(
-                    rect,
-                    egui::Rounding::same(4.0),
-                    egui::Stroke::new(1.5, egui::Color32::WHITE),
-                );
-            }
-            if response.clicked() {
-                sketch.style.stroke_color = color;
-            }
+        let mut c = sketch.style.stroke_color;
+        if ui.color_edit_button_srgba_unmultiplied(&mut c).changed() {
+            sketch.style.stroke_color = c;
         }
 
         ui.add_space(8.0);

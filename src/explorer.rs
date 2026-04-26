@@ -1,7 +1,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const MAX_FILE_SIZE: u64 = 1_048_576; // 1 MB
+use crate::editor::buffer::Buffer;
+
+const MAX_FILE_SIZE: u64 = 10_485_760; // 10 MB (increased for editor)
 const MAX_IMAGE_SIZE: u64 = 20_971_520; // 20 MB
 
 pub struct DirEntry {
@@ -12,7 +14,7 @@ pub struct DirEntry {
 }
 
 pub enum FileContent {
-    Text(String),
+    Text(Buffer),
     Image {
         rgba: Vec<u8>,
         width: u32,
@@ -126,7 +128,7 @@ impl ExplorerState {
         match fs::metadata(&path) {
             Ok(meta) if meta.len() > MAX_FILE_SIZE => {
                 self.error = Some(format!(
-                    "File too large to preview ({:.1} MB limit)",
+                    "File too large to edit ({:.0} MB limit)",
                     MAX_FILE_SIZE as f64 / 1_048_576.0
                 ));
                 return;
@@ -138,18 +140,17 @@ impl ExplorerState {
             _ => {}
         }
 
-        match fs::read_to_string(&path) {
-            Ok(text) => {
+        match Buffer::from_file(&path) {
+            Ok(buf) => {
                 self.error = None;
                 self.open_file = Some(OpenFile {
                     path,
                     name,
-                    content: FileContent::Text(text),
+                    content: FileContent::Text(buf),
                 });
             }
-            Err(_) => {
-                self.error =
-                    Some("Cannot display file (binary or unsupported encoding)".to_string());
+            Err(e) => {
+                self.error = Some(e);
             }
         }
     }

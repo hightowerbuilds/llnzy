@@ -19,7 +19,7 @@ pub(crate) fn render_background_tab(ui: &mut egui::Ui, config: &mut Config) {
         .num_columns(2)
         .spacing([24.0, 10.0])
         .show(ui, |ui| {
-            // Background type
+            // Background type (shader effects only)
             ui.label(label("Background"));
             egui::ComboBox::from_id_salt("bg_type")
                 .selected_text(label(&config.effects.background))
@@ -70,131 +70,150 @@ pub(crate) fn render_background_tab(ui: &mut egui::Ui, config: &mut Config) {
                     ui.end_row();
                 }
             }
+
+            // Image background — separate from shader backgrounds
+            ui.label(label("Image"));
+            ui.horizontal(|ui| {
+                if ui.button(label("Choose Image")).clicked() {
+                    if let Some(path) = rfd::FileDialog::new()
+                        .add_filter("Images", &["png", "jpg", "jpeg", "bmp", "webp", "gif"])
+                        .pick_file()
+                    {
+                        config.effects.background_image = Some(path.display().to_string());
+                        config.effects.background = "image".to_string();
+                    }
+                }
+                if config.effects.background == "image" {
+                    if let Some(ref p) = config.effects.background_image {
+                        let name = std::path::Path::new(p)
+                            .file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                        ui.label(
+                            egui::RichText::new(name)
+                                .size(13.0)
+                                .color(egui::Color32::from_rgb(160, 160, 170)),
+                        );
+                    }
+                }
+            });
+            ui.end_row();
         });
 
     ui.add_space(16.0);
     ui.separator();
     ui.add_space(8.0);
 
-    egui::CollapsingHeader::new(
+    ui.label(
         egui::RichText::new("Bloom / Glow")
             .size(18.0)
             .color(egui::Color32::WHITE),
-    )
-    .default_open(false)
-    .show(ui, |ui| {
-        ui.add_space(8.0);
-        egui::Grid::new("bloom_settings")
-            .num_columns(2)
-            .spacing([24.0, 10.0])
-            .show(ui, |ui| {
-                ui.label(label("Enabled"));
-                ui.add(egui::Checkbox::without_text(
-                    &mut config.effects.bloom_enabled,
-                ));
-                ui.end_row();
+    );
+    ui.add_space(8.0);
+    egui::Grid::new("bloom_settings")
+        .num_columns(2)
+        .spacing([24.0, 10.0])
+        .show(ui, |ui| {
+            ui.label(label("Enabled"));
+            ui.add(egui::Checkbox::without_text(
+                &mut config.effects.bloom_enabled,
+            ));
+            ui.end_row();
 
-                ui.label(label("Threshold"));
-                ui.add(egui::Slider::new(&mut config.effects.bloom_threshold, 0.1..=0.9).text(""));
-                ui.end_row();
+            ui.label(label("Threshold"));
+            ui.add(egui::Slider::new(&mut config.effects.bloom_threshold, 0.1..=0.9).text(""));
+            ui.end_row();
 
-                ui.label(label("Intensity"));
-                ui.add(egui::Slider::new(&mut config.effects.bloom_intensity, 0.0..=2.0).text(""));
-                ui.end_row();
+            ui.label(label("Intensity"));
+            ui.add(egui::Slider::new(&mut config.effects.bloom_intensity, 0.0..=2.0).text(""));
+            ui.end_row();
 
-                ui.label(label("Radius"));
-                ui.add(egui::Slider::new(&mut config.effects.bloom_radius, 0.5..=5.0).text(""));
-                ui.end_row();
-            });
-    });
+            ui.label(label("Radius"));
+            ui.add(egui::Slider::new(&mut config.effects.bloom_radius, 0.5..=5.0).text(""));
+            ui.end_row();
+        });
 
     ui.add_space(16.0);
     ui.separator();
     ui.add_space(8.0);
 
-    egui::CollapsingHeader::new(
+    ui.label(
         egui::RichText::new("Particles")
             .size(18.0)
             .color(egui::Color32::WHITE),
-    )
-    .default_open(false)
-    .show(ui, |ui| {
-        ui.add_space(8.0);
-        egui::Grid::new("particle_settings")
-            .num_columns(2)
-            .spacing([24.0, 10.0])
-            .show(ui, |ui| {
-                ui.label(label("Enabled"));
-                ui.add(egui::Checkbox::without_text(
-                    &mut config.effects.particles_enabled,
-                ));
-                ui.end_row();
+    );
+    ui.add_space(8.0);
+    egui::Grid::new("particle_settings")
+        .num_columns(2)
+        .spacing([24.0, 10.0])
+        .show(ui, |ui| {
+            ui.label(label("Enabled"));
+            ui.add(egui::Checkbox::without_text(
+                &mut config.effects.particles_enabled,
+            ));
+            ui.end_row();
 
-                let mut count = config.effects.particles_count as f32;
-                ui.label(label("Count"));
-                if ui
-                    .add(egui::Slider::new(&mut count, 0.0..=4096.0).text(""))
-                    .changed()
-                {
-                    config.effects.particles_count = count as u32;
-                }
-                ui.end_row();
+            let mut count = config.effects.particles_count as f32;
+            ui.label(label("Count"));
+            if ui
+                .add(egui::Slider::new(&mut count, 0.0..=4096.0).text(""))
+                .changed()
+            {
+                config.effects.particles_count = count as u32;
+            }
+            ui.end_row();
 
-                ui.label(label("Speed"));
-                ui.add(egui::Slider::new(&mut config.effects.particles_speed, 0.0..=5.0).text(""));
-                ui.end_row();
-            });
-    });
+            ui.label(label("Speed"));
+            ui.add(egui::Slider::new(&mut config.effects.particles_speed, 0.0..=5.0).text(""));
+            ui.end_row();
+        });
 
     ui.add_space(16.0);
     ui.separator();
     ui.add_space(8.0);
 
-    egui::CollapsingHeader::new(
+    ui.label(
         egui::RichText::new("CRT / Retro")
             .size(18.0)
             .color(egui::Color32::WHITE),
-    )
-    .default_open(false)
-    .show(ui, |ui| {
-        ui.add_space(8.0);
-        egui::Grid::new("crt_settings")
-            .num_columns(2)
-            .spacing([24.0, 10.0])
-            .show(ui, |ui| {
-                ui.label(label("Enabled"));
-                ui.add(egui::Checkbox::without_text(
-                    &mut config.effects.crt_enabled,
-                ));
-                ui.end_row();
+    );
+    ui.add_space(8.0);
+    egui::Grid::new("crt_settings")
+        .num_columns(2)
+        .spacing([24.0, 10.0])
+        .show(ui, |ui| {
+            ui.label(label("Enabled"));
+            ui.add(egui::Checkbox::without_text(
+                &mut config.effects.crt_enabled,
+            ));
+            ui.end_row();
 
-                ui.label(label("Scanlines"));
-                ui.add(
-                    egui::Slider::new(&mut config.effects.scanline_intensity, 0.0..=1.0).text(""),
-                );
-                ui.end_row();
+            ui.label(label("Scanlines"));
+            ui.add(
+                egui::Slider::new(&mut config.effects.scanline_intensity, 0.0..=1.0).text(""),
+            );
+            ui.end_row();
 
-                ui.label(label("Curvature"));
-                ui.add(egui::Slider::new(&mut config.effects.curvature, 0.0..=0.5).text(""));
-                ui.end_row();
+            ui.label(label("Curvature"));
+            ui.add(egui::Slider::new(&mut config.effects.curvature, 0.0..=0.5).text(""));
+            ui.end_row();
 
-                ui.label(label("Vignette"));
-                ui.add(
-                    egui::Slider::new(&mut config.effects.vignette_strength, 0.0..=2.0).text(""),
-                );
-                ui.end_row();
+            ui.label(label("Vignette"));
+            ui.add(
+                egui::Slider::new(&mut config.effects.vignette_strength, 0.0..=2.0).text(""),
+            );
+            ui.end_row();
 
-                ui.label(label("Chromatic Aberration"));
-                ui.add(
-                    egui::Slider::new(&mut config.effects.chromatic_aberration, 0.0..=5.0).text(""),
-                );
-                ui.end_row();
+            ui.label(label("Chromatic Aberration"));
+            ui.add(
+                egui::Slider::new(&mut config.effects.chromatic_aberration, 0.0..=5.0).text(""),
+            );
+            ui.end_row();
 
-                ui.label(label("Film Grain"));
-                ui.add(egui::Slider::new(&mut config.effects.grain_intensity, 0.0..=0.5).text(""));
-                ui.end_row();
-            });
-    });
+            ui.label(label("Film Grain"));
+            ui.add(egui::Slider::new(&mut config.effects.grain_intensity, 0.0..=0.5).text(""));
+            ui.end_row();
+        });
 }
 
 pub(crate) fn render_text_tab(ui: &mut egui::Ui, config: &mut Config) {
