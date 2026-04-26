@@ -662,13 +662,15 @@ impl ApplicationHandler<UserEvent> for App {
                                 }
                             })
                         });
-                        // Supply clipboard content to editor for paste
+                        // Supply clipboard content to editor for paste + init LSP
                         if let Some(ui) = self.ui.as_mut() {
                             if let Some(cb) = &mut self.clipboard {
                                 if let Ok(text) = cb.get_text() {
                                     ui.editor_view.clipboard_in = Some(text);
                                 }
                             }
+                            // Ensure the LSP manager is initialized
+                            ui.editor_view.init_lsp(self.proxy.clone());
                         }
                         // Update tab context for tab bar interaction
                         if let Some(ui) = self.ui.as_mut() {
@@ -1213,6 +1215,7 @@ impl ApplicationHandler<UserEvent> for App {
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
             UserEvent::PtyOutput => self.request_redraw(),
+            UserEvent::LspMessage => self.request_redraw(),
             #[cfg(target_os = "macos")]
             UserEvent::MenuAction(action) => {
                 use llnzy::menu::MenuAction;

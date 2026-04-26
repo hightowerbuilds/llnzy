@@ -6,6 +6,7 @@ pub mod explorer;
 pub mod input;
 pub mod keybindings;
 pub mod layout;
+pub mod lsp;
 #[cfg(target_os = "macos")]
 pub mod menu;
 pub mod pty;
@@ -22,6 +23,7 @@ pub mod ui;
 #[derive(Debug)]
 pub enum UserEvent {
     PtyOutput,
+    LspMessage,
     #[cfg(target_os = "macos")]
     MenuAction(menu::MenuAction),
 }
