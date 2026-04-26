@@ -1,3 +1,4 @@
+pub mod command_palette;
 mod editor_view;
 mod explorer_view;
 mod settings_tabs;
@@ -63,8 +64,10 @@ pub struct UiState {
     pub active_tab_index: usize,
     // Terminal panel (shown below editor in Explorer view)
     pub terminal_panel_open: bool,
-    /// Fraction of vertical space for the terminal panel (0.0-1.0).
     pub terminal_panel_ratio: f32,
+    // Command palette
+    pub palette: command_palette::PaletteState,
+    pub palette_command: Option<command_palette::CommandId>,
 }
 
 impl UiState {
@@ -137,6 +140,8 @@ impl UiState {
             active_tab_index: 0,
             terminal_panel_open: false,
             terminal_panel_ratio: 0.35,
+            palette: command_palette::PaletteState::default(),
+            palette_command: None,
         }
     }
 
@@ -255,6 +260,8 @@ impl UiState {
         let mut editor_view = std::mem::take(&mut self.editor_view);
         let terminal_panel_open = self.terminal_panel_open;
         let terminal_panel_ratio = self.terminal_panel_ratio;
+        let mut palette = std::mem::take(&mut self.palette);
+        let mut palette_command: Option<command_palette::CommandId> = None;
         let show_fps = self.show_fps;
         let fps_info = if show_fps && !self.frame_times.is_empty() {
             let avg_dt: f32 = self.frame_times.iter().sum::<f32>() / self.frame_times.len() as f32;
@@ -618,6 +625,34 @@ impl UiState {
                 ctx.request_repaint();
             }
 
+            // Command palette overlay
+            if palette.open {
+                egui::Area::new(egui::Id::new("command_palette"))
+                    .fixed_pos(egui::pos2(
+                        ctx.screen_rect().center().x - 200.0,
+                        ctx.screen_rect().top() + 50.0,
+                    ))
+                    .order(egui::Order::Foreground)
+                    .show(ctx, |ui| {
+                        egui::Frame::none()
+                            .fill(egui::Color32::from_rgb(30, 32, 42))
+                            .rounding(egui::Rounding::same(8.0))
+                            .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(60, 65, 80)))
+                            .inner_margin(egui::Margin::same(12.0))
+                            .show(ui, |ui| {
+                                ui.set_min_width(400.0);
+                                palette_command = command_palette::render_palette(ui, &mut palette);
+                            });
+                    });
+            }
+
+            // Cmd+Shift+P to toggle palette
+            ctx.input(|input| {
+                if input.modifiers.command && input.modifiers.shift && input.key_pressed(egui::Key::P) {
+                    if palette.open { palette.close(); } else { palette.open(); }
+                }
+            });
+
             // FPS overlay
             if let Some((fps, ms)) = fps_info {
                 egui::Area::new(egui::Id::new("fps_overlay"))
@@ -669,6 +704,8 @@ impl UiState {
         self.sketch = sketch;
         self.explorer = explorer;
         self.editor_view = editor_view;
+        self.palette = palette;
+        self.palette_command = palette_command;
         self.sketch_canvas_px = sketch_canvas_px;
 
         // Restore tab editing state
