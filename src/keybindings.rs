@@ -23,6 +23,7 @@ pub enum Action {
     CyclePaneBackward,
     ScrollPageUp,
     ScrollPageDown,
+    ToggleTerminalPanel,
     SwitchTab(u8),
 }
 
@@ -103,6 +104,7 @@ impl KeyBindings {
             (cmd_named(NamedKey::ArrowUp), CyclePaneBackward),
             (shift_named(NamedKey::PageUp), ScrollPageUp),
             (shift_named(NamedKey::PageDown), ScrollPageDown),
+            (cmd("`"), ToggleTerminalPanel),
         ];
 
         for i in 1..=9u8 {

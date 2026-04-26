@@ -61,6 +61,10 @@ pub struct UiState {
     // Tab context for rendering interaction
     pub tab_count: usize,
     pub active_tab_index: usize,
+    // Terminal panel (shown below editor in Explorer view)
+    pub terminal_panel_open: bool,
+    /// Fraction of vertical space for the terminal panel (0.0-1.0).
+    pub terminal_panel_ratio: f32,
 }
 
 impl UiState {
@@ -131,6 +135,8 @@ impl UiState {
             sketch_canvas_px: None,
             tab_count: 0,
             active_tab_index: 0,
+            terminal_panel_open: false,
+            terminal_panel_ratio: 0.35,
         }
     }
 
@@ -140,16 +146,22 @@ impl UiState {
         response.consumed
     }
 
-    /// Whether the terminal is covered by a full-screen view.
+    /// Whether the terminal is completely covered by a full-screen view.
+    /// When the terminal panel is open in Explorer, the terminal is NOT covered.
     pub fn settings_open(&self) -> bool {
-        matches!(
-            self.active_view,
+        match self.active_view {
+            ActiveView::Explorer if self.terminal_panel_open => false,
             ActiveView::Appearances
-                | ActiveView::Settings
-                | ActiveView::Stacker
-                | ActiveView::Sketch
-                | ActiveView::Explorer
-        )
+            | ActiveView::Settings
+            | ActiveView::Stacker
+            | ActiveView::Sketch
+            | ActiveView::Explorer => true,
+            _ => false,
+        }
+    }
+
+    pub fn toggle_terminal_panel(&mut self) {
+        self.terminal_panel_open = !self.terminal_panel_open;
     }
 
     pub fn captures_terminal_input(&self) -> bool {
@@ -241,6 +253,8 @@ impl UiState {
         let mut sketch_canvas_px: Option<[f32; 4]> = None;
         let mut explorer = std::mem::take(&mut self.explorer);
         let mut editor_view = std::mem::take(&mut self.editor_view);
+        let terminal_panel_open = self.terminal_panel_open;
+        let terminal_panel_ratio = self.terminal_panel_ratio;
         let show_fps = self.show_fps;
         let fps_info = if show_fps && !self.frame_times.is_empty() {
             let avg_dt: f32 = self.frame_times.iter().sum::<f32>() / self.frame_times.len() as f32;
@@ -511,6 +525,18 @@ impl UiState {
 
             // ── Explorer view ──
             if current_view == ActiveView::Explorer {
+                // When terminal panel is open, reserve the bottom portion for the terminal
+                if terminal_panel_open {
+                    let screen_h = ctx.screen_rect().height();
+                    let terminal_h = (screen_h * terminal_panel_ratio).max(80.0);
+                    egui::TopBottomPanel::bottom("terminal_panel_spacer")
+                        .exact_height(terminal_h)
+                        .frame(egui::Frame::none().fill(egui::Color32::TRANSPARENT))
+                        .show(ctx, |ui| {
+                            // Divider line between editor and terminal
+                            ui.add(egui::Separator::default().horizontal());
+                        });
+                }
                 egui::CentralPanel::default()
                     .frame(
                         egui::Frame::none()
