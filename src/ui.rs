@@ -2,6 +2,9 @@ use std::time::Instant;
 use winit::window::Window;
 
 use crate::config::Config;
+use crate::sketch::{
+    save_default_document, DraftElement, SketchElement, SketchPoint, SketchState, SketchTool,
+};
 use crate::stacker::{
     apply_prompt_edit, export_prompts, import_prompts, load_stacker_prompts, merge_unique_prompts,
     new_prompt, save_stacker_prompts, stacker_path, StackerPrompt,
@@ -15,6 +18,7 @@ pub const SIDEBAR_WIDTH: f32 = 200.0;
 pub enum ActiveView {
     Shells,
     Stacker,
+    Sketch,
     Appearances,
     Settings,
 }
@@ -65,6 +69,8 @@ pub struct UiState {
     pub stacker_edit_text: String,
     pub stacker_dirty: bool, // needs save to disk
     pub copy_ghosts: Vec<CopyGhost>,
+    // Sketch state
+    pub sketch: SketchState,
     // Tab renaming
     pub editing_tab: Option<usize>,
     pub editing_tab_text: String,
@@ -84,8 +90,10 @@ impl UiState {
         let ctx = egui::Context::default();
 
         // Style: dark theme with our terminal aesthetic
-        let mut style = egui::Style::default();
-        style.visuals = egui::Visuals::dark();
+        let mut style = egui::Style {
+            visuals: egui::Visuals::dark(),
+            ..Default::default()
+        };
         style.visuals.window_rounding = egui::Rounding::same(4.0);
         style.visuals.button_frame = true;
         ctx.set_style(style);
@@ -131,6 +139,7 @@ impl UiState {
             stacker_edit_text: String::new(),
             stacker_dirty: false,
             copy_ghosts: Vec::new(),
+            sketch: SketchState::load_default(),
             editing_tab: None,
             editing_tab_text: String::new(),
             saved_tab_name: None,
@@ -148,7 +157,17 @@ impl UiState {
 
     /// Whether the terminal is covered by a full-screen view.
     pub fn settings_open(&self) -> bool {
-        matches!(self.active_view, ActiveView::Appearances | ActiveView::Settings | ActiveView::Stacker)
+        matches!(
+            self.active_view,
+            ActiveView::Appearances
+                | ActiveView::Settings
+                | ActiveView::Stacker
+                | ActiveView::Sketch
+        )
+    }
+
+    pub fn captures_terminal_input(&self) -> bool {
+        matches!(self.active_view, ActiveView::Sketch)
     }
 
     pub fn toggle_sidebar(&mut self) {
@@ -232,6 +251,7 @@ impl UiState {
         let mut stacker_dirty = self.stacker_dirty;
         let mut saved_edit_idx: Option<usize> = None;
         let mut copy_ghosts = std::mem::take(&mut self.copy_ghosts);
+        let mut sketch = std::mem::take(&mut self.sketch);
         let show_fps = self.show_fps;
         let fps_info = if show_fps && !self.frame_times.is_empty() {
             let avg_dt: f32 = self.frame_times.iter().sum::<f32>() / self.frame_times.len() as f32;
@@ -286,7 +306,9 @@ impl UiState {
                 ctx.input(|input| {
                     if input.pointer.button_pressed(egui::PointerButton::Primary) {
                         if let Some(pos) = input.pointer.latest_pos() {
-                            if pos.y >= viewport_rect.top() && pos.y < viewport_rect.top() + tab_bar_height {
+                            if pos.y >= viewport_rect.top()
+                                && pos.y < viewport_rect.top() + tab_bar_height
+                            {
                                 let rel_x = pos.x - viewport_rect.left() - sidebar_offset;
                                 if rel_x >= 0.0 && rel_x < viewport_rect.width() - sidebar_offset {
                                     let tab_idx = (rel_x / tab_w).floor() as usize;
@@ -302,7 +324,9 @@ impl UiState {
                 // Detect double-click based on last click time
                 if let Some(tab_idx) = tab_clicked {
                     if let Some((last_idx, last_time)) = last_tab_click {
-                        if last_idx == tab_idx && last_time.elapsed().as_millis() < DOUBLE_CLICK_TIME_MS {
+                        if last_idx == tab_idx
+                            && last_time.elapsed().as_millis() < DOUBLE_CLICK_TIME_MS
+                        {
                             // Double-click detected!
                             editing_tab = Some(tab_idx);
                             editing_tab_text.clear();
@@ -374,6 +398,7 @@ impl UiState {
                         let views = [
                             ("Shells", ActiveView::Shells),
                             ("Stacker", ActiveView::Stacker),
+                            ("Sketch", ActiveView::Sketch),
                             ("Appearances", ActiveView::Appearances),
                             ("Settings", ActiveView::Settings),
                         ];
@@ -404,15 +429,13 @@ impl UiState {
                             ui.add_space(8.0);
                             ui.separator();
                             ui.add_space(4.0);
-                            ui.label(
-                                egui::RichText::new("Queue")
-                                    .size(13.0)
-                                    .color(egui::Color32::from_rgb(
-                                        (fg[0] as f32 * 0.6) as u8,
-                                        (fg[1] as f32 * 0.6) as u8,
-                                        (fg[2] as f32 * 0.6) as u8,
-                                    )),
-                            );
+                            ui.label(egui::RichText::new("Queue").size(13.0).color(
+                                egui::Color32::from_rgb(
+                                    (fg[0] as f32 * 0.6) as u8,
+                                    (fg[1] as f32 * 0.6) as u8,
+                                    (fg[2] as f32 * 0.6) as u8,
+                                ),
+                            ));
                             ui.add_space(4.0);
 
                             egui::ScrollArea::vertical()
@@ -426,10 +449,7 @@ impl UiState {
                                                     .color(text_color),
                                             )
                                             .fill(egui::Color32::TRANSPARENT)
-                                            .min_size(egui::Vec2::new(
-                                                ui.available_width(),
-                                                24.0,
-                                            ))
+                                            .min_size(egui::Vec2::new(ui.available_width(), 24.0))
                                             .wrap_mode(egui::TextWrapMode::Truncate),
                                         );
                                         if btn.clicked() {
@@ -767,6 +787,20 @@ impl UiState {
                     });
             }
 
+            // ── Sketch view ──
+            if current_view == ActiveView::Sketch {
+                let sketch_bg = egui::Color32::from_rgb(bg[0], bg[1], bg[2]);
+                egui::CentralPanel::default()
+                    .frame(
+                        egui::Frame::none()
+                            .fill(sketch_bg)
+                            .inner_margin(egui::Margin::same(14.0)),
+                    )
+                    .show(ctx, |ui| {
+                        render_sketch_view(ctx, ui, &mut sketch, sketch_bg, text_color, active_btn);
+                    });
+            }
+
             // ── Settings view (blank for now) ──
             if current_view == ActiveView::Settings {
                 egui::CentralPanel::default()
@@ -786,7 +820,8 @@ impl UiState {
 
             // ── Copy ghost animations ──
             let now = Instant::now();
-            copy_ghosts.retain(|g| now.duration_since(g.created).as_secs_f32() < GHOST_DURATION_SECS);
+            copy_ghosts
+                .retain(|g| now.duration_since(g.created).as_secs_f32() < GHOST_DURATION_SECS);
             for (i, ghost) in copy_ghosts.iter().enumerate() {
                 let t = now.duration_since(ghost.created).as_secs_f32() / GHOST_DURATION_SECS;
                 let alpha = ((1.0 - t) * 200.0) as u8;
@@ -852,6 +887,10 @@ impl UiState {
         self.stacker_edit_text = stacker_edit_text;
         self.stacker_dirty = false;
         self.copy_ghosts = copy_ghosts;
+        if sketch.is_dirty() && save_default_document(&sketch.document).is_ok() {
+            sketch.mark_saved();
+        }
+        self.sketch = sketch;
 
         // Restore tab editing state
         self.editing_tab = editing_tab;
@@ -934,6 +973,429 @@ fn label(text: &str) -> egui::RichText {
     egui::RichText::new(text).size(S)
 }
 
+fn render_sketch_view(
+    ctx: &egui::Context,
+    ui: &mut egui::Ui,
+    sketch: &mut SketchState,
+    sketch_bg: egui::Color32,
+    text_color: egui::Color32,
+    active_btn: egui::Color32,
+) {
+    sketch_shortcuts(ui, sketch);
+
+    ui.horizontal(|ui| {
+        ui.label(
+            egui::RichText::new("Sketch")
+                .size(22.0)
+                .color(egui::Color32::WHITE),
+        );
+        ui.add_space(16.0);
+        tool_button(
+            ui,
+            sketch,
+            SketchTool::Select,
+            "Select",
+            active_btn,
+            text_color,
+        )
+        .on_hover_text("Select and delete elements");
+        tool_button(
+            ui,
+            sketch,
+            SketchTool::Marker,
+            "Marker",
+            active_btn,
+            text_color,
+        )
+        .on_hover_text("Draw freehand strokes");
+        tool_button(
+            ui,
+            sketch,
+            SketchTool::Rectangle,
+            "Rect",
+            active_btn,
+            text_color,
+        )
+        .on_hover_text("Drag to create a rectangle");
+        tool_button(ui, sketch, SketchTool::Text, "Text", active_btn, text_color)
+            .on_hover_text("Click to place a text box");
+
+        ui.separator();
+
+        for color in [
+            [235, 238, 245, 255],
+            [92, 160, 255, 255],
+            [84, 220, 150, 255],
+            [255, 205, 92, 255],
+            [255, 105, 150, 255],
+            [28, 30, 38, 255],
+        ] {
+            let (rect, response) =
+                ui.allocate_exact_size(egui::Vec2::splat(22.0), egui::Sense::click());
+            ui.painter()
+                .rect_filled(rect.shrink(3.0), egui::Rounding::same(3.0), color32(color));
+            if sketch.style.stroke_color == color {
+                ui.painter().rect_stroke(
+                    rect,
+                    egui::Rounding::same(4.0),
+                    egui::Stroke::new(1.5, egui::Color32::WHITE),
+                );
+            }
+            if response.clicked() {
+                sketch.style.stroke_color = color;
+            }
+        }
+
+        ui.add_space(8.0);
+        ui.add(egui::Slider::new(&mut sketch.style.stroke_width, 1.0..=14.0).text("Width"));
+
+        ui.separator();
+
+        if ui
+            .add_enabled(sketch.can_undo(), egui::Button::new("Undo"))
+            .clicked()
+        {
+            sketch.undo();
+        }
+        if ui
+            .add_enabled(sketch.can_redo(), egui::Button::new("Redo"))
+            .clicked()
+        {
+            sketch.redo();
+        }
+        if ui
+            .add_enabled(
+                !sketch.document.elements.is_empty(),
+                egui::Button::new("Clear"),
+            )
+            .clicked()
+        {
+            sketch.clear();
+        }
+    });
+
+    ui.add_space(12.0);
+
+    let available = ui.available_size();
+    let canvas_size = egui::Vec2::new(available.x.max(320.0), available.y.max(240.0));
+    let (canvas_rect, response) =
+        ui.allocate_exact_size(canvas_size, egui::Sense::click_and_drag());
+    let painter = ui.painter_at(canvas_rect);
+
+    painter.rect_filled(canvas_rect, egui::Rounding::same(4.0), sketch_bg);
+    painter.rect_stroke(
+        canvas_rect,
+        egui::Rounding::same(4.0),
+        egui::Stroke::new(1.0, active_btn),
+    );
+
+    handle_sketch_pointer(sketch, &response, canvas_rect);
+    paint_sketch_document(&painter, canvas_rect, sketch);
+    render_text_editor(ctx, canvas_rect, sketch);
+}
+
+fn tool_button(
+    ui: &mut egui::Ui,
+    sketch: &mut SketchState,
+    tool: SketchTool,
+    text: &str,
+    active_btn: egui::Color32,
+    text_color: egui::Color32,
+) -> egui::Response {
+    let selected = sketch.tool == tool;
+    let response = ui.add(
+        egui::Button::new(egui::RichText::new(text).size(14.0).color(if selected {
+            egui::Color32::WHITE
+        } else {
+            text_color
+        }))
+        .fill(if selected {
+            active_btn
+        } else {
+            egui::Color32::from_rgb(30, 32, 40)
+        }),
+    );
+    if response.clicked() {
+        sketch.set_tool(tool);
+    }
+    response
+}
+
+fn sketch_shortcuts(ui: &egui::Ui, sketch: &mut SketchState) {
+    ui.input(|input| {
+        if input.modifiers.command && input.key_pressed(egui::Key::Z) {
+            if input.modifiers.shift {
+                sketch.redo();
+            } else {
+                sketch.undo();
+            }
+        }
+        if (input.key_pressed(egui::Key::Delete) || input.key_pressed(egui::Key::Backspace))
+            && sketch.text_draft.is_none()
+        {
+            sketch.delete_selected();
+        }
+        if input.key_pressed(egui::Key::Escape) {
+            if sketch.text_draft.is_some() {
+                sketch.cancel_text_draft();
+            } else {
+                sketch.selected = None;
+            }
+        }
+    });
+}
+
+fn handle_sketch_pointer(
+    sketch: &mut SketchState,
+    response: &egui::Response,
+    canvas_rect: egui::Rect,
+) {
+    let Some(pointer_pos) = response.interact_pointer_pos() else {
+        return;
+    };
+    let point = screen_to_canvas(pointer_pos, canvas_rect);
+
+    match sketch.tool {
+        SketchTool::Marker => {
+            if response.drag_started() {
+                sketch.begin_stroke(point);
+            } else if response.dragged() {
+                sketch.append_stroke_point(point);
+            }
+            if response.drag_stopped() {
+                sketch.finish_stroke();
+            }
+        }
+        SketchTool::Rectangle => {
+            if response.drag_started() {
+                sketch.begin_rectangle(point);
+            } else if response.dragged() {
+                sketch.update_rectangle(point);
+            }
+            if response.drag_stopped() {
+                sketch.finish_rectangle();
+            }
+        }
+        SketchTool::Text => {
+            if response.clicked() {
+                sketch.add_text_box(point);
+            }
+        }
+        SketchTool::Select => {
+            if response.clicked() {
+                sketch.select_at(point);
+            }
+        }
+    }
+}
+
+fn paint_sketch_document(painter: &egui::Painter, canvas_rect: egui::Rect, sketch: &SketchState) {
+    for (index, element) in sketch.document.elements.iter().enumerate() {
+        paint_sketch_element(
+            painter,
+            canvas_rect,
+            element,
+            sketch.selected == Some(index),
+        );
+    }
+
+    match &sketch.draft {
+        Some(DraftElement::Stroke(stroke)) => {
+            paint_stroke(
+                painter,
+                canvas_rect,
+                &stroke.points,
+                stroke.style.stroke_color,
+                stroke.style.stroke_width,
+            );
+        }
+        Some(DraftElement::Rectangle {
+            start,
+            current,
+            style,
+        }) => {
+            let rect = rect_from_points(canvas_rect, *start, *current);
+            painter.rect_stroke(
+                rect,
+                egui::Rounding::same(2.0),
+                egui::Stroke::new(style.stroke_width, color32(style.stroke_color)),
+            );
+        }
+        None => {}
+    }
+}
+
+fn paint_sketch_element(
+    painter: &egui::Painter,
+    canvas_rect: egui::Rect,
+    element: &SketchElement,
+    selected: bool,
+) {
+    match element {
+        SketchElement::Stroke(stroke) => {
+            paint_stroke(
+                painter,
+                canvas_rect,
+                &stroke.points,
+                stroke.style.stroke_color,
+                stroke.style.stroke_width,
+            );
+        }
+        SketchElement::Rectangle(rect) => {
+            let screen_rect = egui::Rect::from_min_size(
+                canvas_to_screen(canvas_rect, SketchPoint::new(rect.x, rect.y)),
+                egui::Vec2::new(rect.w, rect.h),
+            );
+            if let Some(fill) = rect.style.fill_color {
+                painter.rect_filled(screen_rect, egui::Rounding::same(2.0), color32(fill));
+            }
+            painter.rect_stroke(
+                screen_rect,
+                egui::Rounding::same(2.0),
+                egui::Stroke::new(rect.style.stroke_width, color32(rect.style.stroke_color)),
+            );
+            if selected {
+                paint_selection(painter, screen_rect);
+            }
+        }
+        SketchElement::Text(text) => {
+            if text.text.is_empty() {
+                return;
+            }
+            let pos = canvas_to_screen(canvas_rect, SketchPoint::new(text.x, text.y));
+            let screen_rect = egui::Rect::from_min_size(pos, egui::Vec2::new(text.w, text.h));
+            painter.text(
+                pos,
+                egui::Align2::LEFT_TOP,
+                &text.text,
+                egui::FontId::proportional(text.style.font_size),
+                color32(text.style.stroke_color),
+            );
+            if selected {
+                paint_selection(painter, screen_rect);
+            }
+        }
+    }
+}
+
+fn paint_stroke(
+    painter: &egui::Painter,
+    canvas_rect: egui::Rect,
+    points: &[SketchPoint],
+    color: [u8; 4],
+    width: f32,
+) {
+    if points.len() < 2 {
+        return;
+    }
+    let screen_points: Vec<egui::Pos2> = points
+        .iter()
+        .map(|point| canvas_to_screen(canvas_rect, *point))
+        .collect();
+    painter.add(egui::Shape::line(
+        screen_points,
+        egui::Stroke::new(width, color32(color)),
+    ));
+}
+
+fn paint_selection(painter: &egui::Painter, rect: egui::Rect) {
+    painter.rect_stroke(
+        rect.expand(4.0),
+        egui::Rounding::same(3.0),
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(60, 130, 255)),
+    );
+}
+
+fn render_text_editor(ctx: &egui::Context, canvas_rect: egui::Rect, sketch: &mut SketchState) {
+    let Some(draft) = sketch.text_draft.clone() else {
+        return;
+    };
+    let Some(SketchElement::Text(text_box)) = sketch.document.elements.get(draft.index) else {
+        return;
+    };
+
+    let pos = canvas_to_screen(canvas_rect, SketchPoint::new(text_box.x, text_box.y));
+    let width = text_box.w;
+    let mut draft_text = draft.text;
+    let mut commit = false;
+    let mut cancel = false;
+
+    egui::Area::new(egui::Id::new(("sketch_text_editor", draft.index)))
+        .fixed_pos(pos)
+        .order(egui::Order::Foreground)
+        .show(ctx, |ui| {
+            egui::Frame::none()
+                .fill(egui::Color32::from_rgba_premultiplied(250, 250, 245, 235))
+                .stroke(egui::Stroke::new(
+                    1.0,
+                    egui::Color32::from_rgb(60, 130, 255),
+                ))
+                .inner_margin(egui::Margin::same(4.0))
+                .show(ui, |ui| {
+                    ui.set_width(width);
+                    let response = ui.add(
+                        egui::TextEdit::multiline(&mut draft_text)
+                            .desired_rows(2)
+                            .desired_width(width)
+                            .font(egui::TextStyle::Body),
+                    );
+                    response.request_focus();
+                    if response.changed() {
+                        sketch.update_text_draft(draft_text.clone());
+                    }
+                    ui.horizontal(|ui| {
+                        if ui.small_button("Done").clicked() {
+                            commit = true;
+                        }
+                        if ui.small_button("Cancel").clicked() {
+                            cancel = true;
+                        }
+                    });
+                    ui.input(|input| {
+                        if input.key_pressed(egui::Key::Escape) {
+                            cancel = true;
+                        }
+                        if input.modifiers.command && input.key_pressed(egui::Key::Enter) {
+                            commit = true;
+                        }
+                    });
+                });
+        });
+
+    if cancel {
+        sketch.cancel_text_draft();
+    } else if commit {
+        sketch.update_text_draft(draft_text);
+        sketch.commit_text_draft();
+    }
+}
+
+fn screen_to_canvas(pos: egui::Pos2, canvas_rect: egui::Rect) -> SketchPoint {
+    SketchPoint::new(
+        (pos.x - canvas_rect.min.x).clamp(0.0, canvas_rect.width()),
+        (pos.y - canvas_rect.min.y).clamp(0.0, canvas_rect.height()),
+    )
+}
+
+fn canvas_to_screen(canvas_rect: egui::Rect, point: SketchPoint) -> egui::Pos2 {
+    egui::pos2(canvas_rect.min.x + point.x, canvas_rect.min.y + point.y)
+}
+
+fn rect_from_points(
+    canvas_rect: egui::Rect,
+    start: SketchPoint,
+    current: SketchPoint,
+) -> egui::Rect {
+    egui::Rect::from_two_pos(
+        canvas_to_screen(canvas_rect, start),
+        canvas_to_screen(canvas_rect, current),
+    )
+}
+
+fn color32(color: [u8; 4]) -> egui::Color32 {
+    egui::Color32::from_rgba_unmultiplied(color[0], color[1], color[2], color[3])
+}
+
 fn render_background_tab(ui: &mut egui::Ui, config: &mut Config) {
     ui.label(
         egui::RichText::new("Background Effects")
@@ -975,7 +1437,10 @@ fn render_background_tab(ui: &mut egui::Ui, config: &mut Config) {
             if config.effects.background == "smoke" || config.effects.background == "aurora" {
                 let mut use_custom = config.effects.background_color.is_some();
                 ui.label(label("Custom Color"));
-                if ui.add(egui::Checkbox::without_text(&mut use_custom)).changed() {
+                if ui
+                    .add(egui::Checkbox::without_text(&mut use_custom))
+                    .changed()
+                {
                     if use_custom {
                         let bg = config.colors.background;
                         config.effects.background_color = Some(bg);

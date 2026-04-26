@@ -19,7 +19,6 @@ use llnzy::terminal::Terminal;
 type PtyWriter = Box<dyn Write + Send>;
 type PtyMaster = Box<dyn portable_pty::MasterPty + Send>;
 
-#[allow(clippy::type_complexity)]
 fn spawn_shell(cols: u16, rows: u16) -> (Terminal, mpsc::Receiver<Vec<u8>>, PtyWriter, PtyMaster) {
     let pty_system = native_pty_system();
     let size = PtySize {

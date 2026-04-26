@@ -17,9 +17,9 @@ use crate::layout::ScreenLayout;
 use crate::session::{PaneNode, Rect as PaneRect};
 use background::BackgroundRenderer;
 use blit::BlitPipeline;
-use bloom::BloomEffect;
-use crt::CrtEffect;
-use cursor::CursorRenderer;
+use bloom::{BloomEffect, BloomParams};
+use crt::{CrtEffect, CrtParams};
+use cursor::{CursorDrawRequest, CursorRenderer};
 use particles::ParticleSystem;
 use rect::RectRenderer;
 use state::GpuState;
@@ -443,21 +443,21 @@ impl Renderer {
                 if let Some((cr, cc)) = terminal.cursor_point() {
                     if use_scene && self.config.effects.cursor_glow {
                         // Shader-driven cursor with glow + pulse + trail
-                        self.cursor_renderer.draw(
-                            &self.gpu,
+                        self.cursor_renderer.draw(CursorDrawRequest {
+                            gpu: &self.gpu,
                             encoder,
                             target,
-                            cr,
-                            cc,
-                            cw,
-                            ch,
-                            rect.x,
-                            rect.y,
-                            self.config.cursor_style,
-                            self.config.cursor_color(),
-                            self.gpu.current_time,
-                            self.config.effects.cursor_trail,
-                        );
+                            cursor_row: cr,
+                            cursor_col: cc,
+                            cell_w: cw,
+                            cell_h: ch,
+                            offset_x: rect.x,
+                            offset_y: rect.y,
+                            cursor_style: self.config.cursor_style,
+                            cursor_color: self.config.cursor_color(),
+                            time: self.gpu.current_time,
+                            trail_enabled: self.config.effects.cursor_trail,
+                        });
                     } else {
                         // Flat rect cursor (no effects)
                         let cc_color = self.config.cursor_color();
@@ -577,21 +577,14 @@ impl Renderer {
                         encoder,
                         &self.gpu.scene_view,
                         &self.gpu.scene_view_b,
-                        self.config.effects.bloom_threshold,
-                        self.config.effects.bloom_intensity,
-                        self.config.effects.bloom_radius,
+                        self.bloom_params(),
                     );
                     self.crt.apply(
                         &self.gpu,
                         encoder,
                         &self.gpu.scene_view_b,
                         swapchain_view,
-                        self.config.effects.scanline_intensity,
-                        self.config.effects.curvature,
-                        self.config.effects.vignette_strength,
-                        self.config.effects.chromatic_aberration,
-                        self.config.effects.grain_intensity,
-                        self.gpu.current_time,
+                        self.crt_params(),
                     );
                 }
                 (true, false) => {
@@ -600,9 +593,7 @@ impl Renderer {
                         encoder,
                         &self.gpu.scene_view,
                         swapchain_view,
-                        self.config.effects.bloom_threshold,
-                        self.config.effects.bloom_intensity,
-                        self.config.effects.bloom_radius,
+                        self.bloom_params(),
                     );
                 }
                 (false, true) => {
@@ -611,18 +602,32 @@ impl Renderer {
                         encoder,
                         &self.gpu.scene_view,
                         swapchain_view,
-                        self.config.effects.scanline_intensity,
-                        self.config.effects.curvature,
-                        self.config.effects.vignette_strength,
-                        self.config.effects.chromatic_aberration,
-                        self.config.effects.grain_intensity,
-                        self.gpu.current_time,
+                        self.crt_params(),
                     );
                 }
                 (false, false) => {
                     self.blit.draw(encoder, swapchain_view);
                 }
             }
+        }
+    }
+
+    fn bloom_params(&self) -> BloomParams {
+        BloomParams {
+            threshold: self.config.effects.bloom_threshold,
+            intensity: self.config.effects.bloom_intensity,
+            radius: self.config.effects.bloom_radius,
+        }
+    }
+
+    fn crt_params(&self) -> CrtParams {
+        CrtParams {
+            scanline_intensity: self.config.effects.scanline_intensity,
+            curvature: self.config.effects.curvature,
+            vignette_strength: self.config.effects.vignette_strength,
+            chromatic_aberration: self.config.effects.chromatic_aberration,
+            grain_intensity: self.config.effects.grain_intensity,
+            time: self.gpu.current_time,
         }
     }
 

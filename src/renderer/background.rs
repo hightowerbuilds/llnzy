@@ -153,8 +153,6 @@ fn builtin_shaders() -> Vec<(&'static str, String)> {
 pub struct BackgroundRenderer {
     pipelines: HashMap<String, wgpu::RenderPipeline>,
     uniform_buffer: wgpu::Buffer,
-    #[allow(dead_code)]
-    bind_group_layout: wgpu::BindGroupLayout,
     bind_group: wgpu::BindGroup,
 }
 
@@ -203,7 +201,7 @@ impl BackgroundRenderer {
         // Build a pipeline for each built-in shader
         let mut pipelines = HashMap::new();
         for (name, source) in builtin_shaders() {
-            if let Some(pipeline) = Self::compile_pipeline(gpu, &pipeline_layout, &source, &name) {
+            if let Some(pipeline) = Self::compile_pipeline(gpu, &pipeline_layout, &source, name) {
                 pipelines.insert(name.to_string(), pipeline);
             }
         }
@@ -235,7 +233,6 @@ impl BackgroundRenderer {
         BackgroundRenderer {
             pipelines,
             uniform_buffer,
-            bind_group_layout,
             bind_group,
         }
     }
@@ -300,7 +297,11 @@ impl BackgroundRenderer {
         custom_color: Option<[u8; 3]>,
     ) {
         let (r, g, b) = if let Some(c) = custom_color {
-            (c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0)
+            (
+                c[0] as f32 / 255.0,
+                c[1] as f32 / 255.0,
+                c[2] as f32 / 255.0,
+            )
         } else {
             (bg_color[0], bg_color[1], bg_color[2])
         };

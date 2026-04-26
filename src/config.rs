@@ -145,7 +145,7 @@ pub fn apply_time_of_day(colors: &mut ColorScheme) {
 
     // Warmth curve: cool during day (10-16h), warm at night (20-6h)
     // Map hour to warmth factor: 0.0 = neutral, 1.0 = max warm
-    let warmth = if hour >= 6.0 && hour <= 18.0 {
+    let warmth = if (6.0..=18.0).contains(&hour) {
         // Day: cool blue tint
         let day_progress = (hour - 6.0) / 12.0;
         let mid = 1.0 - (day_progress - 0.5).abs() * 2.0; // peak at noon

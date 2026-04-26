@@ -36,25 +36,26 @@ impl Zone {
 pub const TAB_BAR_HEIGHT: f32 = 28.0;
 pub const FOOTER_HEIGHT: f32 = 36.0;
 
+pub struct LayoutInputs {
+    pub window_w: f32,
+    pub window_h: f32,
+    pub cell_w: f32,
+    pub cell_h: f32,
+    pub padding_x: f32,
+    pub padding_y: f32,
+    pub glyph_offset_x: f32,
+    pub sidebar_w: f32,
+}
+
 impl ScreenLayout {
     /// Compute the full screen layout using Taffy flexbox.
-    pub fn compute(
-        window_w: f32,
-        window_h: f32,
-        cell_w: f32,
-        cell_h: f32,
-        _tab_count: usize,
-        padding_x: f32,
-        padding_y: f32,
-        glyph_offset_x: f32,
-        sidebar_w: f32,
-    ) -> Self {
-        let padding_x = padding_x + glyph_offset_x;
+    pub fn compute(input: LayoutInputs) -> Self {
+        let padding_x = input.padding_x + input.glyph_offset_x;
         let mut tree: TaffyTree<()> = TaffyTree::new();
         let show_tab_bar = true; // always show tab bar
 
         // Effective width excluding sidebar (sidebar is rendered by egui)
-        let effective_w = (window_w - sidebar_w).max(1.0);
+        let effective_w = (input.window_w - input.sidebar_w).max(1.0);
 
         // ── Build flexbox tree ──
         // Root: vertical column filling the effective area
@@ -84,8 +85,8 @@ impl ScreenLayout {
                 padding: Rect {
                     left: LengthPercentage::Length(padding_x),
                     right: LengthPercentage::Length(padding_x),
-                    top: LengthPercentage::Length(padding_y),
-                    bottom: LengthPercentage::Length(padding_y),
+                    top: LengthPercentage::Length(input.padding_y),
+                    bottom: LengthPercentage::Length(input.padding_y),
                 },
                 ..Default::default()
             })
@@ -106,7 +107,7 @@ impl ScreenLayout {
                 Style {
                     size: Size {
                         width: Dimension::Length(effective_w),
-                        height: Dimension::Length(window_h),
+                        height: Dimension::Length(input.window_h),
                     },
                     flex_direction: FlexDirection::Column,
                     ..Default::default()
@@ -123,7 +124,7 @@ impl ScreenLayout {
         let content_layout = tree.layout(content_node).unwrap();
 
         let tab_bar = Zone {
-            x: tab_bar_layout.location.x + sidebar_w,
+            x: tab_bar_layout.location.x + input.sidebar_w,
             y: tab_bar_layout.location.y,
             w: tab_bar_layout.size.width,
             h: tab_bar_layout.size.height,
@@ -132,24 +133,24 @@ impl ScreenLayout {
         // Content zone: the padding is handled by Taffy, so content_box gives us
         // the inner area. But Taffy's layout gives the outer box — we need inner.
         let content = Zone {
-            x: content_layout.location.x + padding_x + sidebar_w,
-            y: content_layout.location.y + padding_y,
+            x: content_layout.location.x + padding_x + input.sidebar_w,
+            y: content_layout.location.y + input.padding_y,
             w: content_layout.size.width - padding_x * 2.0,
-            h: content_layout.size.height - padding_y * 2.0,
+            h: content_layout.size.height - input.padding_y * 2.0,
         };
 
         // ── Grid dimensions from content zone ──
-        let grid_cols = (content.w / cell_w).max(1.0) as u16;
-        let grid_rows = (content.h / cell_h).max(1.0) as u16;
+        let grid_cols = (content.w / input.cell_w).max(1.0) as u16;
+        let grid_rows = (content.h / input.cell_h).max(1.0) as u16;
 
         ScreenLayout {
-            window_w,
-            window_h,
-            sidebar_w,
+            window_w: input.window_w,
+            window_h: input.window_h,
+            sidebar_w: input.sidebar_w,
             tab_bar,
             content,
-            cell_w,
-            cell_h,
+            cell_w: input.cell_w,
+            cell_h: input.cell_h,
             grid_cols,
             grid_rows,
             show_tab_bar,

@@ -14,6 +14,16 @@ pub struct CrtUniforms {
     pub _padding: [f32; 2],
 }
 
+#[derive(Clone, Copy)]
+pub struct CrtParams {
+    pub scanline_intensity: f32,
+    pub curvature: f32,
+    pub vignette_strength: f32,
+    pub chromatic_aberration: f32,
+    pub grain_intensity: f32,
+    pub time: f32,
+}
+
 const CRT_SHADER: &str = r#"
 @group(0) @binding(0) var src_tex: texture_2d<f32>;
 @group(0) @binding(1) var src_sampler: sampler;
@@ -241,20 +251,15 @@ impl CrtEffect {
         encoder: &mut wgpu::CommandEncoder,
         src_view: &wgpu::TextureView,
         target_view: &wgpu::TextureView,
-        scanline_intensity: f32,
-        curvature: f32,
-        vignette_strength: f32,
-        chromatic_aberration: f32,
-        grain_intensity: f32,
-        time: f32,
+        params: CrtParams,
     ) {
         let uniforms = CrtUniforms {
-            scanline_intensity,
-            curvature,
-            vignette_strength,
-            chromatic_aberration,
-            grain_intensity,
-            time,
+            scanline_intensity: params.scanline_intensity,
+            curvature: params.curvature,
+            vignette_strength: params.vignette_strength,
+            chromatic_aberration: params.chromatic_aberration,
+            grain_intensity: params.grain_intensity,
+            time: params.time,
             _padding: [0.0; 2],
         };
         gpu.queue
