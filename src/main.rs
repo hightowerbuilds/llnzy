@@ -17,7 +17,7 @@ use llnzy::renderer::{RenderRequest, Renderer};
 use llnzy::search::Search;
 use llnzy::selection::Selection;
 use llnzy::session::{split_pane, PaneNode, Rect as PaneRect, Session, SplitDir};
-use llnzy::ui::UiState;
+use llnzy::ui::{ActiveView, UiState};
 use llnzy::UserEvent;
 use winit::window::CursorIcon;
 
@@ -637,10 +637,16 @@ impl ApplicationHandler<UserEvent> for App {
                     (&mut self.renderer, self.tabs.get(self.active_tab))
                 {
                     if let Some(layout) = &self.screen_layout {
-                        // Apply shaders to egui only on the Shells view (not Settings/Stacker)
-                        // and only if the active theme allows it (effects_on_ui)
-                        let effects_on_ui = !self.ui.as_ref().is_some_and(|u| u.settings_open())
-                            && self.config.effects.effects_on_ui;
+                        // Shells honors the theme-level UI shader flag so app chrome can stay
+                        // clean. Sketch opts into the real shader path so the canvas gets CRT,
+                        // bloom, and background effects instead of a painter-only approximation.
+                        let effects_on_ui = self.ui.as_ref().is_some_and(|u| match u.active_view {
+                            ActiveView::Shells => self.config.effects.effects_on_ui,
+                            ActiveView::Sketch => true,
+                            ActiveView::Stacker
+                            | ActiveView::Appearances
+                            | ActiveView::Settings => false,
+                        });
                         // Update tab context for tab bar interaction
                         if let Some(ui) = self.ui.as_mut() {
                             ui.set_tab_context(self.tabs.len(), self.active_tab);

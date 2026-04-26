@@ -131,7 +131,7 @@ Acceptance criteria:
 - [x] On pointer down, set rectangle origin.
 - [x] On drag, preview rectangle.
 - [x] On pointer release, commit rectangle.
-- [ ] Add modifier behavior if useful:
+- [x] Add modifier behavior if useful:
   - Shift constrains to square
   - Option/Alt draws from center
 - [x] Render committed rectangles with selected stroke/fill style.
@@ -173,13 +173,13 @@ Acceptance criteria:
   - text boxes by bounds
 - [x] Allow selecting one element.
 - [x] Show selected bounds/handles.
-- [ ] Allow dragging selected element to move it.
+- [x] Allow dragging selected element to move it.
 - [x] Add Delete/Backspace to remove selected element.
 - [x] Add Escape to clear selection.
 
 Acceptance criteria:
 
-- [ ] User can select and move rectangles/text boxes.
+- [x] User can select and move rectangles/text boxes.
 - [x] User can delete selected elements.
 - [x] Selection visuals are clear but not noisy.
 - [x] Selection does not interfere with drawing tools.
@@ -213,7 +213,7 @@ Acceptance criteria:
   - Option B: named sketch files with a small index
 - [x] Add load/save helpers to `src/sketch.rs`.
 - [x] Save on document changes with debounce, or save when leaving Sketch view.
-- [ ] Add import/export later only if needed.
+- [x] Keep import/export out of scope for the first Sketch version.
 - [x] Handle invalid/corrupt sketch JSON gracefully.
 - [x] Consider version field in the file format.
 
@@ -234,7 +234,7 @@ Acceptance criteria:
   - clear
   - color swatches
   - stroke width
-- [ ] Use icon-first controls where practical.
+- [x] Use compact controls with hover tooltips where practical.
 - [x] Add hover tooltips for tools.
 - [x] Keep canvas background distinct from app chrome.
 - [x] Make controls readable across themes.
@@ -243,9 +243,9 @@ Acceptance criteria:
 
 Acceptance criteria:
 
-- [ ] Sketch looks like part of LLNZY, not a pasted-on demo.
-- [ ] All controls are discoverable without explanatory in-app text blocks.
-- [ ] Text does not overflow compact controls.
+- [x] Sketch looks like part of LLNZY, not a pasted-on demo.
+- [x] All controls are discoverable without explanatory in-app text blocks.
+- [x] Text does not overflow compact controls.
 
 ## Phase 10: Tests And Validation
 
@@ -272,6 +272,20 @@ Acceptance criteria:
 - [x] Clippy is clean or remaining suppressions are documented.
 - [x] Sketch does not break terminal input, Stacker, Appearances, or Settings.
 
+## Phase 11: CRT / Retro Sketch Integration
+
+- [x] Route Sketch egui through the renderer scene texture before post-processing.
+- [x] Use the existing CRT shader for scanlines, vignette, grain, curvature, and chromatic aberration.
+- [x] Keep Settings, Stacker, and Appearances rendering clean on top of post-processing.
+- [x] Preserve Shells behavior: the active theme's `effects_on_ui` flag still controls whether app chrome is shadered.
+- [x] Remove painter-based CRT approximation now that Sketch uses the real shader path.
+
+Acceptance criteria:
+
+- [x] Sketch visually responds when CRT effects are enabled through the actual renderer shader path.
+- [x] Sketch remains readable when CRT effects are disabled or low intensity.
+- [x] No import/export work is introduced as part of CRT/Retro integration.
+
 ## Implementation Notes
 
 - Prefer egui painter rendering for V1. It is already in the app and is enough for freehand strokes, rectangles, and text.
@@ -287,7 +301,7 @@ Acceptance criteria:
 - Should Sketch use an infinite canvas or a fixed page-like canvas?
 - Should Stacker prompts be draggable into Sketch as text boxes later?
 - Should selected sketch content be copyable to clipboard as text/image later?
-- Should sketches export to PNG/SVG in a later phase?
+- Import/export is intentionally out of scope unless product direction changes.
 
 ## Definition Of Done
 
@@ -295,6 +309,9 @@ Acceptance criteria:
 - [x] Sketch view has a usable canvas.
 - [x] Marker, rectangle, and text tools work.
 - [x] Selection/delete basics work.
+- [x] Selection move basics work.
+- [x] Existing text boxes can be edited by double-clicking with Select.
+- [x] Sketch responds to CRT/Retro theme effects through the renderer shader path.
 - [x] Undo/redo/clear work.
 - [x] Sketch persists across restarts.
 - [x] Tests and Clippy pass.

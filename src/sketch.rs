@@ -105,6 +105,8 @@ pub enum DraftElement {
     Rectangle {
         start: SketchPoint,
         current: SketchPoint,
+        constrain_square: bool,
+        from_center: bool,
         style: SketchStyle,
     },
 }
@@ -113,6 +115,14 @@ pub enum DraftElement {
 pub struct TextDraft {
     pub index: usize,
     pub text: String,
+    pub is_new: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct MoveDraft {
+    pub index: usize,
+    pub last_point: SketchPoint,
+    pub moved: bool,
 }
 
 pub struct SketchState {
@@ -122,6 +132,7 @@ pub struct SketchState {
     pub draft: Option<DraftElement>,
     pub selected: Option<usize>,
     pub text_draft: Option<TextDraft>,
+    pub move_draft: Option<MoveDraft>,
     undo_stack: Vec<SketchDocument>,
     redo_stack: Vec<SketchDocument>,
     dirty: bool,
@@ -136,6 +147,7 @@ impl Default for SketchState {
             draft: None,
             selected: None,
             text_draft: None,
+            move_draft: None,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             dirty: false,
@@ -173,6 +185,7 @@ impl SketchState {
     pub fn set_tool(&mut self, tool: SketchTool) {
         self.tool = tool;
         self.draft = None;
+        self.move_draft = None;
         if tool != SketchTool::Select {
             self.selected = None;
         }
@@ -217,6 +230,8 @@ impl SketchState {
         self.draft = Some(DraftElement::Rectangle {
             start: point,
             current: point,
+            constrain_square: false,
+            from_center: false,
             style: self.style,
         });
     }
@@ -227,16 +242,37 @@ impl SketchState {
         }
     }
 
+    pub fn update_rectangle_with_modifiers(
+        &mut self,
+        point: SketchPoint,
+        constrain_square: bool,
+        from_center: bool,
+    ) {
+        if let Some(DraftElement::Rectangle {
+            current,
+            constrain_square: draft_square,
+            from_center: draft_center,
+            ..
+        }) = &mut self.draft
+        {
+            *current = point;
+            *draft_square = constrain_square;
+            *draft_center = from_center;
+        }
+    }
+
     pub fn finish_rectangle(&mut self) -> bool {
         let Some(DraftElement::Rectangle {
             start,
             current,
+            constrain_square,
+            from_center,
             style,
         }) = self.draft.take()
         else {
             return false;
         };
-        let rect = normalized_rect(start, current, style);
+        let rect = rect_from_drag(start, current, style, constrain_square, from_center);
         if rect.w < MIN_RECT_SIZE || rect.h < MIN_RECT_SIZE {
             return false;
         }
@@ -264,9 +300,23 @@ impl SketchState {
         self.text_draft = Some(TextDraft {
             index,
             text: String::new(),
+            is_new: true,
         });
         self.dirty = true;
         index
+    }
+
+    pub fn edit_text_box(&mut self, index: usize) -> bool {
+        let Some(SketchElement::Text(text_box)) = self.document.elements.get(index) else {
+            return false;
+        };
+        self.selected = Some(index);
+        self.text_draft = Some(TextDraft {
+            index,
+            text: text_box.text.clone(),
+            is_new: false,
+        });
+        true
     }
 
     pub fn update_text_draft(&mut self, text: String) {
@@ -281,12 +331,23 @@ impl SketchState {
         };
         let text = draft.text.trim().to_string();
         if text.is_empty() {
-            if draft.index < self.document.elements.len() {
+            if draft.is_new && draft.index < self.document.elements.len() {
                 self.document.elements.remove(draft.index);
                 self.selected = None;
                 self.dirty = true;
             }
             return;
+        }
+        let needs_undo =
+            self.document
+                .elements
+                .get(draft.index)
+                .is_some_and(|element| match element {
+                    SketchElement::Text(text_box) => text_box.text != text,
+                    _ => false,
+                });
+        if !draft.is_new && needs_undo {
+            self.push_undo();
         }
         if let Some(SketchElement::Text(text_box)) = self.document.elements.get_mut(draft.index) {
             text_box.text = text;
@@ -299,7 +360,7 @@ impl SketchState {
         let Some(draft) = self.text_draft.take() else {
             return;
         };
-        if draft.index < self.document.elements.len() {
+        if draft.is_new && draft.index < self.document.elements.len() {
             self.document.elements.remove(draft.index);
             self.selected = None;
             self.dirty = true;
@@ -309,6 +370,57 @@ impl SketchState {
     pub fn select_at(&mut self, point: SketchPoint) -> Option<usize> {
         self.selected = self.hit_test(point);
         self.selected
+    }
+
+    pub fn begin_move_selected(&mut self, point: SketchPoint) -> bool {
+        let Some(index) = self.selected else {
+            return false;
+        };
+        if index >= self.document.elements.len() {
+            self.selected = None;
+            return false;
+        }
+        self.push_undo();
+        self.move_draft = Some(MoveDraft {
+            index,
+            last_point: point,
+            moved: false,
+        });
+        true
+    }
+
+    pub fn update_move_selected(&mut self, point: SketchPoint) -> bool {
+        let Some(draft) = &mut self.move_draft else {
+            return false;
+        };
+        if draft.index >= self.document.elements.len() {
+            self.move_draft = None;
+            self.selected = None;
+            return false;
+        }
+        let dx = point.x - draft.last_point.x;
+        let dy = point.y - draft.last_point.y;
+        if dx.abs() < 0.5 && dy.abs() < 0.5 {
+            return false;
+        }
+        translate_element(&mut self.document.elements[draft.index], dx, dy);
+        draft.last_point = point;
+        draft.moved = true;
+        self.dirty = true;
+        true
+    }
+
+    pub fn finish_move_selected(&mut self) -> bool {
+        let Some(draft) = self.move_draft.take() else {
+            return false;
+        };
+        if draft.moved {
+            self.dirty = true;
+            true
+        } else {
+            self.undo_stack.pop();
+            false
+        }
     }
 
     pub fn delete_selected(&mut self) -> bool {
@@ -323,6 +435,7 @@ impl SketchState {
         self.document.elements.remove(index);
         self.selected = None;
         self.text_draft = None;
+        self.move_draft = None;
         self.dirty = true;
         true
     }
@@ -335,6 +448,7 @@ impl SketchState {
         self.document.elements.clear();
         self.selected = None;
         self.text_draft = None;
+        self.move_draft = None;
         self.draft = None;
         self.dirty = true;
         true
@@ -348,6 +462,7 @@ impl SketchState {
         self.document = previous;
         self.selected = None;
         self.text_draft = None;
+        self.move_draft = None;
         self.draft = None;
         self.dirty = true;
         true
@@ -361,6 +476,7 @@ impl SketchState {
         self.document = next;
         self.selected = None;
         self.text_draft = None;
+        self.move_draft = None;
         self.draft = None;
         self.dirty = true;
         true
@@ -373,6 +489,26 @@ impl SketchState {
             .enumerate()
             .rev()
             .find_map(|(index, element)| element_contains(element, point).then_some(index))
+    }
+
+    pub fn draft_rectangle(&self) -> Option<RectElement> {
+        let Some(DraftElement::Rectangle {
+            start,
+            current,
+            constrain_square,
+            from_center,
+            style,
+        }) = &self.draft
+        else {
+            return None;
+        };
+        Some(rect_from_drag(
+            *start,
+            *current,
+            *style,
+            *constrain_square,
+            *from_center,
+        ))
     }
 
     fn push_undo(&mut self) {
@@ -405,12 +541,63 @@ pub fn save_default_document(document: &SketchDocument) -> Result<(), String> {
     save_document_to_path(document, &path)
 }
 
-fn normalized_rect(start: SketchPoint, current: SketchPoint, style: SketchStyle) -> RectElement {
-    let x = start.x.min(current.x);
-    let y = start.y.min(current.y);
-    let w = (start.x - current.x).abs();
-    let h = (start.y - current.y).abs();
-    RectElement { x, y, w, h, style }
+fn rect_from_drag(
+    start: SketchPoint,
+    current: SketchPoint,
+    style: SketchStyle,
+    constrain_square: bool,
+    from_center: bool,
+) -> RectElement {
+    let mut dx = current.x - start.x;
+    let mut dy = current.y - start.y;
+    if constrain_square {
+        let size = dx.abs().max(dy.abs());
+        dx = signed_size(size, dx);
+        dy = signed_size(size, dy);
+    }
+    if from_center {
+        RectElement {
+            x: start.x - dx.abs(),
+            y: start.y - dy.abs(),
+            w: dx.abs() * 2.0,
+            h: dy.abs() * 2.0,
+            style,
+        }
+    } else {
+        RectElement {
+            x: start.x.min(start.x + dx),
+            y: start.y.min(start.y + dy),
+            w: dx.abs(),
+            h: dy.abs(),
+            style,
+        }
+    }
+}
+
+fn signed_size(size: f32, direction: f32) -> f32 {
+    if direction < 0.0 {
+        -size
+    } else {
+        size
+    }
+}
+
+fn translate_element(element: &mut SketchElement, dx: f32, dy: f32) {
+    match element {
+        SketchElement::Stroke(stroke) => {
+            for point in &mut stroke.points {
+                *point = point.translated(dx, dy);
+            }
+        }
+        SketchElement::Rectangle(rect) => {
+            rect.x += dx;
+            rect.y += dy;
+        }
+        SketchElement::Text(text) => {
+            text.x += dx;
+            text.y += dy;
+        }
+    }
 }
 
 fn element_contains(element: &SketchElement, point: SketchPoint) -> bool {
@@ -494,6 +681,36 @@ mod tests {
     }
 
     #[test]
+    fn rectangle_can_constrain_to_square() {
+        let mut state = SketchState::default();
+        state.begin_rectangle(point(0.0, 0.0));
+        state.update_rectangle_with_modifiers(point(20.0, 5.0), true, false);
+
+        assert!(state.finish_rectangle());
+        let SketchElement::Rectangle(rect) = &state.document.elements[0] else {
+            panic!("expected rectangle");
+        };
+        assert_eq!(rect.w, 20.0);
+        assert_eq!(rect.h, 20.0);
+    }
+
+    #[test]
+    fn rectangle_can_draw_from_center() {
+        let mut state = SketchState::default();
+        state.begin_rectangle(point(10.0, 10.0));
+        state.update_rectangle_with_modifiers(point(20.0, 25.0), false, true);
+
+        assert!(state.finish_rectangle());
+        let SketchElement::Rectangle(rect) = &state.document.elements[0] else {
+            panic!("expected rectangle");
+        };
+        assert_eq!(rect.x, 0.0);
+        assert_eq!(rect.y, -5.0);
+        assert_eq!(rect.w, 20.0);
+        assert_eq!(rect.h, 30.0);
+    }
+
+    #[test]
     fn tiny_rectangle_is_discarded() {
         let mut state = SketchState::default();
         state.begin_rectangle(point(1.0, 1.0));
@@ -523,6 +740,42 @@ mod tests {
             panic!("expected text box");
         };
         assert_eq!(text.text, "idea map");
+    }
+
+    #[test]
+    fn existing_text_box_can_be_edited() {
+        let mut state = SketchState::default();
+        let index = state.add_text_box(point(10.0, 10.0));
+        state.update_text_draft("old".to_string());
+        state.commit_text_draft();
+
+        assert!(state.edit_text_box(index));
+        state.update_text_draft("new".to_string());
+        state.commit_text_draft();
+
+        let SketchElement::Text(text) = &state.document.elements[0] else {
+            panic!("expected text box");
+        };
+        assert_eq!(text.text, "new");
+    }
+
+    #[test]
+    fn selected_rectangle_can_move() {
+        let mut state = SketchState::default();
+        state.begin_rectangle(point(0.0, 0.0));
+        state.update_rectangle(point(20.0, 20.0));
+        state.finish_rectangle();
+        state.selected = Some(0);
+
+        assert!(state.begin_move_selected(point(5.0, 5.0)));
+        assert!(state.update_move_selected(point(15.0, 25.0)));
+        assert!(state.finish_move_selected());
+
+        let SketchElement::Rectangle(rect) = &state.document.elements[0] else {
+            panic!("expected rectangle");
+        };
+        assert_eq!(rect.x, 10.0);
+        assert_eq!(rect.y, 20.0);
     }
 
     #[test]
