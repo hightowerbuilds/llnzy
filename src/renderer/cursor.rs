@@ -26,6 +26,22 @@ struct TrailData {
     entries: [[f32; 4]; MAX_TRAIL], // [x, y, alpha, _pad] per entry
 }
 
+pub struct CursorDrawRequest<'a> {
+    pub gpu: &'a GpuState,
+    pub encoder: &'a mut wgpu::CommandEncoder,
+    pub target: &'a wgpu::TextureView,
+    pub cursor_row: usize,
+    pub cursor_col: usize,
+    pub cell_w: f32,
+    pub cell_h: f32,
+    pub offset_x: f32,
+    pub offset_y: f32,
+    pub cursor_style: CursorStyle,
+    pub cursor_color: [u8; 3],
+    pub time: f32,
+    pub trail_enabled: bool,
+}
+
 const CURSOR_SHADER: &str = r#"
 struct CursorUniforms {
     pos: vec2<f32>,
@@ -281,22 +297,23 @@ impl CursorRenderer {
     }
 
     /// Call each frame with the cursor's pixel position. Updates the trail.
-    pub fn draw(
-        &mut self,
-        gpu: &GpuState,
-        encoder: &mut wgpu::CommandEncoder,
-        target: &wgpu::TextureView,
-        cursor_row: usize,
-        cursor_col: usize,
-        cell_w: f32,
-        cell_h: f32,
-        offset_x: f32,
-        offset_y: f32,
-        cursor_style: CursorStyle,
-        cursor_color: [u8; 3],
-        time: f32,
-        trail_enabled: bool,
-    ) {
+    pub fn draw(&mut self, request: CursorDrawRequest<'_>) {
+        let CursorDrawRequest {
+            gpu,
+            encoder,
+            target,
+            cursor_row,
+            cursor_col,
+            cell_w,
+            cell_h,
+            offset_x,
+            offset_y,
+            cursor_style,
+            cursor_color,
+            time,
+            trail_enabled,
+        } = request;
+
         let px = cursor_col as f32 * cell_w + offset_x;
         let py = cursor_row as f32 * cell_h + offset_y;
 
@@ -314,7 +331,7 @@ impl CursorRenderer {
         // Update trail
         if trail_enabled {
             let new_pos = (cursor_px.0, cursor_px.1);
-            let moved = self.last_cursor_pos.map_or(true, |last| {
+            let moved = self.last_cursor_pos.is_none_or(|last| {
                 (last.0 - new_pos.0).abs() > 0.5 || (last.1 - new_pos.1).abs() > 0.5
             });
             if moved {

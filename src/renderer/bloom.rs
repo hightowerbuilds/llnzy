@@ -11,6 +11,13 @@ struct BloomUniforms {
     direction: f32, // 0.0 = horizontal, 1.0 = vertical
 }
 
+#[derive(Clone, Copy)]
+pub struct BloomParams {
+    pub threshold: f32,
+    pub intensity: f32,
+    pub radius: f32,
+}
+
 const BLOOM_THRESHOLD_SHADER: &str = r#"
 @group(0) @binding(0) var src_tex: texture_2d<f32>;
 @group(0) @binding(1) var src_sampler: sampler;
@@ -125,8 +132,6 @@ pub struct BloomEffect {
     // Bind group layouts
     tex_layout: wgpu::BindGroupLayout,
     composite_layout: wgpu::BindGroupLayout,
-    #[allow(dead_code)]
-    params_layout: wgpu::BindGroupLayout,
     // Uniform buffer
     params_buffer: wgpu::Buffer,
     params_bind_group: wgpu::BindGroup,
@@ -378,7 +383,6 @@ impl BloomEffect {
             composite_pipeline,
             tex_layout,
             composite_layout,
-            params_layout,
             params_buffer,
             params_bind_group,
             half_width,
@@ -404,21 +408,19 @@ impl BloomEffect {
 
     /// Run the full bloom pipeline:
     /// 1. Threshold (scene -> bloom_a at half-res)
-    /// 2-3. First blur pass H+V (bloom_a -> bloom_b -> bloom_a)
-    /// 4-5. Second blur pass H+V for extra smoothness (bloom_a -> bloom_b -> bloom_a)
-    /// 6. Composite (scene + bloom_a -> output)
+    ///    2-3. First blur pass H+V (bloom_a -> bloom_b -> bloom_a)
+    ///    4-5. Second blur pass H+V for extra smoothness (bloom_a -> bloom_b -> bloom_a)
+    ///    6. Composite (scene + bloom_a -> output)
     pub fn apply(
         &self,
         gpu: &GpuState,
         encoder: &mut wgpu::CommandEncoder,
         scene_view: &wgpu::TextureView,
         output_view: &wgpu::TextureView,
-        threshold: f32,
-        intensity: f32,
-        radius: f32,
+        params: BloomParams,
     ) {
         // -- Step 1: Threshold (extract bright pixels, downsample to half-res)
-        self.write_params(gpu, threshold, intensity, radius, 0.0);
+        self.write_params(gpu, params.threshold, params.intensity, params.radius, 0.0);
         let scene_bg = self.make_tex_bind_group(gpu, scene_view);
         self.fullscreen_pass(
             encoder,
@@ -428,27 +430,39 @@ impl BloomEffect {
         );
 
         // -- Step 2: First horizontal blur (bloom_a -> bloom_b)
-        self.write_params(gpu, threshold, intensity, radius, 0.0);
+        self.write_params(gpu, params.threshold, params.intensity, params.radius, 0.0);
         let blur_h1 = self.make_tex_bind_group(gpu, &self.bloom_a_view);
         self.fullscreen_pass(encoder, &self.blur_pipeline, &blur_h1, &self.bloom_b_view);
 
         // -- Step 3: First vertical blur (bloom_b -> bloom_a)
-        self.write_params(gpu, threshold, intensity, radius, 1.0);
+        self.write_params(gpu, params.threshold, params.intensity, params.radius, 1.0);
         let blur_v1 = self.make_tex_bind_group(gpu, &self.bloom_b_view);
         self.fullscreen_pass(encoder, &self.blur_pipeline, &blur_v1, &self.bloom_a_view);
 
         // -- Step 4: Second horizontal blur for extra smoothness (bloom_a -> bloom_b)
-        self.write_params(gpu, threshold, intensity, radius * 1.5, 0.0);
+        self.write_params(
+            gpu,
+            params.threshold,
+            params.intensity,
+            params.radius * 1.5,
+            0.0,
+        );
         let blur_h2 = self.make_tex_bind_group(gpu, &self.bloom_a_view);
         self.fullscreen_pass(encoder, &self.blur_pipeline, &blur_h2, &self.bloom_b_view);
 
         // -- Step 5: Second vertical blur (bloom_b -> bloom_a)
-        self.write_params(gpu, threshold, intensity, radius * 1.5, 1.0);
+        self.write_params(
+            gpu,
+            params.threshold,
+            params.intensity,
+            params.radius * 1.5,
+            1.0,
+        );
         let blur_v2 = self.make_tex_bind_group(gpu, &self.bloom_b_view);
         self.fullscreen_pass(encoder, &self.blur_pipeline, &blur_v2, &self.bloom_a_view);
 
         // -- Step 4: Composite (scene + bloom_a -> output)
-        self.write_params(gpu, threshold, intensity, radius, 0.0);
+        self.write_params(gpu, params.threshold, params.intensity, params.radius, 0.0);
         let composite_bg = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("bloom_composite_bg"),
             layout: &self.composite_layout,

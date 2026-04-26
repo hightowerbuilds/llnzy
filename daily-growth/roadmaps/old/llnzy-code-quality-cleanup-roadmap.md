@@ -110,15 +110,15 @@ Acceptance criteria:
 
 ## Phase 7: Reduce Suppressions And Easy Clippy Warnings
 
-- [ ] Replace retained-resource `#[allow(dead_code)]` fields with clearer ownership patterns or underscore-prefixed field names.
-- [ ] Fix low-risk Clippy warnings such as manual range checks, manual div ceil, unnecessary unwraps, collapsible ifs, needless borrows, and vec init patterns.
-- [ ] Keep only suppressions that protect intentional architecture decisions.
-- [ ] Add a short comment for each remaining suppression explaining why it exists.
+- [x] Replace retained-resource `#[allow(dead_code)]` fields with clearer ownership patterns or underscore-prefixed field names.
+- [x] Fix low-risk Clippy warnings such as manual range checks, manual div ceil, unnecessary unwraps, collapsible ifs, needless borrows, and vec init patterns.
+- [x] Keep only suppressions that protect intentional architecture decisions.
+- [x] Add a short comment for each remaining suppression explaining why it exists.
 
 Acceptance criteria:
 
-- [ ] `cargo clippy --all-targets --all-features` is materially cleaner.
-- [ ] Remaining suppressions are rare, local, and justified.
+- [x] `cargo clippy --all-targets --all-features` is materially cleaner.
+- [x] Remaining suppressions are rare, local, and justified.
 
 ## Phase 8: Final Validation And Documentation
 

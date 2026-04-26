@@ -170,7 +170,10 @@ impl TextSystem {
             .retain(|cache_key, _| active_keys.contains(cache_key));
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "glyphon render calls need GPU, target, cache, and terminal context together"
+    )]
     pub fn render_grid_at(
         &mut self,
         cache_key: TextCacheKey,
@@ -344,7 +347,10 @@ impl TextSystem {
     }
 
     /// Render tab bar labels.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "overlay text rendering keeps GPU target state explicit at call sites"
+    )]
     pub fn render_tab_labels(
         &mut self,
         tabs: &[(String, bool)],
@@ -427,7 +433,6 @@ impl TextSystem {
         }
     }
     /// Render text labels at specific (x, y) pixel positions.
-    #[allow(clippy::too_many_arguments)]
     pub fn render_labels_at(
         &mut self,
         labels: &[(&str, f32, f32, f32)], // (text, x, y, max_width)
@@ -512,7 +517,10 @@ impl TextSystem {
     }
 
     /// Render multiple lines of text at a given Y offset (for the error panel).
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "panel text rendering keeps target, layout, and GPU state explicit"
+    )]
     pub fn render_panel_lines(
         &mut self,
         lines: &[&str],

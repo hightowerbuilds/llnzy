@@ -158,7 +158,10 @@ impl ErrorPanel {
 
     /// Generate the display lines and colored rects for the error panel.
     /// Returns (background_rect, line_rects, display_lines).
-    #[allow(clippy::type_complexity)]
+    #[expect(
+        clippy::type_complexity,
+        reason = "render data is passed directly to the lightweight rect/text renderers"
+    )]
     pub fn render_data(
         &self,
         log: &ErrorLog,

@@ -190,8 +190,6 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 pub struct ParticleSystem {
     compute_pipeline: wgpu::ComputePipeline,
     render_pipeline: wgpu::RenderPipeline,
-    #[allow(dead_code)]
-    particle_buffer: wgpu::Buffer,
     uniform_buffer: wgpu::Buffer,
     compute_bind_group: wgpu::BindGroup,
     render_bind_group: wgpu::BindGroup,
@@ -400,7 +398,6 @@ impl ParticleSystem {
         ParticleSystem {
             compute_pipeline,
             render_pipeline,
-            particle_buffer,
             uniform_buffer,
             compute_bind_group,
             render_bind_group,
@@ -444,7 +441,7 @@ impl ParticleSystem {
             });
             pass.set_pipeline(&self.compute_pipeline);
             pass.set_bind_group(0, &self.compute_bind_group, &[]);
-            pass.dispatch_workgroups((self.count + 255) / 256, 1, 1);
+            pass.dispatch_workgroups(self.count.div_ceil(256), 1, 1);
         }
 
         // Render pass: draw particles as instanced quads

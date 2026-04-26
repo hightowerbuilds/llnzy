@@ -11,6 +11,7 @@ pub mod renderer;
 pub mod search;
 pub mod selection;
 pub mod session;
+pub mod sketch;
 pub mod stacker;
 pub mod terminal;
 pub mod theme;

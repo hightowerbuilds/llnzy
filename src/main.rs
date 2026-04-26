@@ -12,7 +12,7 @@ use llnzy::diagnostics::write_diagnostic;
 use llnzy::error_log::{ErrorLog, ErrorPanel};
 use llnzy::input;
 use llnzy::keybindings::Action;
-use llnzy::layout::ScreenLayout;
+use llnzy::layout::{LayoutInputs, ScreenLayout};
 use llnzy::renderer::{RenderRequest, Renderer};
 use llnzy::search::Search;
 use llnzy::selection::Selection;
@@ -199,18 +199,17 @@ impl App {
                 .as_ref()
                 .map(|w| w.inner_size().height as f32)
                 .unwrap_or(600.0);
-                let sidebar_w = self.ui.as_ref().map(|u| u.sidebar_width()).unwrap_or(0.0);
-            self.screen_layout = Some(ScreenLayout::compute(
-                w,
-                h,
-                cw,
-                ch,
-                self.tabs.len(),
-                self.config.padding_x,
-                self.config.padding_y,
-                gox,
+            let sidebar_w = self.ui.as_ref().map(|u| u.sidebar_width()).unwrap_or(0.0);
+            self.screen_layout = Some(ScreenLayout::compute(LayoutInputs {
+                window_w: w,
+                window_h: h,
+                cell_w: cw,
+                cell_h: ch,
+                padding_x: self.config.padding_x,
+                padding_y: self.config.padding_y,
+                glyph_offset_x: gox,
                 sidebar_w,
-            ));
+            }));
         }
     }
 
@@ -483,17 +482,16 @@ impl ApplicationHandler<UserEvent> for App {
         let (cw, ch) = renderer.cell_dimensions();
         let gox = renderer.glyph_offset_x();
         let size = window.inner_size();
-        let layout = ScreenLayout::compute(
-            size.width as f32,
-            size.height as f32,
-            cw,
-            ch,
-            1,
-            self.config.padding_x,
-            self.config.padding_y,
-            gox,
-            0.0, // sidebar closed at startup
-        );
+        let layout = ScreenLayout::compute(LayoutInputs {
+            window_w: size.width as f32,
+            window_h: size.height as f32,
+            cell_w: cw,
+            cell_h: ch,
+            padding_x: self.config.padding_x,
+            padding_y: self.config.padding_y,
+            glyph_offset_x: gox,
+            sidebar_w: 0.0, // sidebar closed at startup
+        });
         let cols = layout.grid_cols;
         let rows = layout.grid_rows;
         self.screen_layout = Some(layout);
@@ -514,7 +512,7 @@ impl ApplicationHandler<UserEvent> for App {
 
         let ui_state = UiState::new(
             &window,
-            &renderer.gpu_device(),
+            renderer.gpu_device(),
             renderer.gpu_surface_format(),
         );
 
@@ -536,6 +534,12 @@ impl ApplicationHandler<UserEvent> for App {
         // Route events to egui first
         if let (Some(window), Some(ui)) = (&self.window, &mut self.ui) {
             let response = ui.handle_event(window, &event);
+            // Sketch owns raw canvas input; do not let unconsumed pointer/text events leak
+            // into the terminal while that workspace is active.
+            if ui.captures_terminal_input() && terminal_input_event(&event) {
+                self.request_redraw();
+                return;
+            }
             // If egui consumed a mouse/keyboard event, don't pass to terminal
             if response && (ui.settings_open() || ui.sidebar_open) {
                 self.request_redraw();
@@ -635,10 +639,8 @@ impl ApplicationHandler<UserEvent> for App {
                     if let Some(layout) = &self.screen_layout {
                         // Apply shaders to egui only on the Shells view (not Settings/Stacker)
                         // and only if the active theme allows it (effects_on_ui)
-                        let effects_on_ui = !self
-                            .ui
-                            .as_ref()
-                            .map_or(false, |u| u.settings_open()) && self.config.effects.effects_on_ui;
+                        let effects_on_ui = !self.ui.as_ref().is_some_and(|u| u.settings_open())
+                            && self.config.effects.effects_on_ui;
                         // Update tab context for tab bar interaction
                         if let Some(ui) = self.ui.as_mut() {
                             ui.set_tab_context(self.tabs.len(), self.active_tab);
@@ -799,13 +801,14 @@ impl ApplicationHandler<UserEvent> for App {
                         return;
                     }
                 }
-                if button == MouseButton::Left && state == ElementState::Released {
-                    if self.divider_drag.take().is_some() {
-                        if let Some(window) = &self.window {
-                            window.set_cursor(CursorIcon::Default);
-                        }
-                        return;
+                if button == MouseButton::Left
+                    && state == ElementState::Released
+                    && self.divider_drag.take().is_some()
+                {
+                    if let Some(window) = &self.window {
+                        window.set_cursor(CursorIcon::Default);
                     }
+                    return;
                 }
 
                 if button == MouseButton::Right && state == ElementState::Pressed {
@@ -1266,7 +1269,7 @@ impl ApplicationHandler<UserEvent> for App {
         }
 
         // Config hot-reload from disk (skip when settings UI is open or recently changed)
-        let settings_active = self.ui.as_ref().map_or(false, |u| u.settings_open());
+        let settings_active = self.ui.as_ref().is_some_and(|u| u.settings_open());
         let recently_changed = now.duration_since(self.last_ui_config_change).as_secs() < 10;
         if !settings_active
             && !recently_changed
@@ -1283,12 +1286,24 @@ impl ApplicationHandler<UserEvent> for App {
         }
 
         // Continuous animation mode — only when effects actually need it
-        let ui_active = self.ui.as_ref().map_or(false, |u| u.settings_open());
+        let ui_active = self.ui.as_ref().is_some_and(|u| u.settings_open());
         if self.config.effects.any_active() || ui_active {
             event_loop.set_control_flow(ControlFlow::Poll);
             self.request_redraw();
         }
     }
+}
+
+fn terminal_input_event(event: &WindowEvent) -> bool {
+    matches!(
+        event,
+        WindowEvent::KeyboardInput { .. }
+            | WindowEvent::Ime(_)
+            | WindowEvent::MouseInput { .. }
+            | WindowEvent::MouseWheel { .. }
+            | WindowEvent::CursorMoved { .. }
+            | WindowEvent::DroppedFile(_)
+    )
 }
 
 fn load_window_state() -> Option<(u32, u32)> {

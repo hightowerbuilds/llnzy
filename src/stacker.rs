@@ -149,8 +149,14 @@ mod tests {
             0,
             "one two three four five six seven eight nine"
         ));
-        assert_eq!(prompts[0].text, "one two three four five six seven eight nine");
-        assert_eq!(prompts[0].label, "one two three four five six seven eight...");
+        assert_eq!(
+            prompts[0].text,
+            "one two three four five six seven eight nine"
+        );
+        assert_eq!(
+            prompts[0].label,
+            "one two three four five six seven eight..."
+        );
     }
 
     #[test]
