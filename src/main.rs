@@ -17,7 +17,7 @@ use llnzy::renderer::{RenderRequest, Renderer};
 use llnzy::search::Search;
 use llnzy::selection::Selection;
 use llnzy::session::{split_pane, PaneNode, Rect as PaneRect, Session, SplitDir};
-use llnzy::ui::{ActiveView, UiState};
+use llnzy::ui::{ActiveView, UiState, BUMPER_WIDTH};
 use llnzy::UserEvent;
 use winit::window::CursorIcon;
 
@@ -502,7 +502,7 @@ impl ApplicationHandler<UserEvent> for App {
             padding_x: self.config.padding_x,
             padding_y: self.config.padding_y,
             glyph_offset_x: gox,
-            sidebar_w: 0.0, // sidebar closed at startup
+            sidebar_w: BUMPER_WIDTH, // bumper always visible
         });
         let cols = layout.grid_cols;
         let rows = layout.grid_rows;
@@ -552,8 +552,10 @@ impl ApplicationHandler<UserEvent> for App {
                 self.request_redraw();
                 return;
             }
-            // If egui consumed a mouse/keyboard event, don't pass to terminal
-            if response && (ui.settings_open() || ui.sidebar_open) {
+            // If egui consumed a mouse/keyboard event, don't pass to terminal.
+            // The footer and bumper are always visible, so any egui-consumed
+            // event must be respected regardless of which view is active.
+            if response {
                 self.request_redraw();
                 match &event {
                     WindowEvent::CloseRequested | WindowEvent::Resized(_) => {}
@@ -645,6 +647,9 @@ impl ApplicationHandler<UserEvent> for App {
                     None
                 };
 
+                // Snapshot sidebar width before egui render so we can detect bumper clicks
+                let sidebar_w_before = self.ui.as_ref().map(|u| u.sidebar_width()).unwrap_or(0.0);
+
                 if let (Some(renderer), Some(tab)) =
                     (&mut self.renderer, self.tabs.get(self.active_tab))
                 {
@@ -719,8 +724,29 @@ impl ApplicationHandler<UserEvent> for App {
                     }
                 }
 
+                // Detect sidebar state change from bumper click and recompute layout
+                let sidebar_w_after = self.ui.as_ref().map(|u| u.sidebar_width()).unwrap_or(0.0);
+                if (sidebar_w_after - sidebar_w_before).abs() > 0.1 {
+                    self.recompute_layout();
+                    if let Some(layout) = &self.screen_layout {
+                        let rect = PaneRect {
+                            x: layout.content.x,
+                            y: layout.content.y,
+                            w: layout.content.w,
+                            h: layout.content.h,
+                        };
+                        let (cw, ch) = (layout.cell_w, layout.cell_h);
+                        for tab in &mut self.tabs {
+                            tab.root.resize_all(rect, cw, ch);
+                        }
+                    }
+                    self.selection.clear();
+                    self.invalidate_and_redraw();
+                }
+
                 // Apply config changes and tab renames from UI after render
                 let mut need_redraw = false;
+                let mut sidebar_changed = false;
                 let mut clip_text: Option<String> = None;
                 let mut tab_rename: Option<(usize, String)> = None;
                 if let Some(ui) = &mut self.ui {
@@ -738,8 +764,25 @@ impl ApplicationHandler<UserEvent> for App {
                     if let Some(project_path) = ui.open_project.take() {
                         ui.explorer.set_root(project_path.clone());
                         llnzy::explorer::add_recent_project(&mut ui.recent_projects, project_path);
-                        ui.sidebar_open = true; // Open sidebar to show file tree
+                        ui.sidebar_open = true;
+                        sidebar_changed = true;
                         need_redraw = true;
+                    }
+                }
+                // Recompute layout if sidebar changed via Open Project
+                if sidebar_changed {
+                    self.recompute_layout();
+                    if let Some(layout) = &self.screen_layout {
+                        let rect = PaneRect {
+                            x: layout.content.x,
+                            y: layout.content.y,
+                            w: layout.content.w,
+                            h: layout.content.h,
+                        };
+                        let (cw, ch) = (layout.cell_w, layout.cell_h);
+                        for tab in &mut self.tabs {
+                            tab.root.resize_all(rect, cw, ch);
+                        }
                     }
                 }
                 if need_redraw {

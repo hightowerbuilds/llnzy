@@ -1,6 +1,7 @@
 use std::time::Instant;
 
 pub const SIDEBAR_WIDTH: f32 = 200.0;
+pub const BUMPER_WIDTH: f32 = 20.0;
 
 /// Which view is active.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
