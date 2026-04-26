@@ -656,7 +656,8 @@ impl ApplicationHandler<UserEvent> for App {
                         let effects_on_ui = self.ui.as_ref().is_some_and(|u| match u.active_view {
                             ActiveView::Shells => self.config.effects.effects_on_ui,
                             ActiveView::Sketch => true,
-                            ActiveView::Explorer
+                            ActiveView::Home
+                            | ActiveView::Explorer
                             | ActiveView::Stacker
                             | ActiveView::Appearances
                             | ActiveView::Settings => false,
@@ -733,6 +734,13 @@ impl ApplicationHandler<UserEvent> for App {
                     }
                     clip_text = ui.clipboard_text.take();
                     tab_rename = ui.take_saved_tab_name();
+                    // Handle "Open Project" from Home screen
+                    if let Some(project_path) = ui.open_project.take() {
+                        ui.explorer.set_root(project_path.clone());
+                        llnzy::explorer::add_recent_project(&mut ui.recent_projects, project_path);
+                        ui.sidebar_open = true; // Open sidebar to show file tree
+                        need_redraw = true;
+                    }
                 }
                 if need_redraw {
                     self.request_redraw();

@@ -337,13 +337,33 @@ pub(crate) fn render_explorer_view(
 ) {
     ui.visuals_mut().override_text_color = Some(egui::Color32::WHITE);
 
+    // ── Fuzzy finder overlay (takes over the view when open) ──
+    if explorer.finder_open {
+        render_finder(ui, explorer, editor_state);
+        return;
+    }
+
     // ── Editor mode: show tabs + active buffer ──
     if !editor_state.editor.is_empty() {
         render_editor_tabs(ui, explorer, editor_state);
     } else if explorer.open_file.is_some() {
         render_image_viewer(ui, explorer);
     } else {
-        render_file_browser(ui, explorer, editor_state);
+        // No files open — show hint
+        ui.vertical_centered(|ui| {
+            ui.add_space(ui.available_height() / 3.0);
+            ui.label(
+                egui::RichText::new("Open a file from the sidebar")
+                    .size(16.0)
+                    .color(egui::Color32::from_rgb(100, 105, 120)),
+            );
+            ui.add_space(8.0);
+            ui.label(
+                egui::RichText::new("or press Cmd+P to find a file")
+                    .size(13.0)
+                    .color(egui::Color32::from_rgb(80, 85, 95)),
+            );
+        });
     }
 }
 
@@ -596,7 +616,7 @@ fn render_image_viewer(ui: &mut egui::Ui, explorer: &mut ExplorerState) {
     }
 }
 
-/// Render the file tree browser.
+#[allow(dead_code)] // Retained for potential standalone file browser mode
 fn render_file_browser(
     ui: &mut egui::Ui,
     explorer: &mut ExplorerState,
@@ -923,4 +943,32 @@ fn render_finder(
 fn is_image_ext(path: &std::path::Path) -> bool {
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
     matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp" | "tiff" | "tif" | "ico")
+}
+
+/// Render the file tree in the sidebar. Called from ui/mod.rs.
+/// Clicking a file opens it in the editor and switches to Explorer view.
+pub(crate) fn render_sidebar_tree(
+    ui: &mut egui::Ui,
+    explorer: &mut ExplorerState,
+    editor_state: &mut EditorViewState,
+) {
+    let mut action: Option<TreeAction> = None;
+    render_tree_nodes(ui, &explorer.tree, &explorer.root, 0, &mut action);
+
+    match action {
+        Some(TreeAction::OpenFile(path)) => {
+            if is_image_ext(&path) {
+                explorer.open(path);
+            } else {
+                match editor_state.open_file(path) {
+                    Ok(_) => editor_state.status_msg = None,
+                    Err(e) => editor_state.status_msg = Some(e),
+                }
+            }
+        }
+        Some(TreeAction::Toggle(indices)) => {
+            toggle_at(&mut explorer.tree, &indices);
+        }
+        None => {}
+    }
 }

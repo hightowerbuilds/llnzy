@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 use crate::editor::buffer::Buffer;
 
 const MAX_IMAGE_SIZE: u64 = 20_971_520; // 20 MB
+/// Maximum number of files to index for the fuzzy finder.
+const MAX_INDEX_FILES: usize = 10_000;
 
 /// Directories and patterns to always ignore.
 const IGNORED_DIRS: &[&str] = &[
@@ -73,19 +75,7 @@ impl TreeNode {
         }
     }
 
-    /// Recursively collect all file paths (for fuzzy finder indexing).
-    pub fn collect_files(&mut self, out: &mut Vec<PathBuf>) {
-        if self.is_dir {
-            self.ensure_children();
-            if let Some(children) = &mut self.children {
-                for child in children {
-                    child.collect_files(out);
-                }
-            }
-        } else {
-            out.push(self.path.clone());
-        }
-    }
+    // collect_files removed — use walk_files_capped() instead for safety
 }
 
 /// Read a directory and return sorted TreeNodes (dirs first, then files).
@@ -226,16 +216,12 @@ impl ExplorerState {
         self.error = None;
     }
 
-    /// Build the file index for fuzzy finding (lazy, cached).
+    /// Build the file index for fuzzy finding (capped, iterative walk).
     pub fn ensure_file_index(&mut self) {
         if self.file_index.is_some() {
             return;
         }
-        let mut files = Vec::new();
-        for node in &mut self.tree {
-            node.collect_files(&mut files);
-        }
-        self.file_index = Some(files);
+        self.file_index = Some(walk_files_capped(&self.root, MAX_INDEX_FILES));
     }
 
     /// Update fuzzy finder results based on the query.
@@ -284,6 +270,51 @@ impl ExplorerState {
     }
 }
 
+/// Walk a directory tree iteratively, collecting file paths up to a cap.
+/// Skips ignored directories and hidden files. Uses a stack (no recursion).
+fn walk_files_capped(root: &Path, max_files: usize) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    let mut dirs_to_visit = vec![root.to_path_buf()];
+
+    while let Some(dir) = dirs_to_visit.pop() {
+        if files.len() >= max_files {
+            break;
+        }
+        let Ok(entries) = fs::read_dir(&dir) else { continue };
+
+        for entry in entries.flatten() {
+            if files.len() >= max_files {
+                break;
+            }
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().into_owned();
+
+            // Skip hidden files (except .env, .gitignore)
+            if name.starts_with('.') && name != ".env" && name != ".gitignore" {
+                continue;
+            }
+
+            let meta = entry.metadata().ok();
+            let is_dir = meta.as_ref().is_some_and(|m| m.is_dir());
+
+            if is_dir {
+                if !IGNORED_DIRS.contains(&name.as_str()) {
+                    dirs_to_visit.push(path);
+                }
+            } else {
+                files.push(path);
+            }
+        }
+    }
+
+    files.sort_by(|a, b| {
+        let a_name = a.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        let b_name = b.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        a_name.to_lowercase().cmp(&b_name.to_lowercase())
+    });
+    files
+}
+
 /// Simple fuzzy match: all query chars appear in order in the target.
 fn fuzzy_match(query: &str, target: &str) -> bool {
     let mut target_chars = target.chars();
@@ -312,4 +343,45 @@ pub fn format_size(bytes: u64) -> String {
     } else {
         format!("{:.1} MB", bytes as f64 / 1_048_576.0)
     }
+}
+
+// ── Recent projects persistence ──
+
+const MAX_RECENT: usize = 5;
+
+fn recent_projects_path() -> Option<PathBuf> {
+    dirs::config_dir().map(|d| d.join("llnzy").join("recent_projects.json"))
+}
+
+/// Load recent project paths from disk.
+pub fn load_recent_projects() -> Vec<PathBuf> {
+    let Some(path) = recent_projects_path() else { return Vec::new() };
+    let Ok(data) = fs::read_to_string(&path) else { return Vec::new() };
+    let Ok(paths) = serde_json::from_str::<Vec<String>>(&data) else { return Vec::new() };
+    paths.into_iter().map(PathBuf::from).filter(|p| p.exists()).collect()
+}
+
+/// Save recent project paths to disk.
+pub fn save_recent_projects(projects: &[PathBuf]) {
+    let Some(path) = recent_projects_path() else { return };
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let strings: Vec<String> = projects.iter().map(|p| p.to_string_lossy().to_string()).collect();
+    if let Ok(json) = serde_json::to_string_pretty(&strings) {
+        let _ = fs::write(path, json);
+    }
+}
+
+/// Add a project to the recent list (moves to front, caps at MAX_RECENT).
+pub fn add_recent_project(projects: &mut Vec<PathBuf>, path: PathBuf) {
+    projects.retain(|p| p != &path);
+    projects.insert(0, path);
+    projects.truncate(MAX_RECENT);
+    save_recent_projects(projects);
+}
+
+/// Get the display name for a project path (last directory component).
+pub fn project_name(path: &Path) -> &str {
+    path.file_name().and_then(|n| n.to_str()).unwrap_or("unknown")
 }

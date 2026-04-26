@@ -101,12 +101,25 @@ pub(crate) fn render_text_editor(
         diag_label,
     );
 
-    // Main editor area
+    // Main editor area — click + drag for cursor, scroll for navigation
     let (response, painter) = ui.allocate_painter(
         egui::Vec2::new(ui.available_width(), available_h),
-        egui::Sense::click(),
+        egui::Sense::click_and_drag(),
     );
     let rect = response.rect;
+
+    // Mouse wheel scrolling
+    if response.hovered() {
+        let scroll_delta = ui.input(|i| i.smooth_scroll_delta.y);
+        if scroll_delta != 0.0 {
+            let scroll_lines = (-scroll_delta / line_height).round() as i32;
+            if scroll_lines > 0 {
+                view.scroll_line = (view.scroll_line + scroll_lines as usize).min(line_count.saturating_sub(1));
+            } else if scroll_lines < 0 {
+                view.scroll_line = view.scroll_line.saturating_sub((-scroll_lines) as usize);
+            }
+        }
+    }
     let text_clip = egui::Rect::from_min_max(
         egui::pos2(rect.left() + gutter_width, rect.top()),
         rect.right_bottom(),
@@ -120,17 +133,29 @@ pub(crate) fn render_text_editor(
     );
     painter.rect_filled(gutter_rect, 0.0, egui::Color32::from_rgb(30, 30, 38));
 
-    // Mouse click to position cursor
+    // Mouse click to position cursor, drag to select
     if response.clicked() {
         if let Some(pos) = response.interact_pointer_pos() {
-            let rel_x = pos.x - rect.left() - gutter_width - text_margin + h_offset;
-            let rel_y = pos.y - rect.top();
-            let click_line = view.scroll_line + (rel_y / line_height) as usize;
-            let click_col = (rel_x / char_width).max(0.0) as usize;
-            let click_line = click_line.min(line_count.saturating_sub(1));
-            let click_col = click_col.min(buf.line_len(click_line));
+            let (click_line, click_col) = pixel_to_editor_pos(
+                pos, rect, gutter_width, text_margin, h_offset, char_width, line_height,
+                view.scroll_line, line_count, buf,
+            );
             view.cursor.clear_selection();
             view.cursor.pos = Position::new(click_line, click_col);
+            view.cursor.desired_col = None;
+        }
+    }
+    if response.dragged() {
+        if let Some(pos) = response.interact_pointer_pos() {
+            let (drag_line, drag_col) = pixel_to_editor_pos(
+                pos, rect, gutter_width, text_margin, h_offset, char_width, line_height,
+                view.scroll_line, line_count, buf,
+            );
+            // Start selection on first drag if not already selecting
+            if !view.cursor.has_selection() {
+                view.cursor.anchor = Some(view.cursor.pos);
+            }
+            view.cursor.pos = Position::new(drag_line, drag_col);
             view.cursor.desired_col = None;
         }
     }
@@ -517,4 +542,25 @@ fn render_diagnostics(
             egui::Align2::LEFT_TOP, marker, egui::FontId::monospace(10.0), color,
         );
     }
+}
+
+/// Convert a pixel position to an editor (line, col) position.
+fn pixel_to_editor_pos(
+    pos: egui::Pos2,
+    rect: egui::Rect,
+    gutter_width: f32,
+    text_margin: f32,
+    h_offset: f32,
+    char_width: f32,
+    line_height: f32,
+    scroll_line: usize,
+    line_count: usize,
+    buf: &crate::editor::buffer::Buffer,
+) -> (usize, usize) {
+    let rel_x = pos.x - rect.left() - gutter_width - text_margin + h_offset;
+    let rel_y = pos.y - rect.top();
+    let line = (scroll_line + (rel_y / line_height) as usize).min(line_count.saturating_sub(1));
+    let col = (rel_x / char_width).max(0.0) as usize;
+    let col = col.min(buf.line_len(line));
+    (line, col)
 }
