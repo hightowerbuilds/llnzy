@@ -7,14 +7,14 @@ pub struct KeyAction {
     pub goto_definition: bool,
     pub request_hover: bool,
     pub request_completion: bool,
-    /// Accept the selected completion item.
     pub accept_completion: bool,
-    /// Dismiss the completion popup.
     pub dismiss_completion: bool,
-    /// Move completion selection up.
     pub completion_up: bool,
-    /// Move completion selection down.
     pub completion_down: bool,
+    pub format_document: bool,
+    pub rename_symbol: bool,
+    pub code_actions: bool,
+    pub document_symbols: bool,
 }
 
 /// Auto-closing bracket pairs.
@@ -87,8 +87,32 @@ pub fn handle_editor_keys(
             return;
         }
 
+        // F2: rename symbol
+        if input.key_pressed(egui::Key::F2) {
+            action.rename_symbol = true;
+            return;
+        }
+
+        // Cmd+Shift+F: format document
+        if cmd && shift && input.key_pressed(egui::Key::F) {
+            action.format_document = true;
+            return;
+        }
+
+        // Cmd+. : code actions
+        if cmd && input.key_pressed(egui::Key::Period) {
+            action.code_actions = true;
+            return;
+        }
+
+        // Cmd+Shift+O: document symbols
+        if cmd && shift && input.key_pressed(egui::Key::O) {
+            action.document_symbols = true;
+            return;
+        }
+
         // Ctrl+Space: trigger completion
-        if input.modifiers.command && input.key_pressed(egui::Key::Space) {
+        if cmd && input.key_pressed(egui::Key::Space) {
             action.request_completion = true;
             return;
         }

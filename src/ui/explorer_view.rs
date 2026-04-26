@@ -19,6 +19,15 @@ pub struct EditorViewState {
     pub goto_target: Option<(std::path::PathBuf, u32, u32)>,
     /// Active completion popup state.
     pub completion: Option<CompletionState>,
+    /// Code actions popup: list of available actions.
+    pub code_actions_popup: Option<Vec<crate::lsp::CodeAction>>,
+    pub code_actions_selected: usize,
+    /// Document symbols popup.
+    pub symbols_popup: Option<Vec<crate::lsp::SymbolInfo>>,
+    pub symbols_selected: usize,
+    pub symbols_filter: String,
+    /// Rename input state.
+    pub rename_input: Option<String>,
 }
 
 /// State for the auto-completion popup.
@@ -44,6 +53,12 @@ impl Default for EditorViewState {
             hover_pos: None,
             goto_target: None,
             completion: None,
+            code_actions_popup: None,
+            code_actions_selected: 0,
+            symbols_popup: None,
+            symbols_selected: 0,
+            symbols_filter: String::new(),
+            rename_input: None,
         }
     }
 }
@@ -167,6 +182,124 @@ impl EditorViewState {
                 .filter(|i| i.label.to_lowercase().contains(&lower))
                 .take(20)
                 .collect()
+        }
+    }
+
+    /// Format the active document via LSP.
+    pub fn format_document(&mut self) {
+        let Some(lsp) = &mut self.lsp else { return };
+        let active = self.editor.active;
+        if active >= self.editor.buffers.len() { return }
+        let buf = &self.editor.buffers[active];
+        let view = &self.editor.views[active];
+        if let (Some(lang_id), Some(path)) = (view.lang_id, buf.path()) {
+            let edits = lsp.format(path, lang_id);
+            if edits.is_empty() {
+                self.status_msg = Some("No formatting changes".to_string());
+                return;
+            }
+            // Apply edits in reverse order to preserve positions
+            let buf = &mut self.editor.buffers[active];
+            let mut sorted = edits;
+            sorted.sort_by(|a, b| b.start_line.cmp(&a.start_line).then(b.start_col.cmp(&a.start_col)));
+            for edit in sorted {
+                let start = crate::editor::buffer::Position::new(edit.start_line as usize, edit.start_col as usize);
+                let end = crate::editor::buffer::Position::new(edit.end_line as usize, edit.end_col as usize);
+                buf.replace(start, end, &edit.new_text);
+            }
+            self.editor.views[active].tree_dirty = true;
+            self.lsp_did_change();
+            self.status_msg = Some("Formatted".to_string());
+        }
+    }
+
+    /// Rename the symbol at cursor. Prompts for new name via status_msg.
+    pub fn rename_symbol(&mut self, new_name: &str) {
+        let Some(lsp) = &mut self.lsp else { return };
+        let active = self.editor.active;
+        if active >= self.editor.buffers.len() { return }
+        let buf = &self.editor.buffers[active];
+        let view = &self.editor.views[active];
+        let pos = view.cursor.pos;
+        if let (Some(lang_id), Some(path)) = (view.lang_id, buf.path()) {
+            let file_edits = lsp.rename(path, lang_id, pos.line as u32, pos.col as u32, new_name);
+            if file_edits.is_empty() {
+                self.status_msg = Some("Rename returned no changes".to_string());
+                return;
+            }
+            let mut total = 0;
+            for (file_path, edits) in &file_edits {
+                // Only apply edits to the current open buffer for now
+                if self.editor.buffers[active].path() == Some(file_path.as_path()) {
+                    let buf = &mut self.editor.buffers[active];
+                    let mut sorted = edits.clone();
+                    sorted.sort_by(|a, b| b.start_line.cmp(&a.start_line).then(b.start_col.cmp(&a.start_col)));
+                    for edit in &sorted {
+                        let start = crate::editor::buffer::Position::new(edit.start_line as usize, edit.start_col as usize);
+                        let end = crate::editor::buffer::Position::new(edit.end_line as usize, edit.end_col as usize);
+                        buf.replace(start, end, &edit.new_text);
+                        total += 1;
+                    }
+                }
+            }
+            self.editor.views[active].tree_dirty = true;
+            self.lsp_did_change();
+            self.status_msg = Some(format!("Renamed: {total} occurrence{}", if total == 1 { "" } else { "s" }));
+        }
+    }
+
+    /// Request code actions at the cursor position.
+    pub fn request_code_actions(&mut self) -> Vec<crate::lsp::CodeAction> {
+        let Some(lsp) = &mut self.lsp else { return Vec::new() };
+        let active = self.editor.active;
+        if active >= self.editor.buffers.len() { return Vec::new() }
+        let buf = &self.editor.buffers[active];
+        let view = &self.editor.views[active];
+        let pos = view.cursor.pos;
+        let (start, end) = view.cursor.selection().unwrap_or((pos, pos));
+        if let (Some(lang_id), Some(path)) = (view.lang_id, buf.path()) {
+            lsp.code_actions(path, lang_id, start.line as u32, start.col as u32, end.line as u32, end.col as u32)
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Apply a code action's workspace edits.
+    pub fn apply_code_action(&mut self, action: &crate::lsp::CodeAction) {
+        let active = self.editor.active;
+        if active >= self.editor.buffers.len() { return }
+        let mut total = 0;
+        for (file_path, edits) in &action.edits {
+            if self.editor.buffers[active].path() == Some(file_path.as_path()) {
+                let buf = &mut self.editor.buffers[active];
+                let mut sorted = edits.clone();
+                sorted.sort_by(|a, b| b.start_line.cmp(&a.start_line).then(b.start_col.cmp(&a.start_col)));
+                for edit in &sorted {
+                    let start = crate::editor::buffer::Position::new(edit.start_line as usize, edit.start_col as usize);
+                    let end = crate::editor::buffer::Position::new(edit.end_line as usize, edit.end_col as usize);
+                    buf.replace(start, end, &edit.new_text);
+                    total += 1;
+                }
+            }
+        }
+        if total > 0 {
+            self.editor.views[active].tree_dirty = true;
+            self.lsp_did_change();
+        }
+        self.status_msg = Some(format!("Applied: {}", action.title));
+    }
+
+    /// Request document symbols for the active buffer.
+    pub fn request_document_symbols(&mut self) -> Vec<crate::lsp::SymbolInfo> {
+        let Some(lsp) = &mut self.lsp else { return Vec::new() };
+        let active = self.editor.active;
+        if active >= self.editor.buffers.len() { return Vec::new() }
+        let buf = &self.editor.buffers[active];
+        let view = &self.editor.views[active];
+        if let (Some(lang_id), Some(path)) = (view.lang_id, buf.path()) {
+            lsp.document_symbols(path, lang_id)
+        } else {
+            Vec::new()
         }
     }
 
@@ -349,6 +482,51 @@ fn render_editor_tabs(ui: &mut egui::Ui, editor_state: &mut EditorViewState) {
                     editor_state.lsp_did_change();
                 }
                 editor_state.completion = None;
+            }
+        }
+
+        // Format document
+        if frame_result.key_action.format_document {
+            editor_state.format_document();
+        }
+
+        // Rename symbol: open input or apply
+        if frame_result.key_action.rename_symbol && editor_state.rename_input.is_none() {
+            // Get current word at cursor for prefill
+            let word = {
+                let buf = &editor_state.editor.buffers[active];
+                let pos = editor_state.editor.views[active].cursor.pos;
+                let line = buf.line(pos.line);
+                let chars: Vec<char> = line.chars().collect();
+                let mut start = pos.col;
+                let mut end = pos.col;
+                while start > 0 && chars.get(start - 1).is_some_and(|c| c.is_alphanumeric() || *c == '_') { start -= 1; }
+                while end < chars.len() && chars.get(end).is_some_and(|c| c.is_alphanumeric() || *c == '_') { end += 1; }
+                chars[start..end].iter().collect::<String>()
+            };
+            editor_state.rename_input = Some(word);
+        }
+
+        // Code actions
+        if frame_result.key_action.code_actions {
+            let actions = editor_state.request_code_actions();
+            if actions.is_empty() {
+                editor_state.status_msg = Some("No code actions available".to_string());
+            } else {
+                editor_state.code_actions_popup = Some(actions);
+                editor_state.code_actions_selected = 0;
+            }
+        }
+
+        // Document symbols
+        if frame_result.key_action.document_symbols {
+            let symbols = editor_state.request_document_symbols();
+            if symbols.is_empty() {
+                editor_state.status_msg = Some("No symbols found".to_string());
+            } else {
+                editor_state.symbols_popup = Some(symbols);
+                editor_state.symbols_selected = 0;
+                editor_state.symbols_filter.clear();
             }
         }
     }

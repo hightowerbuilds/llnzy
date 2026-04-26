@@ -374,7 +374,88 @@ impl LspClient {
         Ok(Some(resp))
     }
 
-    /// Get a reference to the transport's notification receiver.
+    /// Request document formatting.
+    pub async fn formatting(&self, path: &Path) -> Result<Vec<TextEdit>, String> {
+        if self.state != ClientState::Running { return Ok(Vec::new()); }
+        let Some(doc) = self.open_docs.get(path) else { return Ok(Vec::new()) };
+
+        let params = DocumentFormattingParams {
+            text_document: TextDocumentIdentifier { uri: doc.uri.clone() },
+            options: FormattingOptions {
+                tab_size: 4,
+                insert_spaces: true,
+                ..Default::default()
+            },
+            work_done_progress_params: Default::default(),
+        };
+
+        let result = self.transport.request("textDocument/formatting", serde_json::to_value(params).unwrap()).await?;
+        if result.is_null() { return Ok(Vec::new()); }
+        serde_json::from_value(result).map_err(|e| e.to_string())
+    }
+
+    /// Request rename at a position.
+    pub async fn rename(&self, path: &Path, line: u32, col: u32, new_name: &str) -> Result<Option<WorkspaceEdit>, String> {
+        if self.state != ClientState::Running { return Ok(None); }
+        let Some(doc) = self.open_docs.get(path) else { return Ok(None) };
+
+        let params = RenameParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: doc.uri.clone() },
+                position: Position { line, character: col },
+            },
+            new_name: new_name.to_string(),
+            work_done_progress_params: Default::default(),
+        };
+
+        let result = self.transport.request("textDocument/rename", serde_json::to_value(params).unwrap()).await?;
+        if result.is_null() { return Ok(None); }
+        let edit: WorkspaceEdit = serde_json::from_value(result).map_err(|e| e.to_string())?;
+        Ok(Some(edit))
+    }
+
+    /// Request code actions at a range.
+    pub async fn code_actions(&self, path: &Path, start_line: u32, start_col: u32, end_line: u32, end_col: u32) -> Result<Vec<CodeActionOrCommand>, String> {
+        if self.state != ClientState::Running { return Ok(Vec::new()); }
+        let Some(doc) = self.open_docs.get(path) else { return Ok(Vec::new()) };
+
+        let params = CodeActionParams {
+            text_document: TextDocumentIdentifier { uri: doc.uri.clone() },
+            range: Range {
+                start: Position { line: start_line, character: start_col },
+                end: Position { line: end_line, character: end_col },
+            },
+            context: CodeActionContext {
+                diagnostics: Vec::new(),
+                only: None,
+                trigger_kind: Some(CodeActionTriggerKind::INVOKED),
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        };
+
+        let result = self.transport.request("textDocument/codeAction", serde_json::to_value(params).unwrap()).await?;
+        if result.is_null() { return Ok(Vec::new()); }
+        serde_json::from_value(result).map_err(|e| e.to_string())
+    }
+
+    /// Request document symbols.
+    pub async fn document_symbols(&self, path: &Path) -> Result<Option<DocumentSymbolResponse>, String> {
+        if self.state != ClientState::Running { return Ok(None); }
+        let Some(doc) = self.open_docs.get(path) else { return Ok(None) };
+
+        let params = DocumentSymbolParams {
+            text_document: TextDocumentIdentifier { uri: doc.uri.clone() },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        };
+
+        let result = self.transport.request("textDocument/documentSymbol", serde_json::to_value(params).unwrap()).await?;
+        if result.is_null() { return Ok(None); }
+        let resp: DocumentSymbolResponse = serde_json::from_value(result).map_err(|e| e.to_string())?;
+        Ok(Some(resp))
+    }
+
     pub fn transport(&self) -> &Arc<Transport> {
         &self.transport
     }
