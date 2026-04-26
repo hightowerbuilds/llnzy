@@ -1,7 +1,11 @@
 pub mod command_palette;
 mod editor_view;
 mod explorer_view;
+mod footer;
+mod home_view;
+mod overlays;
 mod settings_tabs;
+mod sidebar;
 mod sketch_view;
 mod stacker_view;
 pub mod types;
@@ -16,8 +20,7 @@ use crate::stacker::{
     apply_prompt_edit, load_stacker_prompts, save_stacker_prompts, StackerPrompt,
 };
 
-pub use types::{ActiveView, CopyGhost, SettingsTab, SIDEBAR_WIDTH};
-use types::{GHOST_DURATION_SECS, GHOST_FLOAT_PX};
+pub use types::{ActiveView, CopyGhost, SettingsTab, BUMPER_WIDTH, SIDEBAR_WIDTH};
 
 /// State for the egui-driven UI overlay.
 pub struct UiState {
@@ -184,11 +187,12 @@ impl UiState {
         self.sidebar_open = !self.sidebar_open;
     }
 
+    /// Total width consumed by sidebar UI (bumper is always visible).
     pub fn sidebar_width(&self) -> f32 {
         if self.sidebar_open {
             SIDEBAR_WIDTH
         } else {
-            0.0
+            BUMPER_WIDTH
         }
     }
 
@@ -304,297 +308,39 @@ impl UiState {
             );
             let text_color = egui::Color32::from_rgb(fg[0], fg[1], fg[2]);
 
-            // ── Footer bar with navigation buttons ──
-            egui::TopBottomPanel::bottom("footer")
-                .exact_height(footer_height)
-                .frame(egui::Frame::none().fill(chrome_bg).inner_margin(egui::Margin::symmetric(8.0, 2.0)))
-                .show(ctx, |ui| {
-                    ui.horizontal_centered(|ui| {
-                        let views: &[(&str, ActiveView)] = &[
-                            ("Home", ActiveView::Home),
-                            ("Terminal", ActiveView::Shells),
-                            ("Stacker", ActiveView::Stacker),
-                            ("Sketch", ActiveView::Sketch),
-                            ("Appearances", ActiveView::Appearances),
-                            ("Settings", ActiveView::Settings),
-                        ];
-                        for &(name, view) in views {
-                            let is_active = current_view == view;
-                            let btn_fill = if is_active { active_btn } else { egui::Color32::TRANSPARENT };
-                            let btn_text = if is_active { egui::Color32::WHITE } else { text_color };
-                            let btn = ui.add(
-                                egui::Button::new(egui::RichText::new(name).size(12.0).color(btn_text))
-                                    .fill(btn_fill)
-                                    .rounding(egui::Rounding::same(4.0))
-                                    .min_size(egui::Vec2::new(0.0, 28.0)),
-                            );
-                            if btn.clicked() && current_view != view {
-                                nav_target = Some(view);
-                            }
-                        }
-                    });
-                });
-
-            // ── Tab bar interaction (for renaming) ──
-            let tab_bar_height = 32.0;
-            const DOUBLE_CLICK_TIME_MS: u128 = 300;
-
-            // Create interactive areas over each tab for double-click detection
-            if tab_count > 0 && matches!(current_view, ActiveView::Shells) {
-                let viewport_rect = ctx.screen_rect();
-                let tab_w = (viewport_rect.width() / tab_count as f32).min(200.0);
-                let sidebar_offset = if sidebar_open { SIDEBAR_WIDTH } else { 0.0 };
-
-                // Check for clicks on tabs
-                let mut tab_clicked: Option<usize> = None;
-                ctx.input(|input| {
-                    if input.pointer.button_pressed(egui::PointerButton::Primary) {
-                        if let Some(pos) = input.pointer.latest_pos() {
-                            if pos.y >= viewport_rect.top()
-                                && pos.y < viewport_rect.top() + tab_bar_height
-                            {
-                                let rel_x = pos.x - viewport_rect.left() - sidebar_offset;
-                                if rel_x >= 0.0 && rel_x < viewport_rect.width() - sidebar_offset {
-                                    let tab_idx = (rel_x / tab_w).floor() as usize;
-                                    if tab_idx < tab_count {
-                                        tab_clicked = Some(tab_idx);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                });
-
-                // Detect double-click based on last click time
-                if let Some(tab_idx) = tab_clicked {
-                    if let Some((last_idx, last_time)) = last_tab_click {
-                        if last_idx == tab_idx
-                            && last_time.elapsed().as_millis() < DOUBLE_CLICK_TIME_MS
-                        {
-                            // Double-click detected!
-                            editing_tab = Some(tab_idx);
-                            editing_tab_text.clear();
-                            last_tab_click = None;
-                        } else {
-                            // Single click on different tab or too late
-                            last_tab_click = Some((tab_idx, Instant::now()));
-                        }
-                    } else {
-                        // First click
-                        last_tab_click = Some((tab_idx, Instant::now()));
-                    }
-                }
-
-                // If editing a tab, show a text input area overlay
-                if let Some(edit_idx) = editing_tab {
-                    let tab_x = sidebar_offset + edit_idx as f32 * tab_w;
-
-                    egui::Area::new(egui::Id::new(("tab_edit", edit_idx)))
-                        .fixed_pos(egui::pos2(tab_x + 4.0, viewport_rect.top() + 4.0))
-                        .show(ctx, |ui| {
-                            ui.set_max_width(tab_w - 8.0);
-                            let mut text = editing_tab_text.clone();
-                            let response = ui.text_edit_singleline(&mut text);
-                            editing_tab_text = text;
-
-                            // Request focus on this input
-                            response.request_focus();
-
-                            // Check for Enter or Escape
-                            let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter));
-                            let escape_pressed = ui.input(|i| i.key_pressed(egui::Key::Escape));
-
-                            if enter_pressed {
-                                // Save the edited name
-                                saved_tab_name_out = Some((edit_idx, editing_tab_text.clone()));
-                                editing_tab = None;
-                                editing_tab_text.clear();
-                                last_tab_click = None;
-                            } else if escape_pressed {
-                                // Cancel editing
-                                editing_tab = None;
-                                editing_tab_text.clear();
-                                last_tab_click = None;
-                            }
-                        });
-                }
+            // ── Footer ──
+            if let Some(view) = footer::render_footer(
+                ctx, footer_height, current_view, chrome_bg, active_btn, text_color,
+            ) {
+                nav_target = Some(view);
             }
 
-            // ── Sidebar: file tree when open, bumper when closed ──
-            if sidebar_open {
-                egui::SidePanel::left("file_sidebar")
-                    .exact_width(SIDEBAR_WIDTH)
-                    .frame(
-                        egui::Frame::none()
-                            .fill(chrome_bg)
-                            .inner_margin(egui::Margin::same(8.0)),
-                    )
-                    .show(ctx, |ui| {
-                        // Sidebar header
-                        ui.horizontal(|ui| {
-                            let project_name = explorer.root.file_name()
-                                .and_then(|n| n.to_str())
-                                .unwrap_or("No Project");
-                            ui.label(
-                                egui::RichText::new(project_name)
-                                    .size(14.0)
-                                    .color(text_color)
-                                    .strong(),
-                            );
-                        });
-                        ui.add_space(4.0);
-                        ui.separator();
-                        ui.add_space(4.0);
-
-                        // File tree
-                        if explorer.tree.is_empty() {
-                            ui.label(
-                                egui::RichText::new("Open a project from the Home screen")
-                                    .size(12.0)
-                                    .color(egui::Color32::from_rgb(100, 105, 120)),
-                            );
-                        } else {
-                            egui::ScrollArea::vertical()
-                                .id_salt("sidebar_tree")
-                                .auto_shrink([false; 2])
-                                .show(ui, |ui| {
-                                    explorer_view::render_sidebar_tree(ui, &mut explorer, &mut editor_view);
-                                });
-                        }
-                    });
-            } else {
-                // Bumper strip to re-open sidebar
-                egui::SidePanel::left("sidebar_bumper")
-                    .exact_width(12.0)
-                    .frame(
-                        egui::Frame::none()
-                            .fill(egui::Color32::from_rgb(
-                                (bg[0] as f32 * 0.5) as u8,
-                                (bg[1] as f32 * 0.5) as u8,
-                                (bg[2] as f32 * 0.5) as u8,
-                            ))
-                    )
-                    .show(ctx, |ui| {
-                        let resp = ui.allocate_response(
-                            ui.available_size(),
-                            egui::Sense::click(),
-                        );
-                        if resp.clicked() {
-                            sidebar_open = true;
-                        }
-                        if resp.hovered() {
-                            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                        }
-                    });
+            // ── Tab bar interaction ──
+            let mut tab_state = overlays::TabBarState {
+                editing_tab,
+                editing_tab_text: editing_tab_text.clone(),
+                last_tab_click,
+                saved_tab_name: None,
+            };
+            overlays::handle_tab_bar(ctx, tab_count, current_view, sidebar_open, &mut tab_state);
+            editing_tab = tab_state.editing_tab;
+            editing_tab_text = tab_state.editing_tab_text;
+            last_tab_click = tab_state.last_tab_click;
+            if tab_state.saved_tab_name.is_some() {
+                saved_tab_name_out = tab_state.saved_tab_name;
             }
+
+            // ── Sidebar ──
+            sidebar_open = sidebar::render_sidebar(
+                ctx, sidebar_open, chrome_bg, bg, text_color,
+                &mut explorer, &mut editor_view,
+            );
 
             // ── Home view ──
             if current_view == ActiveView::Home {
-                egui::CentralPanel::default()
-                    .frame(
-                        egui::Frame::none()
-                            .fill(egui::Color32::from_rgb(22, 24, 30))
-                            .inner_margin(egui::Margin::same(0.0)),
-                    )
-                    .show(ctx, |ui| {
-                        let available = ui.available_size();
-                        let center_y = available.y / 2.0;
-
-                        ui.vertical_centered(|ui| {
-                            ui.add_space((center_y - 140.0).max(20.0));
-
-                            ui.label(
-                                egui::RichText::new("llnzy")
-                                    .size(48.0)
-                                    .color(egui::Color32::WHITE)
-                                    .strong(),
-                            );
-                            ui.add_space(8.0);
-                            ui.label(
-                                egui::RichText::new("GPU-accelerated terminal & editor")
-                                    .size(14.0)
-                                    .color(egui::Color32::from_rgb(120, 125, 140)),
-                            );
-                            ui.add_space(40.0);
-
-                            let btn_width = 240.0;
-                            let btn_height = 48.0;
-
-                            // Terminal button
-                            if ui.add_sized(
-                                [btn_width, btn_height],
-                                egui::Button::new(
-                                    egui::RichText::new("Terminal").size(18.0).color(egui::Color32::WHITE),
-                                )
-                                .fill(egui::Color32::from_rgb(40, 80, 160))
-                                .rounding(egui::Rounding::same(8.0)),
-                            ).clicked() {
-                                nav_target = Some(ActiveView::Shells);
-                            }
-
-                            ui.add_space(12.0);
-
-                            // Open Project button (triggers folder picker)
-                            if ui.add_sized(
-                                [btn_width, btn_height],
-                                egui::Button::new(
-                                    egui::RichText::new("Open Project").size(18.0).color(egui::Color32::WHITE),
-                                )
-                                .fill(egui::Color32::from_rgb(40, 120, 80))
-                                .rounding(egui::Rounding::same(8.0)),
-                            ).clicked() {
-                                if let Some(path) = rfd::FileDialog::new()
-                                    .set_title("Open Project Folder")
-                                    .pick_folder()
-                                {
-                                    open_project = Some(path);
-                                    nav_target = Some(ActiveView::Explorer);
-                                }
-                            }
-
-                            ui.add_space(12.0);
-
-                            // Workspace button (greyed out)
-                            ui.add_sized(
-                                [btn_width, btn_height],
-                                egui::Button::new(
-                                    egui::RichText::new("Workspace").size(18.0).color(egui::Color32::from_rgb(100, 105, 120)),
-                                )
-                                .fill(egui::Color32::from_rgb(45, 48, 58))
-                                .rounding(egui::Rounding::same(8.0)),
-                            ).on_hover_text("Coming soon");
-
-                            // Recent Projects
-                            if !recent_projects.is_empty() {
-                                ui.add_space(28.0);
-                                ui.label(
-                                    egui::RichText::new("Recent Projects")
-                                        .size(13.0)
-                                        .color(egui::Color32::from_rgb(100, 105, 120)),
-                                );
-                                ui.add_space(8.0);
-
-                                for project in &recent_projects {
-                                    let name = crate::explorer::project_name(project);
-                                    let path_str = project.to_string_lossy().to_string();
-                                    let btn = ui.add_sized(
-                                        [btn_width, 36.0],
-                                        egui::Button::new(
-                                            egui::RichText::new(format!("{name}  "))
-                                                .size(14.0)
-                                                .color(egui::Color32::from_rgb(180, 185, 200)),
-                                        )
-                                        .fill(egui::Color32::from_rgb(32, 35, 44))
-                                        .rounding(egui::Rounding::same(6.0)),
-                                    ).on_hover_text(&path_str);
-                                    if btn.clicked() {
-                                        open_project = Some(project.clone());
-                                        nav_target = Some(ActiveView::Explorer);
-                                    }
-                                }
-                            }
-                        });
-                    });
+                let action = home_view::render_home_view(ctx, &recent_projects);
+                if action.nav_target.is_some() { nav_target = action.nav_target; }
+                if action.open_project.is_some() { open_project = action.open_project; }
             }
 
             // ── Appearances view ──
@@ -649,7 +395,6 @@ impl UiState {
 
             // ── Explorer view ──
             if current_view == ActiveView::Explorer {
-                // When terminal panel is open, reserve the bottom portion for the terminal
                 if terminal_panel_open {
                     let screen_h = ctx.screen_rect().height();
                     let terminal_h = (screen_h * terminal_panel_ratio).max(80.0);
@@ -657,7 +402,6 @@ impl UiState {
                         .exact_height(terminal_h)
                         .frame(egui::Frame::none().fill(egui::Color32::TRANSPARENT))
                         .show(ctx, |ui| {
-                            // Divider line between editor and terminal
                             ui.add(egui::Separator::default().horizontal());
                         });
                 }
@@ -701,7 +445,7 @@ impl UiState {
                 }
             }
 
-            // ── Settings view (blank for now) ──
+            // ── Settings view ──
             if current_view == ActiveView::Settings {
                 egui::CentralPanel::default()
                     .frame(
@@ -718,76 +462,11 @@ impl UiState {
                     });
             }
 
-            // ── Copy ghost animations ──
-            let now = Instant::now();
-            copy_ghosts
-                .retain(|g| now.duration_since(g.created).as_secs_f32() < GHOST_DURATION_SECS);
-            for (i, ghost) in copy_ghosts.iter().enumerate() {
-                let t = now.duration_since(ghost.created).as_secs_f32() / GHOST_DURATION_SECS;
-                let alpha = ((1.0 - t) * 200.0) as u8;
-                let y_offset = t * GHOST_FLOAT_PX;
-                egui::Area::new(egui::Id::new("copy_ghost").with(i))
-                    .fixed_pos(egui::Pos2::new(ghost.x, ghost.y - y_offset))
-                    .interactable(false)
-                    .order(egui::Order::Tooltip)
-                    .show(ctx, |ui| {
-                        ui.label(
-                            egui::RichText::new(&ghost.text)
-                                .size(12.0)
-                                .color(egui::Color32::from_rgba_unmultiplied(255, 255, 255, alpha)),
-                        );
-                    });
-            }
-            if !copy_ghosts.is_empty() {
-                ctx.request_repaint();
-            }
-
-            // Command palette overlay
-            if palette.open {
-                egui::Area::new(egui::Id::new("command_palette"))
-                    .fixed_pos(egui::pos2(
-                        ctx.screen_rect().center().x - 200.0,
-                        ctx.screen_rect().top() + 50.0,
-                    ))
-                    .order(egui::Order::Foreground)
-                    .show(ctx, |ui| {
-                        egui::Frame::none()
-                            .fill(egui::Color32::from_rgb(30, 32, 42))
-                            .rounding(egui::Rounding::same(8.0))
-                            .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(60, 65, 80)))
-                            .inner_margin(egui::Margin::same(12.0))
-                            .show(ui, |ui| {
-                                ui.set_min_width(400.0);
-                                palette_command = command_palette::render_palette(ui, &mut palette);
-                            });
-                    });
-            }
-
-            // Cmd+Shift+P to toggle palette
-            ctx.input(|input| {
-                if input.modifiers.command && input.modifiers.shift && input.key_pressed(egui::Key::P) {
-                    if palette.open { palette.close(); } else { palette.open(); }
-                }
-            });
-
-            // FPS overlay
+            // ── Overlays ──
+            overlays::render_copy_ghosts(ctx, &mut copy_ghosts);
+            palette_command = overlays::render_command_palette(ctx, &mut palette);
             if let Some((fps, ms)) = fps_info {
-                egui::Area::new(egui::Id::new("fps_overlay"))
-                    .fixed_pos(egui::Pos2::new(8.0, 8.0))
-                    .show(ctx, |ui| {
-                        egui::Frame::none()
-                            .fill(egui::Color32::from_rgba_premultiplied(0, 0, 0, 180))
-                            .rounding(egui::Rounding::same(4.0))
-                            .inner_margin(egui::Margin::symmetric(8.0, 4.0))
-                            .show(ui, |ui| {
-                                ui.label(
-                                    egui::RichText::new(format!("{:.0} FPS  {:.1}ms", fps, ms))
-                                        .size(12.0)
-                                        .color(egui::Color32::from_rgb(150, 255, 150))
-                                        .monospace(),
-                                );
-                            });
-                    });
+                overlays::render_fps_overlay(ctx, fps, ms);
             }
         });
 
