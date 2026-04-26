@@ -27,7 +27,7 @@ impl VisualTheme {
 
 /// All built-in theme presets.
 pub fn builtin_themes() -> Vec<VisualTheme> {
-    vec![minimalist(), buzz(), synthwave()]
+    vec![minimalist(), buzz()]
 }
 
 /// Clean terminal, no effects.
@@ -121,64 +121,5 @@ fn buzz() -> VisualTheme {
             effects_on_ui: false,
         },
         cursor_style: CursorStyle::Block,
-    }
-}
-
-/// Sunset gradient palette, heavy glow.
-fn synthwave() -> VisualTheme {
-    VisualTheme {
-        name: "Synthwave".to_string(),
-        description: "80s sunset vibes with hot pink and electric blue".to_string(),
-        colors: ColorScheme {
-            ansi: [
-                [20, 10, 30],    // black — dark purple
-                [255, 60, 120],  // red — hot pink
-                [120, 255, 180], // green — mint
-                [255, 200, 60],  // yellow — golden
-                [60, 120, 255],  // blue — electric blue
-                [255, 80, 200],  // magenta — fuchsia
-                [80, 200, 255],  // cyan — sky blue
-                [220, 200, 240], // white — lavender
-                [50, 30, 60],    // bright black
-                [255, 100, 160], // bright red
-                [150, 255, 200], // bright green
-                [255, 230, 100], // bright yellow
-                [100, 150, 255], // bright blue
-                [255, 120, 230], // bright magenta
-                [120, 220, 255], // bright cyan
-                [240, 230, 255], // bright white
-            ],
-            foreground: [230, 210, 255],
-            background: [18, 8, 28],
-            cursor: [255, 80, 200],
-            selection: [80, 30, 100],
-            selection_alpha: 0.4,
-        },
-        effects: EffectsConfig {
-            enabled: true,
-            fps_target: 60,
-            background: "smoke".to_string(),
-            background_intensity: 0.25,
-            background_speed: 0.6,
-            background_color: None,
-            bloom_enabled: true,
-            bloom_threshold: 0.3,
-            bloom_intensity: 0.8,
-            bloom_radius: 2.0,
-            particles_enabled: true,
-            particles_count: 800,
-            particles_speed: 0.5,
-            cursor_glow: true,
-            cursor_trail: true,
-            text_animation: true,
-            crt_enabled: false,
-            scanline_intensity: 0.0,
-            curvature: 0.0,
-            vignette_strength: 0.3,
-            chromatic_aberration: 0.0,
-            grain_intensity: 0.0,
-            effects_on_ui: true,
-        },
-        cursor_style: CursorStyle::Beam,
     }
 }
