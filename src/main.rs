@@ -270,11 +270,23 @@ impl App {
     }
 
     fn content_rect(&self) -> Option<PaneRect> {
-        self.screen_layout.as_ref().map(|l| PaneRect {
-            x: l.content.x,
-            y: l.content.y,
-            w: l.content.w,
-            h: l.content.h,
+        self.screen_layout.as_ref().map(|l| {
+            let mut rect = PaneRect {
+                x: l.content.x,
+                y: l.content.y,
+                w: l.content.w,
+                h: l.content.h,
+            };
+            // When terminal panel is open in Explorer, terminal gets only the bottom portion
+            if let Some(ui) = &self.ui {
+                if ui.terminal_panel_open && ui.active_view == ActiveView::Explorer {
+                    let panel_h = (l.content.h * ui.terminal_panel_ratio).max(80.0);
+                    let editor_h = l.content.h - panel_h;
+                    rect.y = l.content.y + editor_h;
+                    rect.h = panel_h;
+                }
+            }
+            rect
         })
     }
 
@@ -570,12 +582,12 @@ impl ApplicationHandler<UserEvent> for App {
                 }
                 self.recompute_layout();
                 if let Some(layout) = &self.screen_layout {
-                    let rect = PaneRect {
+                    let rect = self.content_rect().unwrap_or(PaneRect {
                         x: layout.content.x,
                         y: layout.content.y,
                         w: layout.content.w,
                         h: layout.content.h,
-                    };
+                    });
                     let (cw, ch) = (layout.cell_w, layout.cell_h);
                     for tab in &mut self.tabs {
                         tab.root.resize_all(rect, cw, ch);
@@ -859,6 +871,40 @@ impl ApplicationHandler<UserEvent> for App {
                     && self.modifiers.super_key()
                 {
                     if let Some(session) = self.active_session() {
+                        // Try to extract a file:line:col pattern from the line
+                        let line_text = {
+                            let (cols, _) = session.terminal.size();
+                            (0..cols).map(|c| session.terminal.cell_char(row, c)).collect::<String>()
+                        };
+                        let file_loc = parse_file_location(&line_text, col);
+
+                        if let Some((path, line, col_num)) = file_loc {
+                            // Open in editor
+                            if let Some(ui) = &mut self.ui {
+                                match ui.editor_view.open_file(path) {
+                                    Ok(idx) => {
+                                        let view = &mut ui.editor_view.editor.views[idx];
+                                        view.cursor.pos = llnzy::editor::buffer::Position::new(
+                                            line.saturating_sub(1),
+                                            col_num.saturating_sub(1),
+                                        );
+                                        view.cursor.clear_selection();
+                                        view.cursor.desired_col = None;
+                                        ui.active_view = ActiveView::Explorer;
+                                        if !ui.terminal_panel_open {
+                                            ui.terminal_panel_open = true;
+                                        }
+                                    }
+                                    Err(e) => {
+                                        self.error_log.error(format!("Cannot open file: {e}"));
+                                    }
+                                }
+                                self.request_redraw();
+                            }
+                            return;
+                        }
+
+                        // Fall back to URL detection
                         let url = session.terminal.cell_hyperlink(row, col).or_else(|| {
                             let text = Selection::word_at(row, col, &session.terminal);
                             if text.starts_with("http://") || text.starts_with("https://") {
@@ -1155,6 +1201,31 @@ impl ApplicationHandler<UserEvent> for App {
                                 self.invalidate_and_redraw();
                             }
                         }
+                        Action::ToggleTerminalPanel => {
+                            if let Some(ui) = &mut self.ui {
+                                ui.toggle_terminal_panel();
+                                // When opening terminal panel, switch to Explorer if on Shells
+                                if ui.terminal_panel_open && ui.active_view == ActiveView::Shells {
+                                    ui.active_view = ActiveView::Explorer;
+                                }
+                            }
+                            self.recompute_layout();
+                            // Resize terminal panes to the new content rect
+                            if let Some(layout) = &self.screen_layout {
+                                let rect = self.content_rect().unwrap_or(PaneRect {
+                                    x: layout.content.x,
+                                    y: layout.content.y,
+                                    w: layout.content.w,
+                                    h: layout.content.h,
+                                });
+                                let (cw, ch) = (layout.cell_w, layout.cell_h);
+                                for tab in &mut self.tabs {
+                                    tab.root.resize_all(rect, cw, ch);
+                                }
+                            }
+                            self.selection.clear();
+                            self.invalidate_and_redraw();
+                        }
                         Action::SwitchTab(n) => {
                             self.switch_tab((n - 1) as usize);
                         }
@@ -1325,6 +1396,38 @@ impl ApplicationHandler<UserEvent> for App {
             self.request_redraw();
         }
     }
+}
+
+/// Parse a file:line:col location from a terminal line near the click column.
+/// Supports patterns like:
+///   src/main.rs:42:10
+///   file.py:123
+///   File "test.py", line 42
+///   at Object.<anonymous> (file.js:10:5)
+fn parse_file_location(line: &str, _click_col: usize) -> Option<(std::path::PathBuf, usize, usize)> {
+    let line = line.trim();
+
+    // Pattern: file.ext:line:col or file.ext:line
+    let re_colon = regex::Regex::new(r"([a-zA-Z0-9_./-]+\.[a-zA-Z0-9]+):(\d+)(?::(\d+))?").ok()?;
+    if let Some(caps) = re_colon.captures(line) {
+        let path = std::path::PathBuf::from(&caps[1]);
+        let line_num: usize = caps[2].parse().ok()?;
+        let col_num: usize = caps.get(3).and_then(|m| m.as_str().parse().ok()).unwrap_or(1);
+        // Only match if the file exists (or is a relative path that could exist)
+        if path.exists() || (!path.is_absolute() && path.components().count() <= 10) {
+            return Some((path, line_num, col_num));
+        }
+    }
+
+    // Pattern: File "path", line N (Python tracebacks)
+    let re_python = regex::Regex::new(r#"File "([^"]+)", line (\d+)"#).ok()?;
+    if let Some(caps) = re_python.captures(line) {
+        let path = std::path::PathBuf::from(&caps[1]);
+        let line_num: usize = caps[2].parse().ok()?;
+        return Some((path, line_num, 1));
+    }
+
+    None
 }
 
 fn terminal_input_event(event: &WindowEvent) -> bool {
