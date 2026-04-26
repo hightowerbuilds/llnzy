@@ -1,6 +1,7 @@
 use crate::editor::buffer::Position;
 use crate::editor::EditorState;
 use crate::explorer::{format_size, ExplorerState, FileContent};
+use crate::lsp::{DiagSeverity, LspManager};
 
 /// Auto-closing bracket pairs.
 const PAIRS: &[(char, char)] = &[
@@ -15,10 +16,9 @@ const PAIRS: &[(char, char)] = &[
 /// Persistent editor UI state — lives alongside the ExplorerState.
 pub struct EditorViewState {
     pub editor: EditorState,
+    pub lsp: Option<LspManager>,
     pub status_msg: Option<String>,
-    /// Text to copy to the system clipboard (main loop picks this up).
     pub clipboard_out: Option<String>,
-    /// Text pasted from the system clipboard (main loop supplies this).
     pub clipboard_in: Option<String>,
 }
 
@@ -26,9 +26,69 @@ impl Default for EditorViewState {
     fn default() -> Self {
         Self {
             editor: EditorState::new(),
+            lsp: None,
             status_msg: None,
             clipboard_out: None,
             clipboard_in: None,
+        }
+    }
+}
+
+impl EditorViewState {
+    /// Initialize the LSP manager with the event loop proxy.
+    pub fn init_lsp(&mut self, proxy: winit::event_loop::EventLoopProxy<crate::UserEvent>) {
+        if self.lsp.is_none() {
+            self.lsp = Some(LspManager::new(proxy));
+        }
+    }
+
+    /// Open a file, starting the LSP server if available.
+    pub fn open_file(&mut self, path: std::path::PathBuf) -> Result<usize, String> {
+        let idx = self.editor.open(path)?;
+
+        // Start LSP for this language if available
+        if let Some(lsp) = &mut self.lsp {
+            let buf = &self.editor.buffers[idx];
+            let view = &self.editor.views[idx];
+            if let (Some(lang_id), Some(path)) = (view.lang_id, buf.path()) {
+                // Detect project root
+                if let Some(root) = LspManager::detect_root(path) {
+                    lsp.set_root(root);
+                }
+                // Start server (no-op if already running)
+                if lsp.ensure_server(lang_id) {
+                    let text = buf.text();
+                    lsp.did_open(path, lang_id, &text);
+                }
+            }
+        }
+
+        Ok(idx)
+    }
+
+    /// Notify LSP of a document change (call after edits).
+    pub fn lsp_did_change(&mut self) {
+        let Some(lsp) = &mut self.lsp else { return };
+        let active = self.editor.active;
+        if active >= self.editor.buffers.len() { return }
+        let buf = &self.editor.buffers[active];
+        let view = &self.editor.views[active];
+        if let (Some(lang_id), Some(path)) = (view.lang_id, buf.path()) {
+            let text = buf.text();
+            lsp.did_change(path, lang_id, &text);
+        }
+    }
+
+    /// Notify LSP of a save.
+    pub fn lsp_did_save(&mut self) {
+        let Some(lsp) = &mut self.lsp else { return };
+        let active = self.editor.active;
+        if active >= self.editor.buffers.len() { return }
+        let buf = &self.editor.buffers[active];
+        let view = &self.editor.views[active];
+        if let (Some(lang_id), Some(path)) = (view.lang_id, buf.path()) {
+            let text = buf.text();
+            lsp.did_save(path, lang_id, &text);
         }
     }
 }
@@ -127,15 +187,37 @@ pub(crate) fn render_explorer_view(
 
         let active = editor_state.editor.active;
         if active < editor_state.editor.buffers.len() {
+            // Get diagnostics for this file from LSP
+            let diags = editor_state.lsp.as_ref().and_then(|lsp| {
+                let path = editor_state.editor.buffers[active].path()?;
+                let d = lsp.get_diagnostics(path);
+                if d.is_empty() { None } else { Some(d.to_vec()) }
+            });
+
+            let len_before = editor_state.editor.buffers[active].len_chars();
+            let was_modified = editor_state.editor.buffers[active].is_modified();
+
             let buf = &mut editor_state.editor.buffers[active];
             let view = &mut editor_state.editor.views[active];
             let syntax = &editor_state.editor.syntax;
             render_text_editor(
-                ui, buf, view, syntax,
+                ui, buf, view, syntax, diags.as_deref(),
                 &mut editor_state.status_msg,
                 &mut editor_state.clipboard_out,
                 &mut editor_state.clipboard_in,
             );
+
+            let len_after = editor_state.editor.buffers[active].len_chars();
+            let is_modified = editor_state.editor.buffers[active].is_modified();
+
+            // Notify LSP of changes
+            if len_before != len_after {
+                editor_state.lsp_did_change();
+            }
+            // Detect save (was modified, now not)
+            if was_modified && !is_modified {
+                editor_state.lsp_did_save();
+            }
         }
     } else if explorer.open_file.is_some() {
         // ── Image viewer (non-text files stay in explorer.open_file) ──
@@ -294,7 +376,7 @@ pub(crate) fn render_explorer_view(
                             break;
                         } else {
                             // Text files go through the editor
-                            match editor_state.editor.open(path) {
+                            match editor_state.open_file(path) {
                                 Ok(_) => editor_state.status_msg = None,
                                 Err(e) => editor_state.status_msg = Some(e),
                             }
@@ -324,6 +406,7 @@ fn render_text_editor(
     buf: &mut crate::editor::buffer::Buffer,
     view: &mut crate::editor::BufferView,
     syntax: &crate::editor::syntax::SyntaxEngine,
+    diagnostics: Option<&[crate::lsp::FileDiagnostic]>,
     status_msg: &mut Option<String>,
     clipboard_out: &mut Option<String>,
     clipboard_in: &mut Option<String>,
@@ -558,6 +641,60 @@ fn render_text_editor(
                 );
                 col = batch_end;
             }
+        }
+    }
+
+    // Diagnostic underlines
+    if let Some(diags) = diagnostics {
+        for diag in diags {
+            if diag.line < view.scroll_line as u32 || diag.line >= end_line as u32 {
+                continue;
+            }
+            let vis_y = (diag.line as usize - view.scroll_line) as f32 * line_height;
+            let y_base = rect.top() + vis_y + line_height - 2.0;
+            let x_start = rect.left() + gutter_width + text_margin
+                + diag.col as f32 * char_width - h_offset;
+            let x_end = rect.left() + gutter_width + text_margin
+                + diag.end_col as f32 * char_width - h_offset;
+            let width = (x_end - x_start).max(char_width);
+
+            let color = match diag.severity {
+                DiagSeverity::Error => egui::Color32::from_rgb(255, 80, 80),
+                DiagSeverity::Warning => egui::Color32::from_rgb(230, 180, 50),
+                DiagSeverity::Info => egui::Color32::from_rgb(80, 160, 255),
+                DiagSeverity::Hint => egui::Color32::from_rgb(130, 130, 150),
+            };
+
+            // Draw squiggly underline (approximated with small segments)
+            let segments = ((width / 4.0) as usize).max(2);
+            let seg_w = width / segments as f32;
+            for i in 0..segments {
+                let sx = x_start + i as f32 * seg_w;
+                let offset = if i % 2 == 0 { 0.0 } else { 2.0 };
+                painter.with_clip_rect(text_clip).line_segment(
+                    [
+                        egui::pos2(sx, y_base + offset),
+                        egui::pos2(sx + seg_w, y_base + 2.0 - offset),
+                    ],
+                    egui::Stroke::new(1.0, color),
+                );
+            }
+
+            // Gutter marker
+            let gutter_y = rect.top() + vis_y;
+            let marker = match diag.severity {
+                DiagSeverity::Error => "E",
+                DiagSeverity::Warning => "W",
+                DiagSeverity::Info => "i",
+                DiagSeverity::Hint => ".",
+            };
+            painter.text(
+                egui::pos2(rect.left() + 1.0, gutter_y + 1.0),
+                egui::Align2::LEFT_TOP,
+                marker,
+                egui::FontId::monospace(10.0),
+                color,
+            );
         }
     }
 
