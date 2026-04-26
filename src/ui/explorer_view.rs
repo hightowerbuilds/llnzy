@@ -325,7 +325,7 @@ pub(crate) fn render_explorer_view(
 
     // ── Editor mode: show tabs + active buffer ──
     if !editor_state.editor.is_empty() {
-        render_editor_tabs(ui, editor_state);
+        render_editor_tabs(ui, explorer, editor_state);
     } else if explorer.open_file.is_some() {
         render_image_viewer(ui, explorer);
     } else {
@@ -334,7 +334,7 @@ pub(crate) fn render_explorer_view(
 }
 
 /// Render the tab bar and active buffer editor.
-fn render_editor_tabs(ui: &mut egui::Ui, editor_state: &mut EditorViewState) {
+fn render_editor_tabs(ui: &mut egui::Ui, explorer: &mut ExplorerState, editor_state: &mut EditorViewState) {
     let tabs = editor_state.editor.tab_info();
     let mut switch_to: Option<usize> = None;
     let mut close_tab: Option<usize> = None;
@@ -518,6 +518,11 @@ fn render_editor_tabs(ui: &mut egui::Ui, editor_state: &mut EditorViewState) {
             }
         }
 
+        // File finder (Cmd+P)
+        if frame_result.key_action.open_file_finder {
+            explorer.open_finder();
+        }
+
         // Document symbols
         if frame_result.key_action.document_symbols {
             let symbols = editor_state.request_document_symbols();
@@ -577,32 +582,34 @@ fn render_image_viewer(ui: &mut egui::Ui, explorer: &mut ExplorerState) {
     }
 }
 
-/// Render the directory file browser.
+/// Render the file tree browser.
 fn render_file_browser(
     ui: &mut egui::Ui,
     explorer: &mut ExplorerState,
     editor_state: &mut EditorViewState,
 ) {
+    // Fuzzy finder overlay
+    if explorer.finder_open {
+        render_finder(ui, explorer, editor_state);
+        return;
+    }
+
+    // Header with project root and Cmd+P hint
     ui.horizontal(|ui| {
-        if ui
-            .add(
-                egui::Button::new(
-                    egui::RichText::new("< Up").size(14.0).color(egui::Color32::from_rgb(100, 180, 255)),
-                )
+        let project_name = explorer.root.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("Project");
+        ui.label(egui::RichText::new(project_name).size(16.0).color(egui::Color32::WHITE).strong());
+        ui.add_space(12.0);
+        if ui.add(
+            egui::Button::new(egui::RichText::new("Find File").size(12.0).color(egui::Color32::from_rgb(100, 180, 255)))
                 .fill(egui::Color32::TRANSPARENT),
-            )
-            .clicked()
-        {
-            explorer.go_up();
+        ).clicked() {
+            explorer.open_finder();
         }
-        ui.label(
-            egui::RichText::new(explorer.current_dir.display().to_string())
-                .size(14.0)
-                .color(egui::Color32::WHITE),
-        );
     });
 
-    ui.add_space(8.0);
+    ui.add_space(4.0);
     ui.separator();
     ui.add_space(4.0);
 
@@ -611,47 +618,291 @@ fn render_file_browser(
         ui.add_space(8.0);
     }
 
+    // File tree
     egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
-        for i in 0..explorer.entries.len() {
-            let is_dir = explorer.entries[i].is_dir;
-            let name = explorer.entries[i].name.clone();
-            let size = explorer.entries[i].size;
+        // Collect click actions to apply after iteration (avoid borrow conflicts)
+        let mut action: Option<TreeAction> = None;
+        render_tree_nodes(ui, &mut explorer.tree, &explorer.root, 0, &mut action);
 
-            let label = if is_dir { format!("/{name}") } else { name.clone() };
-
-            let row = ui.horizontal(|ui| {
-                let dir_color = egui::Color32::from_rgb(100, 180, 255);
-                let text = if is_dir {
-                    egui::RichText::new(&label).size(14.0).color(dir_color).strong()
-                } else {
-                    egui::RichText::new(&label).size(14.0).color(egui::Color32::WHITE)
-                };
-                let response = ui.add(egui::Label::new(text).sense(egui::Sense::click()));
-                if !is_dir {
-                    ui.label(
-                        egui::RichText::new(format_size(size)).size(12.0).color(egui::Color32::from_rgb(120, 120, 130)),
-                    );
-                }
-                response
-            });
-
-            if row.inner.clicked() {
-                let path = explorer.entries[i].path.clone();
-                if is_dir {
-                    explorer.navigate(path);
-                    break;
-                } else if is_image_ext(&path) {
+        match action {
+            Some(TreeAction::OpenFile(path)) => {
+                if is_image_ext(&path) {
                     explorer.open(path);
-                    break;
                 } else {
                     match editor_state.open_file(path) {
                         Ok(_) => editor_state.status_msg = None,
                         Err(e) => editor_state.status_msg = Some(e),
                     }
-                    break;
+                }
+            }
+            Some(TreeAction::Toggle(indices)) => {
+                toggle_at(&mut explorer.tree, &indices);
+            }
+            None => {}
+        }
+    });
+}
+
+enum TreeAction {
+    OpenFile(std::path::PathBuf),
+    Toggle(Vec<usize>),
+}
+
+/// Recursively render tree nodes.
+fn render_tree_nodes(
+    ui: &mut egui::Ui,
+    nodes: &[crate::explorer::TreeNode],
+    root: &std::path::Path,
+    depth: usize,
+    action: &mut Option<TreeAction>,
+) {
+    let indent = depth as f32 * 16.0;
+    let dir_color = egui::Color32::from_rgb(100, 180, 255);
+    let file_color = egui::Color32::WHITE;
+    let dim_color = egui::Color32::from_rgb(120, 120, 130);
+
+    for (i, node) in nodes.iter().enumerate() {
+        if action.is_some() { break; } // Only one action per frame
+
+        ui.horizontal(|ui| {
+            ui.add_space(indent);
+
+            if node.is_dir {
+                let arrow = if node.expanded { "v " } else { "> " };
+                let label = format!("{arrow}{}", node.name);
+                let resp = ui.add(
+                    egui::Label::new(egui::RichText::new(&label).size(13.0).color(dir_color).strong())
+                        .sense(egui::Sense::click()),
+                );
+                if resp.clicked() {
+                    // Build path to this node for toggle
+                    let mut indices = Vec::new();
+                    // We need the index path — for top-level it's just [i]
+                    // For nested, the caller builds it. Simplified: store index at this level.
+                    indices.push(i);
+                    *action = Some(TreeAction::Toggle(indices));
+                }
+            } else {
+                let icon = file_icon(&node.name);
+                let label = format!("{icon} {}", node.name);
+                let resp = ui.add(
+                    egui::Label::new(egui::RichText::new(&label).size(13.0).color(file_color))
+                        .sense(egui::Sense::click()),
+                );
+                if node.size > 0 {
+                    ui.label(egui::RichText::new(format_size(node.size)).size(11.0).color(dim_color));
+                }
+                if resp.clicked() {
+                    *action = Some(TreeAction::OpenFile(node.path.clone()));
+                }
+            }
+        });
+
+        // Render children if expanded
+        if node.is_dir && node.expanded {
+            if let Some(children) = &node.children {
+                // For nested toggles we'd need a path, but for simplicity
+                // we only handle top-level toggles here. Nested toggles
+                // happen via the simplified approach below.
+                let mut child_action: Option<TreeAction> = None;
+                render_tree_children(ui, children, root, depth + 1, &mut child_action, &[i]);
+                if child_action.is_some() && action.is_none() {
+                    *action = child_action;
                 }
             }
         }
+    }
+}
+
+/// Render children with index path tracking for nested toggles.
+fn render_tree_children(
+    ui: &mut egui::Ui,
+    nodes: &[crate::explorer::TreeNode],
+    root: &std::path::Path,
+    depth: usize,
+    action: &mut Option<TreeAction>,
+    parent_path: &[usize],
+) {
+    let indent = depth as f32 * 16.0;
+    let dir_color = egui::Color32::from_rgb(100, 180, 255);
+    let file_color = egui::Color32::WHITE;
+    let dim_color = egui::Color32::from_rgb(120, 120, 130);
+
+    for (i, node) in nodes.iter().enumerate() {
+        if action.is_some() { break; }
+
+        ui.horizontal(|ui| {
+            ui.add_space(indent);
+            if node.is_dir {
+                let arrow = if node.expanded { "v " } else { "> " };
+                let label = format!("{arrow}{}", node.name);
+                let resp = ui.add(
+                    egui::Label::new(egui::RichText::new(&label).size(13.0).color(dir_color).strong())
+                        .sense(egui::Sense::click()),
+                );
+                if resp.clicked() {
+                    let mut indices: Vec<usize> = parent_path.to_vec();
+                    indices.push(i);
+                    *action = Some(TreeAction::Toggle(indices));
+                }
+            } else {
+                let icon = file_icon(&node.name);
+                let label = format!("{icon} {}", node.name);
+                let resp = ui.add(
+                    egui::Label::new(egui::RichText::new(&label).size(13.0).color(file_color))
+                        .sense(egui::Sense::click()),
+                );
+                if node.size > 0 {
+                    ui.label(egui::RichText::new(format_size(node.size)).size(11.0).color(dim_color));
+                }
+                if resp.clicked() {
+                    *action = Some(TreeAction::OpenFile(node.path.clone()));
+                }
+            }
+        });
+
+        if node.is_dir && node.expanded {
+            if let Some(children) = &node.children {
+                let mut path: Vec<usize> = parent_path.to_vec();
+                path.push(i);
+                render_tree_children(ui, children, root, depth + 1, action, &path);
+            }
+        }
+    }
+}
+
+/// Toggle a tree node at the given index path.
+fn toggle_at(tree: &mut [crate::explorer::TreeNode], indices: &[usize]) {
+    if indices.is_empty() { return; }
+    let idx = indices[0];
+    if idx >= tree.len() { return; }
+    if indices.len() == 1 {
+        tree[idx].toggle();
+    } else if let Some(children) = &mut tree[idx].children {
+        toggle_at(children, &indices[1..]);
+    }
+}
+
+/// Simple file type icon based on extension.
+fn file_icon(name: &str) -> &'static str {
+    let ext = name.rsplit('.').next().unwrap_or("").to_lowercase();
+    match ext.as_str() {
+        "rs" => "R",
+        "js" | "mjs" | "cjs" => "J",
+        "ts" | "mts" | "cts" => "T",
+        "tsx" | "jsx" => "X",
+        "py" => "P",
+        "go" => "G",
+        "c" | "h" => "C",
+        "cpp" | "hpp" | "cc" => "C",
+        "json" => "{",
+        "toml" | "yaml" | "yml" => "*",
+        "html" | "htm" => "<",
+        "css" | "scss" => "#",
+        "sh" | "bash" | "zsh" => "$",
+        "md" | "txt" => "=",
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" => "I",
+        _ => " ",
+    }
+}
+
+/// Render the fuzzy file finder overlay.
+fn render_finder(
+    ui: &mut egui::Ui,
+    explorer: &mut ExplorerState,
+    editor_state: &mut EditorViewState,
+) {
+    ui.vertical(|ui| {
+        ui.label(egui::RichText::new("Find File").size(16.0).color(egui::Color32::WHITE).strong());
+        ui.add_space(4.0);
+
+        // Search input
+        let mut query = explorer.finder_query.clone();
+        let response = ui.add(
+            egui::TextEdit::singleline(&mut query)
+                .hint_text("Type to search...")
+                .desired_width(ui.available_width() - 20.0)
+                .text_color(egui::Color32::WHITE)
+                .font(egui::TextStyle::Monospace),
+        );
+        response.request_focus();
+
+        if query != explorer.finder_query {
+            explorer.finder_query = query;
+            explorer.update_finder();
+        }
+
+        // Handle keys
+        let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
+        let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+        let down = ui.input(|i| i.key_pressed(egui::Key::ArrowDown));
+        let up = ui.input(|i| i.key_pressed(egui::Key::ArrowUp));
+
+        if escape {
+            explorer.close_finder();
+            return;
+        }
+        if down {
+            explorer.finder_selected = (explorer.finder_selected + 1).min(explorer.finder_results.len().saturating_sub(1));
+        }
+        if up {
+            explorer.finder_selected = explorer.finder_selected.saturating_sub(1);
+        }
+        if enter && !explorer.finder_results.is_empty() {
+            let path = explorer.finder_results[explorer.finder_selected].clone();
+            explorer.close_finder();
+            if is_image_ext(&path) {
+                explorer.open(path);
+            } else {
+                match editor_state.open_file(path) {
+                    Ok(_) => editor_state.status_msg = None,
+                    Err(e) => editor_state.status_msg = Some(e),
+                }
+            }
+            return;
+        }
+
+        ui.add_space(4.0);
+        ui.separator();
+        ui.add_space(4.0);
+
+        // Results
+        let selected_color = egui::Color32::from_rgb(50, 80, 130);
+        egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
+            for (i, path) in explorer.finder_results.iter().enumerate() {
+                let rel = explorer.relative_path(path);
+                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                let icon = file_icon(name);
+
+                let bg = if i == explorer.finder_selected { selected_color } else { egui::Color32::TRANSPARENT };
+                let text_color = if i == explorer.finder_selected { egui::Color32::WHITE } else { egui::Color32::from_rgb(200, 205, 215) };
+
+                let frame = egui::Frame::none().fill(bg).inner_margin(egui::Margin::symmetric(4.0, 2.0));
+                frame.show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(icon).size(12.0).color(egui::Color32::from_rgb(100, 180, 255)).monospace());
+                        ui.label(egui::RichText::new(name).size(13.0).color(text_color));
+                        ui.label(egui::RichText::new(&rel).size(11.0).color(egui::Color32::from_rgb(100, 105, 120)));
+                    });
+                });
+
+                // Click to select
+                let resp = ui.interact(ui.min_rect(), egui::Id::new(("finder_item", i)), egui::Sense::click());
+                if resp.clicked() {
+                    let path = path.clone();
+                    explorer.close_finder();
+                    if is_image_ext(&path) {
+                        explorer.open(path);
+                    } else {
+                        match editor_state.open_file(path) {
+                            Ok(_) => editor_state.status_msg = None,
+                            Err(e) => editor_state.status_msg = Some(e),
+                        }
+                    }
+                    return;
+                }
+            }
+        });
     });
 }
 

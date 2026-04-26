@@ -15,6 +15,7 @@ pub struct KeyAction {
     pub rename_symbol: bool,
     pub code_actions: bool,
     pub document_symbols: bool,
+    pub open_file_finder: bool,
 }
 
 /// Auto-closing bracket pairs.
@@ -108,6 +109,12 @@ pub fn handle_editor_keys(
         // Cmd+Shift+O: document symbols
         if cmd && shift && input.key_pressed(egui::Key::O) {
             action.document_symbols = true;
+            return;
+        }
+
+        // Cmd+P: open file finder
+        if cmd && !shift && input.key_pressed(egui::Key::P) {
+            action.open_file_finder = true;
             return;
         }
 
