@@ -5,6 +5,7 @@ pub const SIDEBAR_WIDTH: f32 = 200.0;
 /// Which view is active.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ActiveView {
+    Home,
     Shells,
     Explorer,
     Stacker,
