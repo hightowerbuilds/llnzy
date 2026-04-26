@@ -2,6 +2,7 @@ pub mod buffer;
 pub mod cursor;
 pub mod history;
 pub mod keymap;
+pub mod perf;
 pub mod syntax;
 
 use std::path::PathBuf;
@@ -134,6 +135,10 @@ impl EditorState {
     /// Re-parse the active buffer's syntax tree if it's dirty.
     pub fn reparse_active(&mut self) {
         if self.active >= self.buffers.len() {
+            return;
+        }
+        // Skip re-parse for very large files
+        if !perf::syntax_enabled(self.buffers[self.active].line_count()) {
             return;
         }
         let view = &mut self.views[self.active];

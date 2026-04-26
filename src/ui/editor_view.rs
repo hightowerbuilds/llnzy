@@ -1,5 +1,6 @@
 use crate::editor::buffer::Position;
 use crate::editor::keymap::{handle_editor_keys, KeyAction};
+use crate::editor::perf;
 use crate::editor::syntax::SyntaxEngine;
 use crate::editor::BufferView;
 use crate::lsp::{DiagSeverity, FileDiagnostic};
@@ -155,13 +156,17 @@ pub(crate) fn render_text_editor(
         }
     }
 
-    // Syntax highlights for visible lines
+    // Syntax highlights for visible lines (disabled for very large files)
     let source_text = buf.text();
-    let highlight_spans = match (view.lang_id, &view.tree) {
-        (Some(lang_id), Some(tree)) => {
-            syntax.highlights_for_range(lang_id, tree, source_text.as_bytes(), view.scroll_line, end_line)
+    let highlight_spans = if perf::syntax_enabled(line_count) {
+        match (view.lang_id, &view.tree) {
+            (Some(lang_id), Some(tree)) => {
+                syntax.highlights_for_range(lang_id, tree, source_text.as_bytes(), view.scroll_line, end_line)
+            }
+            _ => vec![Vec::new(); end_line.saturating_sub(view.scroll_line)],
         }
-        _ => vec![Vec::new(); end_line.saturating_sub(view.scroll_line)],
+    } else {
+        vec![Vec::new(); end_line.saturating_sub(view.scroll_line)]
     };
 
     // Render visible lines
@@ -224,10 +229,10 @@ pub(crate) fn render_text_editor(
         ui.ctx().request_repaint();
     }
 
-    // Minimap (right edge, replaces scrollbar)
+    // Minimap (right edge, replaces scrollbar) -- disabled for very large files
     let minimap_w = 50.0;
     let minimap_x = rect.right() - minimap_w;
-    if line_count > 1 {
+    if line_count > 1 && perf::minimap_enabled(line_count) {
         // Background
         painter.rect_filled(
             egui::Rect::from_min_size(egui::pos2(minimap_x, rect.top()), egui::Vec2::new(minimap_w, rect.height())),

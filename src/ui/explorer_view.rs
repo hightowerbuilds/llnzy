@@ -1,4 +1,7 @@
+use std::time::Instant;
+
 use crate::editor::EditorState;
+use crate::editor::perf;
 use crate::explorer::{format_size, ExplorerState, FileContent};
 use crate::lsp::LspManager;
 
@@ -28,6 +31,8 @@ pub struct EditorViewState {
     pub symbols_filter: String,
     /// Rename input state.
     pub rename_input: Option<String>,
+    /// Debounce: last time LSP didChange was sent.
+    last_change_sent: Instant,
 }
 
 /// State for the auto-completion popup.
@@ -59,6 +64,7 @@ impl Default for EditorViewState {
             symbols_selected: 0,
             symbols_filter: String::new(),
             rename_input: None,
+            last_change_sent: Instant::now(),
         }
     }
 }
@@ -91,14 +97,22 @@ impl EditorViewState {
     }
 
     pub fn lsp_did_change(&mut self) {
+        // Debounce: skip if sent too recently
+        let now = Instant::now();
+        if now.duration_since(self.last_change_sent).as_millis() < perf::LSP_DEBOUNCE_MS as u128 {
+            return;
+        }
         let Some(lsp) = &mut self.lsp else { return };
         let active = self.editor.active;
         if active >= self.editor.buffers.len() { return }
         let buf = &self.editor.buffers[active];
         let view = &self.editor.views[active];
+        // Skip LSP sync for very large files (sync on save only)
+        if buf.line_count() > perf::LSP_CHANGE_LINE_LIMIT { return }
         if let (Some(lang_id), Some(path)) = (view.lang_id, buf.path()) {
             let text = buf.text();
             lsp.did_change(path, lang_id, &text);
+            self.last_change_sent = now;
         }
     }
 
