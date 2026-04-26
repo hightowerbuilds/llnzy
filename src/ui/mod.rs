@@ -1,3 +1,4 @@
+mod editor_view;
 mod explorer_view;
 mod settings_tabs;
 mod sketch_view;

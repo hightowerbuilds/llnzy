@@ -12,6 +12,15 @@ use tokio::runtime::Runtime;
 use client::{uri_to_path, LspClient};
 use registry::find_server;
 
+/// A simplified completion item for the UI.
+#[derive(Clone, Debug)]
+pub struct CompletionItem {
+    pub label: String,
+    pub detail: Option<String>,
+    pub insert_text: Option<String>,
+    pub kind: Option<lsp_types::CompletionItemKind>,
+}
+
 /// A diagnostic with position and severity.
 #[derive(Clone, Debug)]
 pub struct FileDiagnostic {
@@ -158,6 +167,89 @@ impl LspManager {
         }
     }
 
+    /// Request hover information (blocking).
+    pub fn hover(&mut self, path: &Path, lang_id: &str, line: u32, col: u32) -> Option<String> {
+        let client = self.clients.get(lang_id)?;
+        if !client.is_running() { return None; }
+        let path = path.to_path_buf();
+        self.runtime.block_on(async {
+            match client.hover(&path, line, col).await {
+                Ok(Some(hover)) => {
+                    // Extract plain text from hover contents
+                    match hover.contents {
+                        lsp_types::HoverContents::Scalar(s) => Some(markup_value_to_string(s)),
+                        lsp_types::HoverContents::Array(arr) => {
+                            let parts: Vec<String> = arr.into_iter().map(markup_value_to_string).collect();
+                            Some(parts.join("\n"))
+                        }
+                        lsp_types::HoverContents::Markup(m) => Some(m.value),
+                    }
+                }
+                _ => None,
+            }
+        })
+    }
+
+    /// Request go-to-definition (blocking). Returns (file_path, line, col).
+    pub fn definition(&mut self, path: &Path, lang_id: &str, line: u32, col: u32) -> Option<(PathBuf, u32, u32)> {
+        let client = self.clients.get(lang_id)?;
+        if !client.is_running() { return None; }
+        let path = path.to_path_buf();
+        self.runtime.block_on(async {
+            match client.definition(&path, line, col).await {
+                Ok(Some(resp)) => {
+                    let location = match resp {
+                        lsp_types::GotoDefinitionResponse::Scalar(loc) => Some(loc),
+                        lsp_types::GotoDefinitionResponse::Array(locs) => locs.into_iter().next(),
+                        lsp_types::GotoDefinitionResponse::Link(links) => {
+                            links.into_iter().next().map(|l| lsp_types::Location {
+                                uri: l.target_uri,
+                                range: l.target_selection_range,
+                            })
+                        }
+                    };
+                    location.and_then(|loc| {
+                        let path = uri_to_path(&loc.uri)?;
+                        Some((path, loc.range.start.line, loc.range.start.character))
+                    })
+                }
+                _ => None,
+            }
+        })
+    }
+
+    /// Request completions (blocking).
+    pub fn completion(&mut self, path: &Path, lang_id: &str, line: u32, col: u32) -> Vec<CompletionItem> {
+        let Some(client) = self.clients.get(lang_id) else { return Vec::new() };
+        if !client.is_running() { return Vec::new(); }
+        let path = path.to_path_buf();
+        self.runtime.block_on(async {
+            match client.completion(&path, line, col).await {
+                Ok(Some(resp)) => {
+                    match resp {
+                        lsp_types::CompletionResponse::Array(items) => {
+                            items.into_iter().map(|i| CompletionItem {
+                                label: i.label,
+                                detail: i.detail,
+                                insert_text: i.insert_text,
+                                kind: i.kind,
+                            }).collect()
+                        }
+                        lsp_types::CompletionResponse::List(list) => {
+                            list.items.into_iter().map(|i| CompletionItem {
+                                label: i.label,
+                                detail: i.detail,
+                                insert_text: i.insert_text,
+                                kind: i.kind,
+                            }).collect()
+                        }
+                    }
+                }
+                _ => Vec::new(),
+            }
+        })
+    }
+
     /// Get diagnostics for a specific file.
     pub fn get_diagnostics(&self, path: &Path) -> &[FileDiagnostic] {
         self.diagnostics
@@ -219,6 +311,13 @@ impl LspManager {
             }
             dir = dir.parent()?;
         }
+    }
+}
+
+fn markup_value_to_string(v: lsp_types::MarkedString) -> String {
+    match v {
+        lsp_types::MarkedString::String(s) => s,
+        lsp_types::MarkedString::LanguageString(ls) => ls.value,
     }
 }
 

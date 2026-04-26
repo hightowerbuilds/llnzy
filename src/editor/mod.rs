@@ -1,6 +1,7 @@
 pub mod buffer;
 pub mod cursor;
 pub mod history;
+pub mod keymap;
 pub mod syntax;
 
 use std::path::PathBuf;
