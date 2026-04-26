@@ -41,6 +41,9 @@ pub struct RenderRequest<'a> {
     /// When true, egui renders to the scene texture so post-processing
     /// shaders (bloom, CRT) affect the active UI view.
     pub apply_effects_to_ui: bool,
+    /// UV rect [left, top, right, bottom] restricting CRT effects.
+    /// `None` means fullscreen (no masking).
+    pub effects_mask: Option<[f32; 4]>,
 }
 
 struct ContentPass<'a> {
@@ -222,15 +225,16 @@ impl Renderer {
         // Shadered views render egui to the scene texture before post-processing.
         // Clean views post-process terminal content first, then draw egui on top.
         let egui_to_scene = use_scene && request.apply_effects_to_ui;
+        let effects_mask = request.effects_mask;
         if egui_to_scene {
             self.render_egui_overlay(request.egui_render, &self.gpu.scene_view);
             let mut pp_encoder = self.create_render_encoder();
-            self.apply_post_processing(&mut pp_encoder, &swapchain_view, use_scene);
+            self.apply_post_processing(&mut pp_encoder, &swapchain_view, use_scene, effects_mask);
             self.gpu.queue.submit(std::iter::once(pp_encoder.finish()));
         } else {
             if use_scene {
                 let mut pp_encoder = self.create_render_encoder();
-                self.apply_post_processing(&mut pp_encoder, &swapchain_view, use_scene);
+                self.apply_post_processing(&mut pp_encoder, &swapchain_view, use_scene, effects_mask);
                 self.gpu.queue.submit(std::iter::once(pp_encoder.finish()));
             }
             self.render_egui_overlay(request.egui_render, &swapchain_view);
@@ -565,6 +569,7 @@ impl Renderer {
         encoder: &mut wgpu::CommandEncoder,
         swapchain_view: &wgpu::TextureView,
         use_scene: bool,
+        effects_mask: Option<[f32; 4]>,
     ) {
         if use_scene {
             let has_bloom = self.config.effects.bloom_enabled;
@@ -584,7 +589,7 @@ impl Renderer {
                         encoder,
                         &self.gpu.scene_view_b,
                         swapchain_view,
-                        self.crt_params(),
+                        self.crt_params(effects_mask),
                     );
                 }
                 (true, false) => {
@@ -602,7 +607,7 @@ impl Renderer {
                         encoder,
                         &self.gpu.scene_view,
                         swapchain_view,
-                        self.crt_params(),
+                        self.crt_params(effects_mask),
                     );
                 }
                 (false, false) => {
@@ -620,7 +625,11 @@ impl Renderer {
         }
     }
 
-    fn crt_params(&self) -> CrtParams {
+    fn crt_params(&self, mask: Option<[f32; 4]>) -> CrtParams {
+        let (mask_min, mask_max) = mask.map_or(
+            ([0.0, 0.0], [1.0, 1.0]),
+            |m| ([m[0], m[1]], [m[2], m[3]]),
+        );
         CrtParams {
             scanline_intensity: self.config.effects.scanline_intensity,
             curvature: self.config.effects.curvature,
@@ -628,6 +637,8 @@ impl Renderer {
             chromatic_aberration: self.config.effects.chromatic_aberration,
             grain_intensity: self.config.effects.grain_intensity,
             time: self.gpu.current_time,
+            mask_min,
+            mask_max,
         }
     }
 

@@ -77,6 +77,8 @@ pub struct UiState {
     pub editing_tab_text: String,
     pub saved_tab_name: Option<(usize, String)>, // (tab_index, new_name) to apply after render
     pub last_tab_click: Option<(usize, Instant)>, // (tab_index, time) for double-click detection
+    // Sketch canvas rect in physical pixels (for CRT mask)
+    pub sketch_canvas_px: Option<[f32; 4]>,
     // Tab context for rendering interaction
     pub tab_count: usize,
     pub active_tab_index: usize,
@@ -145,6 +147,7 @@ impl UiState {
             editing_tab_text: String::new(),
             saved_tab_name: None,
             last_tab_click: None,
+            sketch_canvas_px: None,
             tab_count: 0,
             active_tab_index: 0,
         }
@@ -253,6 +256,7 @@ impl UiState {
         let mut saved_edit_idx: Option<usize> = None;
         let mut copy_ghosts = std::mem::take(&mut self.copy_ghosts);
         let mut sketch = std::mem::take(&mut self.sketch);
+        let mut sketch_canvas_px: Option<[f32; 4]> = None;
         let show_fps = self.show_fps;
         let fps_info = if show_fps && !self.frame_times.is_empty() {
             let avg_dt: f32 = self.frame_times.iter().sum::<f32>() / self.frame_times.len() as f32;
@@ -796,6 +800,7 @@ impl UiState {
                     text_color,
                     active_btn,
                 };
+                let mut canvas_rect_out = None;
                 egui::CentralPanel::default()
                     .frame(
                         egui::Frame::none()
@@ -803,8 +808,17 @@ impl UiState {
                             .inner_margin(egui::Margin::same(14.0)),
                     )
                     .show(ctx, |ui| {
-                        render_sketch_view(ctx, ui, &mut sketch, &sketch_appearance);
+                        canvas_rect_out = Some(render_sketch_view(ctx, ui, &mut sketch, &sketch_appearance));
                     });
+                if let Some(rect) = canvas_rect_out {
+                    let ppp = ctx.pixels_per_point();
+                    sketch_canvas_px = Some([
+                        rect.left() * ppp,
+                        rect.top() * ppp,
+                        rect.right() * ppp,
+                        rect.bottom() * ppp,
+                    ]);
+                }
             }
 
             // ── Settings view (blank for now) ──
@@ -897,6 +911,7 @@ impl UiState {
             sketch.mark_saved();
         }
         self.sketch = sketch;
+        self.sketch_canvas_px = sketch_canvas_px;
 
         // Restore tab editing state
         self.editing_tab = editing_tab;
@@ -991,7 +1006,7 @@ fn render_sketch_view(
     ui: &mut egui::Ui,
     sketch: &mut SketchState,
     appearance: &SketchAppearance,
-) {
+) -> egui::Rect {
     sketch_shortcuts(ui, sketch);
 
     ui.horizontal(|ui| {
@@ -1110,6 +1125,8 @@ fn render_sketch_view(
     handle_sketch_pointer(sketch, &response, canvas_rect);
     paint_sketch_document(&painter, canvas_rect, sketch);
     render_text_editor(ctx, canvas_rect, sketch);
+
+    canvas_rect
 }
 
 fn tool_button(
