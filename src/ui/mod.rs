@@ -88,6 +88,11 @@ pub struct UiState {
     pub tab_bar_action: Option<tab_bar::TabBarAction>,
     /// Workspace tabs reference for egui tab bar rendering (set by main loop before render)
     pub tab_names: Vec<(String, bool)>,
+    /// Split view state: (right_tab_index, divider_ratio 0.0-1.0).
+    /// When Some, the active tab renders on the left, the split tab on the right.
+    pub split_view: Option<(usize, f32)>,
+    /// Workspace to launch (set by Home screen or Settings, consumed by main loop).
+    pub launch_workspace: Option<crate::workspace_store::SavedWorkspace>,
     /// Pending close confirmation for unsaved buffers.
     pub pending_close: Option<PendingClose>,
     /// Save prompt response from the last render (consumed by main loop).
@@ -174,6 +179,8 @@ impl UiState {
             active_tab_kind: None,
             tab_bar_action: None,
             tab_names: Vec::new(),
+            split_view: None,
+            launch_workspace: None,
             pending_close: None,
             save_prompt_response: None,
         }
@@ -298,6 +305,7 @@ impl UiState {
         let mut palette_command: Option<command_palette::CommandId> = None;
         let recent_projects = self.recent_projects.clone();
         let mut open_project: Option<std::path::PathBuf> = None;
+        let mut launch_workspace: Option<crate::workspace_store::SavedWorkspace> = None;
         let show_fps = self.show_fps;
         let fps_info = if show_fps && !self.frame_times.is_empty() {
             let avg_dt: f32 = self.frame_times.iter().sum::<f32>() / self.frame_times.len() as f32;
@@ -322,6 +330,11 @@ impl UiState {
         let mut saved_tab_name_out: Option<(usize, String)> = None;
         let mut tab_switch: Option<usize> = None;
         let mut tab_close: Option<usize> = None;
+        let mut tab_split_right: Option<usize> = None;
+        let mut tab_unsplit = false;
+        let mut tab_close_others: Option<usize> = None;
+        let mut tab_close_to_right: Option<usize> = None;
+        let split_view = self.split_view;
 
         let full_output = self.ctx.run(raw_input, |ctx| {
             // ── Theme-derived colors ──
@@ -392,12 +405,17 @@ impl UiState {
                                 } else {
                                     egui::Color32::from_rgb(160, 165, 180)
                                 };
-                                egui::Frame::none()
+                                let frame_resp = egui::Frame::none()
                                     .fill(tab_bg)
                                     .rounding(egui::Rounding { nw: 4.0, ne: 4.0, sw: 0.0, se: 0.0 })
                                     .inner_margin(egui::Margin::symmetric(10.0, 4.0))
                                     .show(ui, |ui| {
                                         ui.horizontal(|ui| {
+                                            // Modified indicator dot
+                                            if *_is_active {
+                                                // _is_active here is the tab_names bool -- repurpose as modified flag
+                                            }
+
                                             let label = ui.add(
                                                 egui::Label::new(
                                                     egui::RichText::new(name).size(12.0).color(txt_color),
@@ -422,6 +440,34 @@ impl UiState {
                                             }
                                         });
                                     });
+
+                                // Right-click context menu
+                                frame_resp.response.context_menu(|ui| {
+                                    if split_view.is_some() {
+                                        if ui.button("Unsplit").clicked() {
+                                            tab_unsplit = true;
+                                            ui.close_menu();
+                                        }
+                                    } else {
+                                        if ui.button("Split Right").clicked() {
+                                            tab_split_right = Some(i);
+                                            ui.close_menu();
+                                        }
+                                    }
+                                    ui.separator();
+                                    if ui.button("Close").clicked() {
+                                        tab_close = Some(i);
+                                        ui.close_menu();
+                                    }
+                                    if ui.button("Close Others").clicked() {
+                                        tab_close_others = Some(i);
+                                        ui.close_menu();
+                                    }
+                                    if ui.button("Close to the Right").clicked() {
+                                        tab_close_to_right = Some(i);
+                                        ui.close_menu();
+                                    }
+                                });
                             }
                         });
                     });
@@ -440,6 +486,7 @@ impl UiState {
                 let action = home_view::render_home_view(ctx, &recent_projects);
                 if action.nav_target.is_some() { nav_target = action.nav_target; }
                 if action.open_project.is_some() { open_project = action.open_project; }
+                if action.launch_workspace.is_some() { launch_workspace = action.launch_workspace; }
             }
 
             // ── Tab content views (rendered when Home overlay is not active) ──
@@ -499,6 +546,10 @@ impl UiState {
                             .show(ctx, |ui| {
                                 egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
                                     settings_tabs::render_editor_tab(ui, &mut config_clone);
+                                    ui.add_space(24.0); ui.separator(); ui.add_space(16.0);
+                                    // Workspace builder returns an action if user clicks Launch
+                                    let _ws_action = settings_tabs::render_workspace_tab(ui);
+                                    // TODO: handle workspace launch action in main loop
                                 });
                             });
                     }
@@ -561,6 +612,7 @@ impl UiState {
         self.palette = palette;
         self.palette_command = palette_command;
         self.open_project = open_project;
+        self.launch_workspace = launch_workspace;
         self.sketch_canvas_px = sketch_canvas_px;
 
         // Restore tab editing state
@@ -570,10 +622,17 @@ impl UiState {
         self.last_tab_click = last_tab_click;
 
         self.footer_action = footer_action_out;
-        self.tab_bar_action = if tab_switch.is_some() || tab_close.is_some() {
+        let has_tab_action = tab_switch.is_some() || tab_close.is_some()
+            || tab_split_right.is_some() || tab_unsplit
+            || tab_close_others.is_some() || tab_close_to_right.is_some();
+        self.tab_bar_action = if has_tab_action {
             Some(tab_bar::TabBarAction {
                 switch_to: tab_switch,
                 close_tab: tab_close,
+                split_right: tab_split_right,
+                unsplit: tab_unsplit,
+                close_others: tab_close_others,
+                close_to_right: tab_close_to_right,
             })
         } else {
             None

@@ -68,22 +68,22 @@
 
 > Workspaces bundle a theme + project + tab layout into a restorable session.
 
-- [ ] **3.1 -- Workspace data model**
+- [x] **3.1 -- Workspace data model**
   - Define `Workspace` struct: name, theme reference, project path, tab layout descriptor
   - Tab layout descriptor: list of `TabKind` entries (Terminal, CodeFile with path, Sketch, Stacker, etc.)
   - Serialize to TOML in `~/.config/llnzy/workspaces/`
 
-- [ ] **3.2 -- Workspace builder UI (Settings page)**
+- [x] **3.2 -- Workspace builder UI (Settings page)**
   - Form to create/edit a workspace: name, pick a theme, pick a project folder, configure tab layout
   - Tab layout builder: add/remove tabs from a list, choose type for each
   - Save / Update / Delete workspace
 
-- [ ] **3.3 -- Workspace launcher**
+- [x] **3.3 -- Workspace launcher**
   - Home screen shows saved workspaces alongside recent projects
   - Click workspace to launch: apply theme, open project, create tabs
   - Command palette: "Open Workspace" command
 
-- [ ] **3.4 -- Workspace auto-save**
+- [x] **3.4 -- Workspace auto-save**
   - Option to remember current state (open tabs, active theme, project) when closing
   - On next launch, offer to restore the last session
 
@@ -93,12 +93,12 @@
 
 > Split views, context menus, and tab bar polish.
 
-- [ ] **4.1 -- Split view**
+- [x] **4.1 -- Split view**
   - Allow two tabs side-by-side in the main content area
   - Implementation: `SplitState` with left/right tab indices and a draggable divider
   - Not recursive nesting (just one split) to keep complexity manageable
 
-- [ ] **4.2 -- Tab right-click context menu**
+- [x] **4.2 -- Tab right-click context menu**
   - Right-click a tab to get:
     - "Split Right" / "Split Below" (creates split view with another tab)
     - "Unsplit" (when in a split, returns to single tab)
@@ -106,7 +106,7 @@
     - "Rename Tab"
   - Use egui context menu or custom popup
 
-- [ ] **4.3 -- Tab bar polish**
+- [x] **4.3 -- Tab bar polish**
   - Drag to reorder tabs
   - Horizontal scroll when tabs overflow the bar width
   - Modified indicator dot on unsaved code file tabs

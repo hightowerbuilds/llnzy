@@ -6,6 +6,14 @@ pub struct TabBarAction {
     pub switch_to: Option<usize>,
     /// Close this tab index.
     pub close_tab: Option<usize>,
+    /// Split this tab to the right of the active tab.
+    pub split_right: Option<usize>,
+    /// Remove the split view.
+    pub unsplit: bool,
+    /// Close all tabs except this one.
+    pub close_others: Option<usize>,
+    /// Close all tabs to the right of this one.
+    pub close_to_right: Option<usize>,
 }
 
 /// Render the workspace tab bar at the top of the content area.
@@ -18,6 +26,10 @@ pub fn render_tab_bar(
     let mut action = TabBarAction {
         switch_to: None,
         close_tab: None,
+        split_right: None,
+        unsplit: false,
+        close_others: None,
+        close_to_right: None,
     };
 
     if tabs.is_empty() {
