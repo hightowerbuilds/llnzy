@@ -139,6 +139,51 @@ program = "/bin/bash"
 
 ---
 
+## `[editor.syntax_colors]`
+
+Override code editor syntax highlight colors by semantic group. Values are hex strings in `"#RRGGBB"` or `"RRGGBB"` format.
+
+Accepted groups: `keyword`, `type`, `function`, `variable`, `string`, `number`, `comment`, `operator`, `punctuation`, `constant`, `attribute`, `tag`, `property`, `escape`, `label`, `module` or `namespace`.
+
+```toml
+[editor.syntax_colors]
+keyword = "#C678DD"
+function = "#61AFEF"
+comment = "#7F848E"
+string = "#98C379"
+```
+
+---
+
+## `[editor]`
+
+Configure code editor behavior. Language-specific overrides use the tree-sitter language id, such as `rust`, `python`, `tsx`, or `json`.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `tab_size` | integer | `4` | Number of columns per indentation level. |
+| `insert_spaces` | boolean | `true` | Use spaces for indentation when pressing Tab. |
+| `rulers` | integer array | `[80, 120]` | Column ruler positions to draw in the editor. |
+| `word_wrap` | boolean | `false` | Stores the preferred wrap mode and shows it in editor status. |
+| `visible_whitespace` | boolean | `false` | Render visible markers for spaces and tabs. |
+| `font_size` | float | terminal font minus `2.0` | Code editor font size. |
+
+```toml
+[editor]
+tab_size = 2
+insert_spaces = true
+rulers = [80, 100]
+word_wrap = false
+visible_whitespace = true
+font_size = 14.0
+
+[editor.languages.rust]
+tab_size = 4
+rulers = [100]
+```
+
+---
+
 ## Full example
 
 ```toml
@@ -166,6 +211,21 @@ lines = 3
 
 [shell]
 program = "/bin/zsh"
+
+[editor]
+tab_size = 2
+insert_spaces = true
+rulers = [80, 100]
+visible_whitespace = false
+
+[editor.languages.rust]
+tab_size = 4
+rulers = [100]
+
+[editor.syntax_colors]
+keyword = "#C678DD"
+function = "#61AFEF"
+comment = "#7F848E"
 ```
 
 ---

@@ -8,7 +8,7 @@
 
 ## Phase 2: Editor View & Rendering
 
-- [ ] **2.7 -- Indentation guides**
+- [x] **2.7 -- Indentation guides**
   - Render faint vertical lines at each indentation level
   - Detect indent style per file (tabs vs spaces, indent width)
   - Active indent scope highlighted more prominently
@@ -17,7 +17,7 @@
 
 ## Phase 3: Core Editing Operations
 
-- [ ] **3.7 -- Find & replace**
+- [x] **3.7 -- Find & replace**
   - Cmd+F: find bar (reuse/extend existing terminal search UI)
   - Cmd+H: find and replace bar
   - Options: case-sensitive, whole word, regex
@@ -26,7 +26,7 @@
   - Cmd+D: select next occurrence of current word/selection (add cursor)
   - Cmd+Shift+L: select all occurrences
 
-- [ ] **3.9 -- Comment toggle**
+- [x] **3.9 -- Comment toggle**
   - Cmd+/: toggle line comment (prepend/remove `//`, `#`, `--`, etc.)
   - Cmd+Shift+/: toggle block comment (`/* */`, `<!-- -->`, etc.)
   - Comment style determined by file extension initially, then from syntax engine
@@ -35,7 +35,7 @@
 
 ## Phase 4: Multi-Buffer & Tab Management
 
-- [ ] **4.3 -- Save prompts** (partial)
+- [x] **4.3 -- Save prompts** (partial)
   - Prompt before closing modified buffer: Save / Don't Save / Cancel
   - Prompt before quitting with unsaved buffers
 
@@ -49,15 +49,15 @@
 
 ## Phase 5: Syntax Highlighting
 
-- [ ] **5.3 -- Custom syntax color mappings**
+- [x] **5.3 -- Custom syntax color mappings**
   - Allow custom highlight group -> color mappings in `[editor.syntax_colors]` in config.toml
 
-- [ ] **5.5 -- Bracket matching**
+- [x] **5.5 -- Bracket matching**
   - Use tree-sitter's tree to find matching brackets
   - Highlight matching bracket when cursor is adjacent to one
   - Jump to matching bracket: Cmd+Shift+\
 
-- [ ] **5.6 -- Code folding**
+- [x] **5.6 -- Code folding**
   - Use tree-sitter node ranges to determine foldable regions
   - Fold indicators in the gutter (triangle markers)
   - Click gutter marker or Cmd+Shift+[ to fold, Cmd+Shift+] to unfold
@@ -68,13 +68,13 @@
 
 ## Phase 7: Core LSP Features
 
-- [ ] **7.5 -- Find references**
+- [x] **7.5 -- Find references**
   - Shift+F12 or Cmd+Shift+F12: `textDocument/references`
   - Show results in a references panel
   - Preview: clicking a reference shows the line in context
   - Group by file, show match count per file
 
-- [ ] **7.6 -- Signature help**
+- [x] **7.6 -- Signature help**
   - Trigger on `(` and `,` inside function calls
   - Display function signature above cursor with active parameter highlighted
   - Update active parameter as user types commas
@@ -84,7 +84,7 @@
 
 ## Phase 8: Advanced LSP Features
 
-- [ ] **8.5 -- Workspace symbol search**
+- [x] **8.5 -- Workspace symbol search**
   - Cmd+T: `workspace/symbol`
   - Search across all files in the workspace
   - Fuzzy matching, show file path + symbol kind
@@ -126,7 +126,7 @@
 
 ## Phase 11: Productivity UX
 
-- [ ] **11.3 -- Git gutter indicators**
+- [x] **11.3 -- Git gutter indicators**
   - Show changed/added/deleted line indicators in the gutter
   - Green bar: added lines, blue bar: modified lines, red triangle: deleted lines
   - Click indicator to see inline diff
@@ -138,7 +138,7 @@
   - Tab stops, placeholders, choice lists, variable expansion ($TM_FILENAME, $CLIPBOARD, etc.)
   - Integrate with LSP completion snippets
 
-- [ ] **11.6 -- Editor settings**
+- [x] **11.6 -- Editor settings**
   - Add editor configuration section to the Settings view
   - Per-language settings: tab size, insert spaces, rulers, word wrap
   - Font settings (reuse terminal font config or separate)
@@ -151,9 +151,9 @@
 ## Phase 12: Performance (remaining)
 
 - [ ] **12.2 -- Async everything**
-  - Tree-sitter parsing on background thread
+  - [x] Tree-sitter parsing on background thread
   - LSP communication fully async (no block_on in render path)
-  - File indexing for fuzzy finder on background thread
+  - [x] File indexing for fuzzy finder on background thread
   - Never block the render loop for I/O
 
 - [ ] **12.3 -- GPU text rendering migration** (if needed)

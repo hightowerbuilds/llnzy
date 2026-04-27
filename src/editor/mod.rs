@@ -1,15 +1,19 @@
 pub mod buffer;
 pub mod cursor;
+pub mod git_gutter;
 pub mod history;
 pub mod keymap;
 pub mod perf;
+pub mod search;
 pub mod syntax;
 
 use std::path::PathBuf;
+use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
+use std::thread;
 
 use buffer::Buffer;
 use cursor::EditorCursor;
-use syntax::SyntaxEngine;
+use syntax::{FoldRange, SyntaxEngine};
 use tree_sitter::Tree;
 
 /// Per-buffer view state (cursor position, scroll offsets, syntax tree).
@@ -23,6 +27,16 @@ pub struct BufferView {
     pub tree: Option<Tree>,
     /// Whether the tree needs re-parsing (set after edits).
     pub tree_dirty: bool,
+    parse_pending: bool,
+    parse_generation: u64,
+    pub folded_ranges: Vec<FoldRange>,
+    pub pending_key_chord: Option<EditorKeyChord>,
+    pub git_gutter: Option<git_gutter::GitGutter>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EditorKeyChord {
+    CmdK,
 }
 
 impl Default for BufferView {
@@ -34,6 +48,11 @@ impl Default for BufferView {
             lang_id: None,
             tree: None,
             tree_dirty: false,
+            parse_pending: false,
+            parse_generation: 0,
+            folded_ranges: Vec::new(),
+            pending_key_chord: None,
+            git_gutter: None,
         }
     }
 }
@@ -47,8 +66,22 @@ impl Clone for BufferView {
             lang_id: self.lang_id,
             tree: None, // Trees aren't cheaply cloneable; will re-parse
             tree_dirty: true,
+            parse_pending: false,
+            parse_generation: self.parse_generation,
+            folded_ranges: self.folded_ranges.clone(),
+            pending_key_chord: self.pending_key_chord,
+            git_gutter: None, // Git gutter reloaded on open
         }
     }
+}
+
+struct ParseResult {
+    view_index: usize,
+    generation: u64,
+    path: Option<PathBuf>,
+    lang_id: &'static str,
+    tree: Option<Tree>,
+    line_count: usize,
 }
 
 /// Top-level editor state managing open buffers.
@@ -57,15 +90,20 @@ pub struct EditorState {
     pub views: Vec<BufferView>,
     pub active: usize,
     pub syntax: SyntaxEngine,
+    parse_tx: Sender<ParseResult>,
+    parse_rx: Receiver<ParseResult>,
 }
 
 impl EditorState {
     pub fn new() -> Self {
+        let (parse_tx, parse_rx) = mpsc::channel();
         Self {
             buffers: Vec::new(),
             views: Vec::new(),
             active: 0,
             syntax: SyntaxEngine::new(),
+            parse_tx,
+            parse_rx,
         }
     }
 
@@ -82,18 +120,15 @@ impl EditorState {
 
         let buf = Buffer::from_file(&path)?;
         let lang_id = self.syntax.detect_language(&path);
-
-        // Parse the initial tree
-        let tree = lang_id.and_then(|id| {
-            let source = buf.text();
-            self.syntax.parse(id, &source)
-        });
+        let tree_dirty = lang_id.is_some();
+        let git_gutter = git_gutter::GitGutter::load(&path);
 
         self.buffers.push(buf);
         self.views.push(BufferView {
             lang_id,
-            tree,
-            tree_dirty: false,
+            tree: None,
+            tree_dirty,
+            git_gutter,
             ..Default::default()
         });
         let idx = self.buffers.len() - 1;
@@ -132,8 +167,15 @@ impl EditorState {
         }
     }
 
+    pub fn active_parse_pending(&self) -> bool {
+        self.views
+            .get(self.active)
+            .is_some_and(|view| view.parse_pending)
+    }
+
     /// Re-parse the active buffer's syntax tree if it's dirty.
     pub fn reparse_active(&mut self) {
+        self.poll_parse_results();
         if self.active >= self.buffers.len() {
             return;
         }
@@ -146,13 +188,72 @@ impl EditorState {
             return;
         }
         let Some(lang_id) = view.lang_id else { return };
+        if view.parse_pending {
+            return;
+        }
+
         let source = self.buffers[self.active].text();
-        view.tree = if let Some(old_tree) = &view.tree {
-            self.syntax.reparse(lang_id, &source, old_tree)
-        } else {
-            self.syntax.parse(lang_id, &source)
-        };
+        let line_count = self.buffers[self.active].line_count();
+        let path = self.buffers[self.active].path().map(PathBuf::from);
+        view.parse_generation = view.parse_generation.wrapping_add(1);
+        let generation = view.parse_generation;
+        let view_index = self.active;
+        let tx = self.parse_tx.clone();
+        view.parse_pending = true;
         view.tree_dirty = false;
+
+        let spawn_result = thread::Builder::new()
+            .name("llnzy-tree-sitter-parse".to_string())
+            .spawn(move || {
+                let mut syntax = SyntaxEngine::new();
+                let tree = syntax.parse(lang_id, &source);
+                let _ = tx.send(ParseResult {
+                    view_index,
+                    generation,
+                    path,
+                    lang_id,
+                    tree,
+                    line_count,
+                });
+            });
+        if let Err(err) = spawn_result {
+            log::warn!("Failed to spawn tree-sitter parser thread: {err}");
+            if let Some(view) = self.views.get_mut(view_index) {
+                view.parse_pending = false;
+                view.tree_dirty = true;
+            }
+        }
+    }
+
+    fn poll_parse_results(&mut self) {
+        loop {
+            match self.parse_rx.try_recv() {
+                Ok(result) => self.apply_parse_result(result),
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => break,
+            }
+        }
+    }
+
+    fn apply_parse_result(&mut self, result: ParseResult) {
+        let Some(view) = self.views.get_mut(result.view_index) else {
+            return;
+        };
+        view.parse_pending = false;
+        if view.parse_generation != result.generation || view.tree_dirty || view.lang_id != Some(result.lang_id) {
+            return;
+        }
+        let buffer_path = self
+            .buffers
+            .get(result.view_index)
+            .and_then(|buffer| buffer.path().map(PathBuf::from));
+        if buffer_path != result.path {
+            return;
+        }
+
+        view.tree = result.tree;
+        view.folded_ranges
+            .retain(|range| range.start_line < range.end_line && range.end_line < result.line_count);
     }
 
     /// Tab titles for rendering: (name, is_active, is_modified).
@@ -168,5 +269,38 @@ impl EditorState {
 impl Default for EditorState {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn open_defers_tree_sitter_parse_to_background() {
+        let path = std::env::temp_dir().join(format!(
+            "llnzy_async_parse_{}_{}.rs",
+            std::process::id(),
+            1
+        ));
+        std::fs::write(&path, "fn main() {\n    println!(\"hi\");\n}\n").unwrap();
+
+        let mut editor = EditorState::new();
+        let idx = editor.open(path.clone()).unwrap();
+        assert_eq!(idx, 0);
+        assert!(editor.views[0].tree.is_none());
+        assert!(editor.views[0].tree_dirty);
+
+        editor.reparse_active();
+        for _ in 0..100 {
+            editor.reparse_active();
+            if editor.views[0].tree.is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+
+        assert!(editor.views[0].tree.is_some());
+        let _ = std::fs::remove_file(path);
     }
 }

@@ -22,7 +22,7 @@ use crate::stacker::{
 };
 
 pub use footer::FooterAction;
-pub use types::{ActiveView, CopyGhost, SettingsTab, BUMPER_WIDTH, SIDEBAR_WIDTH};
+pub use types::{ActiveView, CopyGhost, PendingClose, SavePromptResponse, SettingsTab, BUMPER_WIDTH, SIDEBAR_WIDTH};
 
 /// State for the egui-driven UI overlay.
 pub struct UiState {
@@ -87,6 +87,10 @@ pub struct UiState {
     pub tab_bar_action: Option<tab_bar::TabBarAction>,
     /// Workspace tabs reference for egui tab bar rendering (set by main loop before render)
     pub tab_names: Vec<(String, bool)>,
+    /// Pending close confirmation for unsaved buffers.
+    pub pending_close: Option<PendingClose>,
+    /// Save prompt response from the last render (consumed by main loop).
+    pub save_prompt_response: Option<SavePromptResponse>,
 }
 
 impl UiState {
@@ -168,6 +172,8 @@ impl UiState {
             active_tab_kind: None,
             tab_bar_action: None,
             tab_names: Vec::new(),
+            pending_close: None,
+            save_prompt_response: None,
         }
     }
 
@@ -298,6 +304,9 @@ impl UiState {
         } else {
             None
         };
+
+        let mut pending_close = self.pending_close.take();
+        let mut save_prompt_response: Option<SavePromptResponse> = None;
 
         let mut sidebar_open = self.sidebar_open;
         let mut sidebar_panel_width = self.sidebar_actual_width;
@@ -451,7 +460,7 @@ impl UiState {
                         egui::CentralPanel::default()
                             .frame(egui::Frame::none().fill(egui::Color32::from_rgb(bg[0], bg[1], bg[2])).inner_margin(egui::Margin::same(20.0)))
                             .show(ctx, |ui| {
-                                explorer_view::render_explorer_view(ui, &mut explorer, &mut editor_view);
+                                explorer_view::render_explorer_view(ui, &mut explorer, &mut editor_view, &config_clone);
                             });
                     }
                     Some(TabKind::Sketch) => {
@@ -485,7 +494,9 @@ impl UiState {
                         egui::CentralPanel::default()
                             .frame(egui::Frame::none().fill(egui::Color32::from_rgb(20, 20, 26)).inner_margin(egui::Margin::same(20.0)))
                             .show(ctx, |ui| {
-                                ui.label(egui::RichText::new("Settings").size(22.0).color(egui::Color32::WHITE));
+                                egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
+                                    settings_tabs::render_editor_tab(ui, &mut config_clone);
+                                });
                             });
                     }
                     Some(TabKind::Terminal) => {
@@ -505,6 +516,10 @@ impl UiState {
             palette_command = overlays::render_command_palette(ctx, &mut palette);
             if let Some((fps, ms)) = fps_info {
                 overlays::render_fps_overlay(ctx, fps, ms);
+            }
+            // Save prompt dialog (rendered on top of everything)
+            if let Some(ref pc) = pending_close {
+                save_prompt_response = overlays::render_save_prompt(ctx, pc);
             }
         });
 
@@ -560,6 +575,9 @@ impl UiState {
         } else {
             None
         };
+        self.pending_close = pending_close;
+        self.save_prompt_response = save_prompt_response;
+
         if let Some(view) = nav_target {
             self.active_view = view;
         }
@@ -571,8 +589,11 @@ impl UiState {
             self.clipboard_text = Some(text);
         }
 
-        // Push config changes when appearances tab is active
-        if active_tab_kind == Some(crate::workspace::TabKind::Appearances) {
+        // Push config changes when a settings surface is active
+        if matches!(
+            active_tab_kind,
+            Some(crate::workspace::TabKind::Appearances | crate::workspace::TabKind::Settings)
+        ) {
             self.pending_config = Some(config_clone);
         }
 
@@ -632,4 +653,3 @@ impl UiState {
         }
     }
 }
-

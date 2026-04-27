@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
+use crate::editor::syntax::HighlightGroup;
 use crate::keybindings::{self, KeyBindings};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -70,6 +71,8 @@ pub struct Config {
     pub opacity: f32,
     pub scroll_lines: u32,
     pub effects: EffectsConfig,
+    pub editor: EditorConfig,
+    pub syntax_colors: HashMap<HighlightGroup, [u8; 3]>,
     pub keybindings: KeyBindings,
     // Theme transition state
     pub transition: Option<ColorTransition>,
@@ -77,6 +80,89 @@ pub struct Config {
     pub time_of_day_enabled: bool,
     config_path: Option<PathBuf>,
     config_mtime: Option<SystemTime>,
+}
+
+#[derive(Clone, Debug)]
+pub struct EditorConfig {
+    pub tab_size: u8,
+    pub insert_spaces: bool,
+    pub rulers: Vec<usize>,
+    pub word_wrap: bool,
+    pub visible_whitespace: bool,
+    pub font_size: Option<f32>,
+    pub languages: HashMap<String, EditorLanguageConfig>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct EditorLanguageConfig {
+    pub tab_size: Option<u8>,
+    pub insert_spaces: Option<bool>,
+    pub rulers: Option<Vec<usize>>,
+    pub word_wrap: Option<bool>,
+    pub visible_whitespace: Option<bool>,
+}
+
+#[derive(Clone, Debug)]
+pub struct EffectiveEditorConfig {
+    pub tab_size: u8,
+    pub insert_spaces: bool,
+    pub rulers: Vec<usize>,
+    pub word_wrap: bool,
+    pub visible_whitespace: bool,
+    pub font_size: f32,
+}
+
+impl Default for EditorConfig {
+    fn default() -> Self {
+        Self {
+            tab_size: 4,
+            insert_spaces: true,
+            rulers: vec![80, 120],
+            word_wrap: false,
+            visible_whitespace: false,
+            font_size: None,
+            languages: HashMap::new(),
+        }
+    }
+}
+
+impl EditorConfig {
+    pub fn effective_for(
+        &self,
+        lang_id: Option<&str>,
+        terminal_font_size: f32,
+    ) -> EffectiveEditorConfig {
+        let mut effective = EffectiveEditorConfig {
+            tab_size: self.tab_size.max(1).min(16),
+            insert_spaces: self.insert_spaces,
+            rulers: self.rulers.clone(),
+            word_wrap: self.word_wrap,
+            visible_whitespace: self.visible_whitespace,
+            font_size: self.font_size.unwrap_or((terminal_font_size - 2.0).max(10.0)),
+        };
+
+        if let Some(lang) = lang_id.and_then(|id| self.languages.get(id)) {
+            if let Some(tab_size) = lang.tab_size {
+                effective.tab_size = tab_size.max(1).min(16);
+            }
+            if let Some(insert_spaces) = lang.insert_spaces {
+                effective.insert_spaces = insert_spaces;
+            }
+            if let Some(rulers) = &lang.rulers {
+                effective.rulers = rulers.clone();
+            }
+            if let Some(word_wrap) = lang.word_wrap {
+                effective.word_wrap = word_wrap;
+            }
+            if let Some(visible_whitespace) = lang.visible_whitespace {
+                effective.visible_whitespace = visible_whitespace;
+            }
+        }
+
+        effective.rulers.sort_unstable();
+        effective.rulers.dedup();
+        effective
+    }
 }
 
 /// Smooth color transition between two color schemes.
@@ -263,6 +349,8 @@ impl Default for Config {
             opacity: 1.0,
             scroll_lines: 3,
             effects: EffectsConfig::default(),
+            editor: EditorConfig::default(),
+            syntax_colors: HashMap::new(),
             keybindings: KeyBindings::default_bindings(),
             transition: None,
             time_of_day_enabled: false,
@@ -520,6 +608,62 @@ impl Config {
             }
         }
 
+        if let Some(editor) = file.editor {
+            if let Some(tab_size) = editor.tab_size {
+                self.editor.tab_size = tab_size.clamp(1, 16);
+            }
+            if let Some(insert_spaces) = editor.insert_spaces {
+                self.editor.insert_spaces = insert_spaces;
+            }
+            if let Some(rulers) = editor.rulers {
+                self.editor.rulers = normalize_rulers(rulers);
+            }
+            if let Some(word_wrap) = editor.word_wrap {
+                self.editor.word_wrap = word_wrap;
+            }
+            if let Some(visible_whitespace) = editor.visible_whitespace {
+                self.editor.visible_whitespace = visible_whitespace;
+            }
+            if let Some(font_size) = editor.font_size {
+                self.editor.font_size = Some(font_size.clamp(8.0, 40.0));
+            }
+            if let Some(languages) = editor.languages {
+                for (lang, lang_config) in languages {
+                    let existing = self.editor.languages.entry(lang).or_default();
+                    if let Some(tab_size) = lang_config.tab_size {
+                        existing.tab_size = Some(tab_size.clamp(1, 16));
+                    }
+                    if let Some(insert_spaces) = lang_config.insert_spaces {
+                        existing.insert_spaces = Some(insert_spaces);
+                    }
+                    if let Some(rulers) = lang_config.rulers {
+                        existing.rulers = Some(normalize_rulers(rulers));
+                    }
+                    if let Some(word_wrap) = lang_config.word_wrap {
+                        existing.word_wrap = Some(word_wrap);
+                    }
+                    if let Some(visible_whitespace) = lang_config.visible_whitespace {
+                        existing.visible_whitespace = Some(visible_whitespace);
+                    }
+                }
+            }
+
+            if let Some(syntax_colors) = editor.syntax_colors {
+                self.syntax_colors.clear();
+                for (group_name, color) in syntax_colors {
+                    let Some(group) = HighlightGroup::from_config_key(&group_name) else {
+                        log::warn!("Unknown syntax highlight group: {}", group_name);
+                        continue;
+                    };
+                    let Some(rgb) = parse_hex(&color) else {
+                        log::warn!("Invalid syntax color for {}: {}", group_name, color);
+                        continue;
+                    };
+                    self.syntax_colors.insert(group, rgb);
+                }
+            }
+        }
+
         if let Some(kb) = file.keybindings {
             use keybindings::Action;
             for (action_name, key_str) in kb {
@@ -571,6 +715,7 @@ struct ConfigFile {
     scrolling: Option<ScrollConfig>,
     shell: Option<ShellConfig>,
     effects: Option<EffectsFileConfig>,
+    editor: Option<EditorFileConfig>,
     keybindings: Option<HashMap<String, String>>,
 }
 
@@ -659,7 +804,35 @@ struct EffectsFileConfig {
     grain_intensity: Option<f32>,
 }
 
+#[derive(Deserialize)]
+struct EditorFileConfig {
+    tab_size: Option<u8>,
+    insert_spaces: Option<bool>,
+    rulers: Option<Vec<usize>>,
+    word_wrap: Option<bool>,
+    visible_whitespace: Option<bool>,
+    font_size: Option<f32>,
+    languages: Option<HashMap<String, EditorLanguageFileConfig>>,
+    syntax_colors: Option<HashMap<String, String>>,
+}
+
+#[derive(Deserialize)]
+struct EditorLanguageFileConfig {
+    tab_size: Option<u8>,
+    insert_spaces: Option<bool>,
+    rulers: Option<Vec<usize>>,
+    word_wrap: Option<bool>,
+    visible_whitespace: Option<bool>,
+}
+
 // ── Color scheme presets ──
+
+fn normalize_rulers(mut rulers: Vec<usize>) -> Vec<usize> {
+    rulers.retain(|col| (1..=240).contains(col));
+    rulers.sort_unstable();
+    rulers.dedup();
+    rulers
+}
 
 fn preset_scheme(name: &str) -> Option<ColorScheme> {
     let (ansi, fg, bg, cur, sel) = match name.to_lowercase().as_str() {
@@ -1208,5 +1381,83 @@ mod tests {
         assert_eq!(config.font_weight, "bold");
         assert_eq!(config.font_style, "italic");
         assert_eq!(config.line_height, 1.8);
+    }
+
+    #[test]
+    fn apply_editor_syntax_colors() {
+        let mut config = Config::default();
+        let toml_str = r##"
+            [editor.syntax_colors]
+            keyword = "#112233"
+            function = "AABBCC"
+            namespace = "#010203"
+        "##;
+        let file: ConfigFile = toml::from_str(toml_str).unwrap();
+        config.apply(file);
+        assert_eq!(
+            config.syntax_colors.get(&HighlightGroup::Keyword),
+            Some(&[0x11, 0x22, 0x33])
+        );
+        assert_eq!(
+            config.syntax_colors.get(&HighlightGroup::Function),
+            Some(&[0xAA, 0xBB, 0xCC])
+        );
+        assert_eq!(
+            config.syntax_colors.get(&HighlightGroup::Module),
+            Some(&[0x01, 0x02, 0x03])
+        );
+    }
+
+    #[test]
+    fn apply_editor_settings() {
+        let mut config = Config::default();
+        let toml_str = r#"
+            [editor]
+            tab_size = 2
+            insert_spaces = false
+            rulers = [100, 80, 100, 0, 300]
+            word_wrap = true
+            visible_whitespace = true
+            font_size = 15.5
+        "#;
+        let file: ConfigFile = toml::from_str(toml_str).unwrap();
+        config.apply(file);
+
+        assert_eq!(config.editor.tab_size, 2);
+        assert!(!config.editor.insert_spaces);
+        assert_eq!(config.editor.rulers, vec![80, 100]);
+        assert!(config.editor.word_wrap);
+        assert!(config.editor.visible_whitespace);
+        assert_eq!(config.editor.font_size, Some(15.5));
+    }
+
+    #[test]
+    fn editor_language_overrides_apply_to_effective_config() {
+        let mut config = Config::default();
+        let toml_str = r#"
+            [editor]
+            tab_size = 4
+            insert_spaces = true
+            rulers = [80, 120]
+            visible_whitespace = false
+
+            [editor.languages.rust]
+            tab_size = 2
+            rulers = [100]
+            visible_whitespace = true
+        "#;
+        let file: ConfigFile = toml::from_str(toml_str).unwrap();
+        config.apply(file);
+
+        let effective = config.editor.effective_for(Some("rust"), 16.0);
+        assert_eq!(effective.tab_size, 2);
+        assert!(effective.insert_spaces);
+        assert_eq!(effective.rulers, vec![100]);
+        assert!(effective.visible_whitespace);
+
+        let fallback = config.editor.effective_for(Some("python"), 16.0);
+        assert_eq!(fallback.tab_size, 4);
+        assert_eq!(fallback.rulers, vec![80, 120]);
+        assert!(!fallback.visible_whitespace);
     }
 }

@@ -2,6 +2,7 @@ use std::time::Instant;
 
 use crate::editor::EditorState;
 use crate::editor::perf;
+use crate::editor::search::EditorSearch;
 use crate::explorer::{format_size, ExplorerState, FileContent};
 use crate::lsp::LspManager;
 
@@ -31,6 +32,17 @@ pub struct EditorViewState {
     pub symbols_filter: String,
     /// Rename input state.
     pub rename_input: Option<String>,
+    /// References popup: list of locations.
+    pub references_popup: Option<Vec<crate::lsp::ReferenceLocation>>,
+    pub references_selected: usize,
+    /// Signature help tooltip.
+    pub signature_help: Option<crate::lsp::SignatureInfo>,
+    /// Workspace symbol search popup.
+    pub workspace_symbols_popup: Option<Vec<crate::lsp::WorkspaceSymbol>>,
+    pub workspace_symbols_selected: usize,
+    pub workspace_symbols_query: String,
+    /// Find & replace state for the editor.
+    pub editor_search: EditorSearch,
     /// Debounce: last time LSP didChange was sent.
     last_change_sent: Instant,
     /// File to open as a workspace tab (set by sidebar click, consumed by main loop).
@@ -66,6 +78,13 @@ impl Default for EditorViewState {
             symbols_selected: 0,
             symbols_filter: String::new(),
             rename_input: None,
+            references_popup: None,
+            references_selected: 0,
+            signature_help: None,
+            workspace_symbols_popup: None,
+            workspace_symbols_selected: 0,
+            workspace_symbols_query: String::new(),
+            editor_search: EditorSearch::default(),
             last_change_sent: Instant::now(),
             pending_file_tab: None,
         }
@@ -320,6 +339,47 @@ impl EditorViewState {
         }
     }
 
+    /// Request signature help at the current cursor position.
+    pub fn request_signature_help(&mut self) {
+        let Some(lsp) = &mut self.lsp else { return };
+        let active = self.editor.active;
+        if active >= self.editor.buffers.len() { return }
+        let buf = &self.editor.buffers[active];
+        let view = &self.editor.views[active];
+        let pos = view.cursor.pos;
+        if let (Some(lang_id), Some(path)) = (view.lang_id, buf.path()) {
+            self.signature_help = lsp.signature_help(path, lang_id, pos.line as u32, pos.col as u32);
+        }
+    }
+
+    /// Request workspace symbols for a query.
+    pub fn request_workspace_symbols(&mut self, query: &str) -> Vec<crate::lsp::WorkspaceSymbol> {
+        let Some(lsp) = &mut self.lsp else { return Vec::new() };
+        let active = self.editor.active;
+        if active >= self.editor.buffers.len() { return Vec::new() }
+        let view = &self.editor.views[active];
+        if let Some(lang_id) = view.lang_id {
+            lsp.workspace_symbols(lang_id, query)
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Request find references at the current cursor position.
+    pub fn request_references(&mut self) -> Vec<crate::lsp::ReferenceLocation> {
+        let Some(lsp) = &mut self.lsp else { return Vec::new() };
+        let active = self.editor.active;
+        if active >= self.editor.buffers.len() { return Vec::new() }
+        let buf = &self.editor.buffers[active];
+        let view = &self.editor.views[active];
+        let pos = view.cursor.pos;
+        if let (Some(lang_id), Some(path)) = (view.lang_id, buf.path()) {
+            lsp.references(path, lang_id, pos.line as u32, pos.col as u32)
+        } else {
+            Vec::new()
+        }
+    }
+
     pub fn lsp_did_save(&mut self) {
         let Some(lsp) = &mut self.lsp else { return };
         let active = self.editor.active;
@@ -340,6 +400,7 @@ pub(crate) fn render_explorer_view(
     ui: &mut egui::Ui,
     explorer: &mut ExplorerState,
     editor_state: &mut EditorViewState,
+    config: &crate::config::Config,
 ) {
     ui.visuals_mut().override_text_color = Some(egui::Color32::WHITE);
 
@@ -349,6 +410,9 @@ pub(crate) fn render_explorer_view(
 
     // Reparse syntax tree if dirty
     editor_state.editor.reparse_active();
+    if editor_state.editor.active_parse_pending() {
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
+    }
 
     let active = editor_state.editor.active;
     if active < editor_state.editor.buffers.len() {
@@ -362,6 +426,7 @@ pub(crate) fn render_explorer_view(
         let was_modified = editor_state.editor.buffers[active].is_modified();
 
         let hover_text = editor_state.hover_text.as_deref().map(|s| s.to_string());
+        let sig_help = editor_state.signature_help.clone();
         // Clone completion items to avoid borrow conflicts
         let completion_snapshot: Option<(Vec<crate::lsp::CompletionItem>, usize)> =
             editor_state.completion.as_ref().map(|c| {
@@ -389,13 +454,22 @@ pub(crate) fn render_explorer_view(
         let buf = &mut editor_state.editor.buffers[active];
         let view = &mut editor_state.editor.views[active];
         let syntax = &editor_state.editor.syntax;
+        let effective_editor_config = config.editor.effective_for(view.lang_id, config.font_size);
         let frame_result = editor_view::render_text_editor(
-            ui, buf, view, syntax, diags.as_deref(),
+            ui,
+            buf,
+            view,
+            syntax,
+            &effective_editor_config,
+            &config.syntax_colors,
+            diags.as_deref(),
             hover_text.as_deref(),
             completions_arg,
+            sig_help.as_ref(),
             &mut editor_state.status_msg,
             &mut editor_state.clipboard_out,
             &mut editor_state.clipboard_in,
+            &mut editor_state.editor_search,
         );
 
         let len_after = editor_state.editor.buffers[active].len_chars();
@@ -403,6 +477,24 @@ pub(crate) fn render_explorer_view(
         if len_before != len_after {
             editor_state.lsp_did_change();
             editor_state.hover_text = None; // Dismiss hover on edit
+            if editor_state.editor_search.active {
+                editor_state.editor_search.mark_dirty();
+            }
+            if let Some(gutter) = &mut editor_state.editor.views[active].git_gutter {
+                gutter.mark_dirty();
+            }
+            // Trigger signature help on ( or ,
+            let cursor_pos = editor_state.editor.views[active].cursor.pos;
+            if cursor_pos.col > 0 {
+                let ch = editor_state.editor.buffers[active].char_at(
+                    crate::editor::buffer::Position::new(cursor_pos.line, cursor_pos.col - 1)
+                );
+                if ch == Some('(') || ch == Some(',') {
+                    editor_state.request_signature_help();
+                } else if ch == Some(')') {
+                    editor_state.signature_help = None;
+                }
+            }
         }
         if was_modified && !is_modified { editor_state.lsp_did_save(); }
 
@@ -498,6 +590,217 @@ pub(crate) fn render_explorer_view(
                 editor_state.symbols_popup = Some(symbols);
                 editor_state.symbols_selected = 0;
                 editor_state.symbols_filter.clear();
+            }
+        }
+
+        // Workspace symbols
+        if frame_result.key_action.workspace_symbols {
+            // Initial query: fetch all symbols with empty query
+            let symbols = editor_state.request_workspace_symbols("");
+            editor_state.workspace_symbols_popup = Some(symbols);
+            editor_state.workspace_symbols_selected = 0;
+            editor_state.workspace_symbols_query.clear();
+        }
+
+        // Find references
+        if frame_result.key_action.find_references {
+            let refs = editor_state.request_references();
+            if refs.is_empty() {
+                editor_state.status_msg = Some("No references found".to_string());
+            } else {
+                editor_state.references_popup = Some(refs);
+                editor_state.references_selected = 0;
+            }
+        }
+
+        // Find & replace
+        if frame_result.key_action.open_find {
+            editor_state.editor_search.open_find();
+            editor_state.editor_search.mark_dirty();
+        }
+        if frame_result.key_action.open_find_replace {
+            editor_state.editor_search.open_replace();
+            editor_state.editor_search.mark_dirty();
+        }
+
+        // Render workspace symbols popup if open
+        if editor_state.workspace_symbols_popup.is_some() {
+            let mut navigate_to: Option<(std::path::PathBuf, u32, u32)> = None;
+            let mut dismiss = false;
+            let mut query_changed = false;
+
+            let symbols = editor_state.workspace_symbols_popup.as_ref().unwrap();
+            let selected = editor_state.workspace_symbols_selected;
+
+            egui::Window::new("Workspace Symbols")
+                .id(egui::Id::new("workspace_symbols_panel"))
+                .fixed_pos(egui::pos2(100.0, 40.0))
+                .default_size(egui::Vec2::new(500.0, 350.0))
+                .resizable(true)
+                .show(ui.ctx(), |ui| {
+                    let mut query = editor_state.workspace_symbols_query.clone();
+                    let resp = ui.add(
+                        egui::TextEdit::singleline(&mut query)
+                            .hint_text("Search symbols...")
+                            .desired_width(ui.available_width() - 10.0)
+                            .text_color(egui::Color32::WHITE)
+                            .font(egui::TextStyle::Monospace),
+                    );
+                    resp.request_focus();
+                    if query != editor_state.workspace_symbols_query {
+                        editor_state.workspace_symbols_query = query;
+                        query_changed = true;
+                    }
+
+                    let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
+                    let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    if escape { dismiss = true; }
+                    if enter && !symbols.is_empty() {
+                        let s = &symbols[selected];
+                        navigate_to = Some((s.path.clone(), s.line, s.col));
+                    }
+
+                    ui.separator();
+                    ui.label(egui::RichText::new(format!("{} symbols", symbols.len())).size(11.0).color(egui::Color32::from_rgb(150, 155, 170)));
+
+                    egui::ScrollArea::vertical().max_height(280.0).show(ui, |ui| {
+                        for (i, s) in symbols.iter().enumerate() {
+                            let bg = if i == selected { egui::Color32::from_rgb(50, 80, 130) } else { egui::Color32::TRANSPARENT };
+                            let text_color = if i == selected { egui::Color32::WHITE } else { egui::Color32::from_rgb(200, 205, 215) };
+                            let file_name = s.path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
+
+                            egui::Frame::none().fill(bg).inner_margin(egui::Margin::symmetric(4.0, 2.0)).show(ui, |ui| {
+                                let resp = ui.horizontal(|ui| {
+                                    ui.label(egui::RichText::new(&s.name).size(12.0).color(text_color).monospace());
+                                    ui.label(egui::RichText::new(&s.kind).size(10.0).color(egui::Color32::from_rgb(120, 130, 160)));
+                                    ui.label(egui::RichText::new(format!("{}:{}", file_name, s.line + 1)).size(10.0).color(egui::Color32::from_rgb(100, 105, 120)));
+                                }).response;
+                                if resp.interact(egui::Sense::click()).clicked() {
+                                    navigate_to = Some((s.path.clone(), s.line, s.col));
+                                }
+                            });
+                        }
+                    });
+                });
+
+            // Keyboard nav
+            let syms_len = editor_state.workspace_symbols_popup.as_ref().map_or(0, |s| s.len());
+            let down_pressed = ui.input(|i| i.key_pressed(egui::Key::ArrowDown));
+            let up_pressed = ui.input(|i| i.key_pressed(egui::Key::ArrowUp));
+            if down_pressed {
+                editor_state.workspace_symbols_selected = (editor_state.workspace_symbols_selected + 1).min(syms_len.saturating_sub(1));
+            }
+            if up_pressed {
+                editor_state.workspace_symbols_selected = editor_state.workspace_symbols_selected.saturating_sub(1);
+            }
+
+            if query_changed {
+                let query = editor_state.workspace_symbols_query.clone();
+                let symbols = editor_state.request_workspace_symbols(&query);
+                editor_state.workspace_symbols_popup = Some(symbols);
+                editor_state.workspace_symbols_selected = 0;
+            }
+
+            if dismiss {
+                editor_state.workspace_symbols_popup = None;
+            }
+            if let Some((path, line, col)) = navigate_to {
+                editor_state.workspace_symbols_popup = None;
+                match editor_state.open_file(path) {
+                    Ok(idx) => {
+                        let view = &mut editor_state.editor.views[idx];
+                        view.cursor.pos = crate::editor::buffer::Position::new(line as usize, col as usize);
+                        view.cursor.clear_selection();
+                        view.cursor.desired_col = None;
+                        editor_state.status_msg = None;
+                    }
+                    Err(e) => editor_state.status_msg = Some(format!("Failed to open symbol: {e}")),
+                }
+            }
+        }
+
+        // Render references popup if open
+        if editor_state.references_popup.is_some() {
+            let mut navigate_to: Option<(std::path::PathBuf, u32, u32)> = None;
+            let mut dismiss = false;
+
+            // Extract to avoid borrow conflicts
+            let refs = editor_state.references_popup.as_ref().unwrap();
+            let selected = editor_state.references_selected;
+
+            egui::Window::new("References")
+                .id(egui::Id::new("references_panel"))
+                .fixed_pos(egui::pos2(100.0, 50.0))
+                .default_size(egui::Vec2::new(500.0, 300.0))
+                .resizable(true)
+                .show(ui.ctx(), |ui| {
+                    ui.label(egui::RichText::new(format!("{} references", refs.len())).size(13.0).color(egui::Color32::WHITE));
+                    ui.separator();
+
+                    let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
+                    let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    let _down = ui.input(|i| i.key_pressed(egui::Key::ArrowDown));
+                    let _up = ui.input(|i| i.key_pressed(egui::Key::ArrowUp));
+
+                    if escape { dismiss = true; }
+                    if enter && !refs.is_empty() {
+                        let r = &refs[selected];
+                        navigate_to = Some((r.path.clone(), r.line, r.col));
+                    }
+
+                    egui::ScrollArea::vertical().max_height(250.0).show(ui, |ui| {
+                        for (i, r) in refs.iter().enumerate() {
+                            let bg = if i == selected {
+                                egui::Color32::from_rgb(50, 80, 130)
+                            } else {
+                                egui::Color32::TRANSPARENT
+                            };
+                            let text_color = if i == selected {
+                                egui::Color32::WHITE
+                            } else {
+                                egui::Color32::from_rgb(200, 205, 215)
+                            };
+                            let file_name = r.path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
+
+                            egui::Frame::none().fill(bg).inner_margin(egui::Margin::symmetric(4.0, 2.0)).show(ui, |ui| {
+                                let resp = ui.horizontal(|ui| {
+                                    ui.label(egui::RichText::new(format!("{}:{}", file_name, r.line + 1)).size(12.0).color(egui::Color32::from_rgb(100, 180, 255)).monospace());
+                                    ui.label(egui::RichText::new(&r.context).size(12.0).color(text_color).monospace());
+                                }).response;
+                                if resp.interact(egui::Sense::click()).clicked() {
+                                    navigate_to = Some((r.path.clone(), r.line, r.col));
+                                }
+                            });
+                        }
+                    });
+                });
+
+            // Apply keyboard nav
+            let refs_len = editor_state.references_popup.as_ref().map_or(0, |r| r.len());
+            let down_pressed = ui.input(|i| i.key_pressed(egui::Key::ArrowDown));
+            let up_pressed = ui.input(|i| i.key_pressed(egui::Key::ArrowUp));
+            if down_pressed {
+                editor_state.references_selected = (editor_state.references_selected + 1).min(refs_len.saturating_sub(1));
+            }
+            if up_pressed {
+                editor_state.references_selected = editor_state.references_selected.saturating_sub(1);
+            }
+
+            if dismiss {
+                editor_state.references_popup = None;
+            }
+            if let Some((path, line, col)) = navigate_to {
+                editor_state.references_popup = None;
+                match editor_state.open_file(path) {
+                    Ok(idx) => {
+                        let view = &mut editor_state.editor.views[idx];
+                        view.cursor.pos = crate::editor::buffer::Position::new(line as usize, col as usize);
+                        view.cursor.clear_selection();
+                        view.cursor.desired_col = None;
+                        editor_state.status_msg = None;
+                    }
+                    Err(e) => editor_state.status_msg = Some(format!("Failed to open reference: {e}")),
+                }
             }
         }
     }
@@ -751,6 +1054,11 @@ fn render_finder(
     explorer: &mut ExplorerState,
     editor_state: &mut EditorViewState,
 ) {
+    explorer.poll_file_index();
+    if explorer.is_indexing() {
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+    }
+
     ui.vertical(|ui| {
         ui.label(egui::RichText::new("Find File").size(16.0).color(egui::Color32::WHITE).strong());
         ui.add_space(4.0);
@@ -808,6 +1116,13 @@ fn render_finder(
         // Results
         let selected_color = egui::Color32::from_rgb(50, 80, 130);
         egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
+            if explorer.is_indexing() && explorer.finder_results.is_empty() {
+                ui.label(
+                    egui::RichText::new("Indexing project files...")
+                        .size(13.0)
+                        .color(egui::Color32::from_rgb(150, 155, 170)),
+                );
+            }
             for (i, path) in explorer.finder_results.iter().enumerate() {
                 let rel = explorer.relative_path(path);
                 let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");

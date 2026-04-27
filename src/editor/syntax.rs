@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::Path;
 
 use streaming_iterator::StreamingIterator;
@@ -9,6 +10,12 @@ pub struct HighlightSpan {
     pub col_start: usize,
     pub col_end: usize,
     pub group: HighlightGroup,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FoldRange {
+    pub start_line: usize,
+    pub end_line: usize,
 }
 
 /// Semantic highlight groups that map to colors.
@@ -30,6 +37,35 @@ pub enum HighlightGroup {
     Escape,
     Label,
     Module,
+}
+
+impl HighlightGroup {
+    pub fn from_config_key(key: &str) -> Option<Self> {
+        match key
+            .trim()
+            .to_ascii_lowercase()
+            .replace(['-', '.'], "_")
+            .as_str()
+        {
+            "keyword" => Some(Self::Keyword),
+            "type" => Some(Self::Type),
+            "function" => Some(Self::Function),
+            "variable" => Some(Self::Variable),
+            "string" => Some(Self::String),
+            "number" => Some(Self::Number),
+            "comment" => Some(Self::Comment),
+            "operator" => Some(Self::Operator),
+            "punctuation" => Some(Self::Punctuation),
+            "constant" => Some(Self::Constant),
+            "attribute" => Some(Self::Attribute),
+            "tag" => Some(Self::Tag),
+            "property" => Some(Self::Property),
+            "escape" => Some(Self::Escape),
+            "label" => Some(Self::Label),
+            "module" | "namespace" => Some(Self::Module),
+            _ => None,
+        }
+    }
 }
 
 fn capture_to_group(name: &str) -> Option<HighlightGroup> {
@@ -192,6 +228,18 @@ impl SyntaxEngine {
         }
         result
     }
+
+    pub fn foldable_ranges(&self, tree: &Tree) -> Vec<FoldRange> {
+        let mut ranges = Vec::new();
+        let root = tree.root_node();
+        let mut cursor = root.walk();
+        for child in root.children(&mut cursor) {
+            collect_foldable_ranges(child, &mut ranges);
+        }
+        ranges.sort_by_key(|r| (r.start_line, r.end_line));
+        ranges.dedup();
+        ranges
+    }
 }
 
 impl Default for SyntaxEngine {
@@ -209,6 +257,22 @@ fn line_byte_offset(source: &[u8], target_line: usize) -> usize {
         }
     }
     source.len()
+}
+
+fn collect_foldable_ranges(node: tree_sitter::Node<'_>, ranges: &mut Vec<FoldRange>) {
+    let start = node.start_position().row;
+    let end = node.end_position().row;
+    if node.is_named() && end > start {
+        ranges.push(FoldRange {
+            start_line: start,
+            end_line: end,
+        });
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_foldable_ranges(child, ranges);
+    }
 }
 
 /// Map a HighlightGroup to an RGB color (One Dark inspired).
@@ -231,6 +295,13 @@ pub fn group_color(group: HighlightGroup) -> [u8; 3] {
         HighlightGroup::Label => [229, 192, 123],       // yellow
         HighlightGroup::Module => [86, 182, 194],       // cyan
     }
+}
+
+pub fn group_color_with_overrides(
+    group: HighlightGroup,
+    overrides: &HashMap<HighlightGroup, [u8; 3]>,
+) -> [u8; 3] {
+    overrides.get(&group).copied().unwrap_or_else(|| group_color(group))
 }
 
 // ── Highlight queries (compact, one per language) ──
@@ -546,5 +617,31 @@ mod tests {
     fn group_color_returns_nonzero() {
         let c = group_color(HighlightGroup::Keyword);
         assert!(c[0] > 0 || c[1] > 0 || c[2] > 0);
+    }
+
+    #[test]
+    fn highlight_group_from_config_key_accepts_aliases() {
+        assert_eq!(
+            HighlightGroup::from_config_key("keyword"),
+            Some(HighlightGroup::Keyword)
+        );
+        assert_eq!(
+            HighlightGroup::from_config_key("namespace"),
+            Some(HighlightGroup::Module)
+        );
+        assert_eq!(
+            HighlightGroup::from_config_key("bright.punctuation"),
+            None
+        );
+    }
+
+    #[test]
+    fn foldable_ranges_include_multiline_nodes() {
+        let mut engine = SyntaxEngine::new();
+        let source = "fn main() {\n    if true {\n        println!(\"x\");\n    }\n}\n";
+        let tree = engine.parse("rust", source).expect("should parse");
+        let ranges = engine.foldable_ranges(&tree);
+        assert!(ranges.iter().any(|range| range.start_line == 0 && range.end_line >= 4));
+        assert!(ranges.iter().any(|range| range.start_line == 1 && range.end_line >= 3));
     }
 }

@@ -456,6 +456,68 @@ impl LspClient {
         Ok(Some(resp))
     }
 
+    /// Request signature help at a position.
+    pub async fn signature_help(&self, path: &Path, line: u32, col: u32) -> Result<Option<lsp_types::SignatureHelp>, String> {
+        if self.state != ClientState::Running { return Ok(None); }
+        let Some(doc) = self.open_docs.get(path) else { return Ok(None) };
+
+        let params = SignatureHelpParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: doc.uri.clone() },
+                position: Position { line, character: col },
+            },
+            work_done_progress_params: Default::default(),
+            context: None,
+        };
+
+        let result = self.transport.request("textDocument/signatureHelp", serde_json::to_value(params).unwrap()).await?;
+        if result.is_null() { return Ok(None); }
+        let sig: lsp_types::SignatureHelp = serde_json::from_value(result).map_err(|e| e.to_string())?;
+        Ok(Some(sig))
+    }
+
+    /// Request find references at a position.
+    pub async fn references(&self, path: &Path, line: u32, col: u32) -> Result<Vec<lsp_types::Location>, String> {
+        if self.state != ClientState::Running { return Ok(Vec::new()); }
+        let Some(doc) = self.open_docs.get(path) else { return Ok(Vec::new()) };
+
+        let params = ReferenceParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: doc.uri.clone() },
+                position: Position { line, character: col },
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+            context: ReferenceContext {
+                include_declaration: true,
+            },
+        };
+
+        let result = self.transport.request("textDocument/references", serde_json::to_value(params).unwrap()).await?;
+        if result.is_null() { return Ok(Vec::new()); }
+        serde_json::from_value(result).map_err(|e| e.to_string())
+    }
+
+    /// Request workspace symbols.
+    pub async fn workspace_symbols(&self, query: &str) -> Result<Vec<lsp_types::SymbolInformation>, String> {
+        if self.state != ClientState::Running { return Ok(Vec::new()); }
+
+        let params = WorkspaceSymbolParams {
+            query: query.to_string(),
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        };
+
+        let result = self.transport.request("workspace/symbol", serde_json::to_value(params).unwrap()).await?;
+        if result.is_null() { return Ok(Vec::new()); }
+        // workspace/symbol can return Vec<SymbolInformation> or WorkspaceSymbolResponse
+        // Try Vec<SymbolInformation> first (most common)
+        if let Ok(symbols) = serde_json::from_value::<Vec<lsp_types::SymbolInformation>>(result.clone()) {
+            return Ok(symbols);
+        }
+        Ok(Vec::new())
+    }
+
     pub fn transport(&self) -> &Arc<Transport> {
         &self.transport
     }
