@@ -68,6 +68,23 @@ pub struct WorkspaceSymbol {
     pub col: u32,
 }
 
+/// A simplified inlay hint for the UI.
+#[derive(Clone, Debug)]
+pub struct InlayHintInfo {
+    pub line: u32,
+    pub col: u32,
+    pub label: String,
+    pub padding_left: bool,
+    pub padding_right: bool,
+}
+
+/// A simplified code lens for the UI.
+#[derive(Clone, Debug)]
+pub struct CodeLensInfo {
+    pub line: u32,
+    pub title: String,
+}
+
 /// A simplified completion item for the UI.
 #[derive(Clone, Debug)]
 pub struct CompletionItem {
@@ -560,6 +577,34 @@ impl LspManager {
         Some(rx)
     }
 
+    /// Spawn an inlay hints request. Returns a receiver for the result.
+    pub fn inlay_hints_async(&self, path: &Path, lang_id: &str, start_line: u32, end_line: u32) -> Option<oneshot::Receiver<Vec<InlayHintInfo>>> {
+        let client = self.clients.get(lang_id)?;
+        if !client.is_running() { return None; }
+        let transport = client.transport().clone();
+        let uri = client.doc_uri(path)?;
+        let (tx, rx) = oneshot::channel();
+        self.runtime.spawn(async move {
+            let result = async_inlay_hints(&transport, &uri, start_line, end_line).await;
+            let _ = tx.send(result);
+        });
+        Some(rx)
+    }
+
+    /// Spawn a code lens request. Returns a receiver for the result.
+    pub fn code_lens_async(&self, path: &Path, lang_id: &str) -> Option<oneshot::Receiver<Vec<CodeLensInfo>>> {
+        let client = self.clients.get(lang_id)?;
+        if !client.is_running() { return None; }
+        let transport = client.transport().clone();
+        let uri = client.doc_uri(path)?;
+        let (tx, rx) = oneshot::channel();
+        self.runtime.spawn(async move {
+            let result = async_code_lens(&transport, &uri).await;
+            let _ = tx.send(result);
+        });
+        Some(rx)
+    }
+
     /// Spawn a did_change notification (fire-and-forget, non-blocking).
     pub fn did_change_async(&self, path: &Path, lang_id: &str, text: &str) {
         let Some(client) = self.clients.get(lang_id) else { return };
@@ -831,6 +876,65 @@ async fn async_format(transport: &Transport, uri: &lsp_types::Uri) -> Vec<Format
     edits.into_iter().map(|e| FormatEdit {
         start_line: e.range.start.line, start_col: e.range.start.character,
         end_line: e.range.end.line, end_col: e.range.end.character, new_text: e.new_text,
+    }).collect()
+}
+
+async fn async_inlay_hints(transport: &Transport, uri: &lsp_types::Uri, start_line: u32, end_line: u32) -> Vec<InlayHintInfo> {
+    let params = lsp_types::InlayHintParams {
+        text_document: lsp_types::TextDocumentIdentifier { uri: uri.clone() },
+        range: lsp_types::Range {
+            start: lsp_types::Position { line: start_line, character: 0 },
+            end: lsp_types::Position { line: end_line, character: 0 },
+        },
+        work_done_progress_params: Default::default(),
+    };
+    let result = match transport.request("textDocument/inlayHint", serde_json::to_value(params).unwrap()).await {
+        Ok(r) => r,
+        Err(_) => return Vec::new(),
+    };
+    if result.is_null() { return Vec::new(); }
+    let hints: Vec<lsp_types::InlayHint> = match serde_json::from_value(result) {
+        Ok(r) => r,
+        Err(_) => return Vec::new(),
+    };
+    hints.into_iter().map(|h| {
+        let label = match h.label {
+            lsp_types::InlayHintLabel::String(s) => s,
+            lsp_types::InlayHintLabel::LabelParts(parts) => {
+                parts.into_iter().map(|p| p.value).collect::<Vec<_>>().join("")
+            }
+        };
+        InlayHintInfo {
+            line: h.position.line,
+            col: h.position.character,
+            label,
+            padding_left: h.padding_left.unwrap_or(false),
+            padding_right: h.padding_right.unwrap_or(false),
+        }
+    }).collect()
+}
+
+async fn async_code_lens(transport: &Transport, uri: &lsp_types::Uri) -> Vec<CodeLensInfo> {
+    let params = lsp_types::CodeLensParams {
+        text_document: lsp_types::TextDocumentIdentifier { uri: uri.clone() },
+        work_done_progress_params: Default::default(),
+        partial_result_params: Default::default(),
+    };
+    let result = match transport.request("textDocument/codeLens", serde_json::to_value(params).unwrap()).await {
+        Ok(r) => r,
+        Err(_) => return Vec::new(),
+    };
+    if result.is_null() { return Vec::new(); }
+    let lenses: Vec<lsp_types::CodeLens> = match serde_json::from_value(result) {
+        Ok(r) => r,
+        Err(_) => return Vec::new(),
+    };
+    lenses.into_iter().filter_map(|lens| {
+        let title = lens.command.as_ref().map(|c| c.title.clone())?;
+        Some(CodeLensInfo {
+            line: lens.range.start.line,
+            title,
+        })
     }).collect()
 }
 

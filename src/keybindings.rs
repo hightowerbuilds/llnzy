@@ -24,6 +24,9 @@ pub enum Action {
     ScrollPageUp,
     ScrollPageDown,
     ToggleTerminalPanel,
+    ZoomIn,
+    ZoomOut,
+    ZoomReset,
     SwitchTab(u8),
 }
 
@@ -105,6 +108,10 @@ impl KeyBindings {
             (shift_named(NamedKey::PageUp), ScrollPageUp),
             (shift_named(NamedKey::PageDown), ScrollPageDown),
             (cmd("`"), ToggleTerminalPanel),
+            (cmd("="), ZoomIn),
+            (cmd("+"), ZoomIn),
+            (cmd("-"), ZoomOut),
+            (cmd("0"), ZoomReset),
         ];
 
         for i in 1..=9u8 {

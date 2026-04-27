@@ -90,13 +90,13 @@
   - Fuzzy matching, show file path + symbol kind
   - Click to open file and jump to symbol
 
-- [ ] **8.6 -- Inlay hints**
+- [x] **8.6 -- Inlay hints**
   - Request `textDocument/inlayHint` for visible range
   - Render inline hints: type annotations, parameter names, chain hints
   - Dimmed text styling to distinguish from actual code
   - Configurable: on/off, which kinds to show
 
-- [ ] **8.7 -- Code lens**
+- [x] **8.7 -- Code lens**
   - Request `textDocument/codeLens` on document open/change
   - Render above functions/classes: "3 references", "Run test", etc.
   - Clickable -- execute the associated command
@@ -105,7 +105,7 @@
 
 ## Phase 9: File Management
 
-- [ ] **9.4 -- Multi-file search**
+- [x] **9.4 -- Multi-file search**
   - Cmd+Shift+F: search across all project files
   - Regex support, file type filters, exclude patterns
   - Results panel: grouped by file, show surrounding context
@@ -116,7 +116,7 @@
 
 ## Phase 10: Terminal Integration
 
-- [ ] **10.3 -- Run tasks**
+- [x] **10.3 -- Run tasks**
   - Define tasks in config or detect from project files (Cargo.toml, package.json, Makefile)
   - Cmd+Shift+B: build task
   - Task output in dedicated terminal
@@ -132,7 +132,7 @@
   - Click indicator to see inline diff
   - Revert change from gutter
 
-- [ ] **11.4 -- Snippet engine**
+- [x] **11.4 -- Snippet engine**
   - Built-in snippets for common patterns per language
   - User-defined snippets in config
   - Tab stops, placeholders, choice lists, variable expansion ($TM_FILENAME, $CLIPBOARD, etc.)

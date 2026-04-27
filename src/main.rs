@@ -656,6 +656,7 @@ impl ApplicationHandler<UserEvent> for App {
                         let effects_on_ui = match active_kind {
                             Some(llnzy::workspace::TabKind::Terminal) => self.config.effects.effects_on_ui,
                             Some(llnzy::workspace::TabKind::Sketch) => true,
+                            Some(llnzy::workspace::TabKind::CodeFile) => self.config.effects.effects_on_ui,
                             _ => false,
                         };
                         let effects_mask = self.ui.as_ref().and_then(|u| {
@@ -739,6 +740,7 @@ impl ApplicationHandler<UserEvent> for App {
                 // Extract pending actions before borrowing ui for other state
                 let footer_action = self.ui.as_mut().and_then(|u| u.footer_action.take());
                 let pending_file = self.ui.as_mut().and_then(|u| u.editor_view.pending_file_tab.take());
+                let pending_task = self.ui.as_mut().and_then(|u| u.editor_view.pending_task.take());
                 let tab_bar_action = self.ui.as_mut().and_then(|u| u.tab_bar_action.take());
                 let save_response = self.ui.as_mut().and_then(|u| u.save_prompt_response.take());
 
@@ -876,6 +878,36 @@ impl ApplicationHandler<UserEvent> for App {
                         ui.active_view = ActiveView::Shells;
                     }
                     need_redraw = true;
+                }
+                // Handle pending task: create a terminal tab that runs the command
+                if let Some(task) = pending_task {
+                    let (cols, rows) = self.grid_size();
+                    let cwd = task.cwd.to_string_lossy().to_string();
+                    // Build the command string to send to the shell
+                    let cmd_str = if task.args.is_empty() {
+                        format!("{}\n", task.command)
+                    } else {
+                        format!("{} {}\n", task.command, task.args.join(" "))
+                    };
+                    match Session::new_in_dir(cols, rows, &self.config, self.proxy.clone(), Some(&cwd)) {
+                        Ok(mut session) => {
+                            // Send the command to the shell
+                            session.write(cmd_str.as_bytes());
+                            let id = self.alloc_tab_id();
+                            self.tabs.push(WorkspaceTab {
+                                content: TabContent::Terminal(Box::new(session)),
+                                name: Some(task.name),
+                                id,
+                            });
+                            self.active_tab = self.tabs.len() - 1;
+                            if let Some(ui) = &mut self.ui {
+                                ui.active_view = ActiveView::Shells;
+                            }
+                            self.recompute_layout();
+                            need_redraw = true;
+                        }
+                        Err(e) => self.error_log.error(format!("Failed to run task: {e}")),
+                    }
                 }
                 // Recompute layout if sidebar changed via Open Project
                 if sidebar_changed {
@@ -1244,6 +1276,36 @@ impl ApplicationHandler<UserEvent> for App {
                         }
                         Action::ToggleTerminalPanel => {
                             // Terminal panel in explorer removed — no-op
+                        }
+                        Action::ZoomIn => {
+                            self.config.font_size = (self.config.font_size + 1.0).min(40.0);
+                            if let Some(renderer) = &mut self.renderer {
+                                renderer.update_config(self.config.clone());
+                                renderer.invalidate_text_cache();
+                            }
+                            self.recompute_layout();
+                            self.resize_terminal_tabs();
+                            self.invalidate_and_redraw();
+                        }
+                        Action::ZoomOut => {
+                            self.config.font_size = (self.config.font_size - 1.0).max(8.0);
+                            if let Some(renderer) = &mut self.renderer {
+                                renderer.update_config(self.config.clone());
+                                renderer.invalidate_text_cache();
+                            }
+                            self.recompute_layout();
+                            self.resize_terminal_tabs();
+                            self.invalidate_and_redraw();
+                        }
+                        Action::ZoomReset => {
+                            self.config.font_size = 14.0;
+                            if let Some(renderer) = &mut self.renderer {
+                                renderer.update_config(self.config.clone());
+                                renderer.invalidate_text_cache();
+                            }
+                            self.recompute_layout();
+                            self.resize_terminal_tabs();
+                            self.invalidate_and_redraw();
                         }
                         Action::SwitchTab(n) => {
                             self.switch_tab((n - 1) as usize);

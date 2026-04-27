@@ -684,6 +684,9 @@ impl Config {
                     "toggle_error_panel" => Some(Action::ToggleErrorPanel),
                     "scroll_page_up" => Some(Action::ScrollPageUp),
                     "scroll_page_down" => Some(Action::ScrollPageDown),
+                    "zoom_in" => Some(Action::ZoomIn),
+                    "zoom_out" => Some(Action::ZoomOut),
+                    "zoom_reset" => Some(Action::ZoomReset),
                     s if s.starts_with("switch_tab_") => s
                         .strip_prefix("switch_tab_")
                         .and_then(|n| n.parse::<u8>().ok())

@@ -518,6 +518,41 @@ impl LspClient {
         Ok(Vec::new())
     }
 
+    /// Request inlay hints for a range.
+    pub async fn inlay_hints(&self, path: &Path, start_line: u32, end_line: u32) -> Result<Vec<lsp_types::InlayHint>, String> {
+        if self.state != ClientState::Running { return Ok(Vec::new()); }
+        let Some(doc) = self.open_docs.get(path) else { return Ok(Vec::new()) };
+
+        let params = lsp_types::InlayHintParams {
+            text_document: TextDocumentIdentifier { uri: doc.uri.clone() },
+            range: lsp_types::Range {
+                start: Position { line: start_line, character: 0 },
+                end: Position { line: end_line, character: 0 },
+            },
+            work_done_progress_params: Default::default(),
+        };
+
+        let result = self.transport.request("textDocument/inlayHint", serde_json::to_value(params).unwrap()).await?;
+        if result.is_null() { return Ok(Vec::new()); }
+        serde_json::from_value(result).map_err(|e| e.to_string())
+    }
+
+    /// Request code lenses for a document.
+    pub async fn code_lens(&self, path: &Path) -> Result<Vec<lsp_types::CodeLens>, String> {
+        if self.state != ClientState::Running { return Ok(Vec::new()); }
+        let Some(doc) = self.open_docs.get(path) else { return Ok(Vec::new()) };
+
+        let params = lsp_types::CodeLensParams {
+            text_document: TextDocumentIdentifier { uri: doc.uri.clone() },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        };
+
+        let result = self.transport.request("textDocument/codeLens", serde_json::to_value(params).unwrap()).await?;
+        if result.is_null() { return Ok(Vec::new()); }
+        serde_json::from_value(result).map_err(|e| e.to_string())
+    }
+
     /// Get the URI for an open document (synchronous lookup).
     pub fn doc_uri(&self, path: &Path) -> Option<Uri> {
         self.open_docs.get(path).map(|d| d.uri.clone())

@@ -25,6 +25,8 @@ pub struct KeyAction {
     pub open_find_replace: bool,
     pub find_references: bool,
     pub workspace_symbols: bool,
+    pub project_search: bool,
+    pub run_task: bool,
 }
 
 /// Auto-closing bracket pairs.
@@ -139,6 +141,18 @@ pub fn handle_editor_keys(
         // Cmd+H: open find & replace bar
         if cmd && !shift && input.key_pressed(egui::Key::H) {
             action.open_find_replace = true;
+            return;
+        }
+
+        // Cmd+Shift+B: run build task
+        if cmd && shift && input.key_pressed(egui::Key::B) {
+            action.run_task = true;
+            return;
+        }
+
+        // Cmd+Shift+G: project-wide search
+        if cmd && shift && input.key_pressed(egui::Key::G) {
+            action.project_search = true;
             return;
         }
 
@@ -532,22 +546,32 @@ pub fn handle_editor_keys(
                         view.cursor.clear_selection();
                         view.cursor.pos = start;
                     }
-                    for ch in text.chars() {
-                        if PAIRS.iter().any(|&(_, c)| c == ch) {
-                            let next = buf.char_at(view.cursor.pos);
-                            if next == Some(ch) {
-                                view.cursor.pos.col += 1;
-                                continue;
+
+                    // Bulk insert for multi-character pastes (Wispr Flow, IME, etc.)
+                    // Skip auto-pairing for bulk text to avoid quadratic behavior.
+                    if text.chars().count() > 1 {
+                        let end_pos = buf.compute_end_pos_pub(view.cursor.pos, &text);
+                        buf.insert(view.cursor.pos, &text);
+                        view.cursor.pos = end_pos;
+                    } else {
+                        // Single character: apply auto-pairing logic
+                        for ch in text.chars() {
+                            if PAIRS.iter().any(|&(_, c)| c == ch) {
+                                let next = buf.char_at(view.cursor.pos);
+                                if next == Some(ch) {
+                                    view.cursor.pos.col += 1;
+                                    continue;
+                                }
                             }
-                        }
-                        buf.insert_char(view.cursor.pos, ch);
-                        view.cursor.pos.col += 1;
-                        if let Some(&(_, close)) = PAIRS.iter().find(|&&(o, _)| o == ch) {
-                            let next = buf.char_at(view.cursor.pos);
-                            let should_pair = next.is_none()
-                                || next.is_some_and(|c| c.is_whitespace() || ")]}\"'`".contains(c));
-                            if should_pair {
-                                buf.insert_char(view.cursor.pos, close);
+                            buf.insert_char(view.cursor.pos, ch);
+                            view.cursor.pos.col += 1;
+                            if let Some(&(_, close)) = PAIRS.iter().find(|&&(o, _)| o == ch) {
+                                let next = buf.char_at(view.cursor.pos);
+                                let should_pair = next.is_none()
+                                    || next.is_some_and(|c| c.is_whitespace() || ")]}\"'`".contains(c));
+                                if should_pair {
+                                    buf.insert_char(view.cursor.pos, close);
+                                }
                             }
                         }
                     }

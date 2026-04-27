@@ -16,8 +16,10 @@ pub mod selection;
 pub mod session;
 pub mod sketch;
 pub mod stacker;
+pub mod tasks;
 pub mod terminal;
 pub mod theme;
+pub mod theme_store;
 pub mod ui;
 pub mod workspace;
 
