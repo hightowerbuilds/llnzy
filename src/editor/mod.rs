@@ -5,7 +5,9 @@ pub mod git_gutter;
 pub mod history;
 pub mod keymap;
 pub mod perf;
+pub mod project_search;
 pub mod search;
+pub mod snippet;
 pub mod syntax;
 
 use std::path::PathBuf;

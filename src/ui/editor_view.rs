@@ -9,7 +9,7 @@ use crate::editor::git_gutter::GutterChange;
 use crate::editor::search::EditorSearch;
 use crate::editor::syntax::{FoldRange, HighlightGroup, SyntaxEngine};
 use crate::editor::BufferView;
-use crate::lsp::{DiagSeverity, FileDiagnostic};
+use crate::lsp::{CodeLensInfo, DiagSeverity, FileDiagnostic, InlayHintInfo};
 
 /// Result from rendering that the host needs to act on.
 #[derive(Default)]
@@ -29,6 +29,8 @@ pub(crate) fn render_text_editor(
     hover_text: Option<&str>,
     completions: Option<(&[&crate::lsp::CompletionItem], usize)>,
     signature_help: Option<&crate::lsp::SignatureInfo>,
+    inlay_hints: &[InlayHintInfo],
+    code_lenses: &[CodeLensInfo],
     status_msg: &mut Option<String>,
     clipboard_out: &mut Option<String>,
     clipboard_in: &mut Option<String>,
@@ -54,6 +56,7 @@ pub(crate) fn render_text_editor(
 
     // Handle keyboard input (may modify buffer)
     let content_before = buf.len_chars();
+    let cursor_before = view.cursor.pos;
     let ctx = ui.ctx().clone();
     let completion_active = completions.is_some();
     result.key_action = handle_editor_keys(
@@ -70,6 +73,7 @@ pub(crate) fn render_text_editor(
         view.tree_dirty = true;
         view.folded_ranges.clear();
     }
+    let cursor_moved = view.cursor.pos != cursor_before;
 
     view.cursor.clamp(buf);
     let foldable_ranges = view
@@ -82,15 +86,19 @@ pub(crate) fn render_text_editor(
     let visible_doc_lines = visible_doc_lines(line_count, &view.folded_ranges);
     let visible_line_count = visible_doc_lines.len().max(1);
 
-    // Vertical scroll
+    // Vertical scroll -- only follow cursor when it moved (keyboard/edit),
+    // otherwise allow free mouse-wheel scrolling.
     let available_h = ui.available_height() - 20.0;
     let visible_lines = (available_h / line_height).max(1.0) as usize;
-    let cursor_visible_line = visible_index_for_doc_line(&visible_doc_lines, view.cursor.pos.line);
-    view.scroll_line = view.scroll_line.min(visible_line_count.saturating_sub(1));
-    if cursor_visible_line < view.scroll_line {
-        view.scroll_line = cursor_visible_line;
-    } else if cursor_visible_line >= view.scroll_line + visible_lines {
-        view.scroll_line = cursor_visible_line.saturating_sub(visible_lines - 1);
+    let max_scroll = visible_line_count.saturating_sub(1);
+    view.scroll_line = view.scroll_line.min(max_scroll);
+    if cursor_moved {
+        let cursor_visible_line = visible_index_for_doc_line(&visible_doc_lines, view.cursor.pos.line);
+        if cursor_visible_line < view.scroll_line {
+            view.scroll_line = cursor_visible_line;
+        } else if cursor_visible_line >= view.scroll_line + visible_lines {
+            view.scroll_line = cursor_visible_line.saturating_sub(visible_lines - 1);
+        }
     }
 
     // Horizontal scroll
@@ -166,7 +174,7 @@ pub(crate) fn render_text_editor(
             let scroll_lines = (-scroll_delta / line_height).round() as i32;
             if scroll_lines > 0 {
                 view.scroll_line =
-                    (view.scroll_line + scroll_lines as usize).min(visible_line_count.saturating_sub(1));
+                    (view.scroll_line + scroll_lines as usize).min(max_scroll);
             } else if scroll_lines < 0 {
                 view.scroll_line = view.scroll_line.saturating_sub((-scroll_lines) as usize);
             }
@@ -485,6 +493,40 @@ pub(crate) fn render_text_editor(
                 font.clone(),
                 egui::Color32::from_rgb(110, 120, 145),
             );
+        }
+
+        // Inlay hints for this line (rendered after the code text)
+        let hint_color = egui::Color32::from_rgba_unmultiplied(140, 150, 175, 160);
+        let hint_font = egui::FontId::monospace(editor_font_size * 0.85);
+        for hint in inlay_hints.iter().filter(|h| h.line as usize == line_idx) {
+            let hint_x = text_x_base + hint.col as f32 * char_width;
+            let label = format!(
+                "{}{}{}",
+                if hint.padding_left { " " } else { "" },
+                hint.label,
+                if hint.padding_right { " " } else { "" },
+            );
+            painter.with_clip_rect(text_clip).text(
+                egui::pos2(hint_x, y + 1.0),
+                egui::Align2::LEFT_TOP,
+                &label,
+                hint_font.clone(),
+                hint_color,
+            );
+        }
+
+        // Code lenses for this line (rendered above the line, dimmed)
+        for lens in code_lenses.iter().filter(|l| l.line as usize == line_idx) {
+            let lens_y = y - line_height * 0.5;
+            if lens_y >= rect.top() {
+                painter.with_clip_rect(text_clip).text(
+                    egui::pos2(text_x_base, lens_y),
+                    egui::Align2::LEFT_TOP,
+                    &lens.title,
+                    egui::FontId::monospace(editor_font_size * 0.8),
+                    egui::Color32::from_rgba_unmultiplied(120, 140, 180, 140),
+                );
+            }
         }
     }
 

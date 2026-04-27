@@ -6,7 +6,9 @@ use tokio::sync::oneshot;
 use crate::editor::EditorState;
 use crate::editor::file_watcher::{FileChange, FileWatcher};
 use crate::editor::perf;
+use crate::editor::project_search::ProjectSearch;
 use crate::editor::search::EditorSearch;
+use crate::editor::snippet::ActiveSnippet;
 use crate::explorer::{format_size, ExplorerState, FileContent};
 use crate::lsp::LspManager;
 
@@ -21,6 +23,8 @@ pub struct LspPending {
     pub signature_help: Option<oneshot::Receiver<Option<crate::lsp::SignatureInfo>>>,
     pub references: Option<oneshot::Receiver<Vec<crate::lsp::ReferenceLocation>>>,
     pub format: Option<oneshot::Receiver<Vec<crate::lsp::FormatEdit>>>,
+    pub inlay_hints: Option<oneshot::Receiver<Vec<crate::lsp::InlayHintInfo>>>,
+    pub code_lens: Option<oneshot::Receiver<Vec<crate::lsp::CodeLensInfo>>>,
 }
 
 /// Persistent editor UI state -- lives alongside the ExplorerState.
@@ -60,6 +64,19 @@ pub struct EditorViewState {
     pub editor_search: EditorSearch,
     /// Pending async LSP requests.
     pub pending: LspPending,
+    /// Cached inlay hints for the active buffer.
+    pub inlay_hints: Vec<crate::lsp::InlayHintInfo>,
+    /// Cached code lenses for the active buffer.
+    pub code_lenses: Vec<crate::lsp::CodeLensInfo>,
+    /// Multi-file project search state.
+    pub project_search: ProjectSearch,
+    /// Task picker popup.
+    pub task_picker: Option<Vec<crate::tasks::Task>>,
+    pub task_picker_selected: usize,
+    /// Task to run (consumed by main loop to create terminal tab).
+    pub pending_task: Option<crate::tasks::Task>,
+    /// Active snippet being navigated with Tab/Shift+Tab.
+    pub active_snippet: Option<ActiveSnippet>,
     /// File watcher for detecting external changes.
     pub file_watcher: Option<FileWatcher>,
     /// Pending reload prompt: (buffer_index, path, is_deleted).
@@ -107,6 +124,13 @@ impl Default for EditorViewState {
             workspace_symbols_query: String::new(),
             editor_search: EditorSearch::default(),
             pending: LspPending::default(),
+            inlay_hints: Vec::new(),
+            code_lenses: Vec::new(),
+            project_search: ProjectSearch::default(),
+            task_picker: None,
+            task_picker_selected: 0,
+            pending_task: None,
+            active_snippet: Option::None,
             file_watcher: None,
             reload_prompt: None,
             last_change_sent: Instant::now(),
@@ -149,6 +173,9 @@ impl EditorViewState {
                 }
             }
         }
+
+        // Request inlay hints and code lenses for the new file
+        self.request_hints_and_lenses();
 
         Ok(idx)
     }
@@ -405,6 +432,24 @@ impl EditorViewState {
         }
     }
 
+    /// Request inlay hints and code lenses for the active buffer (non-blocking).
+    pub fn request_hints_and_lenses(&mut self) {
+        let Some(lsp) = &self.lsp else { return };
+        let active = self.editor.active;
+        if active >= self.editor.buffers.len() { return }
+        let buf = &self.editor.buffers[active];
+        let view = &self.editor.views[active];
+        if let (Some(lang_id), Some(path)) = (view.lang_id, buf.path()) {
+            let line_count = buf.line_count() as u32;
+            if let Some(rx) = lsp.inlay_hints_async(path, lang_id, 0, line_count) {
+                self.pending.inlay_hints = Some(rx);
+            }
+            if let Some(rx) = lsp.code_lens_async(path, lang_id) {
+                self.pending.code_lens = Some(rx);
+            }
+        }
+    }
+
     pub fn lsp_did_save(&mut self) {
         let Some(lsp) = &mut self.lsp else { return };
         let active = self.editor.active;
@@ -540,6 +585,28 @@ pub(crate) fn render_explorer_view(
         }
     }
 
+    if let Some(rx) = &mut editor_state.pending.inlay_hints {
+        match rx.try_recv() {
+            Ok(hints) => {
+                editor_state.inlay_hints = hints;
+                editor_state.pending.inlay_hints = None;
+            }
+            Err(oneshot::error::TryRecvError::Closed) => { editor_state.pending.inlay_hints = None; }
+            Err(oneshot::error::TryRecvError::Empty) => { need_repaint = true; }
+        }
+    }
+
+    if let Some(rx) = &mut editor_state.pending.code_lens {
+        match rx.try_recv() {
+            Ok(lenses) => {
+                editor_state.code_lenses = lenses;
+                editor_state.pending.code_lens = None;
+            }
+            Err(oneshot::error::TryRecvError::Closed) => { editor_state.pending.code_lens = None; }
+            Err(oneshot::error::TryRecvError::Empty) => { need_repaint = true; }
+        }
+    }
+
     if need_repaint {
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
     }
@@ -663,6 +730,9 @@ pub(crate) fn render_explorer_view(
             _ => None,
         };
 
+        let inlay_hints_snapshot = editor_state.inlay_hints.clone();
+        let code_lenses_snapshot = editor_state.code_lenses.clone();
+
         let buf = &mut editor_state.editor.buffers[active];
         let view = &mut editor_state.editor.views[active];
         let syntax = &editor_state.editor.syntax;
@@ -678,6 +748,8 @@ pub(crate) fn render_explorer_view(
             hover_text.as_deref(),
             completions_arg,
             sig_help.as_ref(),
+            &inlay_hints_snapshot,
+            &code_lenses_snapshot,
             &mut editor_state.status_msg,
             &mut editor_state.clipboard_out,
             &mut editor_state.clipboard_in,
@@ -708,7 +780,15 @@ pub(crate) fn render_explorer_view(
                 }
             }
         }
-        if was_modified && !is_modified { editor_state.lsp_did_save(); }
+        // Clear active snippet on edit (snippet stops become stale)
+        if len_before != len_after && editor_state.active_snippet.is_some() {
+            editor_state.active_snippet = None;
+        }
+
+        if was_modified && !is_modified {
+            editor_state.lsp_did_save();
+            editor_state.request_hints_and_lenses();
+        }
 
         // Handle LSP key actions
         // Goto definition (async -- result arrives via pending.definition)
@@ -827,6 +907,181 @@ pub(crate) fn render_explorer_view(
         if frame_result.key_action.open_find_replace {
             editor_state.editor_search.open_replace();
             editor_state.editor_search.mark_dirty();
+        }
+        if frame_result.key_action.project_search {
+            editor_state.project_search.open();
+        }
+        if frame_result.key_action.run_task {
+            let tasks = crate::tasks::detect_tasks(&explorer.root);
+            if tasks.is_empty() {
+                editor_state.status_msg = Some("No tasks detected in project".to_string());
+            } else {
+                editor_state.task_picker = Some(tasks);
+                editor_state.task_picker_selected = 0;
+            }
+        }
+
+        // ── Project search panel ──
+        if editor_state.project_search.active {
+            editor_state.project_search.poll();
+            if editor_state.project_search.is_searching() {
+                ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+            }
+
+            let mut navigate_to: Option<(std::path::PathBuf, usize, usize)> = None;
+            let mut dismiss = false;
+            let mut do_search = false;
+
+            egui::Window::new("Project Search")
+                .id(egui::Id::new("project_search_panel"))
+                .fixed_pos(egui::pos2(80.0, 40.0))
+                .default_size(egui::Vec2::new(550.0, 400.0))
+                .resizable(true)
+                .show(ui.ctx(), |ui| {
+                    ui.horizontal(|ui| {
+                        let mut query = editor_state.project_search.query.clone();
+                        let resp = ui.add(
+                            egui::TextEdit::singleline(&mut query)
+                                .hint_text("Search in project...")
+                                .desired_width(ui.available_width() - 100.0)
+                                .text_color(egui::Color32::WHITE)
+                                .font(egui::TextStyle::Monospace),
+                        );
+                        resp.request_focus();
+                        if query != editor_state.project_search.query {
+                            editor_state.project_search.query = query;
+                        }
+
+                        let regex_bg = if editor_state.project_search.regex_mode {
+                            egui::Color32::from_rgb(60, 100, 180)
+                        } else {
+                            egui::Color32::from_rgb(50, 52, 62)
+                        };
+                        if ui.add(egui::Button::new(egui::RichText::new(".*").size(11.0).color(egui::Color32::WHITE)).fill(regex_bg).min_size(egui::Vec2::new(28.0, 20.0))).clicked() {
+                            editor_state.project_search.regex_mode = !editor_state.project_search.regex_mode;
+                        }
+
+                        if ui.add(egui::Button::new(egui::RichText::new("Search").size(12.0).color(egui::Color32::WHITE)).fill(egui::Color32::from_rgb(40, 100, 200))).clicked() {
+                            do_search = true;
+                        }
+                    });
+
+                    if ui.input(|i| i.key_pressed(egui::Key::Escape)) { dismiss = true; }
+                    if ui.input(|i| i.key_pressed(egui::Key::Enter)) { do_search = true; }
+
+                    ui.separator();
+
+                    if editor_state.project_search.is_searching() {
+                        ui.label(egui::RichText::new("Searching...").size(12.0).color(egui::Color32::from_rgb(150, 155, 170)));
+                    }
+
+                    if let Some(result) = &editor_state.project_search.result {
+                        ui.label(egui::RichText::new(format!("{} matches", result.matches.len())).size(11.0).color(egui::Color32::from_rgb(150, 155, 170)));
+
+                        let selected = editor_state.project_search.selected;
+                        egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
+                            for (i, m) in result.matches.iter().enumerate() {
+                                let bg = if i == selected { egui::Color32::from_rgb(50, 80, 130) } else { egui::Color32::TRANSPARENT };
+                                let text_color = if i == selected { egui::Color32::WHITE } else { egui::Color32::from_rgb(200, 205, 215) };
+                                let file_name = m.path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
+
+                                egui::Frame::none().fill(bg).inner_margin(egui::Margin::symmetric(4.0, 1.0)).show(ui, |ui| {
+                                    let resp = ui.horizontal(|ui| {
+                                        ui.label(egui::RichText::new(format!("{}:{}", file_name, m.line + 1)).size(11.0).color(egui::Color32::from_rgb(100, 180, 255)).monospace());
+                                        ui.label(egui::RichText::new(&m.line_text).size(11.0).color(text_color).monospace());
+                                    }).response;
+                                    if resp.interact(egui::Sense::click()).clicked() {
+                                        navigate_to = Some((m.path.clone(), m.line, m.col));
+                                    }
+                                });
+                            }
+                        });
+                    }
+                });
+
+            // Keyboard nav
+            let count = editor_state.project_search.match_count();
+            if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
+                editor_state.project_search.selected = (editor_state.project_search.selected + 1).min(count.saturating_sub(1));
+            }
+            if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
+                editor_state.project_search.selected = editor_state.project_search.selected.saturating_sub(1);
+            }
+
+            if do_search {
+                let root = explorer.root.clone();
+                editor_state.project_search.search(&root);
+            }
+            if dismiss {
+                editor_state.project_search.close();
+            }
+            if let Some((path, line, col)) = navigate_to {
+                editor_state.project_search.close();
+                match editor_state.open_file(path) {
+                    Ok(idx) => {
+                        let view = &mut editor_state.editor.views[idx];
+                        view.cursor.pos = crate::editor::buffer::Position::new(line, col);
+                        view.cursor.clear_selection();
+                        view.cursor.desired_col = None;
+                        editor_state.status_msg = None;
+                    }
+                    Err(e) => editor_state.status_msg = Some(format!("Failed to open: {e}")),
+                }
+            }
+        }
+
+        // Render task picker popup
+        if editor_state.task_picker.is_some() {
+            let mut selected_task: Option<crate::tasks::Task> = None;
+            let mut dismiss = false;
+
+            let tasks = editor_state.task_picker.as_ref().unwrap();
+            let selected = editor_state.task_picker_selected;
+
+            egui::Window::new("Run Task")
+                .id(egui::Id::new("task_picker"))
+                .fixed_pos(egui::pos2(
+                    ui.ctx().screen_rect().center().x - 180.0,
+                    ui.ctx().screen_rect().center().y - 100.0,
+                ))
+                .resizable(false)
+                .show(ui.ctx(), |ui| {
+                    ui.label(egui::RichText::new("Select a task to run:").size(13.0).color(egui::Color32::WHITE));
+                    ui.separator();
+
+                    if ui.input(|i| i.key_pressed(egui::Key::Escape)) { dismiss = true; }
+                    if ui.input(|i| i.key_pressed(egui::Key::Enter)) && !tasks.is_empty() {
+                        selected_task = Some(tasks[selected].clone());
+                    }
+
+                    for (i, task) in tasks.iter().enumerate() {
+                        let bg = if i == selected { egui::Color32::from_rgb(50, 80, 130) } else { egui::Color32::TRANSPARENT };
+                        let text_color = if i == selected { egui::Color32::WHITE } else { egui::Color32::from_rgb(200, 205, 215) };
+
+                        egui::Frame::none().fill(bg).inner_margin(egui::Margin::symmetric(8.0, 4.0)).show(ui, |ui| {
+                            let resp = ui.label(egui::RichText::new(&task.name).size(13.0).color(text_color));
+                            if resp.interact(egui::Sense::click()).clicked() {
+                                selected_task = Some(task.clone());
+                            }
+                        });
+                    }
+                });
+
+            let task_count = editor_state.task_picker.as_ref().map_or(0, |t| t.len());
+            if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
+                editor_state.task_picker_selected = (editor_state.task_picker_selected + 1).min(task_count.saturating_sub(1));
+            }
+            if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
+                editor_state.task_picker_selected = editor_state.task_picker_selected.saturating_sub(1);
+            }
+
+            if dismiss {
+                editor_state.task_picker = None;
+            }
+            if let Some(task) = selected_task {
+                editor_state.pending_task = Some(task);
+                editor_state.task_picker = None;
+            }
         }
 
         // Render workspace symbols popup if open
