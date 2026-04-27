@@ -420,12 +420,19 @@ impl Renderer {
             self.rects.draw_rects(&self.gpu, target, encoder, &bg_rects);
         }
 
-        // Decorations
-        let deco_rects: Vec<_> = terminal
+        // Decorations (underlines, strikethrough, etc.)
+        let mut deco_rects: Vec<_> = terminal
             .decoration_rects(&self.config, cw, ch)
             .into_iter()
             .map(|(x, y, w, h, c)| (x + rect.x, y + rect.y, w, h, c))
             .collect();
+        // URL underline decorations
+        let url_rects: Vec<_> = terminal
+            .url_decoration_rects(cw, ch)
+            .into_iter()
+            .map(|(x, y, w, h, c)| (x + rect.x, y + rect.y, w, h, c))
+            .collect();
+        deco_rects.extend(url_rects);
         if !deco_rects.is_empty() {
             self.rects
                 .draw_rects(&self.gpu, target, encoder, &deco_rects);

@@ -81,6 +81,13 @@ pub struct EditorViewState {
     pub file_watcher: Option<FileWatcher>,
     /// Pending reload prompt: (buffer_index, path, is_deleted).
     pub reload_prompt: Option<(usize, PathBuf, bool)>,
+    /// Last edit info for incremental LSP sync: (start_pos, end_pos, new_text).
+    /// Set by the editor after each edit, consumed by lsp_did_change.
+    pub last_edit: Option<(crate::editor::buffer::Position, crate::editor::buffer::Position, String)>,
+    /// LSP status text displayed in the status bar (e.g. "rust-analyzer" or "Starting...").
+    pub lsp_status: String,
+    /// Last time server health was checked (for auto-restart of crashed servers).
+    last_health_check: Instant,
     /// Debounce: last time LSP didChange was sent.
     last_change_sent: Instant,
     /// File to open as a workspace tab (set by sidebar click, consumed by main loop).
@@ -139,6 +146,9 @@ impl Default for EditorViewState {
             active_snippet: Option::None,
             file_watcher: None,
             reload_prompt: None,
+            last_edit: None,
+            lsp_status: String::new(),
+            last_health_check: Instant::now(),
             last_change_sent: Instant::now(),
             pending_file_tab: None,
             sidebar_rename: None,
@@ -176,9 +186,18 @@ impl EditorViewState {
                 if let Some(root) = LspManager::detect_root(path) {
                     lsp.set_root(root);
                 }
+                self.lsp_status = format!("LSP: Starting {lang_id}...");
                 if lsp.ensure_server(lang_id) {
                     let text = buf.text();
                     lsp.did_open(path, lang_id, &text);
+                    let status = lsp.server_status(lang_id);
+                    self.lsp_status = if status.is_empty() {
+                        String::new()
+                    } else {
+                        format!("LSP: {status}")
+                    };
+                } else {
+                    self.lsp_status = format!("LSP: {lang_id} unavailable");
                 }
             }
         }
@@ -203,8 +222,13 @@ impl EditorViewState {
         // Skip LSP sync for very large files (sync on save only)
         if buf.line_count() > perf::LSP_CHANGE_LINE_LIMIT { return }
         if let (Some(lang_id), Some(path)) = (view.lang_id, buf.path()) {
-            let text = buf.text();
-            lsp.did_change(path, lang_id, &text);
+            // Try incremental sync if we have the last edit info
+            if let Some((start, end, new_text)) = self.last_edit.take() {
+                lsp.did_change_incremental(path, lang_id, start.line as u32, start.col as u32, end.line as u32, end.col as u32, &new_text);
+            } else {
+                let text = buf.text();
+                lsp.did_change(path, lang_id, &text);
+            }
             self.last_change_sent = now;
         }
     }
@@ -620,6 +644,32 @@ pub(crate) fn render_explorer_view(
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
     }
 
+    // ── Update LSP status and check server health ──
+    {
+        let active = editor_state.editor.active;
+        if active < editor_state.editor.views.len() {
+            let lang_id = editor_state.editor.views[active].lang_id;
+            if let (Some(lang_id), Some(lsp)) = (lang_id, &mut editor_state.lsp) {
+                // Update status text for the status bar
+                let status = lsp.server_status(lang_id);
+                if status.is_empty() {
+                    editor_state.lsp_status.clear();
+                } else {
+                    editor_state.lsp_status = format!("LSP: {status}");
+                }
+
+                // Periodically check server health (every 5 seconds)
+                let now = Instant::now();
+                if now.duration_since(editor_state.last_health_check).as_secs() >= 5 {
+                    editor_state.last_health_check = now;
+                    lsp.check_server_health();
+                }
+            } else {
+                editor_state.lsp_status.clear();
+            }
+        }
+    }
+
     // ── Poll file watcher for external changes ──
     if let Some(watcher) = &mut editor_state.file_watcher {
         for change in watcher.poll() {
@@ -741,6 +791,7 @@ pub(crate) fn render_explorer_view(
 
         let inlay_hints_snapshot = editor_state.inlay_hints.clone();
         let code_lenses_snapshot = editor_state.code_lenses.clone();
+        let lsp_status_snapshot = editor_state.lsp_status.clone();
 
         let buf = &mut editor_state.editor.buffers[active];
         let view = &mut editor_state.editor.views[active];
@@ -763,11 +814,26 @@ pub(crate) fn render_explorer_view(
             &mut editor_state.clipboard_out,
             &mut editor_state.clipboard_in,
             &mut editor_state.editor_search,
+            &lsp_status_snapshot,
         );
 
         let len_after = editor_state.editor.buffers[active].len_chars();
         let is_modified = editor_state.editor.buffers[active].is_modified();
         if len_before != len_after {
+            // Capture last_edit info for incremental LSP sync.
+            // cursor_before was the position before editing; the cursor moved to the new position.
+            let cursor_before = frame_result.cursor_before;
+            let cursor_after = editor_state.editor.views[active].cursor.pos;
+            let chars_delta = len_after as i64 - len_before as i64;
+            if chars_delta > 0 {
+                // Text was inserted: range is empty at cursor_before, new_text is what was inserted
+                let new_text = editor_state.editor.buffers[active].text_range(cursor_before, cursor_after);
+                editor_state.last_edit = Some((cursor_before, cursor_before, new_text));
+            } else {
+                // Text was deleted: the range that was removed is from cursor_after to cursor_before
+                // (delete key goes forward, backspace goes backward)
+                editor_state.last_edit = Some((cursor_after, cursor_before, String::new()));
+            }
             editor_state.lsp_did_change();
             editor_state.hover_text = None; // Dismiss hover on edit
             if editor_state.editor_search.active {

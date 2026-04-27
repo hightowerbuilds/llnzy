@@ -210,23 +210,23 @@
 
 > Quality-of-life improvements for the terminal and language server integration.
 
-- [ ] **9.1 -- Terminal tab titles**
+- [x] **9.1 -- Terminal tab titles**
   - Show the running process name in the tab title (e.g. "cargo build" instead of "Shell 1")
   - Parse from terminal title escape sequences or process tree
 
-- [ ] **9.2 -- Terminal link detection**
+- [x] **9.2 -- Terminal link detection**
   - Detect URLs in terminal output, render as underlined + clickable
   - Click to open in default browser
 
-- [ ] **9.3 -- LSP incremental sync**
+- [x] **9.3 -- LSP incremental sync**
   - Send only changed text ranges instead of full document on each edit
   - Reduces LSP traffic for large files
 
-- [ ] **9.4 -- LSP status in status bar**
+- [x] **9.4 -- LSP status in status bar**
   - Show language server state: starting, running, error, not available
   - Click to see server logs or restart
 
-- [ ] **9.5 -- Auto-restart crashed servers**
+- [x] **9.5 -- Auto-restart crashed servers**
   - Detect when a language server process dies
   - Automatically restart and re-open documents
 
