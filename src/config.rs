@@ -90,6 +90,7 @@ pub struct EditorConfig {
     pub word_wrap: bool,
     pub visible_whitespace: bool,
     pub font_size: Option<f32>,
+    pub sidebar_font_size: f32,
     pub languages: HashMap<String, EditorLanguageConfig>,
 }
 
@@ -121,6 +122,7 @@ impl Default for EditorConfig {
             word_wrap: false,
             visible_whitespace: false,
             font_size: None,
+            sidebar_font_size: 13.0,
             languages: HashMap::new(),
         }
     }
@@ -627,6 +629,9 @@ impl Config {
             if let Some(font_size) = editor.font_size {
                 self.editor.font_size = Some(font_size.clamp(8.0, 40.0));
             }
+            if let Some(sidebar_font_size) = editor.sidebar_font_size {
+                self.editor.sidebar_font_size = sidebar_font_size.clamp(8.0, 24.0);
+            }
             if let Some(languages) = editor.languages {
                 for (lang, lang_config) in languages {
                     let existing = self.editor.languages.entry(lang).or_default();
@@ -815,6 +820,7 @@ struct EditorFileConfig {
     word_wrap: Option<bool>,
     visible_whitespace: Option<bool>,
     font_size: Option<f32>,
+    sidebar_font_size: Option<f32>,
     languages: Option<HashMap<String, EditorLanguageFileConfig>>,
     syntax_colors: Option<HashMap<String, String>>,
 }

@@ -167,6 +167,7 @@ Configure code editor behavior. Language-specific overrides use the tree-sitter 
 | `word_wrap` | boolean | `false` | Stores the preferred wrap mode and shows it in editor status. |
 | `visible_whitespace` | boolean | `false` | Render visible markers for spaces and tabs. |
 | `font_size` | float | terminal font minus `2.0` | Code editor font size. |
+| `sidebar_font_size` | float | `13.0` | Font size for the sidebar file tree text. Clamped to 8.0-24.0. |
 
 ```toml
 [editor]
@@ -176,6 +177,7 @@ rulers = [80, 100]
 word_wrap = false
 visible_whitespace = true
 font_size = 14.0
+sidebar_font_size = 13.0
 
 [editor.languages.rust]
 tab_size = 4

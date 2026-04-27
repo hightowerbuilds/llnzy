@@ -85,6 +85,12 @@ pub struct EditorViewState {
     last_change_sent: Instant,
     /// File to open as a workspace tab (set by sidebar click, consumed by main loop).
     pub pending_file_tab: Option<(std::path::PathBuf, usize)>,
+    /// Sidebar file/folder rename state: (path being renamed, current input text).
+    pub sidebar_rename: Option<(std::path::PathBuf, String)>,
+    /// Sidebar delete confirmation: path to delete.
+    pub sidebar_delete_confirm: Option<std::path::PathBuf>,
+    /// Sidebar new file/folder input: (parent dir, input text, is_folder).
+    pub sidebar_new_entry: Option<(std::path::PathBuf, String, bool)>,
 }
 
 /// State for the auto-completion popup.
@@ -135,6 +141,9 @@ impl Default for EditorViewState {
             reload_prompt: None,
             last_change_sent: Instant::now(),
             pending_file_tab: None,
+            sidebar_rename: None,
+            sidebar_delete_confirm: None,
+            sidebar_new_entry: None,
         }
     }
 }
@@ -1352,7 +1361,7 @@ fn render_file_browser(
     egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
         // Collect click actions to apply after iteration (avoid borrow conflicts)
         let mut action: Option<TreeAction> = None;
-        render_tree_nodes(ui, &mut explorer.tree, &explorer.root, 0, &mut action);
+        render_tree_nodes(ui, &mut explorer.tree, &explorer.root, 0, &mut action, 13.0);
 
         match action {
             Some(TreeAction::OpenFile(path)) => {
@@ -1368,7 +1377,7 @@ fn render_file_browser(
             Some(TreeAction::Toggle(indices)) => {
                 toggle_at(&mut explorer.tree, &indices);
             }
-            None => {}
+            _ => {} // Other actions not used in standalone file browser
         }
     });
 }
@@ -1376,6 +1385,18 @@ fn render_file_browser(
 enum TreeAction {
     OpenFile(std::path::PathBuf),
     Toggle(Vec<usize>),
+    /// Copy the absolute path to clipboard.
+    CopyAbsPath(std::path::PathBuf),
+    /// Copy the relative path (from project root) to clipboard.
+    CopyRelPath(std::path::PathBuf),
+    /// Begin rename for a file or folder.
+    Rename(std::path::PathBuf),
+    /// Request delete confirmation for a file or folder.
+    Delete(std::path::PathBuf),
+    /// Create new file inside the given directory.
+    NewFile(std::path::PathBuf),
+    /// Create new folder inside the given directory.
+    NewFolder(std::path::PathBuf),
 }
 
 /// Recursively render tree nodes.
@@ -1385,6 +1406,7 @@ fn render_tree_nodes(
     root: &std::path::Path,
     depth: usize,
     action: &mut Option<TreeAction>,
+    font_size: f32,
 ) {
     let indent = depth as f32 * 16.0;
     let dir_color = egui::Color32::from_rgb(100, 180, 255);
@@ -1394,46 +1416,53 @@ fn render_tree_nodes(
     for (i, node) in nodes.iter().enumerate() {
         if action.is_some() { break; } // Only one action per frame
 
-        ui.horizontal(|ui| {
+        let resp = ui.horizontal(|ui| {
             ui.add_space(indent);
 
             if node.is_dir {
-                let arrow = if node.expanded { "v " } else { "> " };
-                let label = format!("{arrow}{}", node.name);
+                let folder_icon = if node.expanded { "v " } else { "> " };
+                let label = format!("{folder_icon}{}", node.name);
                 let resp = ui.add(
-                    egui::Label::new(egui::RichText::new(&label).size(13.0).color(dir_color).strong())
+                    egui::Label::new(egui::RichText::new(&label).size(font_size).color(dir_color).strong())
                         .sense(egui::Sense::click()),
                 );
                 if resp.clicked() {
-                    // Build path to this node for toggle
                     let mut indices = Vec::new();
-                    // We need the index path — for top-level it's just [i]
-                    // For nested, the caller builds it. Simplified: store index at this level.
                     indices.push(i);
                     *action = Some(TreeAction::Toggle(indices));
                 }
+                resp
             } else {
+                // File type icon
+                if let Some((icon, color)) = file_type_icon(&node.name) {
+                    ui.label(egui::RichText::new(icon).size(font_size).color(color).strong());
+                }
                 let resp = ui.add(
-                    egui::Label::new(egui::RichText::new(&node.name).size(13.0).color(file_color))
+                    egui::Label::new(egui::RichText::new(&node.name).size(font_size).color(file_color))
                         .sense(egui::Sense::click()),
                 );
                 if node.size > 0 {
-                    ui.label(egui::RichText::new(format_size(node.size)).size(11.0).color(dim_color));
+                    ui.label(egui::RichText::new(format_size(node.size)).size(font_size - 2.0).color(dim_color));
                 }
                 if resp.clicked() {
                     *action = Some(TreeAction::OpenFile(node.path.clone()));
                 }
+                resp
             }
+        });
+
+        // Context menu
+        let node_path = node.path.clone();
+        let is_dir = node.is_dir;
+        resp.response.context_menu(|ui| {
+            render_tree_context_menu(ui, &node_path, is_dir, action);
         });
 
         // Render children if expanded
         if node.is_dir && node.expanded {
             if let Some(children) = &node.children {
-                // For nested toggles we'd need a path, but for simplicity
-                // we only handle top-level toggles here. Nested toggles
-                // happen via the simplified approach below.
                 let mut child_action: Option<TreeAction> = None;
-                render_tree_children(ui, children, root, depth + 1, &mut child_action, &[i]);
+                render_tree_children(ui, children, root, depth + 1, &mut child_action, &[i], font_size);
                 if child_action.is_some() && action.is_none() {
                     *action = child_action;
                 }
@@ -1450,6 +1479,7 @@ fn render_tree_children(
     depth: usize,
     action: &mut Option<TreeAction>,
     parent_path: &[usize],
+    font_size: f32,
 ) {
     let indent = depth as f32 * 16.0;
     let dir_color = egui::Color32::from_rgb(100, 180, 255);
@@ -1459,13 +1489,13 @@ fn render_tree_children(
     for (i, node) in nodes.iter().enumerate() {
         if action.is_some() { break; }
 
-        ui.horizontal(|ui| {
+        let resp = ui.horizontal(|ui| {
             ui.add_space(indent);
             if node.is_dir {
-                let arrow = if node.expanded { "v " } else { "> " };
-                let label = format!("{arrow}{}", node.name);
+                let folder_icon = if node.expanded { "v " } else { "> " };
+                let label = format!("{folder_icon}{}", node.name);
                 let resp = ui.add(
-                    egui::Label::new(egui::RichText::new(&label).size(13.0).color(dir_color).strong())
+                    egui::Label::new(egui::RichText::new(&label).size(font_size).color(dir_color).strong())
                         .sense(egui::Sense::click()),
                 );
                 if resp.clicked() {
@@ -1473,27 +1503,79 @@ fn render_tree_children(
                     indices.push(i);
                     *action = Some(TreeAction::Toggle(indices));
                 }
+                resp
             } else {
+                // File type icon
+                if let Some((icon, color)) = file_type_icon(&node.name) {
+                    ui.label(egui::RichText::new(icon).size(font_size).color(color).strong());
+                }
                 let resp = ui.add(
-                    egui::Label::new(egui::RichText::new(&node.name).size(13.0).color(file_color))
+                    egui::Label::new(egui::RichText::new(&node.name).size(font_size).color(file_color))
                         .sense(egui::Sense::click()),
                 );
                 if node.size > 0 {
-                    ui.label(egui::RichText::new(format_size(node.size)).size(11.0).color(dim_color));
+                    ui.label(egui::RichText::new(format_size(node.size)).size(font_size - 2.0).color(dim_color));
                 }
                 if resp.clicked() {
                     *action = Some(TreeAction::OpenFile(node.path.clone()));
                 }
+                resp
             }
+        });
+
+        // Context menu
+        let node_path = node.path.clone();
+        let is_dir = node.is_dir;
+        resp.response.context_menu(|ui| {
+            render_tree_context_menu(ui, &node_path, is_dir, action);
         });
 
         if node.is_dir && node.expanded {
             if let Some(children) = &node.children {
                 let mut path: Vec<usize> = parent_path.to_vec();
                 path.push(i);
-                render_tree_children(ui, children, root, depth + 1, action, &path);
+                render_tree_children(ui, children, root, depth + 1, action, &path, font_size);
             }
         }
+    }
+}
+
+/// Render context menu items for a file or folder node.
+fn render_tree_context_menu(
+    ui: &mut egui::Ui,
+    path: &std::path::Path,
+    is_dir: bool,
+    action: &mut Option<TreeAction>,
+) {
+    if is_dir {
+        if ui.button("New File").clicked() {
+            *action = Some(TreeAction::NewFile(path.to_path_buf()));
+            ui.close_menu();
+        }
+        if ui.button("New Folder").clicked() {
+            *action = Some(TreeAction::NewFolder(path.to_path_buf()));
+            ui.close_menu();
+        }
+        ui.separator();
+    }
+    if ui.button("Rename").clicked() {
+        *action = Some(TreeAction::Rename(path.to_path_buf()));
+        ui.close_menu();
+    }
+    if !is_dir {
+        if ui.button("Copy Absolute Path").clicked() {
+            *action = Some(TreeAction::CopyAbsPath(path.to_path_buf()));
+            ui.close_menu();
+        }
+        if ui.button("Copy Relative Path").clicked() {
+            *action = Some(TreeAction::CopyRelPath(path.to_path_buf()));
+            ui.close_menu();
+        }
+    }
+    ui.separator();
+    if ui.button(egui::RichText::new("Delete").color(egui::Color32::from_rgb(220, 80, 80))).clicked() {
+        *action = Some(TreeAction::Delete(path.to_path_buf()));
+        ui.close_menu();
     }
 }
 
@@ -1624,15 +1706,212 @@ fn is_image_ext(path: &std::path::Path) -> bool {
     matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp" | "tiff" | "tif" | "ico")
 }
 
+/// Return a (label, color) file-type indicator based on the file extension.
+fn file_type_icon(name: &str) -> Option<(&'static str, egui::Color32)> {
+    let ext = name.rsplit('.').next().unwrap_or("").to_lowercase();
+    match ext.as_str() {
+        "rs" => Some(("R", egui::Color32::from_rgb(230, 140, 60))),       // orange
+        "js" | "jsx" | "mjs" | "cjs" => Some(("J", egui::Color32::from_rgb(240, 220, 80))), // yellow
+        "ts" | "tsx" => Some(("T", egui::Color32::from_rgb(70, 140, 230))),  // blue
+        "py" | "pyi" => Some(("P", egui::Color32::from_rgb(80, 140, 220))), // blue
+        "go" => Some(("G", egui::Color32::from_rgb(80, 200, 200))),        // cyan
+        "json" | "jsonc" => Some(("{", egui::Color32::from_rgb(240, 220, 80))), // yellow
+        "md" | "mdx" => Some(("#", egui::Color32::from_rgb(100, 200, 120))), // green
+        "toml" | "yaml" | "yml" => Some(("*", egui::Color32::from_rgb(180, 140, 220))), // purple
+        "html" | "htm" => Some(("<", egui::Color32::from_rgb(230, 120, 80))), // orange-red
+        "css" | "scss" | "sass" | "less" => Some(("S", egui::Color32::from_rgb(80, 160, 230))), // blue
+        "sh" | "bash" | "zsh" | "fish" => Some(("$", egui::Color32::from_rgb(130, 200, 130))), // green
+        "c" | "h" => Some(("C", egui::Color32::from_rgb(100, 160, 230))),  // blue
+        "cpp" | "cc" | "cxx" | "hpp" | "hxx" => Some(("C", egui::Color32::from_rgb(130, 100, 230))), // purple
+        "java" => Some(("J", egui::Color32::from_rgb(230, 100, 80))),      // red-orange
+        "rb" => Some(("R", egui::Color32::from_rgb(220, 70, 70))),         // red
+        "swift" => Some(("S", egui::Color32::from_rgb(230, 120, 60))),     // orange
+        "lua" => Some(("L", egui::Color32::from_rgb(80, 80, 230))),        // blue
+        "sql" => Some(("Q", egui::Color32::from_rgb(200, 180, 80))),       // gold
+        "lock" => Some(("L", egui::Color32::from_rgb(120, 120, 130))),     // dim
+        "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp" | "svg" | "ico" =>
+            Some(("I", egui::Color32::from_rgb(180, 130, 220))), // purple
+        _ => None,
+    }
+}
+
 /// Render the file tree in the sidebar. Called from ui/mod.rs.
 /// Clicking a file opens it in the editor and switches to Explorer view.
 pub(crate) fn render_sidebar_tree(
     ui: &mut egui::Ui,
     explorer: &mut ExplorerState,
     editor_state: &mut EditorViewState,
+    sidebar_font_size: f32,
 ) {
+    // ── Render rename input modal ──
+    if editor_state.sidebar_rename.is_some() {
+        let (rename_path, mut rename_text) = editor_state.sidebar_rename.take().unwrap();
+        let file_name = rename_path.file_name().and_then(|n| n.to_str()).unwrap_or("file").to_string();
+        let mut done = false;
+        let mut cancel = false;
+        egui::Window::new("Rename")
+            .id(egui::Id::new("sidebar_rename_modal"))
+            .fixed_pos(egui::pos2(
+                ui.ctx().screen_rect().center().x - 140.0,
+                ui.ctx().screen_rect().center().y - 40.0,
+            ))
+            .resizable(false)
+            .show(ui.ctx(), |ui| {
+                ui.label(egui::RichText::new(format!("Rename: {file_name}")).size(13.0).color(egui::Color32::WHITE));
+                ui.add_space(4.0);
+                let resp = ui.add(
+                    egui::TextEdit::singleline(&mut rename_text)
+                        .desired_width(250.0)
+                        .text_color(egui::Color32::WHITE)
+                        .font(egui::TextStyle::Monospace),
+                );
+                resp.request_focus();
+                if ui.input(|i| i.key_pressed(egui::Key::Escape)) { cancel = true; }
+                if ui.input(|i| i.key_pressed(egui::Key::Enter)) && !rename_text.trim().is_empty() { done = true; }
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    if ui.add(egui::Button::new(egui::RichText::new("Rename").size(12.0).color(egui::Color32::WHITE)).fill(egui::Color32::from_rgb(40, 100, 200))).clicked() && !rename_text.trim().is_empty() {
+                        done = true;
+                    }
+                    if ui.add(egui::Button::new(egui::RichText::new("Cancel").size(12.0).color(egui::Color32::WHITE)).fill(egui::Color32::from_rgb(50, 52, 62))).clicked() {
+                        cancel = true;
+                    }
+                });
+            });
+
+        if done {
+            let new_name = rename_text.trim().to_string();
+            let new_path = rename_path.parent().map(|p| p.join(&new_name));
+            if let Some(new_path) = new_path {
+                match std::fs::rename(&rename_path, &new_path) {
+                    Ok(_) => {
+                        explorer.set_root(explorer.root.clone()); // refresh tree
+                        editor_state.status_msg = Some(format!("Renamed to {new_name}"));
+                    }
+                    Err(e) => editor_state.status_msg = Some(format!("Rename failed: {e}")),
+                }
+            }
+            // sidebar_rename already taken -- stays None
+        } else if cancel {
+            // sidebar_rename already taken -- stays None
+        } else {
+            // Put it back with updated text
+            editor_state.sidebar_rename = Some((rename_path, rename_text));
+        }
+    }
+
+    // ── Render delete confirmation modal ──
+    if let Some(ref delete_path) = editor_state.sidebar_delete_confirm.clone() {
+        let display_name = delete_path.file_name().and_then(|n| n.to_str()).unwrap_or("item");
+        let is_dir = delete_path.is_dir();
+        let mut confirm = false;
+        let mut cancel = false;
+        egui::Window::new("Delete")
+            .id(egui::Id::new("sidebar_delete_modal"))
+            .fixed_pos(egui::pos2(
+                ui.ctx().screen_rect().center().x - 160.0,
+                ui.ctx().screen_rect().center().y - 40.0,
+            ))
+            .resizable(false)
+            .show(ui.ctx(), |ui| {
+                ui.label(egui::RichText::new(format!("Delete \"{display_name}\"? This cannot be undone.")).size(13.0).color(egui::Color32::from_rgb(210, 215, 225)));
+                ui.add_space(12.0);
+                ui.horizontal(|ui| {
+                    if ui.add(egui::Button::new(egui::RichText::new("Delete").size(12.0).color(egui::Color32::WHITE)).fill(egui::Color32::from_rgb(180, 50, 50))).clicked() {
+                        confirm = true;
+                    }
+                    if ui.add(egui::Button::new(egui::RichText::new("Cancel").size(12.0).color(egui::Color32::WHITE)).fill(egui::Color32::from_rgb(50, 52, 62))).clicked() {
+                        cancel = true;
+                    }
+                });
+                if ui.input(|i| i.key_pressed(egui::Key::Escape)) { cancel = true; }
+            });
+
+        if confirm {
+            let result = if is_dir {
+                std::fs::remove_dir_all(delete_path)
+            } else {
+                std::fs::remove_file(delete_path)
+            };
+            match result {
+                Ok(_) => {
+                    explorer.set_root(explorer.root.clone()); // refresh tree
+                    editor_state.status_msg = Some(format!("Deleted {display_name}"));
+                }
+                Err(e) => editor_state.status_msg = Some(format!("Delete failed: {e}")),
+            }
+            editor_state.sidebar_delete_confirm = None;
+        } else if cancel {
+            editor_state.sidebar_delete_confirm = None;
+        }
+    }
+
+    // ── Render new file/folder input modal ──
+    if editor_state.sidebar_new_entry.is_some() {
+        let (parent_dir, mut input_text, is_folder) = editor_state.sidebar_new_entry.take().unwrap();
+        let kind = if is_folder { "Folder" } else { "File" };
+        let mut done = false;
+        let mut cancel = false;
+        egui::Window::new(format!("New {kind}"))
+            .id(egui::Id::new("sidebar_new_entry_modal"))
+            .fixed_pos(egui::pos2(
+                ui.ctx().screen_rect().center().x - 140.0,
+                ui.ctx().screen_rect().center().y - 40.0,
+            ))
+            .resizable(false)
+            .show(ui.ctx(), |ui| {
+                ui.label(egui::RichText::new(format!("New {kind} name:")).size(13.0).color(egui::Color32::WHITE));
+                ui.add_space(4.0);
+                let resp = ui.add(
+                    egui::TextEdit::singleline(&mut input_text)
+                        .desired_width(250.0)
+                        .text_color(egui::Color32::WHITE)
+                        .font(egui::TextStyle::Monospace),
+                );
+                resp.request_focus();
+                if ui.input(|i| i.key_pressed(egui::Key::Escape)) { cancel = true; }
+                if ui.input(|i| i.key_pressed(egui::Key::Enter)) && !input_text.trim().is_empty() { done = true; }
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    if ui.add(egui::Button::new(egui::RichText::new("Create").size(12.0).color(egui::Color32::WHITE)).fill(egui::Color32::from_rgb(40, 100, 200))).clicked() && !input_text.trim().is_empty() {
+                        done = true;
+                    }
+                    if ui.add(egui::Button::new(egui::RichText::new("Cancel").size(12.0).color(egui::Color32::WHITE)).fill(egui::Color32::from_rgb(50, 52, 62))).clicked() {
+                        cancel = true;
+                    }
+                });
+            });
+
+        if done {
+            let name = input_text.trim().to_string();
+            let new_path = parent_dir.join(&name);
+            let result = if is_folder {
+                std::fs::create_dir_all(&new_path)
+            } else {
+                if let Some(p) = new_path.parent() {
+                    let _ = std::fs::create_dir_all(p);
+                }
+                std::fs::write(&new_path, "")
+            };
+            match result {
+                Ok(_) => {
+                    explorer.set_root(explorer.root.clone()); // refresh tree
+                    editor_state.status_msg = Some(format!("Created {name}"));
+                }
+                Err(e) => editor_state.status_msg = Some(format!("Create failed: {e}")),
+            }
+            // sidebar_new_entry already taken -- stays None
+        } else if cancel {
+            // sidebar_new_entry already taken -- stays None
+        } else {
+            // Put it back with updated text
+            editor_state.sidebar_new_entry = Some((parent_dir, input_text, is_folder));
+        }
+    }
+
+    // ── Render tree ──
     let mut action: Option<TreeAction> = None;
-    render_tree_nodes(ui, &explorer.tree, &explorer.root, 0, &mut action);
+    render_tree_nodes(ui, &explorer.tree, &explorer.root, 0, &mut action, sidebar_font_size);
 
     match action {
         Some(TreeAction::OpenFile(path)) => {
@@ -1652,6 +1931,28 @@ pub(crate) fn render_sidebar_tree(
         }
         Some(TreeAction::Toggle(indices)) => {
             toggle_at(&mut explorer.tree, &indices);
+        }
+        Some(TreeAction::CopyAbsPath(path)) => {
+            editor_state.clipboard_out = Some(path.to_string_lossy().to_string());
+            editor_state.status_msg = Some("Copied absolute path".to_string());
+        }
+        Some(TreeAction::CopyRelPath(path)) => {
+            let rel = path.strip_prefix(&explorer.root).unwrap_or(&path);
+            editor_state.clipboard_out = Some(rel.to_string_lossy().to_string());
+            editor_state.status_msg = Some("Copied relative path".to_string());
+        }
+        Some(TreeAction::Rename(path)) => {
+            let current_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+            editor_state.sidebar_rename = Some((path, current_name));
+        }
+        Some(TreeAction::Delete(path)) => {
+            editor_state.sidebar_delete_confirm = Some(path);
+        }
+        Some(TreeAction::NewFile(parent_dir)) => {
+            editor_state.sidebar_new_entry = Some((parent_dir, String::new(), false));
+        }
+        Some(TreeAction::NewFolder(parent_dir)) => {
+            editor_state.sidebar_new_entry = Some((parent_dir, String::new(), true));
         }
         None => {}
     }
