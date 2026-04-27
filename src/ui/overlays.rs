@@ -324,8 +324,8 @@ pub fn render_save_prompt(
     response
 }
 
-/// Render the FPS/ms overlay in the top-left corner.
-pub fn render_fps_overlay(ctx: &egui::Context, fps: f32, ms: f32) {
+/// Render the FPS/ms overlay in the top-left corner with optional perf stats.
+pub fn render_fps_overlay(ctx: &egui::Context, fps: f32, ms: f32, perf_summary: Option<&str>) {
     egui::Area::new(egui::Id::new("fps_overlay"))
         .fixed_pos(egui::Pos2::new(8.0, 8.0))
         .show(ctx, |ui| {
@@ -340,6 +340,14 @@ pub fn render_fps_overlay(ctx: &egui::Context, fps: f32, ms: f32) {
                             .color(egui::Color32::from_rgb(150, 255, 150))
                             .monospace(),
                     );
+                    if let Some(summary) = perf_summary {
+                        ui.label(
+                            egui::RichText::new(summary)
+                                .size(10.0)
+                                .color(egui::Color32::from_rgb(130, 220, 130))
+                                .monospace(),
+                        );
+                    }
                 });
         });
 }

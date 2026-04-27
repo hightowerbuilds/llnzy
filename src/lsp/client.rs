@@ -518,6 +518,11 @@ impl LspClient {
         Ok(Vec::new())
     }
 
+    /// Get the URI for an open document (synchronous lookup).
+    pub fn doc_uri(&self, path: &Path) -> Option<Uri> {
+        self.open_docs.get(path).map(|d| d.uri.clone())
+    }
+
     pub fn transport(&self) -> &Arc<Transport> {
         &self.transport
     }

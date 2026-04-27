@@ -4,13 +4,16 @@ pub mod transport;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use lsp_types::DiagnosticSeverity;
 use serde_json::Value;
 use tokio::runtime::Runtime;
+use tokio::sync::oneshot;
 
 use client::{uri_to_path, LspClient};
 use registry::find_server;
+use transport::Transport;
 
 /// A text edit from formatting or workspace edits.
 #[derive(Clone, Debug)]
@@ -469,6 +472,121 @@ impl LspManager {
         })
     }
 
+    // ── Non-blocking async variants ──
+    // These spawn the LSP call on the tokio runtime and return a Receiver.
+    // The caller polls with try_recv() each frame.
+
+    /// Spawn a hover request. Returns a receiver for the result.
+    pub fn hover_async(&self, path: &Path, lang_id: &str, line: u32, col: u32) -> Option<oneshot::Receiver<Option<String>>> {
+        let client = self.clients.get(lang_id)?;
+        if !client.is_running() { return None; }
+        let transport = client.transport().clone();
+        let uri = client.doc_uri(path)?;
+        let (tx, rx) = oneshot::channel();
+        self.runtime.spawn(async move {
+            let result = async_hover(&transport, &uri, line, col).await;
+            let _ = tx.send(result);
+        });
+        Some(rx)
+    }
+
+    /// Spawn a completion request. Returns a receiver for the result.
+    pub fn completion_async(&self, path: &Path, lang_id: &str, line: u32, col: u32) -> Option<oneshot::Receiver<Vec<CompletionItem>>> {
+        let client = self.clients.get(lang_id)?;
+        if !client.is_running() { return None; }
+        let transport = client.transport().clone();
+        let uri = client.doc_uri(path)?;
+        let (tx, rx) = oneshot::channel();
+        self.runtime.spawn(async move {
+            let result = async_completion(&transport, &uri, line, col).await;
+            let _ = tx.send(result);
+        });
+        Some(rx)
+    }
+
+    /// Spawn a goto-definition request. Returns a receiver for the result.
+    pub fn definition_async(&self, path: &Path, lang_id: &str, line: u32, col: u32) -> Option<oneshot::Receiver<Option<(PathBuf, u32, u32)>>> {
+        let client = self.clients.get(lang_id)?;
+        if !client.is_running() { return None; }
+        let transport = client.transport().clone();
+        let uri = client.doc_uri(path)?;
+        let (tx, rx) = oneshot::channel();
+        self.runtime.spawn(async move {
+            let result = async_definition(&transport, &uri, line, col).await;
+            let _ = tx.send(result);
+        });
+        Some(rx)
+    }
+
+    /// Spawn a signature help request. Returns a receiver for the result.
+    pub fn signature_help_async(&self, path: &Path, lang_id: &str, line: u32, col: u32) -> Option<oneshot::Receiver<Option<SignatureInfo>>> {
+        let client = self.clients.get(lang_id)?;
+        if !client.is_running() { return None; }
+        let transport = client.transport().clone();
+        let uri = client.doc_uri(path)?;
+        let (tx, rx) = oneshot::channel();
+        self.runtime.spawn(async move {
+            let result = async_signature_help(&transport, &uri, line, col).await;
+            let _ = tx.send(result);
+        });
+        Some(rx)
+    }
+
+    /// Spawn a references request. Returns a receiver for the result.
+    pub fn references_async(&self, path: &Path, lang_id: &str, line: u32, col: u32) -> Option<oneshot::Receiver<Vec<ReferenceLocation>>> {
+        let client = self.clients.get(lang_id)?;
+        if !client.is_running() { return None; }
+        let transport = client.transport().clone();
+        let uri = client.doc_uri(path)?;
+        let (tx, rx) = oneshot::channel();
+        self.runtime.spawn(async move {
+            let result = async_references(&transport, &uri, line, col).await;
+            let _ = tx.send(result);
+        });
+        Some(rx)
+    }
+
+    /// Spawn a formatting request. Returns a receiver for the result.
+    pub fn format_async(&self, path: &Path, lang_id: &str) -> Option<oneshot::Receiver<Vec<FormatEdit>>> {
+        let client = self.clients.get(lang_id)?;
+        if !client.is_running() { return None; }
+        let transport = client.transport().clone();
+        let uri = client.doc_uri(path)?;
+        let (tx, rx) = oneshot::channel();
+        self.runtime.spawn(async move {
+            let result = async_format(&transport, &uri).await;
+            let _ = tx.send(result);
+        });
+        Some(rx)
+    }
+
+    /// Spawn a did_change notification (fire-and-forget, non-blocking).
+    pub fn did_change_async(&self, path: &Path, lang_id: &str, text: &str) {
+        let Some(client) = self.clients.get(lang_id) else { return };
+        if !client.is_running() { return; }
+        let Some(uri) = client.doc_uri(path) else { return };
+        let transport = client.transport().clone();
+        let text = text.to_string();
+        // Note: version tracking still happens synchronously in did_change()
+        // This just sends the notification without blocking
+        self.runtime.spawn(async move {
+            let params = lsp_types::DidChangeTextDocumentParams {
+                text_document: lsp_types::VersionedTextDocumentIdentifier {
+                    uri,
+                    version: 0, // version managed by blocking path
+                },
+                content_changes: vec![lsp_types::TextDocumentContentChangeEvent {
+                    range: None,
+                    range_length: None,
+                    text,
+                }],
+            };
+            if let Err(e) = transport.notify("textDocument/didChange", serde_json::to_value(params).unwrap()).await {
+                log::warn!("async didChange failed: {e}");
+            }
+        });
+    }
+
     /// Get diagnostics for a specific file.
     pub fn get_diagnostics(&self, path: &Path) -> &[FileDiagnostic] {
         self.diagnostics
@@ -563,6 +681,157 @@ fn flatten_symbols(symbols: &[lsp_types::DocumentSymbol], result: &mut Vec<Symbo
             flatten_symbols(children, result, _depth + 1);
         }
     }
+}
+
+// ── Standalone async helpers (for non-blocking spawned tasks) ──
+
+async fn async_hover(transport: &Transport, uri: &lsp_types::Uri, line: u32, col: u32) -> Option<String> {
+    let params = lsp_types::HoverParams {
+        text_document_position_params: lsp_types::TextDocumentPositionParams {
+            text_document: lsp_types::TextDocumentIdentifier { uri: uri.clone() },
+            position: lsp_types::Position { line, character: col },
+        },
+        work_done_progress_params: Default::default(),
+    };
+    let result = transport.request("textDocument/hover", serde_json::to_value(params).unwrap()).await.ok()?;
+    if result.is_null() { return None; }
+    let hover: lsp_types::Hover = serde_json::from_value(result).ok()?;
+    match hover.contents {
+        lsp_types::HoverContents::Scalar(s) => Some(markup_value_to_string(s)),
+        lsp_types::HoverContents::Array(arr) => {
+            Some(arr.into_iter().map(markup_value_to_string).collect::<Vec<_>>().join("\n"))
+        }
+        lsp_types::HoverContents::Markup(m) => Some(m.value),
+    }
+}
+
+async fn async_completion(transport: &Transport, uri: &lsp_types::Uri, line: u32, col: u32) -> Vec<CompletionItem> {
+    let params = lsp_types::CompletionParams {
+        text_document_position: lsp_types::TextDocumentPositionParams {
+            text_document: lsp_types::TextDocumentIdentifier { uri: uri.clone() },
+            position: lsp_types::Position { line, character: col },
+        },
+        work_done_progress_params: Default::default(),
+        partial_result_params: Default::default(),
+        context: None,
+    };
+    let result = match transport.request("textDocument/completion", serde_json::to_value(params).unwrap()).await {
+        Ok(r) => r,
+        Err(_) => return Vec::new(),
+    };
+    if result.is_null() { return Vec::new(); }
+    let resp: lsp_types::CompletionResponse = match serde_json::from_value(result) {
+        Ok(r) => r,
+        Err(_) => return Vec::new(),
+    };
+    match resp {
+        lsp_types::CompletionResponse::Array(items) => items.into_iter().map(|i| CompletionItem {
+            label: i.label, detail: i.detail, insert_text: i.insert_text, kind: i.kind,
+        }).collect(),
+        lsp_types::CompletionResponse::List(list) => list.items.into_iter().map(|i| CompletionItem {
+            label: i.label, detail: i.detail, insert_text: i.insert_text, kind: i.kind,
+        }).collect(),
+    }
+}
+
+async fn async_definition(transport: &Transport, uri: &lsp_types::Uri, line: u32, col: u32) -> Option<(PathBuf, u32, u32)> {
+    let params = lsp_types::GotoDefinitionParams {
+        text_document_position_params: lsp_types::TextDocumentPositionParams {
+            text_document: lsp_types::TextDocumentIdentifier { uri: uri.clone() },
+            position: lsp_types::Position { line, character: col },
+        },
+        work_done_progress_params: Default::default(),
+        partial_result_params: Default::default(),
+    };
+    let result = transport.request("textDocument/definition", serde_json::to_value(params).unwrap()).await.ok()?;
+    if result.is_null() { return None; }
+    let def: lsp_types::GotoDefinitionResponse = serde_json::from_value(result).ok()?;
+    let location = match def {
+        lsp_types::GotoDefinitionResponse::Scalar(loc) => Some(loc),
+        lsp_types::GotoDefinitionResponse::Array(locs) => locs.into_iter().next(),
+        lsp_types::GotoDefinitionResponse::Link(links) => links.into_iter().next().map(|l| lsp_types::Location {
+            uri: l.target_uri, range: l.target_selection_range,
+        }),
+    };
+    location.and_then(|loc| {
+        let path = uri_to_path(&loc.uri)?;
+        Some((path, loc.range.start.line, loc.range.start.character))
+    })
+}
+
+async fn async_signature_help(transport: &Transport, uri: &lsp_types::Uri, line: u32, col: u32) -> Option<SignatureInfo> {
+    let params = lsp_types::SignatureHelpParams {
+        text_document_position_params: lsp_types::TextDocumentPositionParams {
+            text_document: lsp_types::TextDocumentIdentifier { uri: uri.clone() },
+            position: lsp_types::Position { line, character: col },
+        },
+        work_done_progress_params: Default::default(),
+        context: None,
+    };
+    let result = transport.request("textDocument/signatureHelp", serde_json::to_value(params).unwrap()).await.ok()?;
+    if result.is_null() { return None; }
+    let sig: lsp_types::SignatureHelp = serde_json::from_value(result).ok()?;
+    let active_sig = sig.active_signature.unwrap_or(0) as usize;
+    let signature = sig.signatures.get(active_sig)?;
+    let params: Vec<String> = signature.parameters.as_ref()
+        .map(|ps| ps.iter().map(|p| match &p.label {
+            lsp_types::ParameterLabel::Simple(s) => s.clone(),
+            lsp_types::ParameterLabel::LabelOffsets([start, end]) => {
+                signature.label.get(*start as usize..*end as usize).unwrap_or("?").to_string()
+            }
+        }).collect())
+        .unwrap_or_default();
+    let active_param = sig.active_parameter.or(signature.active_parameter).unwrap_or(0) as usize;
+    Some(SignatureInfo { label: signature.label.clone(), parameters: params, active_parameter: active_param })
+}
+
+async fn async_references(transport: &Transport, uri: &lsp_types::Uri, line: u32, col: u32) -> Vec<ReferenceLocation> {
+    let params = lsp_types::ReferenceParams {
+        text_document_position: lsp_types::TextDocumentPositionParams {
+            text_document: lsp_types::TextDocumentIdentifier { uri: uri.clone() },
+            position: lsp_types::Position { line, character: col },
+        },
+        work_done_progress_params: Default::default(),
+        partial_result_params: Default::default(),
+        context: lsp_types::ReferenceContext { include_declaration: true },
+    };
+    let result = match transport.request("textDocument/references", serde_json::to_value(params).unwrap()).await {
+        Ok(r) => r,
+        Err(_) => return Vec::new(),
+    };
+    if result.is_null() { return Vec::new(); }
+    let locs: Vec<lsp_types::Location> = match serde_json::from_value(result) {
+        Ok(r) => r,
+        Err(_) => return Vec::new(),
+    };
+    locs.into_iter().filter_map(|loc| {
+        let ref_path = uri_to_path(&loc.uri)?;
+        let context = std::fs::read_to_string(&ref_path).ok()
+            .and_then(|text| text.lines().nth(loc.range.start.line as usize).map(|l| l.trim().to_string()))
+            .unwrap_or_default();
+        Some(ReferenceLocation { path: ref_path, line: loc.range.start.line, col: loc.range.start.character, context })
+    }).collect()
+}
+
+async fn async_format(transport: &Transport, uri: &lsp_types::Uri) -> Vec<FormatEdit> {
+    let params = lsp_types::DocumentFormattingParams {
+        text_document: lsp_types::TextDocumentIdentifier { uri: uri.clone() },
+        options: lsp_types::FormattingOptions { tab_size: 4, insert_spaces: true, ..Default::default() },
+        work_done_progress_params: Default::default(),
+    };
+    let result = match transport.request("textDocument/formatting", serde_json::to_value(params).unwrap()).await {
+        Ok(r) => r,
+        Err(_) => return Vec::new(),
+    };
+    if result.is_null() { return Vec::new(); }
+    let edits: Vec<lsp_types::TextEdit> = match serde_json::from_value(result) {
+        Ok(r) => r,
+        Err(_) => return Vec::new(),
+    };
+    edits.into_iter().map(|e| FormatEdit {
+        start_line: e.range.start.line, start_col: e.range.start.character,
+        end_line: e.range.end.line, end_col: e.range.end.character, new_text: e.new_text,
+    }).collect()
 }
 
 fn markup_value_to_string(v: lsp_types::MarkedString) -> String {
