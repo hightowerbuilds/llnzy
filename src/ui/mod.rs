@@ -53,6 +53,8 @@ pub struct UiState {
     pub stacker_editing: Option<usize>,  // index of prompt being edited
     pub stacker_edit_text: String,
     pub stacker_dirty: bool, // needs save to disk
+    pub prompt_bar_visible: bool,  // whether the prompt queue bar is shown
+    pub prompt_bar_views: u8,      // bit 0 = shell, bit 1 = editor
     pub copy_ghosts: Vec<CopyGhost>,
     // Sketch state
     pub sketch: SketchState,
@@ -158,6 +160,8 @@ impl UiState {
             stacker_editing: None,
             stacker_edit_text: String::new(),
             stacker_dirty: false,
+            prompt_bar_visible: false,
+            prompt_bar_views: 0,
             copy_ghosts: Vec::new(),
             sketch: SketchState::load_default(),
             explorer: ExplorerState::new(),
@@ -293,6 +297,8 @@ impl UiState {
         let mut stacker_editing = self.stacker_editing;
         let mut stacker_edit_text = std::mem::take(&mut self.stacker_edit_text);
         let mut stacker_dirty = self.stacker_dirty;
+        let mut prompt_bar_visible = self.prompt_bar_visible;
+        let mut prompt_bar_views = self.prompt_bar_views;
         let mut saved_edit_idx: Option<usize> = None;
         let mut copy_ghosts = std::mem::take(&mut self.copy_ghosts);
         let mut sketch = std::mem::take(&mut self.sketch);
@@ -373,6 +379,24 @@ impl UiState {
                     }
                     footer::FooterAction::NewTerminalTab => {
                         footer_action_out = Some(footer::FooterAction::NewTerminalTab);
+                    }
+                }
+            }
+
+            // ── Prompt queue bar (above footer, below content) ──
+            if prompt_bar_visible && !stacker_prompts.is_empty() && current_view != ActiveView::Home {
+                let show_bar = match active_tab_kind {
+                    Some(crate::workspace::TabKind::Terminal) => {
+                        prompt_bar_views & stacker_view::BAR_VIEW_SHELL != 0
+                    }
+                    Some(crate::workspace::TabKind::CodeFile) => {
+                        prompt_bar_views & stacker_view::BAR_VIEW_EDITOR != 0
+                    }
+                    _ => false,
+                };
+                if show_bar {
+                    if let Some(text) = stacker_view::render_prompt_bar(ctx, &stacker_prompts) {
+                        clipboard_copy = Some(text);
                     }
                 }
             }
@@ -503,6 +527,7 @@ impl UiState {
                                     &mut stacker_filter_category, &mut stacker_editing,
                                     &mut stacker_edit_text, &mut stacker_dirty,
                                     &mut saved_edit_idx, &mut clipboard_copy,
+                                    &mut prompt_bar_visible, &mut prompt_bar_views,
                                 );
                             });
                     }
@@ -600,6 +625,8 @@ impl UiState {
         self.stacker_editing = stacker_editing;
         self.stacker_edit_text = stacker_edit_text;
         self.stacker_dirty = false;
+        self.prompt_bar_visible = prompt_bar_visible;
+        self.prompt_bar_views = prompt_bar_views;
         self.copy_ghosts = copy_ghosts;
         if sketch.is_dirty() && save_default_document(&sketch.document).is_ok() {
             sketch.mark_saved();

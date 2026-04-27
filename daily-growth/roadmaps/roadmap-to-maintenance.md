@@ -147,13 +147,13 @@
 
 > Simplify the prompt manager UI and add the quick-access prompt bar.
 
-- [ ] **6.1 -- Stacker UI redesign**
+- [x] **6.1 -- Stacker UI redesign**
   - Strip away excess boxes, borders, and chrome
   - Clean minimalist list: each prompt is a single row with text preview + category tag
   - More whitespace, less visual noise
   - Keep functionality: add, edit, delete, copy, search, filter by category
 
-- [ ] **6.2 -- Prompt queue bar**
+- [x] **6.2 -- Prompt queue bar**
   - Toggleable horizontal bar that appears above the footer
   - Shows truncated previews of saved prompts in a scrollable row
   - Click a prompt to instantly copy it to clipboard
