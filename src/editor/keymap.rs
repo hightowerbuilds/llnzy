@@ -27,6 +27,8 @@ pub struct KeyAction {
     pub workspace_symbols: bool,
     pub project_search: bool,
     pub run_task: bool,
+    pub add_cursor_next: bool,
+    pub select_all_occurrences: bool,
 }
 
 /// Auto-closing bracket pairs.
@@ -274,11 +276,23 @@ pub fn handle_editor_keys(
             return;
         }
 
+        // Cmd+D: add cursor at next occurrence of current word/selection
+        if cmd && !shift && input.key_pressed(egui::Key::D) {
+            action.add_cursor_next = true;
+            return;
+        }
+
         if cmd && shift && input.key_pressed(egui::Key::D) {
             *status_msg = None;
             view.cursor.pos = buf.duplicate_line(view.cursor.pos.line);
             view.cursor.clear_selection();
             view.cursor.desired_col = None;
+            return;
+        }
+
+        // Cmd+Shift+L: select all occurrences
+        if cmd && shift && input.key_pressed(egui::Key::L) {
+            action.select_all_occurrences = true;
             return;
         }
 
@@ -433,6 +447,53 @@ pub fn handle_editor_keys(
 
         if input.key_pressed(egui::Key::Backspace) {
             *status_msg = None;
+            // Multi-cursor backspace
+            if !view.cursor.extra_cursors.is_empty() {
+                let mut all_positions: Vec<(Position, Option<Position>, bool)> = Vec::new();
+                all_positions.push((view.cursor.pos, view.cursor.anchor, true));
+                for extra in &view.cursor.extra_cursors {
+                    all_positions.push((extra.pos, extra.anchor, false));
+                }
+                all_positions.sort_by(|a, b| b.0.cmp(&a.0));
+
+                let mut new_positions: Vec<(Position, bool)> = Vec::new();
+                for (pos, anchor, is_primary) in &all_positions {
+                    if let Some(anch) = anchor {
+                        if anch != pos {
+                            let (start, end) = if anch <= pos { (*anch, *pos) } else { (*pos, *anch) };
+                            buf.delete(start, end);
+                            new_positions.push((start, *is_primary));
+                            continue;
+                        }
+                    }
+                    if pos.col > 0 {
+                        let del_start = Position::new(pos.line, pos.col - 1);
+                        buf.delete(del_start, *pos);
+                        new_positions.push((del_start, *is_primary));
+                    } else if pos.line > 0 {
+                        let prev_len = buf.line_len(pos.line - 1);
+                        let join_pos = Position::new(pos.line - 1, prev_len);
+                        buf.delete(join_pos, *pos);
+                        new_positions.push((join_pos, *is_primary));
+                    } else {
+                        new_positions.push((*pos, *is_primary));
+                    }
+                }
+
+                view.cursor.clear_selection();
+                view.cursor.extra_cursors.clear();
+                for (new_pos, is_primary) in new_positions {
+                    if is_primary {
+                        view.cursor.pos = new_pos;
+                    } else {
+                        view.cursor.extra_cursors.push(
+                            crate::editor::cursor::CursorRange { pos: new_pos, anchor: None },
+                        );
+                    }
+                }
+                view.cursor.desired_col = None;
+                return;
+            }
             if let Some((start, end)) = view.cursor.selection() {
                 buf.delete(start, end);
                 view.cursor.clear_selection();
@@ -541,6 +602,55 @@ pub fn handle_editor_keys(
                 if !cmd {
                     *status_msg = None;
                     let text = text.clone();
+
+                    // Multi-cursor text input: apply to all cursors in reverse order
+                    if !view.cursor.extra_cursors.is_empty() {
+                        let mut all_positions: Vec<(Position, Option<Position>, bool)> = Vec::new();
+                        all_positions.push((view.cursor.pos, view.cursor.anchor, true));
+                        for extra in &view.cursor.extra_cursors {
+                            all_positions.push((extra.pos, extra.anchor, false));
+                        }
+                        // Sort in reverse document order
+                        all_positions.sort_by(|a, b| b.0.cmp(&a.0));
+
+                        let mut new_positions: Vec<(Position, bool)> = Vec::new();
+                        for (pos, anchor, is_primary) in &all_positions {
+                            // Delete selection if any
+                            if let Some(anch) = anchor {
+                                if anch != pos {
+                                    let (start, end) = if anch <= pos { (*anch, *pos) } else { (*pos, *anch) };
+                                    buf.delete(start, end);
+                                    let insert_pos = start;
+                                    let end_pos = buf.compute_end_pos_pub(insert_pos, &text);
+                                    buf.insert(insert_pos, &text);
+                                    new_positions.push((end_pos, *is_primary));
+                                    continue;
+                                }
+                            }
+                            let end_pos = buf.compute_end_pos_pub(*pos, &text);
+                            buf.insert(*pos, &text);
+                            new_positions.push((end_pos, *is_primary));
+                        }
+
+                        // Reconstruct cursor positions
+                        view.cursor.clear_selection();
+                        view.cursor.extra_cursors.clear();
+                        for (new_pos, is_primary) in new_positions {
+                            if is_primary {
+                                view.cursor.pos = new_pos;
+                            } else {
+                                view.cursor.extra_cursors.push(
+                                    crate::editor::cursor::CursorRange {
+                                        pos: new_pos,
+                                        anchor: None,
+                                    },
+                                );
+                            }
+                        }
+                        view.cursor.desired_col = None;
+                        continue;
+                    }
+
                     if let Some((start, end)) = view.cursor.selection() {
                         buf.delete(start, end);
                         view.cursor.clear_selection();

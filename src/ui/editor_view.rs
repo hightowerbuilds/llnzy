@@ -73,6 +73,25 @@ pub(crate) fn render_text_editor(
         view.tree_dirty = true;
         view.folded_ranges.clear();
     }
+
+    // Handle multi-cursor actions (Cmd+D and Cmd+Shift+L)
+    if result.key_action.add_cursor_next {
+        if !view.cursor.has_selection() {
+            view.cursor.select_word(buf);
+        }
+        if let Some(needle) = view.cursor.word_or_selection_text(buf) {
+            view.cursor.add_next_occurrence(buf, &needle);
+        }
+    }
+    if result.key_action.select_all_occurrences {
+        if !view.cursor.has_selection() {
+            view.cursor.select_word(buf);
+        }
+        if let Some(needle) = view.cursor.word_or_selection_text(buf) {
+            view.cursor.select_all_occurrences(buf, &needle);
+        }
+    }
+
     let cursor_moved = view.cursor.pos != cursor_before;
 
     view.cursor.clamp(buf);
@@ -86,37 +105,97 @@ pub(crate) fn render_text_editor(
     let visible_doc_lines = visible_doc_lines(line_count, &view.folded_ranges);
     let visible_line_count = visible_doc_lines.len().max(1);
 
-    // Vertical scroll -- only follow cursor when it moved (keyboard/edit),
-    // otherwise allow free mouse-wheel scrolling.
+    // Word wrap: compute wrap rows for all visible doc lines
+    let text_area_w_for_wrap = ui.available_width() - gutter_width - text_margin;
+    let wrap_cols = (text_area_w_for_wrap / char_width).max(10.0) as usize;
+    let word_wrap = editor_config.word_wrap;
+    let wrap_rows = if word_wrap {
+        compute_wrap_rows(&visible_doc_lines, buf, wrap_cols)
+    } else {
+        Vec::new()
+    };
+    // In wrap mode, the total visual row count replaces visible_line_count for scroll
+    let effective_line_count = if word_wrap {
+        wrap_rows.len().max(1)
+    } else {
+        visible_line_count
+    };
+
+    // Vertical scroll -- smooth lerp toward target.
     let available_h = ui.available_height() - 20.0;
     let visible_lines = (available_h / line_height).max(1.0) as usize;
-    let max_scroll = visible_line_count.saturating_sub(1);
+    let max_scroll = effective_line_count.saturating_sub(1);
     view.scroll_line = view.scroll_line.min(max_scroll);
     if cursor_moved {
-        let cursor_visible_line = visible_index_for_doc_line(&visible_doc_lines, view.cursor.pos.line);
+        let cursor_visible_line = if word_wrap {
+            wrap_row_for_cursor(&wrap_rows, view.cursor.pos.line, view.cursor.pos.col)
+        } else {
+            visible_index_for_doc_line(&visible_doc_lines, view.cursor.pos.line)
+        };
         if cursor_visible_line < view.scroll_line {
-            view.scroll_line = cursor_visible_line;
+            view.scroll_target = Some(cursor_visible_line as f32);
         } else if cursor_visible_line >= view.scroll_line + visible_lines {
-            view.scroll_line = cursor_visible_line.saturating_sub(visible_lines - 1);
+            view.scroll_target = Some(cursor_visible_line.saturating_sub(visible_lines - 1) as f32);
+        }
+    }
+    // Animate smooth scroll toward target
+    if let Some(target) = view.scroll_target {
+        let target = target.clamp(0.0, max_scroll as f32);
+        let current = view.scroll_line as f32;
+        let diff = target - current;
+        if diff.abs() < 0.5 {
+            view.scroll_line = target.round() as usize;
+            view.scroll_target = None;
+        } else {
+            let new_val = current + diff * 0.18;
+            view.scroll_line = if diff > 0.0 {
+                new_val.ceil() as usize
+            } else {
+                new_val.floor() as usize
+            };
+            view.scroll_line = view.scroll_line.min(max_scroll);
+            ui.ctx().request_repaint();
         }
     }
 
-    // Horizontal scroll
+    // Horizontal scroll (disabled in word-wrap mode)
     let text_area_w = ui.available_width() - gutter_width - text_margin;
     let visible_cols = (text_area_w / char_width).max(1.0) as usize;
-    let margin_cols = 4;
-    if view.cursor.pos.col < view.scroll_col {
-        view.scroll_col = view.cursor.pos.col;
-    } else if view.cursor.pos.col >= view.scroll_col + visible_cols.saturating_sub(margin_cols) {
-        view.scroll_col = view
-            .cursor
-            .pos
-            .col
-            .saturating_sub(visible_cols.saturating_sub(margin_cols));
+    if word_wrap {
+        view.scroll_col = 0;
+    } else {
+        let margin_cols = 4;
+        if view.cursor.pos.col < view.scroll_col {
+            view.scroll_col = view.cursor.pos.col;
+        } else if view.cursor.pos.col >= view.scroll_col + visible_cols.saturating_sub(margin_cols) {
+            view.scroll_col = view
+                .cursor
+                .pos
+                .col
+                .saturating_sub(visible_cols.saturating_sub(margin_cols));
+        }
     }
 
-    let end_visible_line = (view.scroll_line + visible_lines + 2).min(visible_doc_lines.len());
-    let visible_window = &visible_doc_lines[view.scroll_line..end_visible_line];
+    // Compute the visible window of doc lines and (for wrap mode) the visible wrap rows
+    let end_visible_line = if word_wrap {
+        (view.scroll_line + visible_lines + 2).min(wrap_rows.len())
+    } else {
+        (view.scroll_line + visible_lines + 2).min(visible_doc_lines.len())
+    };
+    let visible_window: Vec<usize> = if word_wrap {
+        let visible_wrap = &wrap_rows[view.scroll_line..end_visible_line];
+        // Collect unique doc lines for syntax highlighting
+        let mut doc_lines: Vec<usize> = visible_wrap.iter().map(|r| r.doc_line).collect();
+        doc_lines.dedup();
+        doc_lines
+    } else {
+        visible_doc_lines[view.scroll_line..end_visible_line].to_vec()
+    };
+    let visible_wrap_window: Vec<WrapRow> = if word_wrap {
+        wrap_rows[view.scroll_line..end_visible_line].to_vec()
+    } else {
+        Vec::new()
+    };
     let syntax_start_line = visible_window.first().copied().unwrap_or(0);
     let syntax_end_line = visible_window
         .last()
@@ -167,17 +246,14 @@ pub(crate) fn render_text_editor(
     );
     let rect = response.rect;
 
-    // Mouse wheel scrolling
+    // Mouse wheel scrolling (sets smooth scroll target)
     if response.hovered() {
         let scroll_delta = ui.input(|i| i.smooth_scroll_delta.y);
         if scroll_delta != 0.0 {
             let scroll_lines = (-scroll_delta / line_height).round() as i32;
-            if scroll_lines > 0 {
-                view.scroll_line =
-                    (view.scroll_line + scroll_lines as usize).min(max_scroll);
-            } else if scroll_lines < 0 {
-                view.scroll_line = view.scroll_line.saturating_sub((-scroll_lines) as usize);
-            }
+            let base = view.scroll_target.unwrap_or(view.scroll_line as f32);
+            let new_target = (base + scroll_lines as f32).clamp(0.0, max_scroll as f32);
+            view.scroll_target = Some(new_target);
         }
     }
     let text_clip = egui::Rect::from_min_max(
@@ -208,39 +284,42 @@ pub(crate) fn render_text_editor(
     }
 
     // Mouse click to position cursor, drag to select
+    let minimap_w = 50.0_f32;
     if response.clicked() && !handled_gutter_click {
         if let Some(pos) = response.interact_pointer_pos() {
-            let (click_line, click_col) = pixel_to_editor_pos(
-                pos,
-                rect,
-                gutter_width,
-                text_margin,
-                h_offset,
-                char_width,
-                line_height,
-                view.scroll_line,
-                &visible_doc_lines,
-                buf,
-            );
-            view.cursor.clear_selection();
-            view.cursor.pos = Position::new(click_line, click_col);
-            view.cursor.desired_col = None;
+            // Don't handle clicks in the minimap area as editor clicks
+            if pos.x < rect.right() - minimap_w {
+                let (click_line, click_col) = if word_wrap {
+                    pixel_to_editor_pos_wrapped(
+                        pos, rect, gutter_width, text_margin, char_width, line_height,
+                        view.scroll_line, &wrap_rows, buf,
+                    )
+                } else {
+                    pixel_to_editor_pos(
+                        pos, rect, gutter_width, text_margin, h_offset, char_width, line_height,
+                        view.scroll_line, &visible_doc_lines, buf,
+                    )
+                };
+                view.cursor.clear_selection();
+                view.cursor.clear_extra_cursors();
+                view.cursor.pos = Position::new(click_line, click_col);
+                view.cursor.desired_col = None;
+            }
         }
     }
     if response.dragged() {
         if let Some(pos) = response.interact_pointer_pos() {
-            let (drag_line, drag_col) = pixel_to_editor_pos(
-                pos,
-                rect,
-                gutter_width,
-                text_margin,
-                h_offset,
-                char_width,
-                line_height,
-                view.scroll_line,
-                &visible_doc_lines,
-                buf,
-            );
+            let (drag_line, drag_col) = if word_wrap {
+                pixel_to_editor_pos_wrapped(
+                    pos, rect, gutter_width, text_margin, char_width, line_height,
+                    view.scroll_line, &wrap_rows, buf,
+                )
+            } else {
+                pixel_to_editor_pos(
+                    pos, rect, gutter_width, text_margin, h_offset, char_width, line_height,
+                    view.scroll_line, &visible_doc_lines, buf,
+                )
+            };
             // Start selection on first drag if not already selecting
             if !view.cursor.has_selection() {
                 view.cursor.anchor = Some(view.cursor.pos);
@@ -253,35 +332,62 @@ pub(crate) fn render_text_editor(
     // Selection highlight
     if let Some((sel_start, sel_end)) = view.cursor.selection() {
         let sel_color = egui::Color32::from_rgba_unmultiplied(60, 100, 180, 80);
-        for (visible_offset, &line_idx) in visible_window.iter().enumerate() {
-            if line_idx < sel_start.line || line_idx > sel_end.line {
-                continue;
+        if word_wrap {
+            for (vis_idx, row) in visible_wrap_window.iter().enumerate() {
+                if row.doc_line < sel_start.line || row.doc_line > sel_end.line {
+                    continue;
+                }
+                let vis_y = vis_idx as f32 * line_height;
+                let line_len = buf.line_len(row.doc_line);
+                let doc_col_start = if row.doc_line == sel_start.line { sel_start.col } else { 0 };
+                let doc_col_end = if row.doc_line == sel_end.line { sel_end.col } else { line_len };
+                // Clamp to this row's column range
+                let row_sel_start = doc_col_start.max(row.col_start).saturating_sub(row.col_start);
+                let row_sel_end = doc_col_end.min(row.col_end).saturating_sub(row.col_start);
+                if row_sel_start >= row_sel_end {
+                    continue;
+                }
+                let x1 = rect.left() + gutter_width + text_margin + row_sel_start as f32 * char_width;
+                let x2 = rect.left() + gutter_width + text_margin + row_sel_end as f32 * char_width;
+                let sel_rect = egui::Rect::from_min_max(
+                    egui::pos2(x1.max(text_clip.left()), rect.top() + vis_y),
+                    egui::pos2(x2.max(x1 + char_width).min(text_clip.right()), rect.top() + vis_y + line_height),
+                );
+                if sel_rect.width() > 0.0 {
+                    painter.rect_filled(sel_rect, 0.0, sel_color);
+                }
             }
-            let vis_y = visible_offset as f32 * line_height;
-            let line_len = buf.line_len(line_idx);
-            let col_start = if line_idx == sel_start.line {
-                sel_start.col
-            } else {
-                0
-            };
-            let col_end = if line_idx == sel_end.line {
-                sel_end.col
-            } else {
-                line_len
-            };
-            let x1 =
-                rect.left() + gutter_width + text_margin + col_start as f32 * char_width - h_offset;
-            let x2 =
-                rect.left() + gutter_width + text_margin + col_end as f32 * char_width - h_offset;
-            let sel_rect = egui::Rect::from_min_max(
-                egui::pos2(x1.max(text_clip.left()), rect.top() + vis_y),
-                egui::pos2(
-                    x2.max(x1 + char_width).min(text_clip.right()),
-                    rect.top() + vis_y + line_height,
-                ),
-            );
-            if sel_rect.width() > 0.0 {
-                painter.rect_filled(sel_rect, 0.0, sel_color);
+        } else {
+            for (visible_offset, &line_idx) in visible_window.iter().enumerate() {
+                if line_idx < sel_start.line || line_idx > sel_end.line {
+                    continue;
+                }
+                let vis_y = visible_offset as f32 * line_height;
+                let line_len = buf.line_len(line_idx);
+                let col_start = if line_idx == sel_start.line {
+                    sel_start.col
+                } else {
+                    0
+                };
+                let col_end = if line_idx == sel_end.line {
+                    sel_end.col
+                } else {
+                    line_len
+                };
+                let x1 =
+                    rect.left() + gutter_width + text_margin + col_start as f32 * char_width - h_offset;
+                let x2 =
+                    rect.left() + gutter_width + text_margin + col_end as f32 * char_width - h_offset;
+                let sel_rect = egui::Rect::from_min_max(
+                    egui::pos2(x1.max(text_clip.left()), rect.top() + vis_y),
+                    egui::pos2(
+                        x2.max(x1 + char_width).min(text_clip.right()),
+                        rect.top() + vis_y + line_height,
+                    ),
+                );
+                if sel_rect.width() > 0.0 {
+                    painter.rect_filled(sel_rect, 0.0, sel_color);
+                }
             }
         }
     }
@@ -359,173 +465,312 @@ pub(crate) fn render_text_editor(
         h_offset,
     );
 
-    render_indentation_guides(
-        &painter,
-        text_clip,
-        buf,
-        visible_window,
-        active_indent_level,
-        rect,
-        gutter_width,
-        text_margin,
-        char_width,
-        line_height,
-        h_offset,
-    );
-
-    for (visible_offset, &line_idx) in visible_window.iter().enumerate() {
-        let vis_y = visible_offset as f32 * line_height;
-        let y = rect.top() + vis_y;
-
-        if line_idx == view.cursor.pos.line {
-            let line_rect = egui::Rect::from_min_size(
-                egui::pos2(rect.left() + gutter_width, y),
-                egui::Vec2::new(rect.width() - gutter_width, line_height),
-            );
-            painter.rect_filled(line_rect, 0.0, current_line_bg);
-        }
-
-        // Line number
-        let num_str = format!("{:>width$}", line_idx + 1, width = gutter_digits);
-        let num_color = if line_idx == view.cursor.pos.line {
-            current_line_gutter
-        } else {
-            gutter_color
-        };
-        painter.text(
-            egui::pos2(rect.left() + 4.0, y + 1.0),
-            egui::Align2::LEFT_TOP,
-            &num_str,
-            font.clone(),
-            num_color,
+    if !word_wrap {
+        render_indentation_guides(
+            &painter,
+            text_clip,
+            buf,
+            &visible_window,
+            active_indent_level,
+            rect,
+            gutter_width,
+            text_margin,
+            char_width,
+            line_height,
+            h_offset,
         );
+    }
 
-        // Git gutter indicator
-        if let Some(gutter) = &view.git_gutter {
-            if let Some(change) = gutter.change_at(line_idx) {
-                let (color, bar_h) = match change {
-                    GutterChange::Added => (egui::Color32::from_rgb(80, 200, 80), line_height),
-                    GutterChange::Modified => (egui::Color32::from_rgb(80, 140, 230), line_height),
-                    GutterChange::Deleted => (egui::Color32::from_rgb(220, 70, 70), 4.0),
-                };
-                let bar_y = if change == GutterChange::Deleted {
-                    y - 2.0 // position between lines
+    if word_wrap {
+        // ── Word-wrap rendering path ──
+        for (vis_idx, row) in visible_wrap_window.iter().enumerate() {
+            let vis_y = vis_idx as f32 * line_height;
+            let y = rect.top() + vis_y;
+
+            // Current line highlight
+            if row.doc_line == view.cursor.pos.line {
+                let line_rect = egui::Rect::from_min_size(
+                    egui::pos2(rect.left() + gutter_width, y),
+                    egui::Vec2::new(rect.width() - gutter_width, line_height),
+                );
+                painter.rect_filled(line_rect, 0.0, current_line_bg);
+            }
+
+            // Line number (only on first visual row of each doc line)
+            if row.is_first {
+                let num_str = format!("{:>width$}", row.doc_line + 1, width = gutter_digits);
+                let num_color = if row.doc_line == view.cursor.pos.line {
+                    current_line_gutter
                 } else {
-                    y
+                    gutter_color
                 };
-                painter.rect_filled(
-                    egui::Rect::from_min_size(
-                        egui::pos2(rect.left() + gutter_width - 4.0, bar_y),
-                        egui::Vec2::new(3.0, bar_h),
-                    ),
-                    0.0,
-                    color,
+                painter.text(
+                    egui::pos2(rect.left() + 4.0, y + 1.0),
+                    egui::Align2::LEFT_TOP,
+                    &num_str,
+                    font.clone(),
+                    num_color,
+                );
+
+                // Git gutter (only on first row)
+                if let Some(gutter) = &view.git_gutter {
+                    if let Some(change) = gutter.change_at(row.doc_line) {
+                        let (color, bar_h) = match change {
+                            GutterChange::Added => (egui::Color32::from_rgb(80, 200, 80), line_height),
+                            GutterChange::Modified => (egui::Color32::from_rgb(80, 140, 230), line_height),
+                            GutterChange::Deleted => (egui::Color32::from_rgb(220, 70, 70), 4.0),
+                        };
+                        let bar_y = if change == GutterChange::Deleted { y - 2.0 } else { y };
+                        painter.rect_filled(
+                            egui::Rect::from_min_size(
+                                egui::pos2(rect.left() + gutter_width - 4.0, bar_y),
+                                egui::Vec2::new(3.0, bar_h),
+                            ),
+                            0.0,
+                            color,
+                        );
+                    }
+                }
+            } else {
+                // Continuation indicator for wrapped lines
+                let wrap_indicator = egui::Color32::from_rgb(60, 65, 80);
+                painter.text(
+                    egui::pos2(rect.left() + gutter_width - 12.0, y + 1.0),
+                    egui::Align2::LEFT_TOP,
+                    "~",
+                    font.clone(),
+                    wrap_indicator,
                 );
             }
-        }
 
-        if let Some(range) = foldable_ranges.iter().find(|r| r.start_line == line_idx) {
-            let marker = if is_range_folded(&view.folded_ranges, range.start_line) { ">" } else { "v" };
-            painter.text(
-                egui::pos2(rect.left() + gutter_width - 12.0, y + 1.0),
-                egui::Align2::LEFT_TOP,
-                marker,
-                font.clone(),
-                gutter_color,
-            );
-        }
+            // Render the portion of the line for this wrap row
+            let line_text = buf.line(row.doc_line);
+            if line_text.is_empty() || row.col_start >= line_text.chars().count() {
+                continue;
+            }
+            let chars: Vec<char> = line_text.chars().collect();
+            let end = row.col_end.min(chars.len());
+            let row_text: String = chars[row.col_start..end].iter().collect();
+            if row_text.is_empty() {
+                continue;
+            }
 
-        // Line text with syntax highlighting
-        let line_text = buf.line(line_idx);
-        if line_text.is_empty() {
-            continue;
-        }
-        let text_x_base = rect.left() + gutter_width + text_margin - h_offset;
-        let spans = highlight_spans
-            .get(line_idx.saturating_sub(syntax_start_line))
-            .map(Vec::as_slice)
-            .unwrap_or(&[]);
+            let text_x_base = rect.left() + gutter_width + text_margin;
+            let spans = highlight_spans
+                .get(row.doc_line.saturating_sub(syntax_start_line))
+                .map(Vec::as_slice)
+                .unwrap_or(&[]);
 
-        if editor_config.visible_whitespace {
-            render_visible_whitespace_line(
-                &painter,
-                text_clip,
-                spans,
-                syntax_colors,
-                line_text,
-                text_x_base,
-                y,
-                char_width,
-                &font,
-                text_color,
-            );
-        } else if spans.is_empty() {
-            painter.with_clip_rect(text_clip).text(
-                egui::pos2(text_x_base, y + 1.0),
-                egui::Align2::LEFT_TOP,
-                line_text,
-                font.clone(),
-                text_color,
-            );
-        } else {
-            render_highlighted_line(
-                &painter,
-                text_clip,
-                spans,
-                syntax_colors,
-                line_text,
-                text_x_base,
-                y,
-                char_width,
-                &font,
-                text_color,
-            );
-        }
-
-        if let Some(range) = folded_range_starting_at(&view.folded_ranges, line_idx) {
-            let hidden_count = range.end_line.saturating_sub(range.start_line);
-            let placeholder = format!(" ... {hidden_count} folded line{}", if hidden_count == 1 { "" } else { "s" });
-            let placeholder_x = text_x_base + line_text.chars().count() as f32 * char_width;
-            painter.with_clip_rect(text_clip).text(
-                egui::pos2(placeholder_x, y + 1.0),
-                egui::Align2::LEFT_TOP,
-                placeholder,
-                font.clone(),
-                egui::Color32::from_rgb(110, 120, 145),
-            );
-        }
-
-        // Inlay hints for this line (rendered after the code text)
-        let hint_color = egui::Color32::from_rgba_unmultiplied(140, 150, 175, 160);
-        let hint_font = egui::FontId::monospace(editor_font_size * 0.85);
-        for hint in inlay_hints.iter().filter(|h| h.line as usize == line_idx) {
-            let hint_x = text_x_base + hint.col as f32 * char_width;
-            let label = format!(
-                "{}{}{}",
-                if hint.padding_left { " " } else { "" },
-                hint.label,
-                if hint.padding_right { " " } else { "" },
-            );
-            painter.with_clip_rect(text_clip).text(
-                egui::pos2(hint_x, y + 1.0),
-                egui::Align2::LEFT_TOP,
-                &label,
-                hint_font.clone(),
-                hint_color,
-            );
-        }
-
-        // Code lenses for this line (rendered above the line, dimmed)
-        for lens in code_lenses.iter().filter(|l| l.line as usize == line_idx) {
-            let lens_y = y - line_height * 0.5;
-            if lens_y >= rect.top() {
+            // Render with syntax highlighting, offset spans to wrap row
+            if spans.is_empty() {
                 painter.with_clip_rect(text_clip).text(
-                    egui::pos2(text_x_base, lens_y),
+                    egui::pos2(text_x_base, y + 1.0),
                     egui::Align2::LEFT_TOP,
-                    &lens.title,
-                    egui::FontId::monospace(editor_font_size * 0.8),
-                    egui::Color32::from_rgba_unmultiplied(120, 140, 180, 140),
+                    &row_text,
+                    font.clone(),
+                    text_color,
                 );
+            } else {
+                // Render spans shifted by col_start
+                let row_chars: Vec<char> = row_text.chars().collect();
+                let mut col = 0;
+                while col < row_chars.len() {
+                    let doc_col = row.col_start + col;
+                    let color = spans
+                        .iter()
+                        .find(|s| doc_col >= s.col_start && doc_col < s.col_end)
+                        .map(|s| {
+                            let rgb = crate::editor::syntax::group_color_with_overrides(s.group, syntax_colors);
+                            egui::Color32::from_rgb(rgb[0], rgb[1], rgb[2])
+                        })
+                        .unwrap_or(text_color);
+
+                    let mut batch_end = col + 1;
+                    while batch_end < row_chars.len() {
+                        let next_doc_col = row.col_start + batch_end;
+                        let next_color = spans
+                            .iter()
+                            .find(|s| next_doc_col >= s.col_start && next_doc_col < s.col_end)
+                            .map(|s| {
+                                let rgb = crate::editor::syntax::group_color_with_overrides(s.group, syntax_colors);
+                                egui::Color32::from_rgb(rgb[0], rgb[1], rgb[2])
+                            })
+                            .unwrap_or(text_color);
+                        if next_color != color {
+                            break;
+                        }
+                        batch_end += 1;
+                    }
+
+                    let chunk: String = row_chars[col..batch_end].iter().collect();
+                    let x = text_x_base + col as f32 * char_width;
+                    painter.with_clip_rect(text_clip).text(
+                        egui::pos2(x, y + 1.0),
+                        egui::Align2::LEFT_TOP,
+                        &chunk,
+                        font.clone(),
+                        color,
+                    );
+                    col = batch_end;
+                }
+            }
+        }
+    } else {
+        // ── Non-wrap rendering path (original) ──
+        for (visible_offset, &line_idx) in visible_window.iter().enumerate() {
+            let vis_y = visible_offset as f32 * line_height;
+            let y = rect.top() + vis_y;
+
+            if line_idx == view.cursor.pos.line {
+                let line_rect = egui::Rect::from_min_size(
+                    egui::pos2(rect.left() + gutter_width, y),
+                    egui::Vec2::new(rect.width() - gutter_width, line_height),
+                );
+                painter.rect_filled(line_rect, 0.0, current_line_bg);
+            }
+
+            // Line number
+            let num_str = format!("{:>width$}", line_idx + 1, width = gutter_digits);
+            let num_color = if line_idx == view.cursor.pos.line {
+                current_line_gutter
+            } else {
+                gutter_color
+            };
+            painter.text(
+                egui::pos2(rect.left() + 4.0, y + 1.0),
+                egui::Align2::LEFT_TOP,
+                &num_str,
+                font.clone(),
+                num_color,
+            );
+
+            // Git gutter indicator
+            if let Some(gutter) = &view.git_gutter {
+                if let Some(change) = gutter.change_at(line_idx) {
+                    let (color, bar_h) = match change {
+                        GutterChange::Added => (egui::Color32::from_rgb(80, 200, 80), line_height),
+                        GutterChange::Modified => (egui::Color32::from_rgb(80, 140, 230), line_height),
+                        GutterChange::Deleted => (egui::Color32::from_rgb(220, 70, 70), 4.0),
+                    };
+                    let bar_y = if change == GutterChange::Deleted {
+                        y - 2.0 // position between lines
+                    } else {
+                        y
+                    };
+                    painter.rect_filled(
+                        egui::Rect::from_min_size(
+                            egui::pos2(rect.left() + gutter_width - 4.0, bar_y),
+                            egui::Vec2::new(3.0, bar_h),
+                        ),
+                        0.0,
+                        color,
+                    );
+                }
+            }
+
+            if let Some(range) = foldable_ranges.iter().find(|r| r.start_line == line_idx) {
+                let marker = if is_range_folded(&view.folded_ranges, range.start_line) { ">" } else { "v" };
+                painter.text(
+                    egui::pos2(rect.left() + gutter_width - 12.0, y + 1.0),
+                    egui::Align2::LEFT_TOP,
+                    marker,
+                    font.clone(),
+                    gutter_color,
+                );
+            }
+
+            // Line text with syntax highlighting
+            let line_text = buf.line(line_idx);
+            if line_text.is_empty() {
+                continue;
+            }
+            let text_x_base = rect.left() + gutter_width + text_margin - h_offset;
+            let spans = highlight_spans
+                .get(line_idx.saturating_sub(syntax_start_line))
+                .map(Vec::as_slice)
+                .unwrap_or(&[]);
+
+            if editor_config.visible_whitespace {
+                render_visible_whitespace_line(
+                    &painter,
+                    text_clip,
+                    spans,
+                    syntax_colors,
+                    line_text,
+                    text_x_base,
+                    y,
+                    char_width,
+                    &font,
+                    text_color,
+                );
+            } else if spans.is_empty() {
+                painter.with_clip_rect(text_clip).text(
+                    egui::pos2(text_x_base, y + 1.0),
+                    egui::Align2::LEFT_TOP,
+                    line_text,
+                    font.clone(),
+                    text_color,
+                );
+            } else {
+                render_highlighted_line(
+                    &painter,
+                    text_clip,
+                    spans,
+                    syntax_colors,
+                    line_text,
+                    text_x_base,
+                    y,
+                    char_width,
+                    &font,
+                    text_color,
+                );
+            }
+
+            if let Some(range) = folded_range_starting_at(&view.folded_ranges, line_idx) {
+                let hidden_count = range.end_line.saturating_sub(range.start_line);
+                let placeholder = format!(" ... {hidden_count} folded line{}", if hidden_count == 1 { "" } else { "s" });
+                let placeholder_x = text_x_base + line_text.chars().count() as f32 * char_width;
+                painter.with_clip_rect(text_clip).text(
+                    egui::pos2(placeholder_x, y + 1.0),
+                    egui::Align2::LEFT_TOP,
+                    placeholder,
+                    font.clone(),
+                    egui::Color32::from_rgb(110, 120, 145),
+                );
+            }
+
+            // Inlay hints for this line (rendered after the code text)
+            let hint_color = egui::Color32::from_rgba_unmultiplied(140, 150, 175, 160);
+            let hint_font = egui::FontId::monospace(editor_font_size * 0.85);
+            for hint in inlay_hints.iter().filter(|h| h.line as usize == line_idx) {
+                let hint_x = text_x_base + hint.col as f32 * char_width;
+                let label = format!(
+                    "{}{}{}",
+                    if hint.padding_left { " " } else { "" },
+                    hint.label,
+                    if hint.padding_right { " " } else { "" },
+                );
+                painter.with_clip_rect(text_clip).text(
+                    egui::pos2(hint_x, y + 1.0),
+                    egui::Align2::LEFT_TOP,
+                    &label,
+                    hint_font.clone(),
+                    hint_color,
+                );
+            }
+
+            // Code lenses for this line (rendered above the line, dimmed)
+            for lens in code_lenses.iter().filter(|l| l.line as usize == line_idx) {
+                let lens_y = y - line_height * 0.5;
+                if lens_y >= rect.top() {
+                    painter.with_clip_rect(text_clip).text(
+                        egui::pos2(text_x_base, lens_y),
+                        egui::Align2::LEFT_TOP,
+                        &lens.title,
+                        egui::FontId::monospace(editor_font_size * 0.8),
+                        egui::Color32::from_rgba_unmultiplied(120, 140, 180, 140),
+                    );
+                }
             }
         }
     }
@@ -534,7 +779,7 @@ pub(crate) fn render_text_editor(
         &painter,
         text_clip,
         bracket_match,
-        visible_window,
+        &visible_window,
         rect,
         gutter_width,
         text_margin,
@@ -548,7 +793,7 @@ pub(crate) fn render_text_editor(
         &painter,
         text_clip,
         diagnostics,
-        visible_window,
+        &visible_window,
         rect,
         gutter_width,
         text_margin,
@@ -557,35 +802,151 @@ pub(crate) fn render_text_editor(
         h_offset,
     );
 
-    // Cursor
-    if let Some(cursor_visible_offset) = visible_window
-        .iter()
-        .position(|&line| line == view.cursor.pos.line)
-    {
-        let vis_y = cursor_visible_offset as f32 * line_height;
-        let cursor_x =
-            rect.left() + gutter_width + text_margin + view.cursor.pos.col as f32 * char_width
-                - h_offset;
-        let cursor_y = rect.top() + vis_y;
+    // Cursor (smooth animation + smooth blink)
+    let cursor_vis_info: Option<(f32, f32)> = if word_wrap {
+        // Find the wrap row containing the cursor
+        visible_wrap_window.iter().enumerate().find_map(|(vis_idx, row)| {
+            if row.doc_line == view.cursor.pos.line
+                && view.cursor.pos.col >= row.col_start
+                && (view.cursor.pos.col < row.col_end
+                    || (row.col_end == row.col_start && view.cursor.pos.col == 0)
+                    || visible_wrap_window.get(vis_idx + 1).is_none_or(|next| next.doc_line != row.doc_line))
+            {
+                let col_in_row = view.cursor.pos.col.saturating_sub(row.col_start);
+                Some((vis_idx as f32, col_in_row as f32))
+            } else {
+                None
+            }
+        })
+    } else {
+        visible_window
+            .iter()
+            .position(|&line| line == view.cursor.pos.line)
+            .map(|offset| (offset as f32, view.cursor.pos.col as f32))
+    };
+    if let Some((vis_row, col_offset)) = cursor_vis_info {
+        let vis_y = vis_row * line_height;
+        let target_x =
+            rect.left() + gutter_width + text_margin + col_offset * char_width
+                - if word_wrap { 0.0 } else { h_offset };
+        let target_y = rect.top() + vis_y;
+
+        // Initialize or lerp the display position
+        if !view.cursor_display_init {
+            view.cursor_display_x = target_x;
+            view.cursor_display_y = target_y;
+            view.cursor_display_init = true;
+        } else {
+            // Lerp toward target (~50ms at 60fps = factor ~0.25 per frame)
+            let lerp_factor = 0.25;
+            let dx = target_x - view.cursor_display_x;
+            let dy = target_y - view.cursor_display_y;
+            if dx.abs() < 0.5 && dy.abs() < 0.5 {
+                view.cursor_display_x = target_x;
+                view.cursor_display_y = target_y;
+            } else {
+                view.cursor_display_x += dx * lerp_factor;
+                view.cursor_display_y += dy * lerp_factor;
+                ui.ctx().request_repaint();
+            }
+        }
+
+        let cursor_x = view.cursor_display_x;
+        let cursor_y = view.cursor_display_y;
+
         if cursor_x >= text_clip.left() && cursor_x <= text_clip.right() {
+            // Smooth blink using sin wave for opacity fade
             let time = ui.ctx().input(|i| i.time);
-            if (time * 2.0) as u64 % 2 == 0 {
+            let blink_cycle = (time * 2.0 * std::f64::consts::PI / 1.2) as f32; // ~1.2s full cycle
+            let opacity = (blink_cycle.sin() * 0.5 + 0.5).clamp(0.15, 1.0);
+            let alpha = (opacity * 255.0) as u8;
+            let cursor_color = egui::Color32::from_rgba_unmultiplied(80, 160, 255, alpha);
+            painter.with_clip_rect(text_clip).line_segment(
+                [
+                    egui::pos2(cursor_x, cursor_y + 1.0),
+                    egui::pos2(cursor_x, cursor_y + line_height - 1.0),
+                ],
+                egui::Stroke::new(2.0, cursor_color),
+            );
+        }
+        ui.ctx().request_repaint();
+    }
+
+    // Render extra cursors (multi-cursor, same style)
+    for extra in &view.cursor.extra_cursors {
+        if let Some(extra_visible_offset) = visible_window
+            .iter()
+            .position(|&line| line == extra.pos.line)
+        {
+            let vis_y = extra_visible_offset as f32 * line_height;
+            let cursor_x =
+                rect.left() + gutter_width + text_margin + extra.pos.col as f32 * char_width
+                    - h_offset;
+            let cursor_y = rect.top() + vis_y;
+            if cursor_x >= text_clip.left() && cursor_x <= text_clip.right() {
+                let time = ui.ctx().input(|i| i.time);
+                let blink_cycle = (time * 2.0 * std::f64::consts::PI / 1.2) as f32;
+                let opacity = (blink_cycle.sin() * 0.5 + 0.5).clamp(0.15, 1.0);
+                let alpha = (opacity * 255.0) as u8;
+                let cursor_color = egui::Color32::from_rgba_unmultiplied(80, 160, 255, alpha);
                 painter.with_clip_rect(text_clip).line_segment(
                     [
                         egui::pos2(cursor_x, cursor_y + 1.0),
                         egui::pos2(cursor_x, cursor_y + line_height - 1.0),
                     ],
-                    egui::Stroke::new(2.0, egui::Color32::from_rgb(80, 160, 255)),
+                    egui::Stroke::new(2.0, cursor_color),
                 );
             }
         }
-        ui.ctx().request_repaint();
+
+        // Render extra cursor selections
+        if let Some(anchor) = extra.anchor {
+            if anchor != extra.pos {
+                let (sel_start, sel_end) = if anchor <= extra.pos {
+                    (anchor, extra.pos)
+                } else {
+                    (extra.pos, anchor)
+                };
+                let sel_color = egui::Color32::from_rgba_unmultiplied(60, 100, 180, 80);
+                for (visible_offset, &line_idx) in visible_window.iter().enumerate() {
+                    if line_idx < sel_start.line || line_idx > sel_end.line {
+                        continue;
+                    }
+                    let vis_y = visible_offset as f32 * line_height;
+                    let line_len = buf.line_len(line_idx);
+                    let col_start = if line_idx == sel_start.line { sel_start.col } else { 0 };
+                    let col_end = if line_idx == sel_end.line { sel_end.col } else { line_len };
+                    let x1 = rect.left() + gutter_width + text_margin + col_start as f32 * char_width - h_offset;
+                    let x2 = rect.left() + gutter_width + text_margin + col_end as f32 * char_width - h_offset;
+                    let sel_rect = egui::Rect::from_min_max(
+                        egui::pos2(x1.max(text_clip.left()), rect.top() + vis_y),
+                        egui::pos2(x2.max(x1 + char_width).min(text_clip.right()), rect.top() + vis_y + line_height),
+                    );
+                    if sel_rect.width() > 0.0 {
+                        painter.rect_filled(sel_rect, 0.0, sel_color);
+                    }
+                }
+            }
+        }
     }
 
     // Minimap (right edge, replaces scrollbar) -- disabled for very large files
-    let minimap_w = 50.0;
     let minimap_x = rect.right() - minimap_w;
     if line_count > 1 && perf::minimap_enabled(line_count) {
+        // Minimap click-to-scroll
+        if response.clicked() {
+            if let Some(click_pos) = response.interact_pointer_pos() {
+                if click_pos.x >= minimap_x && click_pos.x <= rect.right() {
+                    let rel_y = (click_pos.y - rect.top()) / rect.height();
+                    let target_line = (rel_y * visible_line_count as f32)
+                        .clamp(0.0, max_scroll as f32);
+                    // Center the viewport on the clicked position
+                    let centered = (target_line - visible_lines as f32 / 2.0).clamp(0.0, max_scroll as f32);
+                    view.scroll_target = Some(centered);
+                }
+            }
+        }
+
         // Background
         painter.rect_filled(
             egui::Rect::from_min_size(
@@ -1143,6 +1504,99 @@ fn folded_range_starting_at(folded_ranges: &[FoldRange], line: usize) -> Option<
 
 fn is_range_folded(folded_ranges: &[FoldRange], line: usize) -> bool {
     folded_ranges.iter().any(|range| range.start_line == line)
+}
+
+/// A visual row in word-wrap mode. Maps a visual row index to a doc line and column range.
+#[derive(Clone, Copy, Debug)]
+struct WrapRow {
+    /// The document line this visual row belongs to.
+    doc_line: usize,
+    /// The character column where this visual row starts.
+    col_start: usize,
+    /// The character column where this visual row ends (exclusive).
+    col_end: usize,
+    /// Whether this is the first visual row of the doc line (shows line number).
+    is_first: bool,
+}
+
+/// Compute visual wrap rows for a set of visible document lines.
+fn compute_wrap_rows(
+    visible_doc_lines: &[usize],
+    buf: &crate::editor::buffer::Buffer,
+    visible_cols: usize,
+) -> Vec<WrapRow> {
+    let wrap_col = visible_cols.max(10);
+    let mut rows = Vec::new();
+    for &doc_line in visible_doc_lines {
+        let line_len = buf.line_len(doc_line);
+        if line_len == 0 {
+            rows.push(WrapRow {
+                doc_line,
+                col_start: 0,
+                col_end: 0,
+                is_first: true,
+            });
+            continue;
+        }
+        let mut col = 0;
+        let mut first = true;
+        while col < line_len {
+            let end = (col + wrap_col).min(line_len);
+            rows.push(WrapRow {
+                doc_line,
+                col_start: col,
+                col_end: end,
+                is_first: first,
+            });
+            first = false;
+            col = end;
+        }
+    }
+    rows
+}
+
+/// Find the visual row index for a given cursor position in wrap mode.
+fn wrap_row_for_cursor(rows: &[WrapRow], line: usize, col: usize) -> usize {
+    for (i, row) in rows.iter().enumerate() {
+        if row.doc_line == line && col >= row.col_start && (col < row.col_end || (row.col_end == row.col_start && col == 0)) {
+            return i;
+        }
+        // Cursor at end of line: last row of that line
+        if row.doc_line == line && col >= row.col_end {
+            // Check if next row is same line
+            if rows.get(i + 1).is_none_or(|next| next.doc_line != line) {
+                return i;
+            }
+        }
+    }
+    rows.len().saturating_sub(1)
+}
+
+/// Convert a pixel position to (doc_line, doc_col) in word-wrap mode.
+fn pixel_to_editor_pos_wrapped(
+    pos: egui::Pos2,
+    rect: egui::Rect,
+    gutter_width: f32,
+    text_margin: f32,
+    char_width: f32,
+    line_height: f32,
+    scroll_row: usize,
+    wrap_rows: &[WrapRow],
+    buf: &crate::editor::buffer::Buffer,
+) -> (usize, usize) {
+    let rel_x = pos.x - rect.left() - gutter_width - text_margin;
+    let rel_y = pos.y - rect.top();
+    let visual_row = (scroll_row + (rel_y / line_height).max(0.0) as usize)
+        .min(wrap_rows.len().saturating_sub(1));
+    let row = wrap_rows.get(visual_row).copied().unwrap_or(WrapRow {
+        doc_line: 0,
+        col_start: 0,
+        col_end: 0,
+        is_first: true,
+    });
+    let col_in_row = (rel_x / char_width).max(0.0) as usize;
+    let doc_col = (row.col_start + col_in_row).min(buf.line_len(row.doc_line));
+    (row.doc_line, doc_col)
 }
 
 #[expect(
