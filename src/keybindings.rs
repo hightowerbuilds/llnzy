@@ -1,6 +1,52 @@
 use winit::event::KeyEvent;
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 
+/// Editor keybinding preset.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KeybindingPreset {
+    VsCode,
+    Vim,
+    Emacs,
+}
+
+impl KeybindingPreset {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::VsCode => "vscode",
+            Self::Vim => "vim",
+            Self::Emacs => "emacs",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "vim" => Self::Vim,
+            "emacs" => Self::Emacs,
+            _ => Self::VsCode,
+        }
+    }
+
+    pub const ALL: [Self; 3] = [Self::VsCode, Self::Vim, Self::Emacs];
+}
+
+/// Vim mode state for the editor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VimMode {
+    Normal,
+    Insert,
+    Visual,
+}
+
+/// Returns true if the "primary" modifier is held: Cmd on macOS, Ctrl on Linux/Windows.
+/// This allows the same keybinding config to work cross-platform.
+pub fn primary_modifier(mods: ModifiersState) -> bool {
+    if cfg!(target_os = "macos") {
+        mods.super_key()
+    } else {
+        mods.control_key()
+    }
+}
+
 /// All actions the user can bind to keys.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Action {
@@ -54,23 +100,27 @@ pub struct KeyBindings {
 impl KeyBindings {
     pub fn default_bindings() -> Self {
         use Action::*;
+        // Use primary_modifier-aware combos: on macOS these set super_key,
+        // on Linux/Windows they set ctrl. This makes the same default config
+        // work cross-platform without any user changes.
+        let is_macos = cfg!(target_os = "macos");
         let cmd = |key: &str| KeyCombo {
-            super_key: true,
-            ctrl: false,
+            super_key: is_macos,
+            ctrl: !is_macos,
             alt: false,
             shift: false,
             key: KeyMatch::Char(key.to_string()),
         };
         let cmd_shift = |key: &str| KeyCombo {
-            super_key: true,
-            ctrl: false,
+            super_key: is_macos,
+            ctrl: !is_macos,
             alt: false,
             shift: true,
             key: KeyMatch::Char(key.to_string()),
         };
         let cmd_named = |named: NamedKey| KeyCombo {
-            super_key: true,
-            ctrl: false,
+            super_key: is_macos,
+            ctrl: !is_macos,
             alt: false,
             shift: false,
             key: KeyMatch::Named(named),
@@ -122,12 +172,27 @@ impl KeyBindings {
     }
 
     /// Match a key event against the bindings. Returns the first matching action.
+    ///
+    /// Cross-platform: when a combo has `super_key: true`, on macOS we check
+    /// `modifiers.super_key()`. On Linux/Windows we also accept
+    /// `modifiers.control_key()` via `primary_modifier()`, so the same
+    /// keybinding config works on all platforms.
     pub fn match_key(&self, event: &KeyEvent, modifiers: ModifiersState) -> Option<Action> {
+        let has_primary = primary_modifier(modifiers);
         for (combo, action) in &self.bindings {
-            if combo.super_key != modifiers.super_key() {
+            // Check the primary modifier (Cmd on macOS, Ctrl on Linux/Windows).
+            // A combo with super_key=true matches if the primary modifier is held.
+            // A combo with ctrl=true and super_key=false checks the raw ctrl key.
+            if combo.super_key {
+                if !has_primary {
+                    continue;
+                }
+            } else if combo.ctrl != modifiers.control_key() {
                 continue;
             }
-            if combo.ctrl != modifiers.control_key() {
+            // When matching a primary-modifier combo, skip raw-ctrl check
+            // because on Linux/Windows primary_modifier already consumed ctrl.
+            if !combo.super_key && combo.ctrl != modifiers.control_key() {
                 continue;
             }
             if combo.alt != modifiers.alt_key() {

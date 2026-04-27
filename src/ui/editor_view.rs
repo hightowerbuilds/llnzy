@@ -9,6 +9,7 @@ use crate::editor::git_gutter::GutterChange;
 use crate::editor::search::EditorSearch;
 use crate::editor::syntax::{FoldRange, HighlightGroup, SyntaxEngine};
 use crate::editor::BufferView;
+use crate::keybindings::KeybindingPreset;
 use crate::lsp::{CodeLensInfo, DiagSeverity, FileDiagnostic, InlayHintInfo};
 
 /// Result from rendering that the host needs to act on.
@@ -37,7 +38,8 @@ pub(crate) fn render_text_editor(
     clipboard_out: &mut Option<String>,
     clipboard_in: &mut Option<String>,
     editor_search: &mut EditorSearch,
-    lsp_status: &str,
+lsp_status: &str,
+    keybinding_preset: KeybindingPreset,
 ) -> EditorFrameResult {
     let mut result = EditorFrameResult::default();
 
@@ -72,6 +74,7 @@ pub(crate) fn render_text_editor(
         clipboard_in,
         line_height,
         completion_active,
+        keybinding_preset,
     );
     if buf.len_chars() != content_before {
         view.tree_dirty = true;
@@ -221,13 +224,24 @@ pub(crate) fn render_text_editor(
     } else {
         String::new()
     };
-    let lsp_label = if lsp_status.is_empty() {
+let lsp_label = if lsp_status.is_empty() {
         String::new()
     } else {
         format!("  |  {lsp_status}")
     };
+    let vim_label = match view.vim_mode {
+        Some(crate::keybindings::VimMode::Normal) => "  |  VIM NORMAL",
+        Some(crate::keybindings::VimMode::Insert) => "  |  VIM INSERT",
+        Some(crate::keybindings::VimMode::Visual) => "  |  VIM VISUAL",
+        None => "",
+    };
+    let preset_label = match keybinding_preset {
+        KeybindingPreset::VsCode => "",
+        KeybindingPreset::Vim => "",
+        KeybindingPreset::Emacs => "  |  Emacs",
+    };
     let status_text = format!(
-        "Ln {}, Col {}  |  {} lines  |  {}  |  {}  |  {}{}{}",
+        "Ln {}, Col {}  |  {} lines  |  {}  |  {}  |  {}{}{}{}{}",
         view.cursor.pos.line + 1,
         view.cursor.pos.col + 1,
         line_count,
@@ -239,7 +253,9 @@ pub(crate) fn render_text_editor(
             "Saved"
         },
         diag_label,
-        lsp_label,
+lsp_label,
+        vim_label,
+        preset_label,
     );
 
     // ── Find / Replace bar ──
