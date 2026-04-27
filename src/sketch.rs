@@ -133,6 +133,16 @@ pub struct SketchState {
     pub selected: Option<usize>,
     pub text_draft: Option<TextDraft>,
     pub move_draft: Option<MoveDraft>,
+    /// Name of the currently active named sketch (None = default scratch).
+    pub active_sketch_name: Option<String>,
+    /// Transient UI state for the "Save As" name prompt.
+    pub save_as_input: String,
+    /// Whether the save-as prompt is currently visible.
+    pub save_as_open: bool,
+    /// Whether the sketch browser panel is currently visible.
+    pub browser_open: bool,
+    /// Cached list of saved sketch names (refreshed on open).
+    pub saved_sketch_names: Vec<String>,
     undo_stack: Vec<SketchDocument>,
     redo_stack: Vec<SketchDocument>,
     dirty: bool,
@@ -148,6 +158,11 @@ impl Default for SketchState {
             selected: None,
             text_draft: None,
             move_draft: None,
+            active_sketch_name: None,
+            save_as_input: String::new(),
+            save_as_open: false,
+            browser_open: false,
+            saved_sketch_names: Vec::new(),
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             dirty: false,
@@ -482,6 +497,43 @@ impl SketchState {
         true
     }
 
+    /// Reset to a blank canvas, optionally clearing the active sketch name.
+    pub fn new_sketch(&mut self) {
+        self.push_undo();
+        self.document = SketchDocument::default();
+        self.selected = None;
+        self.text_draft = None;
+        self.move_draft = None;
+        self.draft = None;
+        self.active_sketch_name = None;
+        self.undo_stack.clear();
+        self.redo_stack.clear();
+        self.dirty = true;
+    }
+
+    /// Load a named sketch, replacing the current document.
+    pub fn load_sketch(&mut self, name: &str) -> Result<(), String> {
+        let document = load_named_sketch(name)?;
+        self.document = document;
+        self.selected = None;
+        self.text_draft = None;
+        self.move_draft = None;
+        self.draft = None;
+        self.active_sketch_name = Some(name.to_string());
+        self.undo_stack.clear();
+        self.redo_stack.clear();
+        self.dirty = false;
+        Ok(())
+    }
+
+    /// Save the current document under a name and set it as active.
+    pub fn save_sketch_as(&mut self, name: &str) -> Result<(), String> {
+        save_named_sketch(name, &self.document)?;
+        self.active_sketch_name = Some(name.to_string());
+        self.dirty = false;
+        Ok(())
+    }
+
     pub fn hit_test(&self, point: SketchPoint) -> Option<usize> {
         self.document
             .elements
@@ -539,6 +591,79 @@ pub fn save_default_document(document: &SketchDocument) -> Result<(), String> {
         return Ok(());
     };
     save_document_to_path(document, &path)
+}
+
+/// Directory where named sketches are stored.
+pub fn sketches_dir() -> Option<PathBuf> {
+    dirs::config_dir().map(|d| d.join("llnzy").join("sketches"))
+}
+
+/// Sanitize a user-provided sketch name into a safe filename stem.
+fn sanitize_sketch_name(name: &str) -> String {
+    name.trim()
+        .replace(|c: char| !c.is_alphanumeric() && c != '-' && c != '_' && c != ' ', "")
+        .trim()
+        .to_string()
+}
+
+/// Save a sketch document under a human-readable name.
+pub fn save_named_sketch(name: &str, document: &SketchDocument) -> Result<(), String> {
+    let sanitized = sanitize_sketch_name(name);
+    if sanitized.is_empty() {
+        return Err("Sketch name cannot be empty".to_string());
+    }
+    let Some(dir) = sketches_dir() else {
+        return Err("Cannot determine config directory".to_string());
+    };
+    let path = dir.join(format!("{sanitized}.json"));
+    save_document_to_path(document, &path)
+}
+
+/// Load a sketch document by name.
+pub fn load_named_sketch(name: &str) -> Result<SketchDocument, String> {
+    let sanitized = sanitize_sketch_name(name);
+    let Some(dir) = sketches_dir() else {
+        return Err("Cannot determine config directory".to_string());
+    };
+    let path = dir.join(format!("{sanitized}.json"));
+    load_document_from_path(&path)
+}
+
+/// List the names of all saved sketches (excluding the default scratch file).
+pub fn list_saved_sketches() -> Vec<String> {
+    let Some(dir) = sketches_dir() else {
+        return Vec::new();
+    };
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = entries
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                return None;
+            }
+            let stem = path.file_stem()?.to_str()?.to_string();
+            // Exclude the default scratch file
+            if stem == "scratch" {
+                return None;
+            }
+            Some(stem)
+        })
+        .collect();
+    names.sort();
+    names
+}
+
+/// Delete a named sketch file.
+pub fn delete_named_sketch(name: &str) -> Result<(), String> {
+    let sanitized = sanitize_sketch_name(name);
+    let Some(dir) = sketches_dir() else {
+        return Err("Cannot determine config directory".to_string());
+    };
+    let path = dir.join(format!("{sanitized}.json"));
+    std::fs::remove_file(&path).map_err(|e| e.to_string())
 }
 
 fn rect_from_drag(
@@ -820,5 +945,50 @@ mod tests {
         let decoded: SketchDocument = serde_json::from_str(&json).unwrap();
 
         assert_eq!(decoded, document);
+    }
+
+    #[test]
+    fn new_sketch_clears_everything() {
+        let mut state = SketchState::default();
+        state.begin_stroke(point(1.0, 1.0));
+        state.append_stroke_point(point(10.0, 10.0));
+        state.finish_stroke();
+        state.active_sketch_name = Some("test".to_string());
+
+        state.new_sketch();
+
+        assert!(state.document.elements.is_empty());
+        assert!(state.active_sketch_name.is_none());
+        assert!(!state.can_undo());
+        assert!(!state.can_redo());
+    }
+
+    #[test]
+    fn save_and_load_via_path() {
+        let dir = std::env::temp_dir().join("llnzy_test_sketch");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("roundtrip_test.json");
+        let mut document = SketchDocument::default();
+        document.elements.push(SketchElement::Text(TextElement {
+            x: 5.0,
+            y: 10.0,
+            w: 100.0,
+            h: 40.0,
+            text: "named sketch".to_string(),
+            style: SketchStyle::default(),
+        }));
+
+        save_document_to_path(&document, &path).unwrap();
+        let loaded = load_document_from_path(&path).unwrap();
+
+        assert_eq!(loaded, document);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn sanitize_sketch_name_removes_special_chars() {
+        assert_eq!(sanitize_sketch_name("  my sketch!@#  "), "my sketch");
+        assert_eq!(sanitize_sketch_name("good-name_1"), "good-name_1");
+        assert_eq!(sanitize_sketch_name(""), "");
     }
 }
