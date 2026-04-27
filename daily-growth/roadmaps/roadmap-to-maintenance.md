@@ -184,22 +184,22 @@
 
 > Smooth animations, multi-cursor, and rendering improvements.
 
-- [ ] **8.1 -- Multi-cursor support**
+- [x] **8.1 -- Multi-cursor support**
   - Cmd+D: add cursor at next occurrence of current word/selection
   - Cmd+Shift+L: select all occurrences
   - All cursors type/delete/move simultaneously
   - Requires extending `EditorCursor` from single to `Vec<CursorRange>`
 
-- [ ] **8.2 -- Smooth scrolling**
+- [x] **8.2 -- Smooth scrolling**
   - Animated scroll (lerp toward target scroll position each frame)
   - Affects both vertical and horizontal scroll
   - Minimap click-to-scroll: click a position in the minimap to jump there
 
-- [ ] **8.3 -- Smooth cursor animation**
+- [x] **8.3 -- Smooth cursor animation**
   - Cursor slides to new position over ~50ms instead of jumping
   - Smooth blink fade (opacity transition instead of on/off)
 
-- [ ] **8.4 -- Word wrap rendering**
+- [x] **8.4 -- Word wrap rendering**
   - Config toggle exists but rendering doesn't wrap long lines
   - Wrap at viewport edge (soft wrap) or at a configured column
   - Wrapped continuation lines indented to match

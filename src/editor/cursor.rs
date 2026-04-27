@@ -2,6 +2,13 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use super::buffer::{Buffer, Position};
 
+/// A single extra cursor position with optional selection anchor.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CursorRange {
+    pub pos: Position,
+    pub anchor: Option<Position>,
+}
+
 /// A cursor in the editor with optional selection anchor.
 #[derive(Clone, Debug)]
 pub struct EditorCursor {
@@ -12,6 +19,8 @@ pub struct EditorCursor {
     pub anchor: Option<Position>,
     /// Desired column when moving vertically — preserved across short lines.
     pub desired_col: Option<usize>,
+    /// Additional cursors for multi-cursor editing.
+    pub extra_cursors: Vec<CursorRange>,
 }
 
 impl EditorCursor {
@@ -20,6 +29,7 @@ impl EditorCursor {
             pos: Position::new(0, 0),
             anchor: None,
             desired_col: None,
+            extra_cursors: Vec::new(),
         }
     }
 
@@ -28,6 +38,7 @@ impl EditorCursor {
             pos: Position::new(line, col),
             anchor: None,
             desired_col: None,
+            extra_cursors: Vec::new(),
         }
     }
 
@@ -337,6 +348,133 @@ impl EditorCursor {
         if let Some(ref mut anchor) = self.anchor {
             anchor.line = anchor.line.min(max_line);
             anchor.col = anchor.col.min(buf.line_len(anchor.line));
+        }
+        for extra in &mut self.extra_cursors {
+            extra.pos.line = extra.pos.line.min(max_line);
+            extra.pos.col = extra.pos.col.min(buf.line_len(extra.pos.line));
+            if let Some(ref mut anchor) = extra.anchor {
+                anchor.line = anchor.line.min(max_line);
+                anchor.col = anchor.col.min(buf.line_len(anchor.line));
+            }
+        }
+    }
+
+    /// Clear all extra cursors.
+    pub fn clear_extra_cursors(&mut self) {
+        self.extra_cursors.clear();
+    }
+
+    /// Get all cursor positions (primary + extras), sorted in reverse document order
+    /// for safe editing (edits from bottom to top preserve positions).
+    pub fn all_positions_reverse(&self) -> Vec<(Position, Option<Position>)> {
+        let mut positions: Vec<(Position, Option<Position>)> = Vec::with_capacity(1 + self.extra_cursors.len());
+        positions.push((self.pos, self.anchor));
+        for extra in &self.extra_cursors {
+            positions.push((extra.pos, extra.anchor));
+        }
+        positions.sort_by(|a, b| b.0.cmp(&a.0));
+        positions.dedup_by(|a, b| a.0 == b.0);
+        positions
+    }
+
+    /// Get the selected text for the primary cursor, or the word under the cursor.
+    pub fn word_or_selection_text<'a>(&self, buf: &'a Buffer) -> Option<String> {
+        if let Some((start, end)) = self.selection() {
+            let text = buf.text_range(start, end);
+            if !text.is_empty() {
+                return Some(text);
+            }
+        }
+        // Get word under cursor
+        let line = buf.line(self.pos.line);
+        let chars: Vec<char> = line.chars().collect();
+        if chars.is_empty() || self.pos.col >= chars.len() {
+            return None;
+        }
+        let kind = char_kind(chars[self.pos.col]);
+        if kind == CharKind::Whitespace {
+            return None;
+        }
+        let mut start = self.pos.col;
+        let mut end = self.pos.col;
+        while start > 0 && char_kind(chars[start - 1]) == kind {
+            start -= 1;
+        }
+        while end < chars.len() && char_kind(chars[end]) == kind {
+            end += 1;
+        }
+        let word: String = chars[start..end].iter().collect();
+        if word.is_empty() { None } else { Some(word) }
+    }
+
+    /// Add a cursor at the next occurrence of `needle` after the last cursor position.
+    /// Returns true if a new cursor was added.
+    pub fn add_next_occurrence(&mut self, buf: &Buffer, needle: &str) -> bool {
+        if needle.is_empty() {
+            return false;
+        }
+        // Find the furthest cursor position to search after
+        let mut search_after = self.pos;
+        for extra in &self.extra_cursors {
+            if extra.pos > search_after {
+                search_after = extra.pos;
+            }
+        }
+        let text = buf.text();
+        let search_char_idx = buf.pos_to_char(search_after);
+        // Search from after the last cursor, wrapping around
+        if let Some(found) = text[search_char_idx..].find(needle) {
+            let abs_char = search_char_idx + found;
+            let found_pos = buf.char_to_pos(abs_char);
+            let found_end = buf.char_to_pos(abs_char + needle.chars().count());
+            // Don't add a duplicate
+            if found_pos != self.pos && !self.extra_cursors.iter().any(|c| c.pos == found_end) {
+                self.extra_cursors.push(CursorRange {
+                    pos: found_end,
+                    anchor: Some(found_pos),
+                });
+                return true;
+            }
+        }
+        // Wrap around from the beginning
+        if let Some(found) = text[..search_char_idx].find(needle) {
+            let found_pos = buf.char_to_pos(found);
+            let found_end = buf.char_to_pos(found + needle.chars().count());
+            if found_pos != self.pos && !self.extra_cursors.iter().any(|c| c.pos == found_end) {
+                self.extra_cursors.push(CursorRange {
+                    pos: found_end,
+                    anchor: Some(found_pos),
+                });
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Select all occurrences of `needle` and place cursors at each.
+    pub fn select_all_occurrences(&mut self, buf: &Buffer, needle: &str) {
+        if needle.is_empty() {
+            return;
+        }
+        let text = buf.text();
+        self.extra_cursors.clear();
+        let mut first = true;
+        let mut start = 0;
+        while let Some(found) = text[start..].find(needle) {
+            let abs_char = start + found;
+            let found_pos = buf.char_to_pos(abs_char);
+            let found_end = buf.char_to_pos(abs_char + needle.chars().count());
+            if first {
+                self.anchor = Some(found_pos);
+                self.pos = found_end;
+                first = false;
+            } else {
+                self.extra_cursors.push(CursorRange {
+                    pos: found_end,
+                    anchor: Some(found_pos),
+                });
+            }
+            start = abs_char + needle.len().max(1);
         }
     }
 }

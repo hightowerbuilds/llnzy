@@ -24,6 +24,13 @@ pub struct BufferView {
     pub cursor: EditorCursor,
     pub scroll_line: usize,
     pub scroll_col: usize,
+    /// Smooth scroll target (None = already at destination).
+    pub scroll_target: Option<f32>,
+    /// Smooth cursor display position (lerped toward actual cursor pos).
+    pub cursor_display_x: f32,
+    pub cursor_display_y: f32,
+    /// Whether cursor display position has been initialized.
+    pub cursor_display_init: bool,
     /// The language ID detected for this buffer (e.g. "rust", "python").
     pub lang_id: Option<&'static str>,
     /// The tree-sitter parse tree, if available.
@@ -48,6 +55,10 @@ impl Default for BufferView {
             cursor: EditorCursor::new(),
             scroll_line: 0,
             scroll_col: 0,
+            scroll_target: None,
+            cursor_display_x: 0.0,
+            cursor_display_y: 0.0,
+            cursor_display_init: false,
             lang_id: None,
             tree: None,
             tree_dirty: false,
@@ -66,6 +77,10 @@ impl Clone for BufferView {
             cursor: self.cursor.clone(),
             scroll_line: self.scroll_line,
             scroll_col: self.scroll_col,
+            scroll_target: self.scroll_target,
+            cursor_display_x: self.cursor_display_x,
+            cursor_display_y: self.cursor_display_y,
+            cursor_display_init: self.cursor_display_init,
             lang_id: self.lang_id,
             tree: None, // Trees aren't cheaply cloneable; will re-parse
             tree_dirty: true,
