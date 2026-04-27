@@ -15,6 +15,8 @@ use crate::lsp::{CodeLensInfo, DiagSeverity, FileDiagnostic, InlayHintInfo};
 #[derive(Default)]
 pub(crate) struct EditorFrameResult {
     pub key_action: KeyAction,
+    /// Cursor position before the frame's edits were applied.
+    pub cursor_before: Position,
 }
 
 /// Render the code editor for a text buffer.
@@ -35,6 +37,7 @@ pub(crate) fn render_text_editor(
     clipboard_out: &mut Option<String>,
     clipboard_in: &mut Option<String>,
     editor_search: &mut EditorSearch,
+    lsp_status: &str,
 ) -> EditorFrameResult {
     let mut result = EditorFrameResult::default();
 
@@ -57,6 +60,7 @@ pub(crate) fn render_text_editor(
     // Handle keyboard input (may modify buffer)
     let content_before = buf.len_chars();
     let cursor_before = view.cursor.pos;
+    result.cursor_before = cursor_before;
     let ctx = ui.ctx().clone();
     let completion_active = completions.is_some();
     result.key_action = handle_editor_keys(
@@ -217,8 +221,13 @@ pub(crate) fn render_text_editor(
     } else {
         String::new()
     };
+    let lsp_label = if lsp_status.is_empty() {
+        String::new()
+    } else {
+        format!("  |  {lsp_status}")
+    };
     let status_text = format!(
-        "Ln {}, Col {}  |  {} lines  |  {}  |  {}  |  {}{}",
+        "Ln {}, Col {}  |  {} lines  |  {}  |  {}  |  {}{}{}",
         view.cursor.pos.line + 1,
         view.cursor.pos.col + 1,
         line_count,
@@ -230,6 +239,7 @@ pub(crate) fn render_text_editor(
             "Saved"
         },
         diag_label,
+        lsp_label,
     );
 
     // ── Find / Replace bar ──

@@ -6,6 +6,7 @@ use alacritty_terminal::index::{Column, Point};
 use alacritty_terminal::term::cell::{Cell, Flags};
 use alacritty_terminal::term::{self, Config as TermConfig, Term, TermMode};
 use alacritty_terminal::vte::ansi::{Color as AnsiColor, NamedColor, Processor};
+use regex::Regex;
 
 use crate::config::{indexed_color, Config};
 
@@ -254,6 +255,12 @@ impl Terminal {
         self.cell(row, col).hyperlink().map(|h| h.uri().to_string())
     }
 
+    /// Collect the text content of a viewport row as a string.
+    pub fn row_text(&self, row: usize) -> String {
+        let (cols, _) = self.size();
+        (0..cols).map(|c| self.cell_char(row, c)).collect()
+    }
+
     // --- Terminal mode queries ---
 
     pub fn mouse_mode(&self) -> bool {
@@ -277,6 +284,36 @@ impl Terminal {
         let cursor = self.term.grid().cursor.point;
         let display_offset = self.term.grid().display_offset();
         term::point_to_viewport(display_offset, cursor).map(|p| (p.line, p.column.0))
+    }
+
+    /// Collect underline decoration rects for detected URLs in the visible grid.
+    pub fn url_decoration_rects(
+        &self,
+        cell_w: f32,
+        cell_h: f32,
+    ) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+        let (cols, rows) = self.size();
+        let mut rects = Vec::new();
+        // Underline color: a muted cyan/blue to suggest clickability
+        let color = [0.4, 0.65, 0.9, 0.7];
+
+        for row in 0..rows {
+            let line_text = self.row_text(row);
+            for (start, end, _url) in detect_urls(&line_text) {
+                // Clamp to visible column range
+                let start = start.min(cols);
+                let end = end.min(cols);
+                if start >= end {
+                    continue;
+                }
+                let x = start as f32 * cell_w;
+                let y = row as f32 * cell_h + cell_h - 2.0;
+                let w = (end - start) as f32 * cell_w;
+                rects.push((x, y, w, 1.0, color));
+            }
+        }
+
+        rects
     }
 
     /// Collect background rects for cells with non-default backgrounds.
@@ -323,6 +360,19 @@ impl Terminal {
 
         rects
     }
+}
+
+/// Detect URLs in a line of terminal text.
+/// Returns a list of (start_col, end_col, url_string) tuples.
+pub fn detect_urls(line: &str) -> Vec<(usize, usize, String)> {
+    // Lazily compiled regex for URL detection
+    static URL_RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    let re = URL_RE.get_or_init(|| {
+        Regex::new(r#"(?:https?://|file://)[^\s<>"'`\)\]\}]+"#).expect("URL regex")
+    });
+    re.find_iter(line)
+        .map(|m| (m.start(), m.end(), m.as_str().to_string()))
+        .collect()
 }
 
 fn resolve_color(color: &AnsiColor, config: &Config, is_fg: bool) -> [u8; 3] {
@@ -630,6 +680,54 @@ mod tests {
         term.scroll_to_bottom();
         // Cursor should be visible again
         assert!(term.cursor_point().is_some());
+    }
+
+    // ── Foreground/background with inverse ──
+
+    // ── URL detection ──
+
+    #[test]
+    fn detect_urls_finds_https() {
+        let urls = detect_urls("Visit https://example.com for details");
+        assert_eq!(urls.len(), 1);
+        assert_eq!(urls[0].2, "https://example.com");
+    }
+
+    #[test]
+    fn detect_urls_finds_http() {
+        let urls = detect_urls("Link: http://foo.bar/baz?x=1&y=2");
+        assert_eq!(urls.len(), 1);
+        assert_eq!(urls[0].2, "http://foo.bar/baz?x=1&y=2");
+    }
+
+    #[test]
+    fn detect_urls_finds_file() {
+        let urls = detect_urls("file:///tmp/test.txt");
+        assert_eq!(urls.len(), 1);
+        assert_eq!(urls[0].2, "file:///tmp/test.txt");
+    }
+
+    #[test]
+    fn detect_urls_multiple() {
+        let urls = detect_urls("See https://a.com and https://b.com");
+        assert_eq!(urls.len(), 2);
+        assert_eq!(urls[0].2, "https://a.com");
+        assert_eq!(urls[1].2, "https://b.com");
+    }
+
+    #[test]
+    fn detect_urls_none() {
+        let urls = detect_urls("no links here at all");
+        assert!(urls.is_empty());
+    }
+
+    #[test]
+    fn detect_urls_returns_correct_columns() {
+        let line = "  https://x.co  ";
+        let urls = detect_urls(line);
+        assert_eq!(urls.len(), 1);
+        assert_eq!(urls[0].0, 2); // starts at col 2
+        assert_eq!(urls[0].1, 14); // ends at col 14
     }
 
     // ── Foreground/background with inverse ──

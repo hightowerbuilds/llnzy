@@ -212,6 +212,47 @@ impl LspClient {
             .await
     }
 
+    /// Notify the server of an incremental document change.
+    pub async fn did_change_incremental(
+        &mut self,
+        path: &Path,
+        start_line: u32,
+        start_col: u32,
+        end_line: u32,
+        end_col: u32,
+        new_text: &str,
+    ) -> Result<(), String> {
+        if self.state != ClientState::Running {
+            return Ok(());
+        }
+        let Some(doc) = self.open_docs.get_mut(path) else {
+            return Ok(());
+        };
+        doc.version += 1;
+
+        let params = DidChangeTextDocumentParams {
+            text_document: VersionedTextDocumentIdentifier {
+                uri: doc.uri.clone(),
+                version: doc.version,
+            },
+            content_changes: vec![TextDocumentContentChangeEvent {
+                range: Some(Range {
+                    start: Position { line: start_line, character: start_col },
+                    end: Position { line: end_line, character: end_col },
+                }),
+                range_length: None,
+                text: new_text.to_string(),
+            }],
+        };
+
+        self.transport
+            .notify(
+                "textDocument/didChange",
+                serde_json::to_value(params).unwrap(),
+            )
+            .await
+    }
+
     /// Notify the server that a document was saved.
     pub async fn did_save(&mut self, path: &Path, text: &str) -> Result<(), String> {
         if self.state != ClientState::Running {

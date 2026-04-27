@@ -207,6 +207,27 @@ impl LspManager {
         });
     }
 
+    /// Send an incremental document change to the server.
+    pub fn did_change_incremental(
+        &mut self,
+        path: &Path,
+        lang_id: &str,
+        start_line: u32,
+        start_col: u32,
+        end_line: u32,
+        end_col: u32,
+        new_text: &str,
+    ) {
+        let Some(client) = self.clients.get_mut(lang_id) else { return };
+        let path = path.to_path_buf();
+        let new_text = new_text.to_string();
+        self.runtime.block_on(async {
+            if let Err(e) = client.did_change_incremental(&path, start_line, start_col, end_line, end_col, &new_text).await {
+                log::warn!("incremental didChange failed: {e}");
+            }
+        });
+    }
+
     pub fn did_save(&mut self, path: &Path, lang_id: &str, text: &str) {
         let Some(client) = self.clients.get_mut(lang_id) else { return };
         let path = path.to_path_buf();
@@ -665,6 +686,49 @@ impl LspManager {
             .collect();
 
         self.diagnostics.insert(path, diags);
+    }
+
+    /// Check if each client's transport is still alive.
+    /// Removes dead clients so they will be restarted on the next ensure_server() call.
+    pub fn check_server_health(&mut self) {
+        let dead: Vec<&'static str> = self.clients.iter()
+            .filter_map(|(&lang_id, client)| {
+                // Try to send a no-op to check if the transport is alive.
+                // If the writer channel is broken, the server has died.
+                if client.state == client::ClientState::Running {
+                    let transport = client.transport().clone();
+                    let is_dead = self.runtime.block_on(async {
+                        // Attempt a lightweight notify; if the pipe is broken this will fail
+                        transport.notify("$/alive", serde_json::json!({})).await.is_err()
+                    });
+                    if is_dead {
+                        Some(lang_id)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        for lang_id in dead {
+            log::warn!("LSP server for {} has died -- removing client", lang_id);
+            self.clients.remove(lang_id);
+        }
+    }
+
+    /// Get the status string for a language server (for display in the status bar).
+    pub fn server_status(&self, lang_id: &str) -> &str {
+        match self.clients.get(lang_id) {
+            Some(client) => match client.state {
+                client::ClientState::Starting => "Starting...",
+                client::ClientState::Running => &client.server_name,
+                client::ClientState::ShuttingDown => "Shutting down...",
+                client::ClientState::Stopped => "Stopped",
+            },
+            None => "",
+        }
     }
 
     pub fn shutdown_all(&mut self) {

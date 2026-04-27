@@ -1179,8 +1179,14 @@ impl ApplicationHandler<UserEvent> for App {
                             return;
                         }
 
-                        // Fall back to URL detection
+                        // Fall back to URL detection using regex-based detect_urls
                         let url = session.terminal.cell_hyperlink(row, col).or_else(|| {
+                            let line_text = session.terminal.row_text(row);
+                            llnzy::terminal::detect_urls(&line_text)
+                                .into_iter()
+                                .find(|(start, end, _)| col >= *start && col < *end)
+                                .map(|(_, _, url)| url)
+                        }).or_else(|| {
                             let text = Selection::word_at(row, col, &session.terminal);
                             if text.starts_with("http://") || text.starts_with("https://") {
                                 Some(text)
