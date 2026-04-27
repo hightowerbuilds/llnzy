@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::keybindings::KeybindingPreset;
 use crate::theme::builtin_themes;
 use crate::theme_store;
 use crate::workspace_store::{self, SavedWorkspace, TabEntry};
@@ -374,6 +375,20 @@ pub(crate) fn render_editor_tab(ui: &mut egui::Ui, config: &mut Config) {
 
             ui.label(label("Sidebar Font Size"));
             ui.add(egui::Slider::new(&mut config.editor.sidebar_font_size, 8.0..=24.0).text("px"));
+            ui.end_row();
+
+            ui.label(label("Keybinding Preset"));
+            egui::ComboBox::from_id_salt("keybinding_preset")
+                .selected_text(label(config.editor.keybinding_preset.as_str()))
+                .show_ui(ui, |ui| {
+                    for preset in KeybindingPreset::ALL {
+                        ui.selectable_value(
+                            &mut config.editor.keybinding_preset,
+                            preset,
+                            preset.as_str(),
+                        );
+                    }
+                });
             ui.end_row();
 
             ui.label(label("Tab Size"));

@@ -19,6 +19,8 @@ use cursor::EditorCursor;
 use syntax::{FoldRange, SyntaxEngine};
 use tree_sitter::Tree;
 
+use crate::keybindings::VimMode;
+
 /// Per-buffer view state (cursor position, scroll offsets, syntax tree).
 pub struct BufferView {
     pub cursor: EditorCursor,
@@ -42,6 +44,11 @@ pub struct BufferView {
     pub folded_ranges: Vec<FoldRange>,
     pub pending_key_chord: Option<EditorKeyChord>,
     pub git_gutter: Option<git_gutter::GitGutter>,
+    /// Vim mode state. `Some(mode)` when Vim keybinding preset is active;
+    /// `None` when using VS Code or Emacs presets.
+    pub vim_mode: Option<VimMode>,
+    /// Pending Vim command buffer for multi-key sequences (e.g. "dd", "gg", "yy").
+    pub vim_pending: Option<char>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -67,6 +74,8 @@ impl Default for BufferView {
             folded_ranges: Vec::new(),
             pending_key_chord: None,
             git_gutter: None,
+            vim_mode: None,
+            vim_pending: None,
         }
     }
 }
@@ -89,6 +98,8 @@ impl Clone for BufferView {
             folded_ranges: self.folded_ranges.clone(),
             pending_key_chord: self.pending_key_chord,
             git_gutter: None, // Git gutter reloaded on open
+            vim_mode: self.vim_mode,
+            vim_pending: self.vim_pending,
         }
     }
 }

@@ -236,13 +236,13 @@
 
 > Items that require broader infrastructure or are explicitly long-term goals.
 
-- [ ] **10.1 -- Editor keybinding presets**
+- [x] **10.1 -- Editor keybinding presets**
   - VS Code-compatible default keybindings (current)
   - Vim mode: normal/insert/visual modes, basic motions, operators
   - Emacs keybindings option
   - Custom keybinding config in `[editor.keybindings]` TOML section
 
-- [ ] **10.2 -- Cross-platform testing**
+- [x] **10.2 -- Cross-platform testing**
   - Verify all features on macOS, Linux, Windows
   - Handle Cmd vs Ctrl keybinding differences
   - Test with Metal, Vulkan, DX12 GPU backends

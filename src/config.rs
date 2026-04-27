@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::time::SystemTime;
 
 use crate::editor::syntax::HighlightGroup;
-use crate::keybindings::{self, KeyBindings};
+use crate::keybindings::{self, KeyBindings, KeybindingPreset};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CursorStyle {
@@ -91,6 +91,7 @@ pub struct EditorConfig {
     pub visible_whitespace: bool,
     pub font_size: Option<f32>,
     pub sidebar_font_size: f32,
+    pub keybinding_preset: KeybindingPreset,
     pub languages: HashMap<String, EditorLanguageConfig>,
 }
 
@@ -123,6 +124,7 @@ impl Default for EditorConfig {
             visible_whitespace: false,
             font_size: None,
             sidebar_font_size: 13.0,
+            keybinding_preset: KeybindingPreset::VsCode,
             languages: HashMap::new(),
         }
     }
@@ -632,6 +634,9 @@ impl Config {
             if let Some(sidebar_font_size) = editor.sidebar_font_size {
                 self.editor.sidebar_font_size = sidebar_font_size.clamp(8.0, 24.0);
             }
+            if let Some(preset) = editor.keybinding_preset {
+                self.editor.keybinding_preset = KeybindingPreset::from_str(&preset);
+            }
             if let Some(languages) = editor.languages {
                 for (lang, lang_config) in languages {
                     let existing = self.editor.languages.entry(lang).or_default();
@@ -821,6 +826,7 @@ struct EditorFileConfig {
     visible_whitespace: Option<bool>,
     font_size: Option<f32>,
     sidebar_font_size: Option<f32>,
+    keybinding_preset: Option<String>,
     languages: Option<HashMap<String, EditorLanguageFileConfig>>,
     syntax_colors: Option<HashMap<String, String>>,
 }

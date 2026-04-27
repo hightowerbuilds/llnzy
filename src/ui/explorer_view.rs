@@ -795,6 +795,24 @@ pub(crate) fn render_explorer_view(
 
         let buf = &mut editor_state.editor.buffers[active];
         let view = &mut editor_state.editor.views[active];
+
+        // Sync vim_mode on the view with the active keybinding preset.
+        // When Vim preset is active, ensure the view has a VimMode (default Normal).
+        // When switching away from Vim, clear the vim state.
+        match config.editor.keybinding_preset {
+            crate::keybindings::KeybindingPreset::Vim => {
+                if view.vim_mode.is_none() {
+                    view.vim_mode = Some(crate::keybindings::VimMode::Normal);
+                }
+            }
+            _ => {
+                if view.vim_mode.is_some() {
+                    view.vim_mode = None;
+                    view.vim_pending = None;
+                }
+            }
+        }
+
         let syntax = &editor_state.editor.syntax;
         let effective_editor_config = config.editor.effective_for(view.lang_id, config.font_size);
         let frame_result = editor_view::render_text_editor(
@@ -814,7 +832,8 @@ pub(crate) fn render_explorer_view(
             &mut editor_state.clipboard_out,
             &mut editor_state.clipboard_in,
             &mut editor_state.editor_search,
-            &lsp_status_snapshot,
+&lsp_status_snapshot,
+            config.editor.keybinding_preset,
         );
 
         let len_after = editor_state.editor.buffers[active].len_chars();
