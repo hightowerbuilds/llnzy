@@ -17,7 +17,7 @@ use llnzy::renderer::{RenderRequest, Renderer};
 use llnzy::search::Search;
 use llnzy::selection::Selection;
 use llnzy::session::{Rect as PaneRect, Session};
-use llnzy::ui::{ActiveView, UiState, BUMPER_WIDTH};
+use llnzy::ui::{ActiveView, PendingClose, SavePromptResponse, UiState, BUMPER_WIDTH};
 use llnzy::workspace::{TabContent, WorkspaceTab};
 use llnzy::UserEvent;
 
@@ -378,6 +378,28 @@ impl App {
         if self.tabs.is_empty() {
             return;
         }
+        // Check for unsaved CodeFile buffer
+        if let TabContent::CodeFile { buffer_idx, .. } = &self.tabs[self.active_tab].content {
+            if let Some(ui) = &self.ui {
+                if *buffer_idx < ui.editor_view.editor.buffers.len()
+                    && ui.editor_view.editor.buffers[*buffer_idx].is_modified()
+                {
+                    let name = ui.editor_view.editor.buffers[*buffer_idx].file_name().to_string();
+                    if let Some(ui) = &mut self.ui {
+                        ui.pending_close = Some(PendingClose::Tab(self.active_tab, name));
+                    }
+                    self.request_redraw();
+                    return;
+                }
+            }
+        }
+        self.force_close_tab();
+    }
+
+    fn force_close_tab(&mut self) {
+        if self.tabs.is_empty() {
+            return;
+        }
         self.tabs.remove(self.active_tab);
         if self.tabs.is_empty() {
             self.active_tab = 0;
@@ -535,9 +557,30 @@ impl ApplicationHandler<UserEvent> for App {
 
         match event {
             WindowEvent::CloseRequested => {
-                self.error_log.info("Close requested");
-                self.save_window_state();
-                event_loop.exit();
+                // Check for unsaved CodeFile buffers before quitting
+                let mut modified = Vec::new();
+                if let Some(ui) = &self.ui {
+                    for (i, tab) in self.tabs.iter().enumerate() {
+                        if let TabContent::CodeFile { buffer_idx, .. } = &tab.content {
+                            if *buffer_idx < ui.editor_view.editor.buffers.len()
+                                && ui.editor_view.editor.buffers[*buffer_idx].is_modified()
+                            {
+                                let name = ui.editor_view.editor.buffers[*buffer_idx].file_name().to_string();
+                                modified.push((i, name));
+                            }
+                        }
+                    }
+                }
+                if !modified.is_empty() {
+                    if let Some(ui) = &mut self.ui {
+                        ui.pending_close = Some(PendingClose::Window(modified));
+                    }
+                    self.request_redraw();
+                } else {
+                    self.error_log.info("Close requested");
+                    self.save_window_state();
+                    event_loop.exit();
+                }
             }
 
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
@@ -697,6 +740,54 @@ impl ApplicationHandler<UserEvent> for App {
                 let footer_action = self.ui.as_mut().and_then(|u| u.footer_action.take());
                 let pending_file = self.ui.as_mut().and_then(|u| u.editor_view.pending_file_tab.take());
                 let tab_bar_action = self.ui.as_mut().and_then(|u| u.tab_bar_action.take());
+                let save_response = self.ui.as_mut().and_then(|u| u.save_prompt_response.take());
+
+                // Handle save prompt response
+                if let Some(resp) = save_response {
+                    let pending = self.ui.as_mut().and_then(|u| u.pending_close.take());
+                    match (resp, pending) {
+                        (SavePromptResponse::Save, Some(PendingClose::Tab(idx, _))) => {
+                            // Save the buffer, then close the tab
+                            if let Some(ui) = &mut self.ui {
+                                if let Some(TabContent::CodeFile { buffer_idx, .. }) = self.tabs.get(idx).map(|t| &t.content) {
+                                    if let Some(buf) = ui.editor_view.editor.buffers.get_mut(*buffer_idx) {
+                                        let _ = buf.save();
+                                    }
+                                }
+                            }
+                            self.active_tab = idx;
+                            self.force_close_tab();
+                            need_redraw = true;
+                        }
+                        (SavePromptResponse::DontSave, Some(PendingClose::Tab(idx, _))) => {
+                            self.active_tab = idx;
+                            self.force_close_tab();
+                            need_redraw = true;
+                        }
+                        (SavePromptResponse::Save, Some(PendingClose::Window(_tabs))) => {
+                            // Save all modified buffers, then exit
+                            if let Some(ui) = &mut self.ui {
+                                for buf in &mut ui.editor_view.editor.buffers {
+                                    if buf.is_modified() {
+                                        let _ = buf.save();
+                                    }
+                                }
+                            }
+                            self.save_window_state();
+                            event_loop.exit();
+                        }
+                        (SavePromptResponse::DontSave, Some(PendingClose::Window(_))) => {
+                            self.save_window_state();
+                            event_loop.exit();
+                        }
+                        (SavePromptResponse::Cancel, pending) => {
+                            // Put it back as None (already taken)
+                            drop(pending);
+                            need_redraw = true;
+                        }
+                        _ => {}
+                    }
+                }
 
                 // Handle egui tab bar clicks
                 if let Some(action) = tab_bar_action {

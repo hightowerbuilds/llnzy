@@ -1,5 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::thread;
 
 use crate::editor::buffer::Buffer;
 
@@ -134,6 +136,8 @@ pub struct ExplorerState {
     pub finder_selected: usize,
     /// Cached project file index for fuzzy finding.
     file_index: Option<Vec<PathBuf>>,
+    file_index_rx: Option<Receiver<(PathBuf, Vec<PathBuf>)>>,
+    indexing_root: Option<PathBuf>,
 }
 
 impl Default for ExplorerState {
@@ -156,6 +160,8 @@ impl ExplorerState {
             finder_results: Vec::new(),
             finder_selected: 0,
             file_index: None,
+            file_index_rx: None,
+            indexing_root: None,
         }
     }
 
@@ -166,6 +172,8 @@ impl ExplorerState {
         self.open_file = None;
         self.error = None;
         self.file_index = None;
+        self.file_index_rx = None;
+        self.indexing_root = None;
         self.finder_open = false;
         self.finder_query.clear();
         self.finder_results.clear();
@@ -176,6 +184,8 @@ impl ExplorerState {
         self.root = path;
         self.tree = read_dir_sorted(&self.root);
         self.file_index = None;
+        self.file_index_rx = None;
+        self.indexing_root = None;
     }
 
     /// Open a file (image only -- text files go through EditorState).
@@ -228,17 +238,62 @@ impl ExplorerState {
         self.error = None;
     }
 
-    /// Build the file index for fuzzy finding (capped, iterative walk).
+    /// Start building the file index for fuzzy finding on a background thread.
     pub fn ensure_file_index(&mut self) {
         if self.file_index.is_some() {
             return;
         }
-        self.file_index = Some(walk_files_capped(&self.root, MAX_INDEX_FILES));
+        if self.file_index_rx.is_some() {
+            self.poll_file_index();
+            return;
+        }
+
+        let root = self.root.clone();
+        let (tx, rx) = mpsc::channel();
+        self.indexing_root = Some(root.clone());
+        self.file_index_rx = Some(rx);
+        let _ = thread::Builder::new()
+            .name("llnzy-file-index".to_string())
+            .spawn(move || {
+                let files = walk_files_capped(&root, MAX_INDEX_FILES);
+                let _ = tx.send((root, files));
+            });
+    }
+
+    /// Poll the background file-indexing job without blocking the UI.
+    pub fn poll_file_index(&mut self) {
+        let Some(rx) = self.file_index_rx.take() else {
+            return;
+        };
+        match rx.try_recv() {
+            Ok((root, files)) => {
+                if root == self.root {
+                    self.file_index = Some(files);
+                    self.refresh_finder_results();
+                }
+                self.indexing_root = None;
+            }
+            Err(TryRecvError::Empty) => {
+                self.file_index_rx = Some(rx);
+            }
+            Err(TryRecvError::Disconnected) => {
+                self.indexing_root = None;
+            }
+        }
+    }
+
+    pub fn is_indexing(&self) -> bool {
+        self.file_index.is_none() && self.file_index_rx.is_some()
     }
 
     /// Update fuzzy finder results based on the query.
     pub fn update_finder(&mut self) {
         self.ensure_file_index();
+        self.poll_file_index();
+        self.refresh_finder_results();
+    }
+
+    fn refresh_finder_results(&mut self) {
         let Some(index) = &self.file_index else { return };
         let query = self.finder_query.to_lowercase();
 
@@ -358,6 +413,45 @@ pub fn format_size(bytes: u64) -> String {
 }
 
 // ── Recent projects persistence ──
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn file_index_builds_on_background_thread() {
+        let root = std::env::temp_dir().join(format!(
+            "llnzy_file_index_{}_{}",
+            std::process::id(),
+            1
+        ));
+        let nested = root.join("src");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(root.join("README.md"), "# test").unwrap();
+        std::fs::write(nested.join("main.rs"), "fn main() {}").unwrap();
+
+        let mut explorer = ExplorerState::new();
+        explorer.set_root(root.clone());
+        explorer.open_finder();
+
+        for _ in 0..100 {
+            explorer.poll_file_index();
+            if explorer.file_index.is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+
+        assert!(explorer.file_index.is_some());
+        assert!(
+            explorer
+                .finder_results
+                .iter()
+                .any(|path| path.file_name().is_some_and(|name| name == "main.rs"))
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+}
 
 const MAX_RECENT: usize = 5;
 

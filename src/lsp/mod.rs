@@ -29,11 +29,38 @@ pub struct CodeAction {
     pub edits: Vec<(PathBuf, Vec<FormatEdit>)>,
 }
 
+/// Simplified signature help info for the UI.
+#[derive(Clone, Debug)]
+pub struct SignatureInfo {
+    pub label: String,
+    pub parameters: Vec<String>,
+    pub active_parameter: usize,
+}
+
+/// A simplified reference location for the UI.
+#[derive(Clone, Debug)]
+pub struct ReferenceLocation {
+    pub path: PathBuf,
+    pub line: u32,
+    pub col: u32,
+    pub context: String,
+}
+
 /// A simplified document symbol for the UI.
 #[derive(Clone, Debug)]
 pub struct SymbolInfo {
     pub name: String,
     pub kind: String,
+    pub line: u32,
+    pub col: u32,
+}
+
+/// A workspace symbol with file path.
+#[derive(Clone, Debug)]
+pub struct WorkspaceSymbol {
+    pub name: String,
+    pub kind: String,
+    pub path: PathBuf,
     pub line: u32,
     pub col: u32,
 }
@@ -329,6 +356,88 @@ impl LspManager {
                     }
                 }).collect(),
                 Err(e) => { log::warn!("code actions failed: {e}"); Vec::new() }
+            }
+        })
+    }
+
+    /// Request signature help (blocking).
+    pub fn signature_help(&mut self, path: &Path, lang_id: &str, line: u32, col: u32) -> Option<SignatureInfo> {
+        let client = self.clients.get(lang_id)?;
+        if !client.is_running() { return None; }
+        let path = path.to_path_buf();
+        self.runtime.block_on(async {
+            match client.signature_help(&path, line, col).await {
+                Ok(Some(sig)) => {
+                    let active_sig = sig.active_signature.unwrap_or(0) as usize;
+                    let signature = sig.signatures.get(active_sig)?;
+                    let params: Vec<String> = signature.parameters.as_ref()
+                        .map(|ps| ps.iter().map(|p| {
+                            match &p.label {
+                                lsp_types::ParameterLabel::Simple(s) => s.clone(),
+                                lsp_types::ParameterLabel::LabelOffsets([start, end]) => {
+                                    signature.label.get(*start as usize..*end as usize)
+                                        .unwrap_or("?").to_string()
+                                }
+                            }
+                        }).collect())
+                        .unwrap_or_default();
+                    let active_param = sig.active_parameter
+                        .or(signature.active_parameter)
+                        .unwrap_or(0) as usize;
+                    Some(SignatureInfo {
+                        label: signature.label.clone(),
+                        parameters: params,
+                        active_parameter: active_param,
+                    })
+                }
+                _ => None,
+            }
+        })
+    }
+
+    /// Request find references (blocking).
+    pub fn references(&mut self, path: &Path, lang_id: &str, line: u32, col: u32) -> Vec<ReferenceLocation> {
+        let Some(client) = self.clients.get(lang_id) else { return Vec::new() };
+        if !client.is_running() { return Vec::new(); }
+        let path = path.to_path_buf();
+        self.runtime.block_on(async {
+            match client.references(&path, line, col).await {
+                Ok(locs) => locs.into_iter().filter_map(|loc| {
+                    let ref_path = uri_to_path(&loc.uri)?;
+                    // Try to read the context line from the file
+                    let context = std::fs::read_to_string(&ref_path).ok()
+                        .and_then(|text| text.lines().nth(loc.range.start.line as usize).map(|l| l.trim().to_string()))
+                        .unwrap_or_default();
+                    Some(ReferenceLocation {
+                        path: ref_path,
+                        line: loc.range.start.line,
+                        col: loc.range.start.character,
+                        context,
+                    })
+                }).collect(),
+                Err(e) => { log::warn!("references failed: {e}"); Vec::new() }
+            }
+        })
+    }
+
+    /// Request workspace symbols (blocking).
+    pub fn workspace_symbols(&mut self, lang_id: &str, query: &str) -> Vec<WorkspaceSymbol> {
+        let Some(client) = self.clients.get(lang_id) else { return Vec::new() };
+        if !client.is_running() { return Vec::new(); }
+        let query = query.to_string();
+        self.runtime.block_on(async {
+            match client.workspace_symbols(&query).await {
+                Ok(symbols) => symbols.into_iter().filter_map(|s| {
+                    let path = uri_to_path(&s.location.uri)?;
+                    Some(WorkspaceSymbol {
+                        name: s.name,
+                        kind: format!("{:?}", s.kind),
+                        path,
+                        line: s.location.range.start.line,
+                        col: s.location.range.start.character,
+                    })
+                }).collect(),
+                Err(e) => { log::warn!("workspace symbols failed: {e}"); Vec::new() }
             }
         })
     }

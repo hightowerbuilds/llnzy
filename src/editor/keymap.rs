@@ -1,5 +1,6 @@
 use crate::editor::buffer::Position;
-use crate::editor::BufferView;
+use crate::editor::{BufferView, EditorKeyChord};
+use std::path::Path;
 
 /// Special actions that the key handler requests from the editor host.
 #[derive(Default)]
@@ -16,6 +17,14 @@ pub struct KeyAction {
     pub code_actions: bool,
     pub document_symbols: bool,
     pub open_file_finder: bool,
+    pub fold_current: bool,
+    pub unfold_current: bool,
+    pub fold_all: bool,
+    pub unfold_all: bool,
+    pub open_find: bool,
+    pub open_find_replace: bool,
+    pub find_references: bool,
+    pub workspace_symbols: bool,
 }
 
 /// Auto-closing bracket pairs.
@@ -44,6 +53,21 @@ pub fn handle_editor_keys(
         let cmd = input.modifiers.command;
         let shift = input.modifiers.shift;
         let alt = input.modifiers.alt;
+
+        if let Some(chord) = view.pending_key_chord.take() {
+            match chord {
+                EditorKeyChord::CmdK => {
+                    if cmd && input.key_pressed(egui::Key::Num0) {
+                        action.fold_all = true;
+                        return;
+                    }
+                    if cmd && input.key_pressed(egui::Key::J) {
+                        action.unfold_all = true;
+                        return;
+                    }
+                }
+            }
+        }
 
         // ── Completion popup intercepts ──
         if completion_active {
@@ -76,6 +100,12 @@ pub fn handle_editor_keys(
 
         // ── LSP shortcuts ──
 
+        // Shift+F12: find references
+        if shift && input.key_pressed(egui::Key::F12) {
+            action.find_references = true;
+            return;
+        }
+
         // F12: go to definition
         if input.key_pressed(egui::Key::F12) {
             action.goto_definition = true;
@@ -100,9 +130,27 @@ pub fn handle_editor_keys(
             return;
         }
 
+        // Cmd+F: open find bar
+        if cmd && !shift && input.key_pressed(egui::Key::F) {
+            action.open_find = true;
+            return;
+        }
+
+        // Cmd+H: open find & replace bar
+        if cmd && !shift && input.key_pressed(egui::Key::H) {
+            action.open_find_replace = true;
+            return;
+        }
+
         // Cmd+. : code actions
         if cmd && input.key_pressed(egui::Key::Period) {
             action.code_actions = true;
+            return;
+        }
+
+        // Cmd+Shift+T: workspace symbols
+        if cmd && shift && input.key_pressed(egui::Key::T) {
+            action.workspace_symbols = true;
             return;
         }
 
@@ -115,6 +163,11 @@ pub fn handle_editor_keys(
         // Cmd+P: open file finder
         if cmd && !shift && input.key_pressed(egui::Key::P) {
             action.open_file_finder = true;
+            return;
+        }
+
+        if cmd && !shift && input.key_pressed(egui::Key::K) {
+            view.pending_key_chord = Some(EditorKeyChord::CmdK);
             return;
         }
 
@@ -215,6 +268,71 @@ pub fn handle_editor_keys(
             return;
         }
 
+        if cmd && input.key_pressed(egui::Key::Slash) {
+            *status_msg = None;
+            let style = comment_style(view.lang_id, buf.path());
+            if shift {
+                if let Some((open, close)) = style.block {
+                    let had_selection = view.cursor.has_selection();
+                    let (start, end) = view.cursor.selection().unwrap_or_else(|| {
+                        let line = view.cursor.pos.line;
+                        (
+                            Position::new(line, 0),
+                            Position::new(line, buf.line_len(line)),
+                        )
+                    });
+                    let (new_start, new_end) = buf.toggle_block_comment(start, end, open, close);
+                    if had_selection {
+                        view.cursor.anchor = Some(new_start);
+                        view.cursor.pos = new_end;
+                    } else {
+                        view.cursor.clear_selection();
+                        view.cursor.pos = new_end;
+                    }
+                    view.cursor.desired_col = None;
+                } else {
+                    *status_msg = Some("No block comment style for this file".to_string());
+                }
+            } else if let Some(prefix) = style.line {
+                let (start_line, end_line) = selected_line_range(view, buf);
+                buf.toggle_line_comments(start_line, end_line, prefix);
+                view.cursor.desired_col = None;
+            } else if let Some((open, close)) = style.block {
+                let (start_line, end_line) = selected_line_range(view, buf);
+                for line in (start_line..=end_line).rev() {
+                    let start = Position::new(line, 0);
+                    let end = Position::new(line, buf.line_len(line));
+                    buf.toggle_block_comment(start, end, open, close);
+                }
+                view.cursor.desired_col = None;
+            } else {
+                *status_msg = Some("No comment style for this file".to_string());
+            }
+            return;
+        }
+
+        if cmd && shift && input.key_pressed(egui::Key::Backslash) {
+            *status_msg = None;
+            if let Some((at, matching)) = buf.matching_bracket(view.cursor.pos) {
+                view.cursor.clear_selection();
+                view.cursor.pos = if view.cursor.pos == matching { at } else { matching };
+                view.cursor.desired_col = None;
+            } else {
+                *status_msg = Some("No matching bracket".to_string());
+            }
+            return;
+        }
+
+        if cmd && shift && input.key_pressed(egui::Key::OpenBracket) {
+            action.fold_current = true;
+            return;
+        }
+
+        if cmd && shift && input.key_pressed(egui::Key::CloseBracket) {
+            action.unfold_current = true;
+            return;
+        }
+
         // Alt+Up/Down: move line
         if alt && !cmd && !shift && input.key_pressed(egui::Key::ArrowUp) {
             *status_msg = None;
@@ -238,38 +356,64 @@ pub fn handle_editor_keys(
         // ── Arrow keys ──
 
         if input.key_pressed(egui::Key::ArrowRight) {
-            if cmd { view.cursor.move_end(buf, shift); }
-            else if alt { view.cursor.move_word_right(buf, shift); }
-            else { view.cursor.move_right(buf, shift); }
+            if cmd {
+                view.cursor.move_end(buf, shift);
+            } else if alt {
+                view.cursor.move_word_right(buf, shift);
+            } else {
+                view.cursor.move_right(buf, shift);
+            }
             *status_msg = None;
             return;
         }
         if input.key_pressed(egui::Key::ArrowLeft) {
-            if cmd { view.cursor.move_home(buf, shift); }
-            else if alt { view.cursor.move_word_left(buf, shift); }
-            else { view.cursor.move_left(buf, shift); }
+            if cmd {
+                view.cursor.move_home(buf, shift);
+            } else if alt {
+                view.cursor.move_word_left(buf, shift);
+            } else {
+                view.cursor.move_left(buf, shift);
+            }
             *status_msg = None;
             return;
         }
         if input.key_pressed(egui::Key::ArrowUp) {
-            if cmd { view.cursor.move_to_start(shift); }
-            else { view.cursor.move_up(buf, shift); }
+            if cmd {
+                view.cursor.move_to_start(shift);
+            } else {
+                view.cursor.move_up(buf, shift);
+            }
             *status_msg = None;
             return;
         }
         if input.key_pressed(egui::Key::ArrowDown) {
-            if cmd { view.cursor.move_to_end(buf, shift); }
-            else { view.cursor.move_down(buf, shift); }
+            if cmd {
+                view.cursor.move_to_end(buf, shift);
+            } else {
+                view.cursor.move_down(buf, shift);
+            }
             *status_msg = None;
             return;
         }
 
-        if input.key_pressed(egui::Key::Home) { view.cursor.move_home(buf, shift); return; }
-        if input.key_pressed(egui::Key::End) { view.cursor.move_end(buf, shift); return; }
+        if input.key_pressed(egui::Key::Home) {
+            view.cursor.move_home(buf, shift);
+            return;
+        }
+        if input.key_pressed(egui::Key::End) {
+            view.cursor.move_end(buf, shift);
+            return;
+        }
 
         let page_lines = (300.0 / line_height) as usize;
-        if input.key_pressed(egui::Key::PageUp) { view.cursor.move_page_up(buf, page_lines, shift); return; }
-        if input.key_pressed(egui::Key::PageDown) { view.cursor.move_page_down(buf, page_lines, shift); return; }
+        if input.key_pressed(egui::Key::PageUp) {
+            view.cursor.move_page_up(buf, page_lines, shift);
+            return;
+        }
+        if input.key_pressed(egui::Key::PageDown) {
+            view.cursor.move_page_down(buf, page_lines, shift);
+            return;
+        }
 
         // ── Editing keys ──
 
@@ -280,10 +424,14 @@ pub fn handle_editor_keys(
                 view.cursor.clear_selection();
                 view.cursor.pos = start;
             } else if view.cursor.pos.col > 0 {
-                let before = buf.char_at(Position::new(view.cursor.pos.line, view.cursor.pos.col - 1));
+                let before =
+                    buf.char_at(Position::new(view.cursor.pos.line, view.cursor.pos.col - 1));
                 let after = buf.char_at(view.cursor.pos);
-                let is_pair = before.is_some() && after.is_some()
-                    && PAIRS.iter().any(|&(o, c)| Some(o) == before && Some(c) == after);
+                let is_pair = before.is_some()
+                    && after.is_some()
+                    && PAIRS
+                        .iter()
+                        .any(|&(o, c)| Some(o) == before && Some(c) == after);
                 if is_pair {
                     let del_start = Position::new(view.cursor.pos.line, view.cursor.pos.col - 1);
                     let del_end = Position::new(view.cursor.pos.line, view.cursor.pos.col + 1);
@@ -409,4 +557,70 @@ pub fn handle_editor_keys(
         }
     });
     action
+}
+
+#[derive(Clone, Copy)]
+struct CommentStyle {
+    line: Option<&'static str>,
+    block: Option<(&'static str, &'static str)>,
+}
+
+fn selected_line_range(view: &BufferView, buf: &crate::editor::buffer::Buffer) -> (usize, usize) {
+    if let Some((start, end)) = view.cursor.selection() {
+        let mut end_line = end.line;
+        if end.col == 0 && end.line > start.line {
+            end_line -= 1;
+        }
+        (
+            start.line.min(buf.line_count().saturating_sub(1)),
+            end_line.min(buf.line_count().saturating_sub(1)),
+        )
+    } else {
+        let line = view.cursor.pos.line.min(buf.line_count().saturating_sub(1));
+        (line, line)
+    }
+}
+
+fn comment_style(lang_id: Option<&'static str>, path: Option<&Path>) -> CommentStyle {
+    let ext = path
+        .and_then(|p| p.extension())
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase);
+    let lang = lang_id.or_else(|| match ext.as_deref() {
+        Some("rs") => Some("rust"),
+        Some("js" | "mjs" | "cjs" | "jsx") => Some("javascript"),
+        Some("ts" | "mts" | "cts") => Some("typescript"),
+        Some("tsx") => Some("tsx"),
+        Some("py" | "pyi") => Some("python"),
+        Some("go") => Some("go"),
+        Some("c" | "h") => Some("c"),
+        Some("html" | "htm") => Some("html"),
+        Some("css" | "scss") => Some("css"),
+        Some("sh" | "bash" | "zsh") => Some("bash"),
+        Some("toml") => Some("toml"),
+        _ => None,
+    });
+
+    match lang {
+        Some("rust" | "javascript" | "typescript" | "tsx" | "go" | "c") => CommentStyle {
+            line: Some("//"),
+            block: Some(("/*", "*/")),
+        },
+        Some("python" | "bash" | "toml") => CommentStyle {
+            line: Some("#"),
+            block: None,
+        },
+        Some("html") => CommentStyle {
+            line: None,
+            block: Some(("<!--", "-->")),
+        },
+        Some("css") => CommentStyle {
+            line: None,
+            block: Some(("/*", "*/")),
+        },
+        _ => CommentStyle {
+            line: Some("//"),
+            block: Some(("/*", "*/")),
+        },
+    }
 }

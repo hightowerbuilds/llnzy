@@ -292,6 +292,80 @@ pub(crate) fn render_text_tab(ui: &mut egui::Ui, config: &mut Config) {
         });
 }
 
+pub(crate) fn render_editor_tab(ui: &mut egui::Ui, config: &mut Config) {
+    ui.label(
+        egui::RichText::new("Editor")
+            .size(22.0)
+            .color(egui::Color32::WHITE),
+    );
+    ui.add_space(12.0);
+
+    egui::Grid::new("editor_settings")
+        .num_columns(2)
+        .spacing([24.0, 10.0])
+        .show(ui, |ui| {
+            ui.label(label("Font Size"));
+            let mut font_size = config.editor.font_size.unwrap_or((config.font_size - 2.0).max(10.0));
+            ui.horizontal(|ui| {
+                if ui
+                    .add(egui::Slider::new(&mut font_size, 8.0..=28.0).text("px"))
+                    .changed()
+                {
+                    config.editor.font_size = Some(font_size);
+                }
+                if ui.button(label("Use Terminal")).clicked() {
+                    config.editor.font_size = None;
+                }
+            });
+            ui.end_row();
+
+            ui.label(label("Tab Size"));
+            ui.add(egui::Slider::new(&mut config.editor.tab_size, 1..=8).text(""));
+            ui.end_row();
+
+            ui.label(label("Insert Spaces"));
+            ui.add(egui::Checkbox::without_text(&mut config.editor.insert_spaces));
+            ui.end_row();
+
+            ui.label(label("Visible Whitespace"));
+            ui.add(egui::Checkbox::without_text(
+                &mut config.editor.visible_whitespace,
+            ));
+            ui.end_row();
+
+            ui.label(label("Word Wrap"));
+            ui.add(egui::Checkbox::without_text(&mut config.editor.word_wrap));
+            ui.end_row();
+
+            ui.label(label("Rulers"));
+            let mut rulers_text = config
+                .editor
+                .rulers
+                .iter()
+                .map(|col| col.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            if ui
+                .add(
+                    egui::TextEdit::singleline(&mut rulers_text)
+                        .desired_width(180.0)
+                        .font(egui::TextStyle::Monospace),
+                )
+                .changed()
+            {
+                let mut rulers: Vec<usize> = rulers_text
+                    .split(',')
+                    .filter_map(|part| part.trim().parse::<usize>().ok())
+                    .filter(|col| (1..=240).contains(col))
+                    .collect();
+                rulers.sort_unstable();
+                rulers.dedup();
+                config.editor.rulers = rulers;
+            }
+            ui.end_row();
+        });
+}
+
 pub(crate) fn render_themes_tab(ui: &mut egui::Ui, config: &mut Config) {
     ui.label(
         egui::RichText::new("Visual Themes")

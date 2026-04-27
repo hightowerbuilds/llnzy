@@ -24,7 +24,11 @@ impl LineEnding {
     fn detect(text: &str) -> Self {
         let crlf = text.matches("\r\n").count();
         let lf = text.matches('\n').count().saturating_sub(crlf);
-        if crlf > lf { LineEnding::CrLf } else { LineEnding::Lf }
+        if crlf > lf {
+            LineEnding::CrLf
+        } else {
+            LineEnding::Lf
+        }
     }
 }
 
@@ -103,8 +107,13 @@ impl IndentStyle {
     pub fn as_str(self) -> &'static str {
         match self {
             IndentStyle::Tabs => "\t",
+            IndentStyle::Spaces(1) => " ",
             IndentStyle::Spaces(2) => "  ",
+            IndentStyle::Spaces(3) => "   ",
             IndentStyle::Spaces(4) => "    ",
+            IndentStyle::Spaces(5) => "     ",
+            IndentStyle::Spaces(6) => "      ",
+            IndentStyle::Spaces(7) => "       ",
             IndentStyle::Spaces(8) => "        ",
             _ => "    ", // fallback
         }
@@ -289,7 +298,11 @@ impl Buffer {
         if start == end {
             return;
         }
-        let (start, end) = if start <= end { (start, end) } else { (end, start) };
+        let (start, end) = if start <= end {
+            (start, end)
+        } else {
+            (end, start)
+        };
         let start_idx = self.pos_to_char(start);
         let end_idx = self.pos_to_char(end);
 
@@ -313,7 +326,11 @@ impl Buffer {
 
     /// Replace a range with new text. Records undo history.
     pub fn replace(&mut self, start: Position, end: Position, text: &str) {
-        let (start, end) = if start <= end { (start, end) } else { (end, start) };
+        let (start, end) = if start <= end {
+            (start, end)
+        } else {
+            (end, start)
+        };
         let start_idx = self.pos_to_char(start);
         let end_idx = self.pos_to_char(end);
 
@@ -439,7 +456,11 @@ impl Buffer {
 
     /// Get text in a range (for copy/cut).
     pub fn text_range(&self, start: Position, end: Position) -> String {
-        let (start, end) = if start <= end { (start, end) } else { (end, start) };
+        let (start, end) = if start <= end {
+            (start, end)
+        } else {
+            (end, start)
+        };
         let start_idx = self.pos_to_char(start);
         let end_idx = self.pos_to_char(end);
         if start_idx >= end_idx {
@@ -482,6 +503,111 @@ impl Buffer {
                     Position::new(line_idx, remove_count),
                 );
             }
+        }
+    }
+
+    /// Toggle a line comment prefix across a range of lines.
+    pub fn toggle_line_comments(&mut self, start_line: usize, end_line: usize, prefix: &str) {
+        if prefix.is_empty() || self.line_count() == 0 {
+            return;
+        }
+        let end_line = end_line.min(self.line_count().saturating_sub(1));
+        if start_line > end_line {
+            return;
+        }
+
+        let mut any_content = false;
+        let mut all_commented = true;
+        for line_idx in start_line..=end_line {
+            let line = self.line(line_idx);
+            if line.trim().is_empty() {
+                continue;
+            }
+            any_content = true;
+            let indent_len = leading_whitespace_len(line);
+            let after_indent = &line[indent_len..];
+            if !after_indent.starts_with(prefix) {
+                all_commented = false;
+                break;
+            }
+        }
+
+        if !any_content {
+            return;
+        }
+
+        for line_idx in (start_line..=end_line).rev() {
+            let line = self.line(line_idx);
+            if line.trim().is_empty() {
+                continue;
+            }
+            let indent_len = leading_whitespace_len(line);
+            if all_commented {
+                let after_prefix = indent_len + prefix.len();
+                let remove_end = if line[after_prefix..].starts_with(' ') {
+                    after_prefix + 1
+                } else {
+                    after_prefix
+                };
+                self.delete(
+                    Position::new(line_idx, indent_len),
+                    Position::new(line_idx, remove_end),
+                );
+            } else {
+                self.insert(Position::new(line_idx, indent_len), &format!("{prefix} "));
+            }
+        }
+    }
+
+    /// Toggle a block comment around a range.
+    pub fn toggle_block_comment(
+        &mut self,
+        start: Position,
+        end: Position,
+        open: &str,
+        close: &str,
+    ) -> (Position, Position) {
+        if open.is_empty() || close.is_empty() {
+            return (start, end);
+        }
+        let (start, end) = if start <= end {
+            (start, end)
+        } else {
+            (end, start)
+        };
+        if start == end {
+            return (start, end);
+        }
+
+        let selected = self.text_range(start, end);
+        if selected.starts_with(open) && selected.ends_with(close) {
+            let close_start =
+                Position::new(end.line, end.col.saturating_sub(close.chars().count()));
+            self.delete(close_start, end);
+            self.delete(
+                start,
+                Position::new(start.line, start.col + open.chars().count()),
+            );
+            let end_col = if start.line == end.line {
+                end.col
+                    .saturating_sub(open.chars().count())
+                    .saturating_sub(close.chars().count())
+            } else {
+                end.col.saturating_sub(close.chars().count())
+            };
+            let new_end = Position::new(end.line, end_col);
+            (start, new_end)
+        } else {
+            self.insert(end, close);
+            self.insert(start, open);
+            let new_start = Position::new(start.line, start.col + open.chars().count());
+            let end_col = if start.line == end.line {
+                end.col + open.chars().count()
+            } else {
+                end.col
+            };
+            let new_end = Position::new(end.line, end_col);
+            (new_start, new_end)
         }
     }
 
@@ -619,12 +745,76 @@ impl Buffer {
         line.chars().nth(pos.col)
     }
 
+    /// Find a matching bracket when the cursor is on or just after a bracket.
+    pub fn matching_bracket(&self, cursor: Position) -> Option<(Position, Position)> {
+        let (bracket_pos, bracket, char_idx) = self.adjacent_bracket(cursor)?;
+        let (open, close, forward) = match bracket {
+            '(' => ('(', ')', true),
+            '[' => ('[', ']', true),
+            '{' => ('{', '}', true),
+            ')' => ('(', ')', false),
+            ']' => ('[', ']', false),
+            '}' => ('{', '}', false),
+            _ => return None,
+        };
+
+        if forward {
+            let mut depth = 0usize;
+            for idx in char_idx..self.rope.len_chars() {
+                let ch = self.rope.char(idx);
+                if ch == open {
+                    depth += 1;
+                } else if ch == close {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        return Some((bracket_pos, self.char_to_pos(idx)));
+                    }
+                }
+            }
+        } else {
+            let mut depth = 0usize;
+            for idx in (0..=char_idx).rev() {
+                let ch = self.rope.char(idx);
+                if ch == close {
+                    depth += 1;
+                } else if ch == open {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        return Some((bracket_pos, self.char_to_pos(idx)));
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    fn adjacent_bracket(&self, cursor: Position) -> Option<(Position, char, usize)> {
+        if let Some(ch @ ('(' | ')' | '[' | ']' | '{' | '}')) = self.char_at(cursor) {
+            return Some((cursor, ch, self.pos_to_char(cursor)));
+        }
+        if cursor.col > 0 {
+            let pos = Position::new(cursor.line, cursor.col - 1);
+            if let Some(ch @ ('(' | ')' | '[' | ']' | '{' | '}')) = self.char_at(pos) {
+                return Some((pos, ch, self.pos_to_char(pos)));
+            }
+        }
+        None
+    }
+
     /// Get the indentation string of a line.
     pub fn line_indent(&self, line_idx: usize) -> &str {
         let line = self.line(line_idx);
         let trimmed = line.trim_start_matches(|c: char| c == ' ' || c == '\t');
         &line[..line.len() - trimmed.len()]
     }
+}
+
+fn leading_whitespace_len(line: &str) -> usize {
+    line.len()
+        - line
+            .trim_start_matches(|c: char| c == ' ' || c == '\t')
+            .len()
 }
 
 #[cfg(test)]
@@ -765,8 +955,14 @@ mod tests {
 
     #[test]
     fn indent_style_detection() {
-        assert_eq!(IndentStyle::detect("  a\n  b\n  c\n"), IndentStyle::Spaces(2));
-        assert_eq!(IndentStyle::detect("    a\n    b\n"), IndentStyle::Spaces(4));
+        assert_eq!(
+            IndentStyle::detect("  a\n  b\n  c\n"),
+            IndentStyle::Spaces(2)
+        );
+        assert_eq!(
+            IndentStyle::detect("    a\n    b\n"),
+            IndentStyle::Spaces(4)
+        );
         assert_eq!(IndentStyle::detect("\ta\n\tb\n"), IndentStyle::Tabs);
     }
 
@@ -967,5 +1163,91 @@ mod tests {
         buf.dedent_lines(0, 1);
         assert_eq!(buf.line(0), "a");
         assert_eq!(buf.line(1), "  b");
+    }
+
+    #[test]
+    fn toggle_line_comments_adds_prefix_after_indent() {
+        let mut buf = Buffer::empty();
+        buf.insert(Position::new(0, 0), "fn main() {\n    println!();\n}");
+        buf.toggle_line_comments(0, 2, "//");
+        assert_eq!(buf.line(0), "// fn main() {");
+        assert_eq!(buf.line(1), "    // println!();");
+        assert_eq!(buf.line(2), "// }");
+    }
+
+    #[test]
+    fn toggle_line_comments_removes_existing_prefix() {
+        let mut buf = Buffer::empty();
+        buf.insert(Position::new(0, 0), "// a\n    // b\n//c");
+        buf.toggle_line_comments(0, 2, "//");
+        assert_eq!(buf.line(0), "a");
+        assert_eq!(buf.line(1), "    b");
+        assert_eq!(buf.line(2), "c");
+    }
+
+    #[test]
+    fn toggle_line_comments_ignores_blank_lines() {
+        let mut buf = Buffer::empty();
+        buf.insert(Position::new(0, 0), "a\n\n    b");
+        buf.toggle_line_comments(0, 2, "#");
+        assert_eq!(buf.line(0), "# a");
+        assert_eq!(buf.line(1), "");
+        assert_eq!(buf.line(2), "    # b");
+    }
+
+    #[test]
+    fn toggle_block_comment_wraps_and_unwraps_selection() {
+        let mut buf = Buffer::empty();
+        buf.insert(Position::new(0, 0), "let value = 1;");
+        let start = Position::new(0, 4);
+        let end = Position::new(0, 9);
+        let (start, end) = buf.toggle_block_comment(start, end, "/*", "*/");
+        assert_eq!(buf.line(0), "let /*value*/ = 1;");
+
+        buf.toggle_block_comment(
+            Position::new(0, start.col - 2),
+            Position::new(0, end.col + 2),
+            "/*",
+            "*/",
+        );
+        assert_eq!(buf.line(0), "let value = 1;");
+    }
+
+    #[test]
+    fn matching_bracket_finds_pair_at_cursor() {
+        let mut buf = Buffer::empty();
+        buf.insert(Position::new(0, 0), "fn main() { call(1); }");
+        assert_eq!(
+            buf.matching_bracket(Position::new(0, 7)),
+            Some((Position::new(0, 7), Position::new(0, 8)))
+        );
+        assert_eq!(
+            buf.matching_bracket(Position::new(0, 10)),
+            Some((Position::new(0, 10), Position::new(0, 21)))
+        );
+    }
+
+    #[test]
+    fn matching_bracket_handles_nested_pairs() {
+        let mut buf = Buffer::empty();
+        buf.insert(Position::new(0, 0), "outer(inner())");
+        assert_eq!(
+            buf.matching_bracket(Position::new(0, 5)),
+            Some((Position::new(0, 5), Position::new(0, 13)))
+        );
+        assert_eq!(
+            buf.matching_bracket(Position::new(0, 11)),
+            Some((Position::new(0, 11), Position::new(0, 12)))
+        );
+    }
+
+    #[test]
+    fn matching_bracket_crosses_lines() {
+        let mut buf = Buffer::empty();
+        buf.insert(Position::new(0, 0), "{\n    value\n}");
+        assert_eq!(
+            buf.matching_bracket(Position::new(0, 0)),
+            Some((Position::new(0, 0), Position::new(2, 0)))
+        );
     }
 }
