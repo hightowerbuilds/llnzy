@@ -450,6 +450,30 @@ impl App {
             content.push_str(&format!("x = {}\ny = {}\n", pos.x, pos.y));
         }
         let _ = std::fs::write(state_path, content);
+
+        // Save session snapshot for auto-restore
+        let project_path = self.ui.as_ref().and_then(|ui| {
+            if !ui.explorer.tree.is_empty() {
+                Some(ui.explorer.root.clone())
+            } else {
+                None
+            }
+        });
+        let tab_entries: Vec<llnzy::workspace_store::TabEntry> = self.tabs.iter().filter_map(|tab| {
+            match &tab.content {
+                TabContent::Terminal(_) => Some(llnzy::workspace_store::TabEntry::Terminal),
+                TabContent::CodeFile { path, .. } => Some(llnzy::workspace_store::TabEntry::CodeFile { path: path.clone() }),
+                TabContent::Stacker => Some(llnzy::workspace_store::TabEntry::Stacker),
+                TabContent::Sketch => Some(llnzy::workspace_store::TabEntry::Sketch),
+                _ => None,
+            }
+        }).collect();
+        let snapshot = llnzy::workspace_store::SessionSnapshot {
+            theme: None, // Could track active theme name in future
+            project_path,
+            tabs: tab_entries,
+        };
+        let _ = llnzy::workspace_store::save_session(&snapshot);
     }
 
     fn tab_titles(&self) -> Vec<(String, bool)> {
@@ -735,6 +759,7 @@ impl ApplicationHandler<UserEvent> for App {
                 // Apply config changes and tab renames from UI after render
                 let mut need_redraw = false;
                 let mut sidebar_changed = false;
+                let mut ws_tab_entries: Option<Vec<llnzy::workspace_store::TabEntry>> = None;
                 let mut clip_text: Option<String> = None;
                 let mut tab_rename: Option<(usize, String)> = None;
                 // Extract pending actions before borrowing ui for other state
@@ -801,6 +826,53 @@ impl ApplicationHandler<UserEvent> for App {
                         self.switch_tab(idx);
                         need_redraw = true;
                     }
+                    // Split view: place the clicked tab in the right pane
+                    if let Some(idx) = action.split_right {
+                        if idx != self.active_tab && idx < self.tabs.len() {
+                            if let Some(ui) = &mut self.ui {
+                                ui.split_view = Some((idx, 0.5));
+                            }
+                            need_redraw = true;
+                        }
+                    }
+                    if action.unsplit {
+                        if let Some(ui) = &mut self.ui {
+                            ui.split_view = None;
+                        }
+                        need_redraw = true;
+                    }
+                    // Close others: keep only the specified tab
+                    if let Some(keep_idx) = action.close_others {
+                        if keep_idx < self.tabs.len() {
+                            let kept = self.tabs.remove(keep_idx);
+                            self.tabs.clear();
+                            self.tabs.push(kept);
+                            self.active_tab = 0;
+                            if let Some(ui) = &mut self.ui {
+                                ui.split_view = None;
+                            }
+                            self.selection.clear();
+                            need_redraw = true;
+                        }
+                    }
+                    // Close tabs to the right
+                    if let Some(idx) = action.close_to_right {
+                        if idx + 1 < self.tabs.len() {
+                            self.tabs.truncate(idx + 1);
+                            if self.active_tab > idx {
+                                self.active_tab = idx;
+                            }
+                            if let Some(ui) = &mut self.ui {
+                                if let Some((right_idx, _)) = ui.split_view {
+                                    if right_idx > idx {
+                                        ui.split_view = None;
+                                    }
+                                }
+                            }
+                            self.selection.clear();
+                            need_redraw = true;
+                        }
+                    }
                 }
                 if let Some(ui) = &mut self.ui {
                     if let Some(new_config) = ui.take_config() {
@@ -819,6 +891,34 @@ impl ApplicationHandler<UserEvent> for App {
                         llnzy::explorer::add_recent_project(&mut ui.recent_projects, project_path);
                         ui.sidebar_open = true;
                         sidebar_changed = true;
+                        need_redraw = true;
+                    }
+                    // Handle workspace launch
+                    if let Some(ws) = ui.launch_workspace.take() {
+                        // Apply theme if specified
+                        if let Some(ref theme_name) = ws.theme {
+                            // Try built-in themes
+                            if let Some(theme) = llnzy::theme::builtin_themes().into_iter().find(|t| t.name == *theme_name) {
+                                theme.apply_to(&mut self.config);
+                            }
+                            // Try user themes
+                            else if let Some((theme, _)) = llnzy::theme_store::load_user_themes().into_iter().find(|(t, _)| t.name == *theme_name) {
+                                theme.apply_to(&mut self.config);
+                            }
+                            if let Some(renderer) = &mut self.renderer {
+                                renderer.update_config(self.config.clone());
+                            }
+                        }
+                        // Open project
+                        if let Some(ref project_path) = ws.project_path {
+                            ui.explorer.set_root(project_path.clone());
+                            llnzy::explorer::add_recent_project(&mut ui.recent_projects, project_path.clone());
+                            ui.sidebar_open = true;
+                            sidebar_changed = true;
+                        }
+                        // Store tab entries to create after releasing ui borrow
+                        ws_tab_entries = Some(ws.tabs);
+                        ui.active_view = ActiveView::Shells;
                         need_redraw = true;
                     }
                 }
@@ -879,6 +979,48 @@ impl ApplicationHandler<UserEvent> for App {
                     }
                     need_redraw = true;
                 }
+                // Create tabs from workspace launch
+                if let Some(entries) = ws_tab_entries {
+                    for entry in entries {
+                        match entry {
+                            llnzy::workspace_store::TabEntry::Terminal => {
+                                self.new_tab();
+                            }
+                            llnzy::workspace_store::TabEntry::CodeFile { path } => {
+                                if let Some(ui) = &mut self.ui {
+                                    match ui.editor_view.open_file(path.clone()) {
+                                        Ok(idx) => {
+                                            let id = self.alloc_tab_id();
+                                            self.tabs.push(WorkspaceTab {
+                                                content: TabContent::CodeFile { path, buffer_idx: idx },
+                                                name: None,
+                                                id,
+                                            });
+                                            self.active_tab = self.tabs.len() - 1;
+                                        }
+                                        Err(e) => self.error_log.error(format!("Workspace: {e}")),
+                                    }
+                                }
+                            }
+                            llnzy::workspace_store::TabEntry::Stacker => {
+                                use llnzy::workspace::{find_singleton, TabKind};
+                                if find_singleton(&self.tabs, TabKind::Stacker).is_none() {
+                                    let id = self.alloc_tab_id();
+                                    self.tabs.push(WorkspaceTab { content: TabContent::Stacker, name: None, id });
+                                }
+                            }
+                            llnzy::workspace_store::TabEntry::Sketch => {
+                                use llnzy::workspace::{find_singleton, TabKind};
+                                if find_singleton(&self.tabs, TabKind::Sketch).is_none() {
+                                    let id = self.alloc_tab_id();
+                                    self.tabs.push(WorkspaceTab { content: TabContent::Sketch, name: None, id });
+                                }
+                            }
+                        }
+                    }
+                    need_redraw = true;
+                }
+
                 // Handle pending task: create a terminal tab that runs the command
                 if let Some(task) = pending_task {
                     let (cols, rows) = self.grid_size();

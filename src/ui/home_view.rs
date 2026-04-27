@@ -1,11 +1,13 @@
 use std::path::PathBuf;
 
 use super::types::ActiveView;
+use crate::workspace_store::{self, SavedWorkspace};
 
 /// Result of rendering the home view.
 pub struct HomeAction {
     pub nav_target: Option<ActiveView>,
     pub open_project: Option<PathBuf>,
+    pub launch_workspace: Option<SavedWorkspace>,
 }
 
 /// Render the home screen with Terminal, Open Project, Workspace buttons and recent projects.
@@ -16,6 +18,7 @@ pub fn render_home_view(
     let mut action = HomeAction {
         nav_target: None,
         open_project: None,
+        launch_workspace: None,
     };
 
     egui::CentralPanel::default()
@@ -71,20 +74,51 @@ pub fn render_home_view(
                     }
                 }
 
-                ui.add_space(12.0);
-
-                // Workspace button (greyed out)
-                ui.add_sized(
-                    [btn_width, btn_height],
-                    egui::Button::new(
-                        egui::RichText::new("Workspace")
-                            .size(18.0)
+                // Saved Workspaces
+                let workspaces = workspace_store::load_workspaces();
+                if !workspaces.is_empty() {
+                    ui.add_space(28.0);
+                    ui.label(
+                        egui::RichText::new("Workspaces")
+                            .size(13.0)
                             .color(egui::Color32::from_rgb(100, 105, 120)),
-                    )
-                    .fill(egui::Color32::from_rgb(45, 48, 58))
-                    .rounding(egui::Rounding::same(8.0)),
-                )
-                .on_hover_text("Coming soon");
+                    );
+                    ui.add_space(8.0);
+
+                    for ws in &workspaces {
+                        let mut detail_parts = Vec::new();
+                        if let Some(ref theme) = ws.theme {
+                            detail_parts.push(theme.as_str());
+                        }
+                        if let Some(ref path) = ws.project_path {
+                            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                                detail_parts.push(name);
+                            }
+                        }
+                        let detail = if detail_parts.is_empty() {
+                            format!("{} tabs", ws.tabs.len())
+                        } else {
+                            detail_parts.join(" | ")
+                        };
+
+                        let btn = ui
+                            .add_sized(
+                                [btn_width, 36.0],
+                                egui::Button::new(
+                                    egui::RichText::new(format!("{}  ", ws.name))
+                                        .size(14.0)
+                                        .color(egui::Color32::from_rgb(180, 200, 255)),
+                                )
+                                .fill(egui::Color32::from_rgb(30, 38, 55))
+                                .rounding(egui::Rounding::same(6.0)),
+                            )
+                            .on_hover_text(&detail);
+                        if btn.clicked() {
+                            action.launch_workspace = Some(ws.clone());
+                            action.nav_target = Some(ActiveView::Shells);
+                        }
+                    }
+                }
 
                 // Recent Projects
                 if !recent_projects.is_empty() {
