@@ -1,16 +1,16 @@
 # llnzy
 
-A GPU-accelerated terminal emulator with visual effects, built from scratch in Rust.
+A GPU-accelerated terminal emulator and source code editor built from scratch in Rust.
 
-## What it is
+![llnzy](llnzy.jpg)
 
-A native terminal emulator that runs your shell and renders everything through the GPU via wgpu. On top of standard terminal functionality, it has a visual effects engine — animated shader backgrounds, bloom/glow, compute-shader particles, CRT retro effects, and cursor glow — all configurable through a built-in settings panel.
+## What it does
 
-It also includes a sidebar with multiple workspaces: a prompt queue manager (Stacker), a drawing canvas (Sketch), a read-only file explorer with image viewing, and a theme/effects configuration panel.
+llnzy is a single native app that combines a terminal, a code editor, a drawing canvas, and a prompt manager. Everything renders through the GPU via wgpu with optional visual effects (bloom, CRT scanlines, animated backgrounds, particles). It runs your shell, edits your code with LSP support, and lets you customize the look of all of it.
 
 ## Status
 
-This is an active personal project. It works as a daily terminal on macOS. There are no prebuilt binaries. Linux and Windows are untested. Things will break.
+Active personal project. Works as a daily driver on macOS. No prebuilt binaries for Linux/Windows yet. Things may break.
 
 ## Building
 
@@ -20,40 +20,70 @@ cd llnzy
 cargo run --release
 ```
 
-Requires Rust 1.75+, a GPU that supports wgpu (Metal on macOS, Vulkan/DX12 on Linux/Windows).
+To build a macOS .app bundle and DMG:
+```sh
+./bundle.sh --release
+```
+
+Requires Rust 1.75+ and a GPU that supports wgpu (Metal on macOS, Vulkan/DX12 elsewhere).
 
 ## Features
 
-### Terminal
-- Full ANSI/VT100 terminal emulation (alacritty_terminal)
-- GPU text rendering (glyphon/cosmic-text) with bold, italic, underline, strikethrough
-- 256-color + 24-bit true color
-- Tabs with in-place renaming, split panes with draggable dividers
-- Scrollback history, regex search with match navigation
-- TOML config with 2-second hot-reload
-- macOS native menu bar
+**Terminal** -- Full ANSI/VT100 emulation via alacritty_terminal. GPU text rendering, true color, tabs, scrollback, regex search, URL detection and click-to-open.
 
-### Visual Effects
-- Animated shader backgrounds (smoke, aurora) with custom color picker
-- Bloom/glow with threshold, intensity, and radius controls
-- GPU compute-shader particle system (configurable count and speed)
-- CRT retro effects: scanlines, barrel distortion, vignette, chromatic aberration, film grain
-- Cursor glow and motion trail
-- Time-of-day color warmth shift
-- Smooth 600ms theme color transitions
-- CRT effects mask restricts shaders to specific regions (e.g. Sketch canvas only)
+**Code Editor** -- Multi-buffer tabbed editor with tree-sitter syntax highlighting for 11 languages. LSP integration (hover, completions, go-to-definition, find references, signature help, rename, code actions, formatting, inlay hints, code lens, diagnostics). Find & replace, multi-cursor (Cmd+D), code folding, bracket matching, comment toggle, git gutter indicators, minimap, word wrap, snippets.
 
-### Workspaces (Sidebar, Cmd+B)
-- **Shells** — Terminal view (default)
-- **Explorer** — Read-only file browser starting at home directory; traverse directories, view text files in monospace, view images (PNG, JPEG, GIF, BMP, WebP) rendered inline via GPU texture
-- **Stacker** — Prompt queue manager: save, categorize, search, copy, import/export prompts (persisted to JSON)
-- **Sketch** — Drawing canvas with marker, rectangle, and text tools; color palette, stroke width, undo/redo; persisted to JSON
-- **Appearances** — Theme browser with live color swatches and Apply button; background effects, bloom, particles, CRT, and cursor settings with real-time sliders
-- **Settings** — (placeholder for future configuration)
+**Sketch** -- Drawing canvas with marker, rectangle, and text tools. Save and recall named sketches.
 
-### Themes
-- **Minimalist** — Clean terminal, no effects
-- **Buzz** — Green phosphor CRT with smoke background, scanlines, and film grain
+**Stacker** -- Prompt queue manager. Save, categorize, search, and copy prompts. Optional prompt bar above the footer for quick access.
+
+**Visual Effects** -- Animated shader backgrounds (smoke, aurora, custom images), bloom/glow, GPU particle system, CRT scanlines with curvature/vignette/chromatic aberration, cursor glow and trail. All configurable per-view.
+
+**Themes** -- Built-in presets plus custom theme creation. Save your colors, effects, and background as a named theme. Per-view application (terminal only, editor too, etc.). Background image library with persistent gallery.
+
+**Workspaces** -- Bundle a theme, a project folder, and a tab layout into a named workspace. Launch from the Home screen to restore everything at once. Session auto-save on close.
+
+**Keybinding Presets** -- VS Code (default), Vim (normal/insert/visual modes with motions), Emacs (Ctrl chords). Cross-platform modifier handling (Cmd on macOS, Ctrl on Linux/Windows).
+
+## Keyboard Shortcuts
+
+| Shortcut | Action |
+|---|---|
+| Cmd+T | New terminal tab |
+| Cmd+W | Close tab |
+| Cmd+B | Toggle sidebar |
+| Cmd+P | Fuzzy file finder |
+| Cmd+F | Find in file |
+| Cmd+H | Find & replace |
+| Cmd+Shift+G | Search across project |
+| Cmd+Shift+B | Run build task |
+| Cmd+Shift+T | Workspace symbols |
+| Cmd+D | Add cursor at next occurrence |
+| Cmd+Shift+L | Select all occurrences |
+| Cmd+= / Cmd+- | Zoom in / out |
+| Cmd+0 | Reset zoom |
+| F12 | Go to definition |
+| Shift+F12 | Find references |
+| F1 | Hover info |
+| F2 | Rename symbol |
+| Cmd+Shift+P | Command palette |
+
+## Config
+
+`~/.config/llnzy/config.toml` -- changes auto-reload within 2 seconds.
+
+```toml
+[effects]
+background = "smoke"
+bloom_enabled = true
+crt_enabled = true
+
+[editor]
+tab_size = 4
+insert_spaces = true
+word_wrap = false
+keybinding_preset = "vscode"  # or "vim" or "emacs"
+```
 
 ## Tech
 
@@ -61,48 +91,14 @@ Requires Rust 1.75+, a GPU that supports wgpu (Metal on macOS, Vulkan/DX12 on Li
 |---|---|
 | Window | winit 0.30 |
 | GPU | wgpu 22 |
-| Text | glyphon 0.6 |
+| Text rendering | glyphon 0.6 |
 | Terminal | alacritty_terminal 0.26 |
 | PTY | portable-pty 0.8 |
-| UI | egui 0.29 |
-| Layout | taffy 0.7 |
-| Images | image 0.25 |
-| Clipboard | arboard |
+| UI overlays | egui 0.29 |
+| Syntax | tree-sitter 0.26 (11 grammars) |
+| LSP | lsp-types 0.97 + tokio |
+| File watching | notify 7 |
 | Config | serde + toml |
-
-## Config
-
-`~/Library/Application Support/llnzy/config.toml` on macOS. Changes apply within 2 seconds.
-
-```toml
-[effects]
-enabled = true
-background = "smoke"
-background_intensity = 0.25
-bloom_enabled = true
-particles_enabled = true
-particles_count = 800
-cursor_glow = true
-crt_enabled = true
-scanline_intensity = 0.2
-grain_intensity = 0.03
-```
-
-## Keyboard Shortcuts
-
-| Shortcut | Action |
-|---|---|
-| Cmd+T | New tab |
-| Cmd+W | Close tab |
-| Cmd+D | Split vertical |
-| Cmd+Shift+D | Split horizontal |
-| Cmd+] / Cmd+[ | Next / previous pane |
-| Cmd+B | Toggle sidebar |
-| Cmd+F | Search |
-| Cmd+Shift+F | Toggle all effects |
-| Cmd+Shift+P | Toggle FPS overlay |
-| Cmd+Shift+E | Toggle error panel |
-| Cmd+Enter | Fullscreen |
 
 ## License
 
