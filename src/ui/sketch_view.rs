@@ -1,5 +1,6 @@
 use crate::sketch::{
-    DraftElement, RectElement, SketchElement, SketchPoint, SketchState, SketchTool,
+    list_saved_sketches, DraftElement, RectElement, SketchElement, SketchPoint, SketchState,
+    SketchTool,
 };
 
 #[derive(Clone, Copy)]
@@ -15,11 +16,25 @@ pub(crate) fn render_sketch_view(
     sketch: &mut SketchState,
     appearance: &SketchAppearance,
 ) -> egui::Rect {
-    sketch_shortcuts(ui, sketch);
+    // Handle inline text input before general shortcuts so typed characters
+    // are consumed by the text draft and not interpreted as shortcut keys.
+    let text_input_active = sketch.text_draft.is_some();
+    if text_input_active {
+        handle_inline_text_input(ui, sketch);
+    } else {
+        sketch_shortcuts(ui, sketch);
+    }
 
+    // ── Toolbar row ──
     ui.horizontal(|ui| {
+        // Title and optional active sketch name
+        let title = if let Some(name) = &sketch.active_sketch_name {
+            format!("Sketch - {name}")
+        } else {
+            "Sketch".to_string()
+        };
         ui.label(
-            egui::RichText::new("Sketch")
+            egui::RichText::new(title)
                 .size(22.0)
                 .color(egui::Color32::WHITE),
         );
@@ -59,7 +74,7 @@ pub(crate) fn render_sketch_view(
             appearance.active_btn,
             appearance.text_color,
         )
-        .on_hover_text("Click to place a text box. Double-click existing text to edit");
+        .on_hover_text("Click to place text directly on the canvas. Enter commits, Escape cancels");
 
         ui.separator();
 
@@ -94,12 +109,84 @@ pub(crate) fn render_sketch_view(
         {
             sketch.clear();
         }
+
+        ui.separator();
+
+        // ── Sketch save/recall controls ──
+        if ui.button("New").on_hover_text("New blank sketch").clicked() {
+            sketch.new_sketch();
+        }
+        if ui
+            .button("Save As")
+            .on_hover_text("Save sketch with a name")
+            .clicked()
+        {
+            sketch.save_as_open = !sketch.save_as_open;
+            if sketch.save_as_open {
+                // Pre-fill with current name if any
+                sketch.save_as_input = sketch
+                    .active_sketch_name
+                    .clone()
+                    .unwrap_or_default();
+            }
+        }
+        if ui
+            .button(if sketch.browser_open {
+                "Close Browser"
+            } else {
+                "Browse"
+            })
+            .on_hover_text("Browse saved sketches")
+            .clicked()
+        {
+            sketch.browser_open = !sketch.browser_open;
+            if sketch.browser_open {
+                sketch.saved_sketch_names = list_saved_sketches();
+            }
+        }
     });
 
-    ui.add_space(12.0);
+    // ── Save-As inline prompt (below toolbar, above canvas) ──
+    if sketch.save_as_open {
+        render_save_as_prompt(ui, sketch);
+    }
 
+    ui.add_space(4.0);
+
+    // ── Main area: optional browser panel + canvas ──
     let available = ui.available_size();
-    let canvas_size = egui::Vec2::new(available.x.max(320.0), available.y.max(240.0));
+
+    if sketch.browser_open {
+        // Side-by-side: browser panel on the left, canvas on the right
+        let browser_width = 180.0_f32.min(available.x * 0.25);
+
+        let resp = ui.horizontal(|ui| {
+            // Browser panel
+            ui.vertical(|ui| {
+                ui.set_width(browser_width);
+                ui.set_height(available.y);
+                render_sketch_browser(ui, sketch);
+            });
+            ui.add_space(4.0);
+            // Canvas takes remaining space
+            let canvas_width = (available.x - browser_width - 12.0).max(320.0);
+            let canvas_size = egui::Vec2::new(canvas_width, available.y.max(240.0));
+            render_canvas(ctx, ui, sketch, appearance, canvas_size)
+        });
+        resp.inner
+    } else {
+        let canvas_size = egui::Vec2::new(available.x.max(320.0), available.y.max(240.0));
+        render_canvas(ctx, ui, sketch, appearance, canvas_size)
+    }
+}
+
+fn render_canvas(
+    ctx: &egui::Context,
+    ui: &mut egui::Ui,
+    sketch: &mut SketchState,
+    appearance: &SketchAppearance,
+    canvas_size: egui::Vec2,
+) -> egui::Rect {
     let (canvas_rect, response) =
         ui.allocate_exact_size(canvas_size, egui::Sense::click_and_drag());
     let painter = ui.painter_at(canvas_rect);
@@ -113,9 +200,124 @@ pub(crate) fn render_sketch_view(
 
     handle_sketch_pointer(sketch, &response, canvas_rect);
     paint_sketch_document(&painter, canvas_rect, sketch);
-    render_text_editor(ctx, canvas_rect, sketch);
+    paint_inline_text_cursor(ctx, &painter, canvas_rect, sketch);
 
     canvas_rect
+}
+
+fn render_save_as_prompt(ui: &mut egui::Ui, sketch: &mut SketchState) {
+    ui.add_space(4.0);
+    let mut commit = false;
+    let mut cancel = false;
+
+    ui.horizontal(|ui| {
+        ui.label(
+            egui::RichText::new("Name:")
+                .size(14.0)
+                .color(egui::Color32::WHITE),
+        );
+        let response = ui.add(
+            egui::TextEdit::singleline(&mut sketch.save_as_input)
+                .desired_width(200.0)
+                .hint_text("my-sketch"),
+        );
+        response.request_focus();
+        if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+            commit = true;
+        }
+        if ui.button("Save").clicked() {
+            commit = true;
+        }
+        if ui.button("Cancel").clicked() {
+            cancel = true;
+        }
+    });
+
+    if commit {
+        let name = sketch.save_as_input.clone();
+        if !name.trim().is_empty() {
+            let _ = sketch.save_sketch_as(&name);
+        }
+        sketch.save_as_open = false;
+        sketch.save_as_input.clear();
+    } else if cancel {
+        sketch.save_as_open = false;
+        sketch.save_as_input.clear();
+    }
+}
+
+fn render_sketch_browser(ui: &mut egui::Ui, sketch: &mut SketchState) {
+    ui.label(
+        egui::RichText::new("Saved Sketches")
+            .size(14.0)
+            .strong()
+            .color(egui::Color32::WHITE),
+    );
+    ui.add_space(4.0);
+
+    if sketch.saved_sketch_names.is_empty() {
+        ui.label(
+            egui::RichText::new("No saved sketches yet.")
+                .size(12.0)
+                .color(egui::Color32::GRAY),
+        );
+        if ui
+            .small_button("Refresh")
+            .on_hover_text("Reload list")
+            .clicked()
+        {
+            sketch.saved_sketch_names = list_saved_sketches();
+        }
+        return;
+    }
+
+    let mut load_name: Option<String> = None;
+    let mut delete_name: Option<String> = None;
+
+    egui::ScrollArea::vertical()
+        .auto_shrink([false; 2])
+        .show(ui, |ui| {
+            for name in &sketch.saved_sketch_names {
+                let is_active = sketch
+                    .active_sketch_name
+                    .as_deref()
+                    == Some(name.as_str());
+                ui.horizontal(|ui| {
+                    let label = if is_active {
+                        egui::RichText::new(name)
+                            .size(13.0)
+                            .color(egui::Color32::from_rgb(60, 180, 255))
+                            .strong()
+                    } else {
+                        egui::RichText::new(name)
+                            .size(13.0)
+                            .color(egui::Color32::from_rgb(200, 200, 210))
+                    };
+                    if ui.add(egui::Label::new(label).sense(egui::Sense::click())).clicked() {
+                        load_name = Some(name.clone());
+                    }
+                    if ui
+                        .small_button("x")
+                        .on_hover_text("Delete this sketch")
+                        .clicked()
+                    {
+                        delete_name = Some(name.clone());
+                    }
+                });
+            }
+        });
+
+    if let Some(name) = load_name {
+        let _ = sketch.load_sketch(&name);
+    }
+    if let Some(name) = delete_name {
+        let _ = crate::sketch::delete_named_sketch(&name);
+        sketch.saved_sketch_names = list_saved_sketches();
+        // If we deleted the active sketch, clear the name
+        if sketch.active_sketch_name.as_deref() == Some(name.as_str()) {
+            sketch.active_sketch_name = None;
+        }
+    }
 }
 
 fn tool_button(
@@ -169,6 +371,49 @@ fn sketch_shortcuts(ui: &egui::Ui, sketch: &mut SketchState) {
     });
 }
 
+/// Handle keyboard input when a text draft is active (inline text tool).
+fn handle_inline_text_input(ui: &egui::Ui, sketch: &mut SketchState) {
+    let Some(draft) = &sketch.text_draft else {
+        return;
+    };
+    let mut text = draft.text.clone();
+    let mut commit = false;
+    let mut cancel = false;
+
+    ui.input(|input| {
+        // Escape cancels
+        if input.key_pressed(egui::Key::Escape) {
+            cancel = true;
+            return;
+        }
+        // Enter commits (without modifiers)
+        if input.key_pressed(egui::Key::Enter) && !input.modifiers.shift {
+            commit = true;
+            return;
+        }
+        // Backspace removes last char
+        if input.key_pressed(egui::Key::Backspace) {
+            text.pop();
+            return;
+        }
+        // Collect typed text from events
+        for event in &input.events {
+            if let egui::Event::Text(s) = event {
+                text.push_str(s);
+            }
+        }
+    });
+
+    if cancel {
+        sketch.cancel_text_draft();
+    } else if commit {
+        sketch.update_text_draft(text);
+        sketch.commit_text_draft();
+    } else {
+        sketch.update_text_draft(text);
+    }
+}
+
 fn handle_sketch_pointer(
     sketch: &mut SketchState,
     response: &egui::Response,
@@ -205,6 +450,14 @@ fn handle_sketch_pointer(
         }
         SketchTool::Text => {
             if response.clicked() {
+                // If there's already a text draft active, commit it first
+                if sketch.text_draft.is_some() {
+                    let draft_text = sketch.text_draft.as_ref().map(|d| d.text.clone());
+                    if let Some(text) = draft_text {
+                        sketch.update_text_draft(text);
+                    }
+                    sketch.commit_text_draft();
+                }
                 sketch.add_text_box(point);
             }
         }
@@ -238,12 +491,41 @@ fn handle_sketch_pointer(
 
 fn paint_sketch_document(painter: &egui::Painter, canvas_rect: egui::Rect, sketch: &SketchState) {
     for (index, element) in sketch.document.elements.iter().enumerate() {
-        paint_sketch_element(
-            painter,
-            canvas_rect,
-            element,
-            sketch.selected == Some(index),
-        );
+        let is_text_draft = sketch
+            .text_draft
+            .as_ref()
+            .is_some_and(|d| d.index == index);
+        // For a text element being actively edited, we paint it with the
+        // draft text (which may differ from the committed text) and with
+        // a cursor. The paint_inline_text_cursor function handles the cursor,
+        // so here we just paint the draft text instead of the committed text.
+        if is_text_draft {
+            if let SketchElement::Text(text_el) = element {
+                let draft_text = sketch
+                    .text_draft
+                    .as_ref()
+                    .map(|d| d.text.as_str())
+                    .unwrap_or("");
+                if !draft_text.is_empty() {
+                    let pos =
+                        canvas_to_screen(canvas_rect, SketchPoint::new(text_el.x, text_el.y));
+                    painter.text(
+                        pos,
+                        egui::Align2::LEFT_TOP,
+                        draft_text,
+                        egui::FontId::proportional(text_el.style.font_size),
+                        color32(text_el.style.stroke_color),
+                    );
+                }
+            }
+        } else {
+            paint_sketch_element(
+                painter,
+                canvas_rect,
+                element,
+                sketch.selected == Some(index),
+            );
+        }
     }
 
     match &sketch.draft {
@@ -304,6 +586,50 @@ fn paint_sketch_element(
     }
 }
 
+/// Paint a blinking cursor at the end of the inline text draft on the canvas.
+fn paint_inline_text_cursor(
+    ctx: &egui::Context,
+    painter: &egui::Painter,
+    canvas_rect: egui::Rect,
+    sketch: &SketchState,
+) {
+    let Some(draft) = &sketch.text_draft else {
+        return;
+    };
+    let Some(SketchElement::Text(text_el)) = sketch.document.elements.get(draft.index) else {
+        return;
+    };
+
+    let pos = canvas_to_screen(canvas_rect, SketchPoint::new(text_el.x, text_el.y));
+    let font_id = egui::FontId::proportional(text_el.style.font_size);
+    let text_color = color32(text_el.style.stroke_color);
+
+    // Measure text width to place cursor after the last character
+    let galley = painter.layout_no_wrap(draft.text.clone(), font_id.clone(), text_color);
+    let text_width = galley.rect.width();
+    let text_height = text_el.style.font_size;
+
+    // Blinking: visible for ~500ms, hidden for ~500ms
+    let time = ctx.input(|i| i.time);
+    let blink_on = (time * 2.0) as u64 % 2 == 0;
+
+    if blink_on {
+        let cursor_x = pos.x + text_width;
+        let cursor_top = pos.y;
+        let cursor_bottom = pos.y + text_height;
+        painter.line_segment(
+            [
+                egui::pos2(cursor_x + 1.0, cursor_top),
+                egui::pos2(cursor_x + 1.0, cursor_bottom),
+            ],
+            egui::Stroke::new(1.5, text_color),
+        );
+    }
+
+    // Request repaint for blink animation
+    ctx.request_repaint();
+}
+
 fn paint_stroke(
     painter: &egui::Painter,
     canvas_rect: egui::Rect,
@@ -353,70 +679,6 @@ fn paint_selection(painter: &egui::Painter, rect: egui::Rect) {
         egui::Rounding::same(3.0),
         egui::Stroke::new(1.0, egui::Color32::from_rgb(60, 130, 255)),
     );
-}
-
-fn render_text_editor(ctx: &egui::Context, canvas_rect: egui::Rect, sketch: &mut SketchState) {
-    let Some(draft) = sketch.text_draft.clone() else {
-        return;
-    };
-    let Some(SketchElement::Text(text_box)) = sketch.document.elements.get(draft.index) else {
-        return;
-    };
-
-    let pos = canvas_to_screen(canvas_rect, SketchPoint::new(text_box.x, text_box.y));
-    let width = text_box.w;
-    let mut draft_text = draft.text;
-    let mut commit = false;
-    let mut cancel = false;
-
-    egui::Area::new(egui::Id::new(("sketch_text_editor", draft.index)))
-        .fixed_pos(pos)
-        .order(egui::Order::Foreground)
-        .show(ctx, |ui| {
-            egui::Frame::none()
-                .fill(egui::Color32::from_rgba_premultiplied(250, 250, 245, 235))
-                .stroke(egui::Stroke::new(
-                    1.0,
-                    egui::Color32::from_rgb(60, 130, 255),
-                ))
-                .inner_margin(egui::Margin::same(4.0))
-                .show(ui, |ui| {
-                    ui.set_width(width);
-                    let response = ui.add(
-                        egui::TextEdit::multiline(&mut draft_text)
-                            .desired_rows(2)
-                            .desired_width(width)
-                            .font(egui::TextStyle::Body),
-                    );
-                    response.request_focus();
-                    if response.changed() {
-                        sketch.update_text_draft(draft_text.clone());
-                    }
-                    ui.horizontal(|ui| {
-                        if ui.small_button("Done").clicked() {
-                            commit = true;
-                        }
-                        if ui.small_button("Cancel").clicked() {
-                            cancel = true;
-                        }
-                    });
-                    ui.input(|input| {
-                        if input.key_pressed(egui::Key::Escape) {
-                            cancel = true;
-                        }
-                        if input.modifiers.command && input.key_pressed(egui::Key::Enter) {
-                            commit = true;
-                        }
-                    });
-                });
-        });
-
-    if cancel {
-        sketch.cancel_text_draft();
-    } else if commit {
-        sketch.update_text_draft(draft_text);
-        sketch.commit_text_draft();
-    }
 }
 
 fn screen_to_canvas(pos: egui::Pos2, canvas_rect: egui::Rect) -> SketchPoint {

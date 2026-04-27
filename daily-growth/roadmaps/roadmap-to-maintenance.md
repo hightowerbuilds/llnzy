@@ -165,14 +165,14 @@
 
 > Better text tool and sketch persistence.
 
-- [ ] **7.1 -- Minimalist text tool**
+- [x] **7.1 -- Minimalist text tool**
   - Replace the current text input popup with an inline cursor on the canvas
   - Click to place a blinking cursor, type directly on the canvas
   - Enter commits the text element
   - Escape cancels
   - No dialog, no window -- just a cursor and typed text
 
-- [ ] **7.2 -- Sketch save/recall**
+- [x] **7.2 -- Sketch save/recall**
   - Save sketches by name to `~/.config/llnzy/sketches/`
   - Sketch browser panel: list saved sketches, click to load
   - "Save As" and "New Sketch" actions

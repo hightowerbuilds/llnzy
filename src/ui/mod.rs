@@ -16,7 +16,7 @@ use winit::window::Window;
 
 use crate::config::Config;
 use crate::explorer::ExplorerState;
-use crate::sketch::{save_default_document, SketchState};
+use crate::sketch::{save_default_document, save_named_sketch, SketchState};
 use crate::stacker::{
     apply_prompt_edit, load_stacker_prompts, save_stacker_prompts, StackerPrompt,
 };
@@ -628,7 +628,13 @@ impl UiState {
         self.prompt_bar_visible = prompt_bar_visible;
         self.prompt_bar_views = prompt_bar_views;
         self.copy_ghosts = copy_ghosts;
-        if sketch.is_dirty() && save_default_document(&sketch.document).is_ok() {
+        if sketch.is_dirty() {
+            // Always auto-save to the default scratch file
+            let _ = save_default_document(&sketch.document);
+            // Also save to the named sketch file if one is active
+            if let Some(name) = &sketch.active_sketch_name {
+                let _ = save_named_sketch(name, &sketch.document);
+            }
             sketch.mark_saved();
         }
         self.sketch = sketch;
