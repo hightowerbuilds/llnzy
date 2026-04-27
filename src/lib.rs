@@ -25,6 +25,7 @@ pub mod workspace;
 pub enum UserEvent {
     PtyOutput,
     LspMessage,
+    FileChanged(std::path::PathBuf),
     #[cfg(target_os = "macos")]
     MenuAction(menu::MenuAction),
 }

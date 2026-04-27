@@ -1311,6 +1311,7 @@ impl ApplicationHandler<UserEvent> for App {
         match event {
             UserEvent::PtyOutput => self.request_redraw(),
             UserEvent::LspMessage => self.request_redraw(),
+            UserEvent::FileChanged(_) => self.request_redraw(),
             #[cfg(target_os = "macos")]
             UserEvent::MenuAction(action) => {
                 use llnzy::menu::MenuAction;

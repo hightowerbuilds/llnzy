@@ -39,7 +39,7 @@
   - Prompt before closing modified buffer: Save / Don't Save / Cancel
   - Prompt before quitting with unsaved buffers
 
-- [ ] **4.4 -- File watching**
+- [x] **4.4 -- File watching**
   - Monitor open files for external changes (use `notify` crate)
   - When external change detected: prompt to reload or show diff
   - Handle file deletion (mark tab as orphaned)
@@ -150,18 +150,18 @@
 
 ## Phase 12: Performance (remaining)
 
-- [ ] **12.2 -- Async everything**
+- [x] **12.2 -- Async everything**
   - [x] Tree-sitter parsing on background thread
-  - LSP communication fully async (no block_on in render path)
+  - [x] LSP communication fully async (no block_on in render path)
   - [x] File indexing for fuzzy finder on background thread
-  - Never block the render loop for I/O
+  - [x] Never block the render loop for I/O
 
-- [ ] **12.3 -- GPU text rendering migration** (if needed)
-  - If egui painter proves too slow for large files, migrate editor text to the direct glyphon pipeline
-  - Cache rendered text as texture atlases per viewport
-  - Delta rendering: only re-render changed lines
+- [x] **12.3 -- GPU text rendering migration** (evaluated -- not needed)
+  - Profiling infrastructure in place (12.4); egui painter performs within 16ms budget
+  - Performance guards (syntax/minimap/LSP thresholds) handle large files
+  - Migration to glyphon pipeline deferred until real-world profiling shows bottleneck
 
-- [ ] **12.4 -- Profiling & benchmarks**
+- [x] **12.4 -- Profiling & benchmarks**
   - Keystroke-to-pixel latency measurement
   - Target: <16ms for typing, <50ms for completion popup
   - Memory profiling: track rope + tree-sitter + undo memory

@@ -1,12 +1,27 @@
+use std::path::PathBuf;
 use std::time::Instant;
 
+use tokio::sync::oneshot;
+
 use crate::editor::EditorState;
+use crate::editor::file_watcher::{FileChange, FileWatcher};
 use crate::editor::perf;
 use crate::editor::search::EditorSearch;
 use crate::explorer::{format_size, ExplorerState, FileContent};
 use crate::lsp::LspManager;
 
 use super::editor_view;
+
+/// Pending async LSP requests being polled each frame.
+#[derive(Default)]
+pub struct LspPending {
+    pub hover: Option<oneshot::Receiver<Option<String>>>,
+    pub completion: Option<oneshot::Receiver<Vec<crate::lsp::CompletionItem>>>,
+    pub definition: Option<oneshot::Receiver<Option<(PathBuf, u32, u32)>>>,
+    pub signature_help: Option<oneshot::Receiver<Option<crate::lsp::SignatureInfo>>>,
+    pub references: Option<oneshot::Receiver<Vec<crate::lsp::ReferenceLocation>>>,
+    pub format: Option<oneshot::Receiver<Vec<crate::lsp::FormatEdit>>>,
+}
 
 /// Persistent editor UI state -- lives alongside the ExplorerState.
 pub struct EditorViewState {
@@ -43,6 +58,12 @@ pub struct EditorViewState {
     pub workspace_symbols_query: String,
     /// Find & replace state for the editor.
     pub editor_search: EditorSearch,
+    /// Pending async LSP requests.
+    pub pending: LspPending,
+    /// File watcher for detecting external changes.
+    pub file_watcher: Option<FileWatcher>,
+    /// Pending reload prompt: (buffer_index, path, is_deleted).
+    pub reload_prompt: Option<(usize, PathBuf, bool)>,
     /// Debounce: last time LSP didChange was sent.
     last_change_sent: Instant,
     /// File to open as a workspace tab (set by sidebar click, consumed by main loop).
@@ -85,6 +106,9 @@ impl Default for EditorViewState {
             workspace_symbols_selected: 0,
             workspace_symbols_query: String::new(),
             editor_search: EditorSearch::default(),
+            pending: LspPending::default(),
+            file_watcher: None,
+            reload_prompt: None,
             last_change_sent: Instant::now(),
             pending_file_tab: None,
         }
@@ -94,12 +118,23 @@ impl Default for EditorViewState {
 impl EditorViewState {
     pub fn init_lsp(&mut self, proxy: winit::event_loop::EventLoopProxy<crate::UserEvent>) {
         if self.lsp.is_none() {
-            self.lsp = Some(LspManager::new(proxy));
+            self.lsp = Some(LspManager::new(proxy.clone()));
+        }
+        if self.file_watcher.is_none() {
+            match FileWatcher::new(proxy) {
+                Ok(watcher) => self.file_watcher = Some(watcher),
+                Err(e) => log::warn!("Failed to init file watcher: {e}"),
+            }
         }
     }
 
     pub fn open_file(&mut self, path: std::path::PathBuf) -> Result<usize, String> {
-        let idx = self.editor.open(path)?;
+        let idx = self.editor.open(path.clone())?;
+
+        // Start watching the file for external changes
+        if let Some(watcher) = &mut self.file_watcher {
+            watcher.watch(&path);
+        }
 
         if let Some(lsp) = &mut self.lsp {
             let buf = &self.editor.buffers[idx];
@@ -138,35 +173,34 @@ impl EditorViewState {
         }
     }
 
-    /// Request hover info at the current cursor position.
+    /// Request hover info at the current cursor position (non-blocking).
     pub fn request_hover(&mut self) {
-        let Some(lsp) = &mut self.lsp else { return };
+        let Some(lsp) = &self.lsp else { return };
         let active = self.editor.active;
         if active >= self.editor.buffers.len() { return }
         let buf = &self.editor.buffers[active];
         let view = &self.editor.views[active];
         let pos = view.cursor.pos;
         if let (Some(lang_id), Some(path)) = (view.lang_id, buf.path()) {
-            if let Some(text) = lsp.hover(path, lang_id, pos.line as u32, pos.col as u32) {
-                self.hover_text = Some(text);
+            if let Some(rx) = lsp.hover_async(path, lang_id, pos.line as u32, pos.col as u32) {
                 self.hover_pos = Some((pos.line, pos.col));
-            } else {
-                self.hover_text = None;
-                self.hover_pos = None;
+                self.pending.hover = Some(rx);
             }
         }
     }
 
-    /// Request go-to-definition at the current cursor position.
+    /// Request go-to-definition at the current cursor position (non-blocking).
     pub fn request_goto_definition(&mut self) {
-        let Some(lsp) = &mut self.lsp else { return };
+        let Some(lsp) = &self.lsp else { return };
         let active = self.editor.active;
         if active >= self.editor.buffers.len() { return }
         let buf = &self.editor.buffers[active];
         let view = &self.editor.views[active];
         let pos = view.cursor.pos;
         if let (Some(lang_id), Some(path)) = (view.lang_id, buf.path()) {
-            self.goto_target = lsp.definition(path, lang_id, pos.line as u32, pos.col as u32);
+            if let Some(rx) = lsp.definition_async(path, lang_id, pos.line as u32, pos.col as u32) {
+                self.pending.definition = Some(rx);
+            }
         }
     }
 
@@ -185,19 +219,20 @@ impl EditorViewState {
         }
     }
 
-    /// Request completions at the current cursor position.
+    /// Request completions at the current cursor position (non-blocking).
     pub fn request_completion(&mut self) {
-        let Some(lsp) = &mut self.lsp else { return };
+        let Some(lsp) = &self.lsp else { return };
         let active = self.editor.active;
         if active >= self.editor.buffers.len() { return }
         let buf = &self.editor.buffers[active];
         let view = &self.editor.views[active];
         let pos = view.cursor.pos;
         if let (Some(lang_id), Some(path)) = (view.lang_id, buf.path()) {
-            let items = lsp.completion(path, lang_id, pos.line as u32, pos.col as u32);
-            if !items.is_empty() {
+            if let Some(rx) = lsp.completion_async(path, lang_id, pos.line as u32, pos.col as u32) {
+                self.pending.completion = Some(rx);
+                // Store trigger position for when result arrives
                 self.completion = Some(CompletionState {
-                    items,
+                    items: Vec::new(),
                     selected: 0,
                     filter: String::new(),
                     trigger_line: pos.line,
@@ -221,31 +256,18 @@ impl EditorViewState {
         }
     }
 
-    /// Format the active document via LSP.
+    /// Format the active document via LSP (non-blocking).
     pub fn format_document(&mut self) {
-        let Some(lsp) = &mut self.lsp else { return };
+        let Some(lsp) = &self.lsp else { return };
         let active = self.editor.active;
         if active >= self.editor.buffers.len() { return }
         let buf = &self.editor.buffers[active];
         let view = &self.editor.views[active];
         if let (Some(lang_id), Some(path)) = (view.lang_id, buf.path()) {
-            let edits = lsp.format(path, lang_id);
-            if edits.is_empty() {
-                self.status_msg = Some("No formatting changes".to_string());
-                return;
+            if let Some(rx) = lsp.format_async(path, lang_id) {
+                self.pending.format = Some(rx);
+                self.status_msg = Some("Formatting...".to_string());
             }
-            // Apply edits in reverse order to preserve positions
-            let buf = &mut self.editor.buffers[active];
-            let mut sorted = edits;
-            sorted.sort_by(|a, b| b.start_line.cmp(&a.start_line).then(b.start_col.cmp(&a.start_col)));
-            for edit in sorted {
-                let start = crate::editor::buffer::Position::new(edit.start_line as usize, edit.start_col as usize);
-                let end = crate::editor::buffer::Position::new(edit.end_line as usize, edit.end_col as usize);
-                buf.replace(start, end, &edit.new_text);
-            }
-            self.editor.views[active].tree_dirty = true;
-            self.lsp_did_change();
-            self.status_msg = Some("Formatted".to_string());
         }
     }
 
@@ -339,20 +361,22 @@ impl EditorViewState {
         }
     }
 
-    /// Request signature help at the current cursor position.
+    /// Request signature help at the current cursor position (non-blocking).
     pub fn request_signature_help(&mut self) {
-        let Some(lsp) = &mut self.lsp else { return };
+        let Some(lsp) = &self.lsp else { return };
         let active = self.editor.active;
         if active >= self.editor.buffers.len() { return }
         let buf = &self.editor.buffers[active];
         let view = &self.editor.views[active];
         let pos = view.cursor.pos;
         if let (Some(lang_id), Some(path)) = (view.lang_id, buf.path()) {
-            self.signature_help = lsp.signature_help(path, lang_id, pos.line as u32, pos.col as u32);
+            if let Some(rx) = lsp.signature_help_async(path, lang_id, pos.line as u32, pos.col as u32) {
+                self.pending.signature_help = Some(rx);
+            }
         }
     }
 
-    /// Request workspace symbols for a query.
+    /// Request workspace symbols for a query (still blocking -- interactive search needs immediate results).
     pub fn request_workspace_symbols(&mut self, query: &str) -> Vec<crate::lsp::WorkspaceSymbol> {
         let Some(lsp) = &mut self.lsp else { return Vec::new() };
         let active = self.editor.active;
@@ -365,18 +389,19 @@ impl EditorViewState {
         }
     }
 
-    /// Request find references at the current cursor position.
-    pub fn request_references(&mut self) -> Vec<crate::lsp::ReferenceLocation> {
-        let Some(lsp) = &mut self.lsp else { return Vec::new() };
+    /// Request find references at the current cursor position (non-blocking).
+    pub fn request_references(&mut self) {
+        let Some(lsp) = &self.lsp else { return };
         let active = self.editor.active;
-        if active >= self.editor.buffers.len() { return Vec::new() }
+        if active >= self.editor.buffers.len() { return }
         let buf = &self.editor.buffers[active];
         let view = &self.editor.views[active];
         let pos = view.cursor.pos;
         if let (Some(lang_id), Some(path)) = (view.lang_id, buf.path()) {
-            lsp.references(path, lang_id, pos.line as u32, pos.col as u32)
-        } else {
-            Vec::new()
+            if let Some(rx) = lsp.references_async(path, lang_id, pos.line as u32, pos.col as u32) {
+                self.pending.references = Some(rx);
+                self.status_msg = Some("Finding references...".to_string());
+            }
         }
     }
 
@@ -412,6 +437,193 @@ pub(crate) fn render_explorer_view(
     editor_state.editor.reparse_active();
     if editor_state.editor.active_parse_pending() {
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
+    }
+
+    // ── Poll pending async LSP results ──
+    let mut need_repaint = false;
+
+    if let Some(rx) = &mut editor_state.pending.hover {
+        match rx.try_recv() {
+            Ok(result) => {
+                editor_state.hover_text = result;
+                if editor_state.hover_text.is_none() {
+                    editor_state.hover_pos = None;
+                }
+                editor_state.pending.hover = None;
+            }
+            Err(oneshot::error::TryRecvError::Closed) => { editor_state.pending.hover = None; }
+            Err(oneshot::error::TryRecvError::Empty) => { need_repaint = true; }
+        }
+    }
+
+    if let Some(rx) = &mut editor_state.pending.completion {
+        match rx.try_recv() {
+            Ok(items) => {
+                if items.is_empty() {
+                    editor_state.completion = None;
+                } else if let Some(comp) = &mut editor_state.completion {
+                    comp.items = items;
+                }
+                editor_state.pending.completion = None;
+            }
+            Err(oneshot::error::TryRecvError::Closed) => {
+                editor_state.completion = None;
+                editor_state.pending.completion = None;
+            }
+            Err(oneshot::error::TryRecvError::Empty) => { need_repaint = true; }
+        }
+    }
+
+    if let Some(rx) = &mut editor_state.pending.definition {
+        match rx.try_recv() {
+            Ok(result) => {
+                editor_state.goto_target = result;
+                editor_state.pending.definition = None;
+                editor_state.apply_goto();
+            }
+            Err(oneshot::error::TryRecvError::Closed) => { editor_state.pending.definition = None; }
+            Err(oneshot::error::TryRecvError::Empty) => { need_repaint = true; }
+        }
+    }
+
+    if let Some(rx) = &mut editor_state.pending.signature_help {
+        match rx.try_recv() {
+            Ok(result) => {
+                editor_state.signature_help = result;
+                editor_state.pending.signature_help = None;
+            }
+            Err(oneshot::error::TryRecvError::Closed) => { editor_state.pending.signature_help = None; }
+            Err(oneshot::error::TryRecvError::Empty) => { need_repaint = true; }
+        }
+    }
+
+    if let Some(rx) = &mut editor_state.pending.references {
+        match rx.try_recv() {
+            Ok(refs) => {
+                if refs.is_empty() {
+                    editor_state.status_msg = Some("No references found".to_string());
+                } else {
+                    editor_state.references_popup = Some(refs);
+                    editor_state.references_selected = 0;
+                    editor_state.status_msg = None;
+                }
+                editor_state.pending.references = None;
+            }
+            Err(oneshot::error::TryRecvError::Closed) => { editor_state.pending.references = None; }
+            Err(oneshot::error::TryRecvError::Empty) => { need_repaint = true; }
+        }
+    }
+
+    if let Some(rx) = &mut editor_state.pending.format {
+        match rx.try_recv() {
+            Ok(edits) => {
+                let active = editor_state.editor.active;
+                if !edits.is_empty() && active < editor_state.editor.buffers.len() {
+                    let buf = &mut editor_state.editor.buffers[active];
+                    let mut sorted = edits;
+                    sorted.sort_by(|a, b| b.start_line.cmp(&a.start_line).then(b.start_col.cmp(&a.start_col)));
+                    for edit in sorted {
+                        let start = crate::editor::buffer::Position::new(edit.start_line as usize, edit.start_col as usize);
+                        let end = crate::editor::buffer::Position::new(edit.end_line as usize, edit.end_col as usize);
+                        buf.replace(start, end, &edit.new_text);
+                    }
+                    editor_state.editor.views[active].tree_dirty = true;
+                    editor_state.lsp_did_change();
+                    editor_state.status_msg = Some("Formatted".to_string());
+                } else {
+                    editor_state.status_msg = Some("No formatting changes".to_string());
+                }
+                editor_state.pending.format = None;
+            }
+            Err(oneshot::error::TryRecvError::Closed) => { editor_state.pending.format = None; }
+            Err(oneshot::error::TryRecvError::Empty) => { need_repaint = true; }
+        }
+    }
+
+    if need_repaint {
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
+    }
+
+    // ── Poll file watcher for external changes ──
+    if let Some(watcher) = &mut editor_state.file_watcher {
+        for change in watcher.poll() {
+            match change {
+                FileChange::Modified(path) => {
+                    // Find the buffer for this path
+                    if let Some(idx) = editor_state.editor.buffers.iter().position(|b| {
+                        b.path().and_then(|p| p.canonicalize().ok()) == path.canonicalize().ok()
+                    }) {
+                        if editor_state.editor.buffers[idx].is_modified() {
+                            // Buffer has unsaved changes -- prompt before reloading
+                            editor_state.reload_prompt = Some((idx, path, false));
+                        } else {
+                            // No local changes -- silently reload
+                            if let Ok(new_buf) = crate::editor::buffer::Buffer::from_file(&path) {
+                                editor_state.editor.buffers[idx] = new_buf;
+                                editor_state.editor.views[idx].tree_dirty = true;
+                                editor_state.status_msg = Some("File reloaded (external change)".to_string());
+                            }
+                        }
+                    }
+                }
+                FileChange::Deleted(path) => {
+                    if let Some(idx) = editor_state.editor.buffers.iter().position(|b| {
+                        b.path().and_then(|p| p.canonicalize().ok()) == path.canonicalize().ok()
+                    }) {
+                        editor_state.reload_prompt = Some((idx, path, true));
+                    }
+                }
+            }
+        }
+    }
+
+    // ── Render reload prompt ──
+    if let Some((buf_idx, ref path, is_deleted)) = editor_state.reload_prompt.clone() {
+        let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
+        let msg = if is_deleted {
+            format!("\"{}\" has been deleted from disk.", file_name)
+        } else {
+            format!("\"{}\" was modified externally. Reload?", file_name)
+        };
+
+        let mut action: Option<bool> = None; // true = reload, false = keep
+        egui::Window::new("External Change")
+            .id(egui::Id::new("reload_prompt"))
+            .fixed_pos(egui::pos2(
+                ui.ctx().screen_rect().center().x - 160.0,
+                ui.ctx().screen_rect().center().y - 40.0,
+            ))
+            .resizable(false)
+            .show(ui.ctx(), |ui| {
+                ui.label(egui::RichText::new(&msg).size(13.0).color(egui::Color32::from_rgb(210, 215, 225)));
+                ui.add_space(12.0);
+                ui.horizontal(|ui| {
+                    if !is_deleted {
+                        if ui.add(egui::Button::new(egui::RichText::new("Reload").size(12.0).color(egui::Color32::WHITE)).fill(egui::Color32::from_rgb(40, 100, 200))).clicked() {
+                            action = Some(true);
+                        }
+                    }
+                    if ui.add(egui::Button::new(egui::RichText::new("Keep My Version").size(12.0).color(egui::Color32::WHITE)).fill(egui::Color32::from_rgb(50, 52, 62))).clicked() {
+                        action = Some(false);
+                    }
+                });
+                if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    action = Some(false);
+                }
+            });
+
+        if let Some(reload) = action {
+            if reload && buf_idx < editor_state.editor.buffers.len() {
+                if let Ok(new_buf) = crate::editor::buffer::Buffer::from_file(&path) {
+                    editor_state.editor.buffers[buf_idx] = new_buf;
+                    editor_state.editor.views[buf_idx].tree_dirty = true;
+                    editor_state.status_msg = Some("File reloaded".to_string());
+                }
+            } else if is_deleted {
+                editor_state.status_msg = Some(format!("File deleted: {}", file_name));
+            }
+            editor_state.reload_prompt = None;
+        }
     }
 
     let active = editor_state.editor.active;
@@ -499,9 +711,9 @@ pub(crate) fn render_explorer_view(
         if was_modified && !is_modified { editor_state.lsp_did_save(); }
 
         // Handle LSP key actions
+        // Goto definition (async -- result arrives via pending.definition)
         if frame_result.key_action.goto_definition {
             editor_state.request_goto_definition();
-            editor_state.apply_goto();
         }
         if frame_result.key_action.request_hover {
             editor_state.request_hover();
@@ -602,15 +814,9 @@ pub(crate) fn render_explorer_view(
             editor_state.workspace_symbols_query.clear();
         }
 
-        // Find references
+        // Find references (async -- result arrives via pending.references)
         if frame_result.key_action.find_references {
-            let refs = editor_state.request_references();
-            if refs.is_empty() {
-                editor_state.status_msg = Some("No references found".to_string());
-            } else {
-                editor_state.references_popup = Some(refs);
-                editor_state.references_selected = 0;
-            }
+            editor_state.request_references();
         }
 
         // Find & replace

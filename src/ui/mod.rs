@@ -43,6 +43,7 @@ pub struct UiState {
     // Debug overlay
     pub show_fps: bool,
     frame_times: std::collections::VecDeque<f32>,
+    pub perf_stats: crate::editor::perf::PerfStats,
     // Stacker state
     pub stacker_prompts: Vec<StackerPrompt>,
     pub stacker_input: String,
@@ -143,6 +144,7 @@ impl UiState {
             sidebar_actual_width: SIDEBAR_WIDTH,
             show_fps: false,
             frame_times: std::collections::VecDeque::with_capacity(120),
+            perf_stats: crate::editor::perf::PerfStats::default(),
             stacker_prompts,
             stacker_input: String::new(),
             stacker_category_input: String::new(),
@@ -304,6 +306,7 @@ impl UiState {
         } else {
             None
         };
+        let perf_summary = if show_fps { Some(self.perf_stats.summary()) } else { None };
 
         let mut pending_close = self.pending_close.take();
         let mut save_prompt_response: Option<SavePromptResponse> = None;
@@ -515,7 +518,7 @@ impl UiState {
             overlays::render_copy_ghosts(ctx, &mut copy_ghosts);
             palette_command = overlays::render_command_palette(ctx, &mut palette);
             if let Some((fps, ms)) = fps_info {
-                overlays::render_fps_overlay(ctx, fps, ms);
+                overlays::render_fps_overlay(ctx, fps, ms, perf_summary.as_deref());
             }
             // Save prompt dialog (rendered on top of everything)
             if let Some(ref pc) = pending_close {
