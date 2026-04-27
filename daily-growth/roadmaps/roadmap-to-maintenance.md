@@ -118,7 +118,7 @@
 
 > Right-click file management and visual polish.
 
-- [ ] **5.1 -- File context menu**
+- [x] **5.1 -- File context menu**
   - Right-click a file in the sidebar to get:
     - Rename
     - Copy absolute path
@@ -126,17 +126,17 @@
     - Delete (with confirmation modal: "Delete [filename]? This cannot be undone.")
   - Right-click a folder: New File, New Folder, Rename, Delete
 
-- [ ] **5.2 -- Close Folder button**
+- [x] **5.2 -- Close Folder button**
   - Button in the sidebar header to close the current project
   - Clears the file tree, returns to Home screen
   - Prompt to save unsaved buffers first
 
-- [ ] **5.3 -- Sidebar font size**
+- [x] **5.3 -- Sidebar font size**
   - Configurable font size for the file tree text
   - Setting in the Settings page or Appearances page
   - Stored in config.toml under `[editor]` or a new `[sidebar]` section
 
-- [ ] **5.4 -- File type icons**
+- [x] **5.4 -- File type icons**
   - Show language/type icons next to file names in the tree
   - Colored icons: Rust (orange), JS (yellow), Python (blue), etc.
   - Folder icons for expanded/collapsed state

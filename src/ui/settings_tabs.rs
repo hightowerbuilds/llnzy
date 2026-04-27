@@ -372,6 +372,10 @@ pub(crate) fn render_editor_tab(ui: &mut egui::Ui, config: &mut Config) {
             });
             ui.end_row();
 
+            ui.label(label("Sidebar Font Size"));
+            ui.add(egui::Slider::new(&mut config.editor.sidebar_font_size, 8.0..=24.0).text("px"));
+            ui.end_row();
+
             ui.label(label("Tab Size"));
             ui.add(egui::Slider::new(&mut config.editor.tab_size, 1..=8).text(""));
             ui.end_row();

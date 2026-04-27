@@ -500,10 +500,17 @@ impl UiState {
             // ── Sidebar ──
             let sidebar_result = sidebar::render_sidebar(
                 ctx, sidebar_open, chrome_bg, bg, text_color,
-                &mut explorer, &mut editor_view,
+                &mut explorer, &mut editor_view, &config_clone,
             );
             sidebar_open = sidebar_result.open;
             sidebar_panel_width = sidebar_result.panel_width;
+            if sidebar_result.close_folder {
+                // Clear the project -- main loop will consume this via open_project == None
+                // and the explorer being cleared.
+                explorer.clear();
+                sidebar_open = false;
+                nav_target = Some(ActiveView::Home);
+            }
 
             // ── Home view ──
             if current_view == ActiveView::Home {
