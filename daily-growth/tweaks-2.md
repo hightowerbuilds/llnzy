@@ -1,0 +1,7 @@
+- word wrap in the sidebar
+- x buttons dont work
+- tab bar needs to be taller/bigger
+- footer is too small, bigger/bigger font
+- finish set up with appearance
+- wisp flow 2 second latency
+- fix the background image changing

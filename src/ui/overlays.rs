@@ -196,6 +196,7 @@ pub fn render_command_palette(
 pub fn render_save_prompt(
     ctx: &egui::Context,
     pending: &PendingClose,
+    error: Option<&str>,
 ) -> Option<SavePromptResponse> {
     let mut response: Option<SavePromptResponse> = None;
 
@@ -260,6 +261,14 @@ pub fn render_save_prompt(
                             .size(13.0)
                             .color(egui::Color32::from_rgb(190, 195, 210)),
                     );
+                    if let Some(error) = error {
+                        ui.add_space(10.0);
+                        ui.label(
+                            egui::RichText::new(error)
+                                .size(12.0)
+                                .color(egui::Color32::from_rgb(255, 135, 135)),
+                        );
+                    }
                     ui.add_space(16.0);
 
                     ui.horizontal(|ui| {

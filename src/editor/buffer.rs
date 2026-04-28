@@ -1010,6 +1010,23 @@ mod tests {
     }
 
     #[test]
+    fn failed_save_keeps_buffer_modified() {
+        let missing_parent = std::env::temp_dir().join(format!(
+            "llnzy-missing-parent-{}",
+            std::process::id()
+        ));
+        let path = missing_parent.join("file.txt");
+
+        let mut buf = Buffer::empty();
+        buf.insert(Position::new(0, 0), "unsaved");
+
+        assert!(buf.save_to(&path).is_err());
+        assert!(buf.is_modified());
+        assert!(buf.path().is_none());
+        assert_eq!(buf.text(), "unsaved");
+    }
+
+    #[test]
     fn crlf_preserved_on_save() {
         let dir = std::env::temp_dir();
         let path = dir.join(format!("llnzy-crlf-{}.txt", std::process::id()));

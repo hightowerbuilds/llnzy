@@ -3,6 +3,7 @@ pub mod blit;
 pub mod bloom;
 pub mod crt;
 pub mod cursor;
+mod frame_adapter;
 pub mod particles;
 pub mod rect;
 pub mod state;
@@ -12,6 +13,7 @@ use std::sync::Arc;
 use winit::window::Window;
 
 use crate::config::{Config, CursorStyle};
+use crate::engine::{Color, EngineFrame, LayerKind, Primitive, Size, TextRun};
 use crate::error_log::{ErrorLog, ErrorPanel};
 use crate::layout::ScreenLayout;
 use crate::session::{Rect as PaneRect, Session};
@@ -52,24 +54,16 @@ pub struct RenderRequest<'a> {
 struct ContentPass<'a> {
     terminal: Option<&'a Session>,
     tab_id: u64,
-    selection_rects: &'a [(f32, f32, f32, f32, [f32; 4])],
-    search_rects: &'a [(f32, f32, f32, f32, [f32; 4])],
+    terminal_backgrounds: &'a [Primitive],
+    terminal_decorations: &'a [Primitive],
+    terminal_highlights: &'a [Primitive],
     screen_layout: &'a ScreenLayout,
 }
 
 struct OverlayPass<'a> {
+    frame: &'a EngineFrame,
     search_bar: Option<(&'a str, &'a str)>,
     error_panel: Option<(&'a ErrorPanel, &'a ErrorLog)>,
-    visual_bell: bool,
-}
-
-struct UiRenderPass<'a> {
-    rects: &'a mut RectRenderer,
-    text: &'a mut TextSystem,
-    gpu: &'a GpuState,
-    config: &'a Config,
-    view: &'a wgpu::TextureView,
-    encoder: &'a mut wgpu::CommandEncoder,
 }
 
 pub struct Renderer {
@@ -196,8 +190,29 @@ impl Renderer {
             .create_view(&wgpu::TextureViewDescriptor::default());
         let mut encoder = self.create_render_encoder();
         let use_scene = self.config.effects.any_active();
+        let engine_frame = frame_adapter::engine_frame_from_request(
+            &request,
+            &self.config,
+            Size::new(
+                self.gpu.surface_config.width as f32,
+                self.gpu.surface_config.height as f32,
+            ),
+            use_scene,
+            self.text.cell_dimensions().1,
+        );
+        #[cfg(debug_assertions)]
+        {
+            if let Err(err) = engine_frame.validate() {
+                log::warn!("Invalid engine frame generated from render request: {:?}", err);
+            }
+        }
 
-        self.clear_frame(&mut encoder, &swapchain_view, use_scene);
+        self.clear_frame(
+            &mut encoder,
+            &swapchain_view,
+            use_scene,
+            engine_frame.clear_color,
+        );
         self.render_scene_background(&mut encoder, use_scene);
         // Tab bar is now rendered by egui — skip wgpu tab bar
         self.render_terminal_content(
@@ -207,19 +222,27 @@ impl Renderer {
             ContentPass {
                 terminal: request.terminal,
                 tab_id: request.tab_id,
-                selection_rects: request.selection_rects,
-                search_rects: request.search_rects,
+                terminal_backgrounds: primitive_layer(&engine_frame, "terminal-cell-backgrounds"),
+                terminal_decorations: primitive_layer(&engine_frame, "terminal-decorations"),
+                terminal_highlights: primitive_layer(&engine_frame, "terminal-highlights"),
                 screen_layout: request.screen_layout,
             },
+        );
+        self.render_engine_primitive_layer(
+            &engine_frame,
+            "visual-bell",
+            &mut encoder,
+            &swapchain_view,
+            use_scene,
         );
         self.render_overlays(
             &mut encoder,
             &swapchain_view,
             use_scene,
             OverlayPass {
+                frame: &engine_frame,
                 search_bar: request.search_bar,
                 error_panel: request.error_panel,
-                visual_bell: request.visual_bell,
             },
         );
 
@@ -295,8 +318,8 @@ impl Renderer {
         encoder: &mut wgpu::CommandEncoder,
         swapchain_view: &wgpu::TextureView,
         use_scene: bool,
+        clear_color: Color,
     ) {
-        let bg = self.config.bg();
         let target = Self::target_view(&self.gpu, swapchain_view, use_scene);
         let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("clear_pass"),
@@ -305,10 +328,10 @@ impl Renderer {
                 resolve_target: None,
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Clear(wgpu::Color {
-                        r: bg[0] as f64,
-                        g: bg[1] as f64,
-                        b: bg[2] as f64,
-                        a: bg[3] as f64,
+                        r: clear_color.r as f64,
+                        g: clear_color.g as f64,
+                        b: clear_color.b as f64,
+                        a: clear_color.a as f64,
                     }),
                     store: wgpu::StoreOp::Store,
                 },
@@ -356,31 +379,6 @@ impl Renderer {
         }
     }
 
-    fn render_tab_bar(
-        &mut self,
-        encoder: &mut wgpu::CommandEncoder,
-        swapchain_view: &wgpu::TextureView,
-        use_scene: bool,
-        request: &RenderRequest<'_>,
-    ) {
-        if request.screen_layout.show_tab_bar {
-            let target = Self::target_view(&self.gpu, swapchain_view, use_scene);
-            let mut ui_pass = UiRenderPass {
-                rects: &mut self.rects,
-                text: &mut self.text,
-                gpu: &self.gpu,
-                config: &self.config,
-                view: target,
-                encoder,
-            };
-            Self::render_tab_bar_to(
-                &mut ui_pass,
-                request.tab_titles,
-                &request.screen_layout.tab_bar,
-            );
-        }
-    }
-
     fn render_terminal_content(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
@@ -410,52 +408,21 @@ impl Renderer {
 
         let terminal = &session.terminal;
 
-        // Cell backgrounds
-        let bg_rects: Vec<_> = terminal
-            .background_rects(&self.config, cw, ch)
-            .into_iter()
-            .map(|(x, y, w, h, c)| (x + rect.x, y + rect.y, w, h, c))
-            .collect();
+        let bg_rects = primitive_rects(pass.terminal_backgrounds, 1.0);
         if !bg_rects.is_empty() {
             self.rects.draw_rects(&self.gpu, target, encoder, &bg_rects);
         }
 
-        // Decorations (underlines, strikethrough, etc.)
-        let mut deco_rects: Vec<_> = terminal
-            .decoration_rects(&self.config, cw, ch)
-            .into_iter()
-            .map(|(x, y, w, h, c)| (x + rect.x, y + rect.y, w, h, c))
-            .collect();
-        // URL underline decorations
-        let url_rects: Vec<_> = terminal
-            .url_decoration_rects(cw, ch)
-            .into_iter()
-            .map(|(x, y, w, h, c)| (x + rect.x, y + rect.y, w, h, c))
-            .collect();
-        deco_rects.extend(url_rects);
+        let deco_rects = primitive_rects(pass.terminal_decorations, 1.0);
         if !deco_rects.is_empty() {
             self.rects
                 .draw_rects(&self.gpu, target, encoder, &deco_rects);
         }
 
-        // Search highlights
-        if !pass.search_rects.is_empty() {
-            let sr: Vec<_> = pass
-                .search_rects
-                .iter()
-                .map(|&(x, y, w, h, c)| (x + rect.x, y + rect.y, w, h, c))
-                .collect();
-            self.rects.draw_rects(&self.gpu, target, encoder, &sr);
-        }
-
-        // Selection
-        if !pass.selection_rects.is_empty() {
-            let sel: Vec<_> = pass
-                .selection_rects
-                .iter()
-                .map(|&(x, y, w, h, c)| (x + rect.x, y + rect.y, w, h, c))
-                .collect();
-            self.rects.draw_rects(&self.gpu, target, encoder, &sel);
+        let highlight_rects = primitive_rects(pass.terminal_highlights, 1.0);
+        if !highlight_rects.is_empty() {
+            self.rects
+                .draw_rects(&self.gpu, target, encoder, &highlight_rects);
         }
 
         // Cursor
@@ -540,40 +507,91 @@ impl Renderer {
         use_scene: bool,
         pass: OverlayPass<'_>,
     ) {
-        let target = Self::target_view(&self.gpu, swapchain_view, use_scene);
-
-        if pass.visual_bell {
-            let w = self.gpu.surface_config.width as f32;
-            let h = self.gpu.surface_config.height as f32;
-            let flash = [(0.0, 0.0, w, h, [1.0, 1.0, 1.0, 0.15])];
-            self.rects.draw_rects(&self.gpu, target, encoder, &flash);
-        }
-
-        if let Some((query, status)) = pass.search_bar {
-            let mut ui_pass = UiRenderPass {
-                rects: &mut self.rects,
-                text: &mut self.text,
-                gpu: &self.gpu,
-                config: &self.config,
-                view: target,
+        if pass.search_bar.is_some() {
+            self.render_engine_primitive_layer(
+                pass.frame,
+                "search-bar-bg",
                 encoder,
-            };
-            Self::render_search_bar_to(&mut ui_pass, query, status);
+                swapchain_view,
+                use_scene,
+            );
+            self.render_engine_text_layer(
+                pass.frame,
+                "search-bar-text",
+                encoder,
+                swapchain_view,
+                use_scene,
+            );
         }
 
-        if let Some((panel, log)) = pass.error_panel {
+        if let Some((panel, _log)) = pass.error_panel {
             if panel.visible {
-                let mut ui_pass = UiRenderPass {
-                    rects: &mut self.rects,
-                    text: &mut self.text,
-                    gpu: &self.gpu,
-                    config: &self.config,
-                    view: target,
+                self.render_engine_primitive_layer(
+                    pass.frame,
+                    "error-panel-bg",
                     encoder,
-                };
-                Self::render_error_panel_to(&mut ui_pass, panel, log);
+                    swapchain_view,
+                    use_scene,
+                );
+                self.render_engine_text_layer(
+                    pass.frame,
+                    "error-panel-text",
+                    encoder,
+                    swapchain_view,
+                    use_scene,
+                );
             }
         }
+    }
+
+    fn render_engine_primitive_layer(
+        &mut self,
+        frame: &EngineFrame,
+        layer_id: &str,
+        encoder: &mut wgpu::CommandEncoder,
+        swapchain_view: &wgpu::TextureView,
+        use_scene: bool,
+    ) {
+        let Some(layer) = frame
+            .layers
+            .iter()
+            .find(|layer| layer.id.as_str() == layer_id)
+        else {
+            return;
+        };
+        let LayerKind::Primitives(primitives) = &layer.kind else {
+            return;
+        };
+
+        let rects = primitive_rects(primitives, layer.style.opacity);
+        if rects.is_empty() {
+            return;
+        }
+        let target = Self::target_view(&self.gpu, swapchain_view, use_scene);
+        self.rects.draw_rects(&self.gpu, target, encoder, &rects);
+    }
+
+    fn render_engine_text_layer(
+        &mut self,
+        frame: &EngineFrame,
+        layer_id: &str,
+        encoder: &mut wgpu::CommandEncoder,
+        swapchain_view: &wgpu::TextureView,
+        use_scene: bool,
+    ) {
+        let runs = text_layer(frame, layer_id);
+        if runs.is_empty() {
+            return;
+        }
+        let target = Self::target_view(&self.gpu, swapchain_view, use_scene);
+        let line_h = self.text.cell_dimensions().1;
+        self.text.render_text_runs(
+            runs,
+            line_h,
+            &self.gpu,
+            target,
+            encoder,
+        );
     }
 
     fn apply_post_processing(
@@ -665,101 +683,159 @@ impl Renderer {
         }
     }
 
-    fn render_search_bar_to(pass: &mut UiRenderPass<'_>, query: &str, status: &str) {
-        let w = pass.gpu.surface_config.width as f32;
-        let h = pass.gpu.surface_config.height as f32;
-        let bar_h = 28.0;
-        let bar_y = h - bar_h;
+}
 
-        let bg = [(0.0, bar_y, w, bar_h, [0.15, 0.15, 0.18, 0.95])];
-        pass.rects
-            .draw_rects(pass.gpu, pass.view, &mut *pass.encoder, &bg);
-
-        let display = format!("Find: {}  {}", query, status);
-        pass.text.render_tab_labels(
-            &[(display, true)],
-            w,
-            bar_h,
-            0.0,
-            pass.config,
-            pass.gpu,
-            pass.view,
-            &mut *pass.encoder,
-        );
-    }
-
-    fn render_error_panel_to(pass: &mut UiRenderPass<'_>, panel: &ErrorPanel, log: &ErrorLog) {
-        let w = pass.gpu.surface_config.width as f32;
-        let h = pass.gpu.surface_config.height as f32;
-        let (_, ch) = pass.text.cell_dimensions();
-        let line_h = ch;
-        let panel_h = (h * 0.4).max(line_h * 5.0);
-        let panel_y = h - panel_h;
-
-        let (bg_rects, lines) = panel.render_data(log, w, panel_h, line_h);
-
-        let offset_rects: Vec<_> = bg_rects
-            .into_iter()
-            .map(|(x, y, rw, rh, c)| (x, y + panel_y, rw, rh, c))
-            .collect();
-        pass.rects
-            .draw_rects(pass.gpu, pass.view, &mut *pass.encoder, &offset_rects);
-
-        if !lines.is_empty() {
-            let line_strs: Vec<&str> = lines.iter().map(|(s, _)| s.as_str()).collect();
-            pass.text.render_panel_lines(
-                &line_strs,
-                panel_y,
-                line_h,
-                pass.config,
-                pass.gpu,
-                pass.view,
-                &mut *pass.encoder,
-            );
+fn primitive_rects(
+    primitives: &[Primitive],
+    layer_opacity: f32,
+) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+    let mut rects = Vec::new();
+    for primitive in primitives {
+        match primitive {
+            Primitive::Rect { rect, color } => {
+                if !rect.is_empty() {
+                    rects.push((
+                        rect.x,
+                        rect.y,
+                        rect.width,
+                        rect.height,
+                        color_with_opacity(*color, layer_opacity),
+                    ));
+                }
+            }
+            Primitive::StrokeRect { rect, color, width } => {
+                if !rect.is_empty() && *width > 0.0 {
+                    let width = width.min(rect.width / 2.0).min(rect.height / 2.0);
+                    let color = color_with_opacity(*color, layer_opacity);
+                    rects.push((rect.x, rect.y, rect.width, width, color));
+                    rects.push((rect.x, rect.y + rect.height - width, rect.width, width, color));
+                    rects.push((rect.x, rect.y, width, rect.height, color));
+                    rects.push((rect.x + rect.width - width, rect.y, width, rect.height, color));
+                }
+            }
+            Primitive::Line {
+                from,
+                to,
+                color,
+                width,
+            } => {
+                if *width > 0.0 {
+                    let x = from[0].min(to[0]);
+                    let y = from[1].min(to[1]);
+                    let w = (from[0] - to[0]).abs().max(*width);
+                    let h = (from[1] - to[1]).abs().max(*width);
+                    rects.push((x, y, w, h, color_with_opacity(*color, layer_opacity)));
+                }
+            }
         }
     }
+    rects
+}
 
-    fn render_tab_bar_to(
-        pass: &mut UiRenderPass<'_>,
-        tabs: &[(String, bool)],
-        zone: &crate::layout::Zone,
-    ) {
-        let tab_w = (zone.w / tabs.len() as f32).min(200.0);
+fn primitive_layer<'a>(frame: &'a EngineFrame, layer_id: &str) -> &'a [Primitive] {
+    frame
+        .layers
+        .iter()
+        .find_map(|layer| {
+            if layer.id.as_str() == layer_id {
+                if let LayerKind::Primitives(primitives) = &layer.kind {
+                    return Some(primitives.as_slice());
+                }
+            }
+            None
+        })
+        .unwrap_or(&[])
+}
 
-        // Tab bar background — black
-        let bar_bg = [(zone.x, zone.y, zone.w, zone.h, [0.04, 0.04, 0.05, 1.0])];
-        pass.rects
-            .draw_rects(pass.gpu, pass.view, &mut *pass.encoder, &bar_bg);
+fn text_layer<'a>(frame: &'a EngineFrame, layer_id: &str) -> &'a [TextRun] {
+    frame
+        .layers
+        .iter()
+        .find_map(|layer| {
+            if layer.id.as_str() == layer_id {
+                if let LayerKind::Text(runs) = &layer.kind {
+                    return Some(runs.as_slice());
+                }
+            }
+            None
+        })
+        .unwrap_or(&[])
+}
 
-        // Individual tabs — dodger blue if selected, black if not
-        let mut tab_rects = Vec::new();
-        for (i, (_, active)) in tabs.iter().enumerate() {
-            let x = zone.x + i as f32 * tab_w;
-            let color = if *active {
-                [0.12, 0.56, 1.0, 1.0] // dodger blue — selected
-            } else {
-                [0.04, 0.04, 0.05, 1.0] // black — not selected
-            };
-            tab_rects.push((x, zone.y, tab_w - 1.0, zone.h, color));
-        }
-        pass.rects
-            .draw_rects(pass.gpu, pass.view, &mut *pass.encoder, &tab_rects);
+fn color_with_opacity(color: Color, layer_opacity: f32) -> [f32; 4] {
+    [
+        color.r,
+        color.g,
+        color.b,
+        color.a * layer_opacity.clamp(0.0, 1.0),
+    ]
+}
 
-        // Render tab name + close "x" button
-        // Append " x" to each tab title so it renders as part of the label
-        let tabs_with_close: Vec<(String, bool)> = tabs
-            .iter()
-            .map(|(title, active)| (format!("{}  x", title), *active))
-            .collect();
-        pass.text.render_tab_labels(
-            &tabs_with_close,
-            tab_w,
-            zone.h,
-            zone.x,
-            pass.config,
-            pass.gpu,
-            pass.view,
-            &mut *pass.encoder,
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn primitive_rects_applies_layer_opacity() {
+        let rects = primitive_rects(
+            &[Primitive::Rect {
+                rect: crate::engine::Rect::new(1.0, 2.0, 3.0, 4.0),
+                color: Color::rgba(0.1, 0.2, 0.3, 0.5),
+            }],
+            0.5,
         );
+
+        assert_eq!(rects, vec![(1.0, 2.0, 3.0, 4.0, [0.1, 0.2, 0.3, 0.25])]);
+    }
+
+    #[test]
+    fn primitive_rects_expands_stroke_rect() {
+        let rects = primitive_rects(
+            &[Primitive::StrokeRect {
+                rect: crate::engine::Rect::new(10.0, 20.0, 30.0, 40.0),
+                color: Color::rgba(1.0, 1.0, 1.0, 1.0),
+                width: 2.0,
+            }],
+            1.0,
+        );
+
+        assert_eq!(rects.len(), 4);
+        assert_eq!(rects[0], (10.0, 20.0, 30.0, 2.0, [1.0, 1.0, 1.0, 1.0]));
+    }
+
+    #[test]
+    fn primitive_layer_returns_named_primitive_layer() {
+        let mut frame = EngineFrame::new(Size::new(100.0, 100.0));
+        frame.push_layer(crate::engine::Layer::new(
+            "hits",
+            10,
+            LayerKind::Primitives(vec![Primitive::Rect {
+                rect: crate::engine::Rect::new(0.0, 0.0, 1.0, 1.0),
+                color: Color::rgba(1.0, 1.0, 1.0, 1.0),
+            }]),
+        ));
+
+        assert_eq!(primitive_layer(&frame, "hits").len(), 1);
+        assert!(primitive_layer(&frame, "missing").is_empty());
+    }
+
+    #[test]
+    fn text_layer_returns_named_text_layer() {
+        let mut frame = EngineFrame::new(Size::new(100.0, 100.0));
+        frame.push_layer(crate::engine::Layer::new(
+            "label",
+            10,
+            LayerKind::Text(vec![TextRun {
+                text: "hello".to_string(),
+                origin: [0.0, 0.0],
+                size: 12.0,
+                color: Color::rgba(1.0, 1.0, 1.0, 1.0),
+                font_family: None,
+                monospace: true,
+            }]),
+        ));
+
+        assert_eq!(text_layer(&frame, "label").len(), 1);
+        assert!(text_layer(&frame, "missing").is_empty());
     }
 }

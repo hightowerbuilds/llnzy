@@ -8,6 +8,7 @@ use glyphon::{
 };
 
 use crate::config::Config;
+use crate::engine::TextRun;
 use crate::renderer::state::GpuState;
 use crate::terminal::Terminal;
 
@@ -346,115 +347,43 @@ impl TextSystem {
         self.atlas.trim();
     }
 
-    /// Render tab bar labels.
+    /// Render engine text runs at absolute pixel positions.
     #[expect(
         clippy::too_many_arguments,
-        reason = "overlay text rendering keeps GPU target state explicit at call sites"
+        reason = "engine text bridge keeps GPU target state explicit at call sites"
     )]
-    pub fn render_tab_labels(
+    pub fn render_text_runs(
         &mut self,
-        tabs: &[(String, bool)],
-        tab_w: f32,
-        tab_h: f32,
-        tab_x_offset: f32,
-        config: &Config,
+        runs: &[TextRun],
+        line_h: f32,
         gpu: &GpuState,
         view: &wgpu::TextureView,
         encoder: &mut wgpu::CommandEncoder,
     ) {
-        let metrics = Metrics::new(self.font_size * 0.8, tab_h);
-        let font_family = self.font_family.clone();
-        let shaping = self.shaping;
-
-        let mut buffers: Vec<Buffer> = Vec::new();
-        for (title, _active) in tabs {
-            let mut buf = Buffer::new(&mut self.font_system, metrics);
-            buf.set_size(&mut self.font_system, Some(tab_w - 16.0), Some(tab_h));
-            // White text for tab labels — always readable on both black and blue
-            let attrs = Attrs::new()
-                .family(Family::Name(&font_family))
-                .color(Color::rgb(240, 240, 245));
-            buf.set_text(&mut self.font_system, title, attrs, shaping);
-            buf.shape_until_scroll(&mut self.font_system, false);
-            buffers.push(buf);
-        }
-
-        let text_areas: Vec<TextArea> = buffers
-            .iter()
-            .enumerate()
-            .map(|(i, buffer)| TextArea {
-                buffer,
-                left: tab_x_offset + i as f32 * tab_w + 8.0,
-                top: 0.0,
-                scale: 1.0,
-                bounds: TextBounds {
-                    left: 0,
-                    top: 0,
-                    right: gpu.surface_config.width as i32,
-                    bottom: tab_h as i32,
-                },
-                default_color: Color::rgb(config.fg()[0], config.fg()[1], config.fg()[2]),
-                custom_glyphs: &[],
-            })
-            .collect();
-
-        if self
-            .overlay_renderer
-            .prepare(
-                &gpu.device,
-                &gpu.queue,
-                &mut self.font_system,
-                &mut self.atlas,
-                &self.viewport,
-                text_areas,
-                &mut self.swash_cache,
-            )
-            .is_err()
-        {
+        if runs.is_empty() {
             return;
         }
 
-        {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("tab_text_pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                ..Default::default()
-            });
-            let _ = self
-                .overlay_renderer
-                .render(&self.atlas, &self.viewport, &mut pass);
-        }
-    }
-    /// Render text labels at specific (x, y) pixel positions.
-    pub fn render_labels_at(
-        &mut self,
-        labels: &[(&str, f32, f32, f32)], // (text, x, y, max_width)
-        height: f32,
-        config: &Config,
-        gpu: &GpuState,
-        view: &wgpu::TextureView,
-        encoder: &mut wgpu::CommandEncoder,
-    ) {
-        let metrics = Metrics::new(self.font_size * 0.75, height);
-        let font_family = self.font_family.clone();
+        let default_font_family = self.font_family.clone();
         let shaping = self.shaping;
 
         let mut buffers: Vec<Buffer> = Vec::new();
-        for &(text, _, _, max_w) in labels {
+        for run in runs {
+            let run_height = line_h.max(run.size);
+            let metrics = Metrics::new(run.size.max(1.0), run_height);
+            let max_width = (gpu.surface_config.width as f32 - run.origin[0]).max(1.0);
             let mut buf = Buffer::new(&mut self.font_system, metrics);
-            buf.set_size(&mut self.font_system, Some(max_w), Some(height));
+            buf.set_size(&mut self.font_system, Some(max_width), Some(run_height));
+            let font_family = run.font_family.as_deref().unwrap_or(&default_font_family);
             let attrs = Attrs::new()
-                .family(Family::Name(&font_family))
-                .color(Color::rgb(config.fg()[0], config.fg()[1], config.fg()[2]));
-            buf.set_text(&mut self.font_system, text, attrs, shaping);
+                .family(Family::Name(font_family))
+                .color(Color::rgba(
+                    color_channel(run.color.r),
+                    color_channel(run.color.g),
+                    color_channel(run.color.b),
+                    color_channel(run.color.a),
+                ));
+            buf.set_text(&mut self.font_system, &run.text, attrs, shaping);
             buf.shape_until_scroll(&mut self.font_system, false);
             buffers.push(buf);
         }
@@ -463,19 +392,26 @@ impl TextSystem {
             .iter()
             .enumerate()
             .map(|(i, buffer)| {
-                let (_, x, y, max_w) = labels[i];
+                let run = &runs[i];
+                let run_height = line_h.max(run.size);
+                let max_width = (gpu.surface_config.width as f32 - run.origin[0]).max(1.0);
                 TextArea {
                     buffer,
-                    left: x,
-                    top: y,
+                    left: run.origin[0],
+                    top: run.origin[1],
                     scale: 1.0,
                     bounds: TextBounds {
-                        left: x as i32,
-                        top: y as i32,
-                        right: (x + max_w) as i32,
-                        bottom: (y + height) as i32,
+                        left: run.origin[0] as i32,
+                        top: run.origin[1] as i32,
+                        right: (run.origin[0] + max_width) as i32,
+                        bottom: (run.origin[1] + run_height) as i32,
                     },
-                    default_color: Color::rgb(config.fg()[0], config.fg()[1], config.fg()[2]),
+                    default_color: Color::rgba(
+                        color_channel(run.color.r),
+                        color_channel(run.color.g),
+                        color_channel(run.color.b),
+                        color_channel(run.color.a),
+                    ),
                     custom_glyphs: &[],
                 }
             })
@@ -499,7 +435,7 @@ impl TextSystem {
 
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("labels_text_pass"),
+                label: Some("engine_text_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view,
                     resolve_target: None,
@@ -517,92 +453,6 @@ impl TextSystem {
         }
     }
 
-    /// Render multiple lines of text at a given Y offset (for the error panel).
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "panel text rendering keeps target, layout, and GPU state explicit"
-    )]
-    pub fn render_panel_lines(
-        &mut self,
-        lines: &[&str],
-        y_offset: f32,
-        line_h: f32,
-        config: &Config,
-        gpu: &GpuState,
-        view: &wgpu::TextureView,
-        encoder: &mut wgpu::CommandEncoder,
-    ) {
-        let metrics = Metrics::new(self.font_size * 0.75, line_h);
-        let font_family = self.font_family.clone();
-        let shaping = self.shaping;
-        let width = gpu.surface_config.width as f32;
-
-        let mut buffers: Vec<Buffer> = Vec::new();
-        for line in lines {
-            let mut buf = Buffer::new(&mut self.font_system, metrics);
-            buf.set_size(&mut self.font_system, Some(width), Some(line_h));
-            let attrs = Attrs::new()
-                .family(Family::Name(&font_family))
-                .color(Color::rgb(config.fg()[0], config.fg()[1], config.fg()[2]));
-            buf.set_text(&mut self.font_system, line, attrs, shaping);
-            buf.shape_until_scroll(&mut self.font_system, false);
-            buffers.push(buf);
-        }
-
-        let text_areas: Vec<TextArea> = buffers
-            .iter()
-            .enumerate()
-            .map(|(i, buffer)| TextArea {
-                buffer,
-                left: 0.0,
-                top: y_offset + i as f32 * line_h,
-                scale: 1.0,
-                bounds: TextBounds {
-                    left: 0,
-                    top: y_offset as i32,
-                    right: gpu.surface_config.width as i32,
-                    bottom: gpu.surface_config.height as i32,
-                },
-                default_color: Color::rgb(config.fg()[0], config.fg()[1], config.fg()[2]),
-                custom_glyphs: &[],
-            })
-            .collect();
-
-        if self
-            .overlay_renderer
-            .prepare(
-                &gpu.device,
-                &gpu.queue,
-                &mut self.font_system,
-                &mut self.atlas,
-                &self.viewport,
-                text_areas,
-                &mut self.swash_cache,
-            )
-            .is_err()
-        {
-            return;
-        }
-
-        {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("panel_text_pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                ..Default::default()
-            });
-            let _ = self
-                .overlay_renderer
-                .render(&self.atlas, &self.viewport, &mut pass);
-        }
-    }
 }
 
 /// Build rich text spans for a single terminal line.
@@ -694,6 +544,10 @@ fn attrs_for_cell<'a>(font_family: &'a str, flags: Flags, fg: [u8; 3]) -> Attrs<
     }
 
     attrs
+}
+
+fn color_channel(value: f32) -> u8 {
+    (value.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
 /// Compute a content hash for a terminal line (used for dirty tracking).

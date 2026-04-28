@@ -97,6 +97,8 @@ pub struct UiState {
     pub launch_workspace: Option<crate::workspace_store::SavedWorkspace>,
     /// Pending close confirmation for unsaved buffers.
     pub pending_close: Option<PendingClose>,
+    /// Save failure shown in the unsaved-changes prompt.
+    pub save_prompt_error: Option<String>,
     /// Save prompt response from the last render (consumed by main loop).
     pub save_prompt_response: Option<SavePromptResponse>,
 }
@@ -186,6 +188,7 @@ impl UiState {
             split_view: None,
             launch_workspace: None,
             pending_close: None,
+            save_prompt_error: None,
             save_prompt_response: None,
         }
     }
@@ -322,7 +325,8 @@ impl UiState {
         };
         let perf_summary = if show_fps { Some(self.perf_stats.summary()) } else { None };
 
-        let mut pending_close = self.pending_close.take();
+        let pending_close = self.pending_close.take();
+        let save_prompt_error = self.save_prompt_error.clone();
         let mut save_prompt_response: Option<SavePromptResponse> = None;
 
         let mut sidebar_open = self.sidebar_open;
@@ -605,7 +609,8 @@ impl UiState {
             }
             // Save prompt dialog (rendered on top of everything)
             if let Some(ref pc) = pending_close {
-                save_prompt_response = overlays::render_save_prompt(ctx, pc);
+                save_prompt_response =
+                    overlays::render_save_prompt(ctx, pc, save_prompt_error.as_deref());
             }
         });
 

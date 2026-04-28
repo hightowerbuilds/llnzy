@@ -387,6 +387,7 @@ impl App {
                     let name = ui.editor_view.editor.buffers[*buffer_idx].file_name().to_string();
                     if let Some(ui) = &mut self.ui {
                         ui.pending_close = Some(PendingClose::Tab(self.active_tab, name));
+                        ui.save_prompt_error = None;
                     }
                     self.request_redraw();
                     return;
@@ -413,6 +414,63 @@ impl App {
         self.selection.clear();
         self.recompute_layout();
         self.request_redraw();
+    }
+
+    fn modified_code_tabs(&self) -> Vec<(usize, String)> {
+        let mut modified = Vec::new();
+        if let Some(ui) = &self.ui {
+            for (i, tab) in self.tabs.iter().enumerate() {
+                if let TabContent::CodeFile { buffer_idx, .. } = &tab.content {
+                    if *buffer_idx < ui.editor_view.editor.buffers.len()
+                        && ui.editor_view.editor.buffers[*buffer_idx].is_modified()
+                    {
+                        let name = ui.editor_view.editor.buffers[*buffer_idx].file_name().to_string();
+                        modified.push((i, name));
+                    }
+                }
+            }
+        }
+        modified
+    }
+
+    fn save_code_tab_for_close(&mut self, idx: usize) -> Result<(), String> {
+        let Some(TabContent::CodeFile { buffer_idx, .. }) =
+            self.tabs.get(idx).map(|tab| &tab.content)
+        else {
+            return Ok(());
+        };
+        let buffer_idx = *buffer_idx;
+        let Some(ui) = &mut self.ui else {
+            return Ok(());
+        };
+        let Some(buf) = ui.editor_view.editor.buffers.get_mut(buffer_idx) else {
+            return Err(format!("Cannot save tab {}: editor buffer is missing", idx + 1));
+        };
+        if !buf.is_modified() {
+            return Ok(());
+        }
+
+        let label = buf
+            .path()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| buf.file_name().to_string());
+        buf.save()
+            .map_err(|err| format!("Failed to save {label}: {err}"))
+    }
+
+    fn save_modified_tabs_for_close(&mut self, tabs: &[(usize, String)]) -> Result<(), String> {
+        for (idx, _) in tabs {
+            self.save_code_tab_for_close(*idx)?;
+        }
+        Ok(())
+    }
+
+    fn report_save_failure(&mut self, message: String) {
+        self.error_log.error(message.clone());
+        if let Some(ui) = &mut self.ui {
+            ui.save_prompt_error = Some(message.clone());
+            ui.editor_view.status_msg = Some(message);
+        }
     }
 
     fn switch_tab(&mut self, idx: usize) {
@@ -582,22 +640,11 @@ impl ApplicationHandler<UserEvent> for App {
         match event {
             WindowEvent::CloseRequested => {
                 // Check for unsaved CodeFile buffers before quitting
-                let mut modified = Vec::new();
-                if let Some(ui) = &self.ui {
-                    for (i, tab) in self.tabs.iter().enumerate() {
-                        if let TabContent::CodeFile { buffer_idx, .. } = &tab.content {
-                            if *buffer_idx < ui.editor_view.editor.buffers.len()
-                                && ui.editor_view.editor.buffers[*buffer_idx].is_modified()
-                            {
-                                let name = ui.editor_view.editor.buffers[*buffer_idx].file_name().to_string();
-                                modified.push((i, name));
-                            }
-                        }
-                    }
-                }
+                let modified = self.modified_code_tabs();
                 if !modified.is_empty() {
                     if let Some(ui) = &mut self.ui {
                         ui.pending_close = Some(PendingClose::Window(modified));
+                        ui.save_prompt_error = None;
                     }
                     self.request_redraw();
                 } else {
@@ -773,43 +820,70 @@ impl ApplicationHandler<UserEvent> for App {
                 if let Some(resp) = save_response {
                     let pending = self.ui.as_mut().and_then(|u| u.pending_close.take());
                     match (resp, pending) {
-                        (SavePromptResponse::Save, Some(PendingClose::Tab(idx, _))) => {
-                            // Save the buffer, then close the tab
-                            if let Some(ui) = &mut self.ui {
-                                if let Some(TabContent::CodeFile { buffer_idx, .. }) = self.tabs.get(idx).map(|t| &t.content) {
-                                    if let Some(buf) = ui.editor_view.editor.buffers.get_mut(*buffer_idx) {
-                                        let _ = buf.save();
+                        (SavePromptResponse::Save, Some(PendingClose::Tab(idx, name))) => {
+                            match self.save_code_tab_for_close(idx) {
+                                Ok(()) => {
+                                    if let Some(ui) = &mut self.ui {
+                                        ui.save_prompt_error = None;
                                     }
+                                    self.active_tab = idx;
+                                    self.force_close_tab();
+                                    need_redraw = true;
+                                }
+                                Err(e) => {
+                                    if let Some(ui) = &mut self.ui {
+                                        ui.pending_close = Some(PendingClose::Tab(idx, name));
+                                    }
+                                    self.report_save_failure(e);
+                                    need_redraw = true;
                                 }
                             }
-                            self.active_tab = idx;
-                            self.force_close_tab();
-                            need_redraw = true;
                         }
                         (SavePromptResponse::DontSave, Some(PendingClose::Tab(idx, _))) => {
+                            if let Some(ui) = &mut self.ui {
+                                ui.save_prompt_error = None;
+                            }
                             self.active_tab = idx;
                             self.force_close_tab();
                             need_redraw = true;
                         }
-                        (SavePromptResponse::Save, Some(PendingClose::Window(_tabs))) => {
-                            // Save all modified buffers, then exit
-                            if let Some(ui) = &mut self.ui {
-                                for buf in &mut ui.editor_view.editor.buffers {
-                                    if buf.is_modified() {
-                                        let _ = buf.save();
+                        (SavePromptResponse::Save, Some(PendingClose::Window(tabs))) => {
+                            match self.save_modified_tabs_for_close(&tabs) {
+                                Ok(()) => {
+                                    if let Some(ui) = &mut self.ui {
+                                        ui.save_prompt_error = None;
                                     }
+                                    self.save_window_state();
+                                    event_loop.exit();
+                                }
+                                Err(e) => {
+                                    let still_modified = self.modified_code_tabs();
+                                    if let Some(ui) = &mut self.ui {
+                                        ui.pending_close = Some(PendingClose::Window(
+                                            if still_modified.is_empty() {
+                                                tabs
+                                            } else {
+                                                still_modified
+                                            },
+                                        ));
+                                    }
+                                    self.report_save_failure(e);
+                                    need_redraw = true;
                                 }
                             }
-                            self.save_window_state();
-                            event_loop.exit();
                         }
                         (SavePromptResponse::DontSave, Some(PendingClose::Window(_))) => {
+                            if let Some(ui) = &mut self.ui {
+                                ui.save_prompt_error = None;
+                            }
                             self.save_window_state();
                             event_loop.exit();
                         }
                         (SavePromptResponse::Cancel, pending) => {
-                            // Put it back as None (already taken)
                             drop(pending);
+                            if let Some(ui) = &mut self.ui {
+                                ui.save_prompt_error = None;
+                            }
                             need_redraw = true;
                         }
                         _ => {}
