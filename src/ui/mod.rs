@@ -20,6 +20,7 @@ use std::time::Instant;
 use winit::window::Window;
 
 use crate::app::commands::AppCommand;
+use crate::app::drag_drop::DragDropState;
 use crate::config::Config;
 use crate::explorer::ExplorerState;
 use crate::stacker::apply_prompt_edit;
@@ -75,6 +76,9 @@ pub struct UiState {
     /// Split view state: (right_tab_index, divider_ratio 0.0-1.0).
     /// When Some, the active tab renders on the left, the split tab on the right.
     pub split_view: Option<(usize, f32)>,
+    /// App-wide drag and drop state. Phase 1 uses this for native file drops;
+    /// later phases will let each surface register typed payloads and targets.
+    pub drag_drop: DragDropState,
     /// Pending close confirmation for unsaved buffers.
     pub pending_close: Option<PendingClose>,
     /// Save failure shown in the unsaved-changes prompt.
@@ -145,6 +149,7 @@ impl UiState {
             active_tab_kind: None,
             tab_names: Vec::new(),
             split_view: None,
+            drag_drop: DragDropState::default(),
             pending_close: None,
             save_prompt_error: None,
         }
@@ -285,6 +290,7 @@ impl UiState {
         };
         let mut tab_bar_action = tab_bar::TabBarAction::default();
         let split_view = self.split_view;
+        let drag_drop = self.drag_drop.clone();
 
         let full_output = self.ctx.run(raw_input, |ctx| {
             // ── Theme-derived colors ──
@@ -398,6 +404,7 @@ impl UiState {
             }
 
             // ── Overlays ──
+            overlays::render_drag_drop_overlay(ctx, &drag_drop);
             overlays::render_copy_ghosts(ctx, &mut stacker.copy_ghosts);
             palette_command = overlays::render_command_palette(ctx, &mut palette);
             if let Some((fps, ms)) = fps_info {

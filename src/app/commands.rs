@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use crate::app::drag_drop::DragDropCommand;
 use crate::config::Config;
 use crate::tasks::Task;
 use crate::workspace::TabKind;
@@ -28,4 +29,5 @@ pub enum AppCommand {
     LaunchWorkspace(SavedWorkspace),
     RenameTab { tab_idx: usize, name: String },
     RunTask(Task),
+    DragDrop(DragDropCommand),
 }

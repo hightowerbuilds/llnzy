@@ -8,6 +8,5 @@ pub fn terminal_input_event(event: &WindowEvent) -> bool {
             | WindowEvent::MouseInput { .. }
             | WindowEvent::MouseWheel { .. }
             | WindowEvent::CursorMoved { .. }
-            | WindowEvent::DroppedFile(_)
     )
 }

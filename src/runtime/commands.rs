@@ -4,6 +4,7 @@ use std::time::Instant;
 use winit::event_loop::ActiveEventLoop;
 
 use llnzy::app::commands::AppCommand;
+use llnzy::app::drag_drop::{terminal_paths_text, DragDropCommand};
 use llnzy::session::Session;
 use llnzy::ui::{ActiveView, PendingClose, SavePromptResponse, UiFrameOutput};
 use llnzy::workspace::{find_singleton, TabContent, TabKind, WorkspaceTab};
@@ -265,6 +266,70 @@ impl App {
                         false
                     }
                 }
+            }
+            AppCommand::DragDrop(command) => self.handle_drag_drop_command(command),
+        }
+    }
+
+    pub(crate) fn handle_drag_drop_command(&mut self, command: DragDropCommand) -> bool {
+        match command {
+            DragDropCommand::InsertTerminalPaths { tab_idx, paths } => {
+                let text = terminal_paths_text(&paths);
+                if text.is_empty() {
+                    return false;
+                }
+                self.write_to_terminal_tab(tab_idx, text.as_bytes())
+            }
+            DragDropCommand::OpenFiles { paths } => {
+                let Some(ui) = &mut self.ui else { return false };
+                let mut opened = Vec::new();
+                let mut errors = Vec::new();
+                let mut opened_any = false;
+                for path in paths {
+                    match ui.editor_view.open_file(path.clone()) {
+                        Ok(idx) => {
+                            opened.push((path, idx));
+                            opened_any = true;
+                        }
+                        Err(e) => errors.push(format!("Drop: {e}")),
+                    }
+                }
+                for error in errors {
+                    self.error_log.error(error);
+                }
+                for (path, idx) in opened {
+                    self.open_code_file_tab(path, idx);
+                }
+                opened_any
+            }
+            DragDropCommand::OpenProject(project_path) => {
+                let mut sidebar_changed = false;
+                let handled = self.handle_app_command(
+                    AppCommand::OpenProject(project_path),
+                    &mut sidebar_changed,
+                );
+                if sidebar_changed {
+                    self.recompute_layout();
+                    self.resize_terminal_tabs();
+                }
+                handled
+            }
+            DragDropCommand::ReorderTab { from, to } => {
+                if from >= self.tabs.len() || to >= self.tabs.len() || from == to {
+                    return false;
+                }
+                let tab = self.tabs.remove(from);
+                self.tabs.insert(to, tab);
+                self.active_tab = if self.active_tab == from {
+                    to
+                } else if from < self.active_tab && self.active_tab <= to {
+                    self.active_tab - 1
+                } else if to <= self.active_tab && self.active_tab < from {
+                    self.active_tab + 1
+                } else {
+                    self.active_tab
+                };
+                true
             }
         }
     }

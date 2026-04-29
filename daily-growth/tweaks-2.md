@@ -1,8 +1,10 @@
-- word wrap in the sidebar
-- x buttons dont work
-- tab bar needs to be taller/bigger
-- tab buttons dont do anything
-- footer is too small, bigger/bigger font
-- finish set up with appearance
-- wisp flow 2 second latency, 6 seconds
-- fix the background image changing
+- [ ] word wrap in the sidebar
+- [ ] x buttons dont work
+- [ ] tab bar needs to be taller/bigger
+- [ ] tab buttons dont do anything
+- [ ] footer is too small, bigger/bigger font
+- [ ] finish set up with appearance
+- [x] wisp flow 2 second latency, 6 seconds
+  - App-side mitigation added: IME commit now updates keypress/redraw state immediately, clears stale terminal selection, and keeps the macOS IME cursor area anchored to the active terminal cursor.
+  - External microphone latency still appears upstream of llnzy in Wispr/audio capture. Prefer the internal mic when speed matters; llnzy should no longer add avoidable post-commit delay once text is delivered.
+- [ ] fix the background image changing

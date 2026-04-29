@@ -3,6 +3,7 @@ use std::time::Instant;
 use super::command_palette::{self, CommandId, PaletteState};
 use super::types::{CopyGhost, PendingClose, SavePromptResponse};
 use super::types::{GHOST_DURATION_SECS, GHOST_FLOAT_PX};
+use crate::app::drag_drop::{DragDropState, DropTarget};
 
 // ── Copy ghost animations ──
 
@@ -30,6 +31,54 @@ pub fn render_copy_ghosts(ctx: &egui::Context, ghosts: &mut Vec<CopyGhost>) {
     if !ghosts.is_empty() {
         ctx.request_repaint();
     }
+}
+
+pub fn render_drag_drop_overlay(ctx: &egui::Context, drag_drop: &DragDropState) {
+    let count = drag_drop.hovered_native_files.len();
+    if count == 0 {
+        return;
+    }
+
+    let pointer = ctx
+        .input(|input| input.pointer.latest_pos())
+        .unwrap_or_else(|| ctx.screen_rect().center());
+    let target = drag_drop.active_target.as_ref();
+    let (verb, color) = match target {
+        Some(DropTarget::Terminal { .. }) => ("Insert path", egui::Color32::from_rgb(75, 130, 210)),
+        Some(DropTarget::Editor { .. }) | Some(DropTarget::TabBar { .. }) => {
+            ("Open file", egui::Color32::from_rgb(65, 145, 100))
+        }
+        Some(DropTarget::Home) | Some(DropTarget::ExplorerFolder { .. }) => {
+            ("Open project", egui::Color32::from_rgb(70, 120, 95))
+        }
+        Some(DropTarget::Stacker) => ("Save prompt", egui::Color32::from_rgb(120, 90, 180)),
+        Some(DropTarget::SketchCanvas) => ("Import", egui::Color32::from_rgb(150, 110, 70)),
+        None => ("Drop unavailable", egui::Color32::from_rgb(120, 55, 55)),
+    };
+    let noun = if count == 1 { "item" } else { "items" };
+    let text = format!("{verb} - {count} {noun}");
+
+    egui::Area::new(egui::Id::new("drag_drop_overlay"))
+        .fixed_pos(pointer + egui::vec2(18.0, 18.0))
+        .order(egui::Order::Tooltip)
+        .interactable(false)
+        .show(ctx, |ui| {
+            egui::Frame::none()
+                .fill(color)
+                .rounding(egui::Rounding::same(6.0))
+                .stroke(egui::Stroke::new(1.0, egui::Color32::from_white_alpha(80)))
+                .inner_margin(egui::Margin::symmetric(10.0, 6.0))
+                .show(ui, |ui| {
+                    ui.label(
+                        egui::RichText::new(text)
+                            .size(12.0)
+                            .strong()
+                            .color(egui::Color32::WHITE),
+                    );
+                });
+        });
+
+    ctx.request_repaint();
 }
 
 // ── Command palette overlay ──

@@ -81,6 +81,17 @@ impl App {
         }
     }
 
+    pub(crate) fn write_to_terminal_tab(&mut self, tab_idx: usize, data: &[u8]) -> bool {
+        let Some(tab) = self.tabs.get_mut(tab_idx) else {
+            return false;
+        };
+        let TabContent::Terminal(session) = &mut tab.content else {
+            return false;
+        };
+        session.write(data);
+        true
+    }
+
     pub(crate) fn paste_text(&mut self, text: &str) {
         let bracketed = self
             .active_session()

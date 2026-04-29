@@ -10,6 +10,7 @@ use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::window::{Window, WindowAttributes, WindowId};
 
 use llnzy::app::click_state::ClickState;
+use llnzy::app::commands::AppCommand;
 use llnzy::app::file_location::parse_file_location;
 use llnzy::app::terminal_events::terminal_input_event;
 use llnzy::app::window_state;
@@ -160,9 +161,33 @@ impl ApplicationHandler<UserEvent> for App {
         _window_id: WindowId,
         event: WindowEvent,
     ) {
+        let native_hover_target = match &event {
+            WindowEvent::HoveredFile(path) => {
+                Some((path.clone(), self.native_file_drop_target(path)))
+            }
+            _ => None,
+        };
+        let terminal_ime_commit =
+            matches!(&event, WindowEvent::Ime(Ime::Commit(_))) && self.active_session().is_some();
+
         // Route events to egui first
         if let (Some(window), Some(ui)) = (&self.window, &mut self.ui) {
             let response = ui.handle_event(window, &event);
+            let terminal_should_receive_consumed_ime = terminal_ime_commit
+                && !ui.captures_terminal_input()
+                && !ui.ctx.wants_keyboard_input();
+            match &event {
+                WindowEvent::HoveredFile(path) => {
+                    ui.drag_drop.hover_native_file(path.clone());
+                    ui.drag_drop.active_target = native_hover_target.and_then(|(_, target)| target);
+                    window.request_redraw();
+                }
+                WindowEvent::HoveredFileCancelled => {
+                    ui.drag_drop.cancel();
+                    window.request_redraw();
+                }
+                _ => {}
+            }
             // Sketch owns raw canvas input; do not let unconsumed pointer/text events leak
             // into the terminal while that workspace is active.
             if ui.captures_terminal_input() && terminal_input_event(&event) {
@@ -172,7 +197,7 @@ impl ApplicationHandler<UserEvent> for App {
             // If egui consumed a mouse/keyboard event, don't pass to terminal.
             // The footer and bumper are always visible, so any egui-consumed
             // event must be respected regardless of which view is active.
-            if response {
+            if response && !terminal_should_receive_consumed_ime {
                 self.request_redraw();
                 match &event {
                     WindowEvent::CloseRequested | WindowEvent::Resized(_) => {}
@@ -216,6 +241,7 @@ impl ApplicationHandler<UserEvent> for App {
 
             WindowEvent::RedrawRequested => {
                 self.process_all_output();
+                self.update_ime_cursor_area();
 
                 // Feed frame time to UI for FPS overlay
                 if let (Some(renderer), Some(ui)) = (&self.renderer, &mut self.ui) {
@@ -790,6 +816,10 @@ impl ApplicationHandler<UserEvent> for App {
                 if self.active_session().is_some() {
                     match ime {
                         Ime::Commit(text) => {
+                            self.last_keypress = Instant::now();
+                            if self.selection.is_active() {
+                                self.selection.clear();
+                            }
                             if self.search.active {
                                 if let Some(terminal) = self
                                     .tabs
@@ -806,6 +836,7 @@ impl ApplicationHandler<UserEvent> for App {
                                 self.request_redraw();
                             } else {
                                 self.write_to_active(text.as_bytes());
+                                self.request_redraw();
                             }
                         }
                         Ime::Preedit(_, _) => {}
@@ -816,11 +847,22 @@ impl ApplicationHandler<UserEvent> for App {
 
             // Drag-and-drop: insert escaped file path into terminal
             WindowEvent::DroppedFile(path) => {
-                if self.active_session().is_some() {
-                    let path_str = path.to_string_lossy();
-                    let escaped = format!("'{}'", path_str.replace('\'', "'\\''"));
-                    self.write_to_active(escaped.as_bytes());
-                    self.write_to_active(b" ");
+                let target = self.native_file_drop_target(&path);
+                if let (Some(ui), Some(target)) = (&mut self.ui, target) {
+                    if let Some(command) =
+                        ui.drag_drop.command_for_external_files(vec![path], target)
+                    {
+                        let mut sidebar_changed = false;
+                        if self
+                            .handle_app_command(AppCommand::DragDrop(command), &mut sidebar_changed)
+                        {
+                            if sidebar_changed {
+                                self.recompute_layout();
+                                self.resize_terminal_tabs();
+                            }
+                            self.request_redraw();
+                        }
+                    }
                 }
             }
 

@@ -178,6 +178,16 @@ This matches the current command-bus direction in `src/app/commands.rs` and avoi
 
 ## Architecture Roadmap
 
+### Progress
+
+- [x] Added the shared DnD vocabulary: `DragPayload`, `DropTarget`, `DragDropCommand`, operations, terminal drop mode, and tab drop zones.
+- [x] Added app-owned `DragDropState`, currently stored on `UiState`.
+- [x] Routed the existing native terminal file drop behavior through `AppCommand::DragDrop`.
+- [x] Added unit coverage for shell-safe path escaping, multi-file terminal insertion text, and external-file-to-terminal command emission.
+- [x] Added a lightweight global native-file hover preview with target-specific action text.
+- [x] Added first-pass target resolution for terminal/editor/sidebar/home/tab bar based on the current cursor position.
+- [ ] Replace first-pass geometry checks with per-surface target registration.
+
 ### Phase 1: DnD State Spine
 
 Add a central DnD state model, likely owned by `UiState` first and later moved into an app controller:
