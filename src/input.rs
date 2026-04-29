@@ -1,6 +1,12 @@
 use winit::event::KeyEvent;
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 
+/// Returns true when a text input payload is more like a paste/dictation commit
+/// than a single keypress.
+pub fn text_should_use_paste_path(text: &str) -> bool {
+    text.chars().take(2).count() > 1
+}
+
 /// Encode a winit key event into bytes to send to the PTY.
 /// `app_cursor` indicates whether application cursor key mode is active.
 /// `super_held` should be true when the Cmd/Super key is down — these
@@ -241,6 +247,19 @@ pub fn encode_mouse(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn single_character_text_uses_key_path() {
+        assert!(!text_should_use_paste_path("a"));
+        assert!(!text_should_use_paste_path("é"));
+    }
+
+    #[test]
+    fn multi_character_text_uses_paste_path() {
+        assert!(text_should_use_paste_path("hello"));
+        assert!(text_should_use_paste_path("hello world"));
+        assert!(text_should_use_paste_path("a\nb"));
+    }
 
     // ── arrow_key ──
 

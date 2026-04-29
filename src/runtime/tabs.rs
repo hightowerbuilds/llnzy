@@ -133,6 +133,7 @@ impl App {
         } else if self.active_tab >= self.tabs.len() {
             self.active_tab = self.tabs.len() - 1;
         }
+        self.sync_active_tab_content();
         self.selection.clear();
         self.recompute_layout();
         self.request_redraw();
@@ -204,10 +205,30 @@ impl App {
     }
 
     pub(crate) fn switch_tab(&mut self, idx: usize) {
-        if idx < self.tabs.len() && idx != self.active_tab {
+        if idx < self.tabs.len() {
+            let changed = idx != self.active_tab;
             self.active_tab = idx;
-            self.selection.clear();
+            self.sync_active_tab_content();
+            if changed {
+                self.selection.clear();
+            }
             self.invalidate_and_redraw();
+        }
+    }
+
+    pub(crate) fn sync_active_tab_content(&mut self) {
+        let Some(tab) = self.tabs.get(self.active_tab) else {
+            return;
+        };
+
+        let Some(ui) = &mut self.ui else {
+            return;
+        };
+
+        ui.active_view = ActiveView::Shells;
+        if let TabContent::CodeFile { buffer_idx, .. } = &tab.content {
+            ui.editor_view.editor.switch_to(*buffer_idx);
+            ui.editor_view.request_hints_and_lenses();
         }
     }
 }

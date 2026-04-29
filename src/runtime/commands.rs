@@ -134,6 +134,9 @@ impl App {
                 true
             }
             AppCommand::CloseTab(idx) => {
+                if idx >= self.tabs.len() {
+                    return false;
+                }
                 self.active_tab = idx;
                 self.close_tab();
                 true
@@ -165,6 +168,7 @@ impl App {
                 if let Some(ui) = &mut self.ui {
                     ui.split_view = None;
                 }
+                self.sync_active_tab_content();
                 self.selection.clear();
                 true
             }
@@ -183,6 +187,7 @@ impl App {
                         }
                     }
                 }
+                self.sync_active_tab_content();
                 self.selection.clear();
                 true
             }

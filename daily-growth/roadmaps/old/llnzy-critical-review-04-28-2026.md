@@ -31,8 +31,7 @@ Completed work should stay marked in the detailed findings below so this review 
 `llnzy` is impressive, but it is carrying too much ambition on too little architecture.
 
 The strongest part of the app is the terminal foundation: PTY integration, `alacritty_terminal`, GPU text rendering, input encoding, terminal search, URL detection, mouse reporting, and scrollback are real work. This is not a fake terminal skin. The code has enough serious implementation detail to deserve respect.
-
-The weakest part is product and architectural focus. The app wants to be a terminal emulator, source editor, lightweight IDE, sketch pad, prompt queue, theme playground, visual effects engine, and workspace launcher. That breadth is exciting, but it has pushed core state management into large central objects and long frame-driven mutation flows. Right now, the app feels like a terminal emulator with a code editor attached to it, plus several other productivity ideas orbiting around the same event loop.
+ The weakest part is product and architectural focus. The app wants to be a terminal emulator, source editor, lightweight IDE, sketch pad, prompt queue, theme playground, visual effects engine, and workspace launcher. That breadth is exciting, but it has pushed core state management into large central objects and long frame-driven mutation flows. Right now, the app feels like a terminal emulator with a code editor attached to it, plus several other productivity ideas orbiting around the same event loop.
 
 The core risk is not that the code is bad. The core risk is that the app is becoming a pile of impressive features before it has a boring, reliable spine.
 

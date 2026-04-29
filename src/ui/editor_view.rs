@@ -544,17 +544,6 @@ pub(crate) fn render_text_editor(
     let active_indent_level = indent_level(buf.line(view.cursor.pos.line), buf.indent_style);
     let bracket_match = buf.matching_bracket(view.cursor.pos);
 
-    render_rulers(
-        &painter,
-        text_clip,
-        &editor_config.rulers,
-        rect,
-        gutter_width,
-        text_margin,
-        char_width,
-        h_offset,
-    );
-
     if !word_wrap {
         render_indentation_guides(
             &painter,
@@ -1763,33 +1752,6 @@ fn pixel_to_editor_pos_wrapped(
     let col_in_row = (rel_x / char_width).max(0.0) as usize;
     let doc_col = (row.col_start + col_in_row).min(buf.line_len(row.doc_line));
     (row.doc_line, doc_col)
-}
-
-#[expect(
-    clippy::too_many_arguments,
-    reason = "layout geometry must be passed explicitly"
-)]
-fn render_rulers(
-    painter: &egui::Painter,
-    text_clip: egui::Rect,
-    rulers: &[usize],
-    rect: egui::Rect,
-    gutter_width: f32,
-    text_margin: f32,
-    char_width: f32,
-    h_offset: f32,
-) {
-    let color = egui::Color32::from_rgba_unmultiplied(220, 220, 235, 28);
-    for &column in rulers {
-        let x = rect.left() + gutter_width + text_margin + column as f32 * char_width - h_offset;
-        if x < text_clip.left() || x > text_clip.right() {
-            continue;
-        }
-        painter.with_clip_rect(text_clip).line_segment(
-            [egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())],
-            egui::Stroke::new(1.0, color),
-        );
-    }
 }
 
 /// Render a single line with syntax-colored spans.

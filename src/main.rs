@@ -803,6 +803,18 @@ impl ApplicationHandler<UserEvent> for App {
                     }
 
                     self.last_keypress = Instant::now();
+                    if let Some(ref text) = key_event.text {
+                        let s = text.as_str();
+                        if !s.is_empty()
+                            && !self.modifiers.control_key()
+                            && !self.modifiers.alt_key()
+                            && !self.modifiers.super_key()
+                            && input::text_should_use_paste_path(s)
+                        {
+                            self.write_text_to_active(s);
+                            return;
+                        }
+                    }
                     let app_cursor = self.app_cursor();
                     if let Some(bytes) = input::encode_key(&key_event, self.modifiers, app_cursor) {
                         self.write_to_active(&bytes);
@@ -835,7 +847,7 @@ impl ApplicationHandler<UserEvent> for App {
                                 }
                                 self.request_redraw();
                             } else {
-                                self.write_to_active(text.as_bytes());
+                                self.write_text_to_active(&text);
                                 self.request_redraw();
                             }
                         }

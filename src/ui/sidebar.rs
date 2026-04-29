@@ -145,6 +145,7 @@ fn render_bumper(ctx: &egui::Context, bumper_bg: egui::Color32, is_open: bool) -
     let mut clicked = false;
     egui::SidePanel::left("sidebar_bumper")
         .exact_width(BUMPER_WIDTH)
+        .resizable(false)
         .frame(egui::Frame::none().fill(bumper_bg))
         .show(ctx, |ui| {
             let size = ui.available_size();

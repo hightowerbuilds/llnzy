@@ -1,5 +1,6 @@
 use std::time::{Duration, Instant};
 
+use llnzy::input::text_should_use_paste_path;
 use llnzy::session::Session;
 use llnzy::workspace::{TabContent, WorkspaceTab};
 
@@ -102,6 +103,14 @@ impl App {
             bytes.extend_from_slice(text.as_bytes());
             bytes.extend_from_slice(b"\x1b[201~");
             self.write_to_active(&bytes);
+        } else {
+            self.write_to_active(text.as_bytes());
+        }
+    }
+
+    pub(crate) fn write_text_to_active(&mut self, text: &str) {
+        if text_should_use_paste_path(text) {
+            self.paste_text(text);
         } else {
             self.write_to_active(text.as_bytes());
         }
