@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// A saved workspace definition (theme + project + tab layout).
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -29,12 +29,11 @@ impl TabEntry {
     pub fn display_name(&self) -> String {
         match self {
             TabEntry::Terminal => "Terminal".to_string(),
-            TabEntry::CodeFile { path } => {
-                path.file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("File")
-                    .to_string()
-            }
+            TabEntry::CodeFile { path } => path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("File")
+                .to_string(),
             TabEntry::Stacker => "Stacker".to_string(),
             TabEntry::Sketch => "Sketch".to_string(),
         }
@@ -60,12 +59,21 @@ pub fn save_workspace(workspace: &SavedWorkspace) -> Result<PathBuf, String> {
     let dir = workspaces_dir().ok_or("No config directory")?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create dir: {e}"))?;
 
-    let safe_name: String = workspace.name.chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+    let safe_name: String = workspace
+        .name
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     let path = dir.join(format!("{safe_name}.toml"));
 
-    let toml_str = toml::to_string_pretty(workspace).map_err(|e| format!("Serialize failed: {e}"))?;
+    let toml_str =
+        toml::to_string_pretty(workspace).map_err(|e| format!("Serialize failed: {e}"))?;
     std::fs::write(&path, toml_str).map_err(|e| format!("Write failed: {e}"))?;
     Ok(path)
 }
@@ -85,8 +93,12 @@ pub fn load_workspaces() -> Vec<SavedWorkspace> {
         if path.extension().and_then(|s| s.to_str()) != Some("toml") {
             continue;
         }
-        let Ok(text) = std::fs::read_to_string(&path) else { continue };
-        let Ok(ws) = toml::from_str::<SavedWorkspace>(&text) else { continue };
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(ws) = toml::from_str::<SavedWorkspace>(&text) else {
+            continue;
+        };
         workspaces.push(ws);
     }
     workspaces.sort_by(|a, b| a.name.cmp(&b.name));
@@ -96,8 +108,15 @@ pub fn load_workspaces() -> Vec<SavedWorkspace> {
 /// Delete a saved workspace by name.
 pub fn delete_workspace(name: &str) -> Result<(), String> {
     let dir = workspaces_dir().ok_or("No config directory")?;
-    let safe_name: String = name.chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+    let safe_name: String = name
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     let path = dir.join(format!("{safe_name}.toml"));
     if path.exists() {
@@ -127,7 +146,8 @@ pub fn save_session(snapshot: &SessionSnapshot) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("Failed to create dir: {e}"))?;
     }
-    let toml_str = toml::to_string_pretty(snapshot).map_err(|e| format!("Serialize failed: {e}"))?;
+    let toml_str =
+        toml::to_string_pretty(snapshot).map_err(|e| format!("Serialize failed: {e}"))?;
     std::fs::write(&path, toml_str).map_err(|e| format!("Write failed: {e}"))?;
     Ok(())
 }
@@ -158,7 +178,9 @@ mod tests {
             project_path: Some(PathBuf::from("/tmp/test-project")),
             tabs: vec![
                 TabEntry::Terminal,
-                TabEntry::CodeFile { path: PathBuf::from("/tmp/test-project/main.rs") },
+                TabEntry::CodeFile {
+                    path: PathBuf::from("/tmp/test-project/main.rs"),
+                },
                 TabEntry::Sketch,
             ],
         };
@@ -187,6 +209,12 @@ mod tests {
     fn tab_entry_display_names() {
         assert_eq!(TabEntry::Terminal.display_name(), "Terminal");
         assert_eq!(TabEntry::Stacker.display_name(), "Stacker");
-        assert_eq!(TabEntry::CodeFile { path: PathBuf::from("/foo/bar.rs") }.display_name(), "bar.rs");
+        assert_eq!(
+            TabEntry::CodeFile {
+                path: PathBuf::from("/foo/bar.rs")
+            }
+            .display_name(),
+            "bar.rs"
+        );
     }
 }

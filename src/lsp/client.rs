@@ -4,8 +4,9 @@ use std::sync::Arc;
 
 use lsp_types::*;
 use serde_json::Value;
+use tokio::sync::mpsc;
 
-use super::transport::Transport;
+use super::transport::{ServerMessage, Transport};
 
 fn path_to_uri(path: &Path) -> Result<Uri, String> {
     let abs = if path.is_absolute() {
@@ -40,9 +41,15 @@ struct OpenDoc {
     version: i32,
 }
 
+pub(crate) struct LspNotification {
+    pub method: &'static str,
+    pub params: Value,
+}
+
 /// A single language server client.
 pub struct LspClient {
     transport: Arc<Transport>,
+    notifications_rx: mpsc::UnboundedReceiver<ServerMessage>,
     pub state: ClientState,
     pub lang_id: &'static str,
     pub server_name: String,
@@ -60,14 +67,14 @@ impl LspClient {
         root_path: Option<&Path>,
         proxy: winit::event_loop::EventLoopProxy<crate::UserEvent>,
     ) -> Result<Self, String> {
-        let transport = Transport::spawn(command, args, proxy).map_err(|e| {
-            format!("Failed to spawn {command}: {e}")
-        })?;
+        let (transport, notifications_rx) = Transport::spawn(command, args, proxy)
+            .map_err(|e| format!("Failed to spawn {command}: {e}"))?;
 
         let root_uri = root_path.and_then(|p| path_to_uri(p).ok());
 
         Ok(LspClient {
             transport: Arc::new(transport),
+            notifications_rx,
             state: ClientState::Starting,
             lang_id,
             server_name: command.to_string(),
@@ -150,8 +157,72 @@ impl LspClient {
 
     /// Notify the server that a document was opened.
     pub async fn did_open(&mut self, path: &Path, lang_id: &str, text: &str) -> Result<(), String> {
+        if let Some(notification) = self.did_open_notification(path, lang_id, text)? {
+            self.transport
+                .notify(notification.method, notification.params)
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// Notify the server of a full document change (full sync mode).
+    pub async fn did_change(&mut self, path: &Path, text: &str) -> Result<(), String> {
+        if let Some(notification) = self.did_change_notification(path, text)? {
+            self.transport
+                .notify(notification.method, notification.params)
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// Notify the server of an incremental document change.
+    pub async fn did_change_incremental(
+        &mut self,
+        path: &Path,
+        start_line: u32,
+        start_col: u32,
+        end_line: u32,
+        end_col: u32,
+        new_text: &str,
+    ) -> Result<(), String> {
+        if let Some(notification) = self.did_change_incremental_notification(
+            path, start_line, start_col, end_line, end_col, new_text,
+        )? {
+            self.transport
+                .notify(notification.method, notification.params)
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// Notify the server that a document was saved.
+    pub async fn did_save(&mut self, path: &Path, text: &str) -> Result<(), String> {
+        if let Some(notification) = self.did_save_notification(path, text)? {
+            self.transport
+                .notify(notification.method, notification.params)
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// Notify the server that a document was closed.
+    pub async fn did_close(&mut self, path: &Path) -> Result<(), String> {
+        if let Some(notification) = self.did_close_notification(path)? {
+            self.transport
+                .notify(notification.method, notification.params)
+                .await?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn did_open_notification(
+        &mut self,
+        path: &Path,
+        lang_id: &str,
+        text: &str,
+    ) -> Result<Option<LspNotification>, String> {
         if self.state != ClientState::Running {
-            return Ok(());
+            return Ok(None);
         }
         let uri = path_to_uri(path)?;
         let version = 1;
@@ -165,30 +236,25 @@ impl LspClient {
             },
         };
 
-        self.transport
-            .notify(
-                "textDocument/didOpen",
-                serde_json::to_value(params).unwrap(),
-            )
-            .await?;
+        self.open_docs
+            .insert(path.to_path_buf(), OpenDoc { uri, version });
 
-        self.open_docs.insert(
-            path.to_path_buf(),
-            OpenDoc {
-                uri,
-                version,
-            },
-        );
-        Ok(())
+        Ok(Some(LspNotification {
+            method: "textDocument/didOpen",
+            params: serde_json::to_value(params).map_err(|e| e.to_string())?,
+        }))
     }
 
-    /// Notify the server of a full document change (full sync mode).
-    pub async fn did_change(&mut self, path: &Path, text: &str) -> Result<(), String> {
+    pub(crate) fn did_change_notification(
+        &mut self,
+        path: &Path,
+        text: &str,
+    ) -> Result<Option<LspNotification>, String> {
         if self.state != ClientState::Running {
-            return Ok(());
+            return Ok(None);
         }
         let Some(doc) = self.open_docs.get_mut(path) else {
-            return Ok(());
+            return Ok(None);
         };
         doc.version += 1;
 
@@ -198,22 +264,19 @@ impl LspClient {
                 version: doc.version,
             },
             content_changes: vec![TextDocumentContentChangeEvent {
-                range: None, // Full document sync
+                range: None,
                 range_length: None,
                 text: text.to_string(),
             }],
         };
 
-        self.transport
-            .notify(
-                "textDocument/didChange",
-                serde_json::to_value(params).unwrap(),
-            )
-            .await
+        Ok(Some(LspNotification {
+            method: "textDocument/didChange",
+            params: serde_json::to_value(params).map_err(|e| e.to_string())?,
+        }))
     }
 
-    /// Notify the server of an incremental document change.
-    pub async fn did_change_incremental(
+    pub(crate) fn did_change_incremental_notification(
         &mut self,
         path: &Path,
         start_line: u32,
@@ -221,12 +284,12 @@ impl LspClient {
         end_line: u32,
         end_col: u32,
         new_text: &str,
-    ) -> Result<(), String> {
+    ) -> Result<Option<LspNotification>, String> {
         if self.state != ClientState::Running {
-            return Ok(());
+            return Ok(None);
         }
         let Some(doc) = self.open_docs.get_mut(path) else {
-            return Ok(());
+            return Ok(None);
         };
         doc.version += 1;
 
@@ -237,29 +300,36 @@ impl LspClient {
             },
             content_changes: vec![TextDocumentContentChangeEvent {
                 range: Some(Range {
-                    start: Position { line: start_line, character: start_col },
-                    end: Position { line: end_line, character: end_col },
+                    start: Position {
+                        line: start_line,
+                        character: start_col,
+                    },
+                    end: Position {
+                        line: end_line,
+                        character: end_col,
+                    },
                 }),
                 range_length: None,
                 text: new_text.to_string(),
             }],
         };
 
-        self.transport
-            .notify(
-                "textDocument/didChange",
-                serde_json::to_value(params).unwrap(),
-            )
-            .await
+        Ok(Some(LspNotification {
+            method: "textDocument/didChange",
+            params: serde_json::to_value(params).map_err(|e| e.to_string())?,
+        }))
     }
 
-    /// Notify the server that a document was saved.
-    pub async fn did_save(&mut self, path: &Path, text: &str) -> Result<(), String> {
+    pub(crate) fn did_save_notification(
+        &self,
+        path: &Path,
+        text: &str,
+    ) -> Result<Option<LspNotification>, String> {
         if self.state != ClientState::Running {
-            return Ok(());
+            return Ok(None);
         }
         let Some(doc) = self.open_docs.get(path) else {
-            return Ok(());
+            return Ok(None);
         };
 
         let params = DidSaveTextDocumentParams {
@@ -269,33 +339,31 @@ impl LspClient {
             text: Some(text.to_string()),
         };
 
-        self.transport
-            .notify(
-                "textDocument/didSave",
-                serde_json::to_value(params).unwrap(),
-            )
-            .await
+        Ok(Some(LspNotification {
+            method: "textDocument/didSave",
+            params: serde_json::to_value(params).map_err(|e| e.to_string())?,
+        }))
     }
 
-    /// Notify the server that a document was closed.
-    pub async fn did_close(&mut self, path: &Path) -> Result<(), String> {
+    pub(crate) fn did_close_notification(
+        &mut self,
+        path: &Path,
+    ) -> Result<Option<LspNotification>, String> {
         if self.state != ClientState::Running {
-            return Ok(());
+            return Ok(None);
         }
         let Some(doc) = self.open_docs.remove(path) else {
-            return Ok(());
+            return Ok(None);
         };
 
         let params = DidCloseTextDocumentParams {
             text_document: TextDocumentIdentifier { uri: doc.uri },
         };
 
-        self.transport
-            .notify(
-                "textDocument/didClose",
-                serde_json::to_value(params).unwrap(),
-            )
-            .await
+        Ok(Some(LspNotification {
+            method: "textDocument/didClose",
+            params: serde_json::to_value(params).map_err(|e| e.to_string())?,
+        }))
     }
 
     /// Request hover information at a position.
@@ -312,17 +380,17 @@ impl LspClient {
                 text_document: TextDocumentIdentifier {
                     uri: doc.uri.clone(),
                 },
-                position: Position { line, character: col },
+                position: Position {
+                    line,
+                    character: col,
+                },
             },
             work_done_progress_params: Default::default(),
         };
 
         let result = self
             .transport
-            .request(
-                "textDocument/hover",
-                serde_json::to_value(params).unwrap(),
-            )
+            .request("textDocument/hover", serde_json::to_value(params).unwrap())
             .await?;
 
         if result.is_null() {
@@ -351,7 +419,10 @@ impl LspClient {
                 text_document: TextDocumentIdentifier {
                     uri: doc.uri.clone(),
                 },
-                position: Position { line, character: col },
+                position: Position {
+                    line,
+                    character: col,
+                },
             },
             work_done_progress_params: Default::default(),
             partial_result_params: Default::default(),
@@ -392,7 +463,10 @@ impl LspClient {
                 text_document: TextDocumentIdentifier {
                     uri: doc.uri.clone(),
                 },
-                position: Position { line, character: col },
+                position: Position {
+                    line,
+                    character: col,
+                },
             },
             work_done_progress_params: Default::default(),
             partial_result_params: Default::default(),
@@ -410,18 +484,23 @@ impl LspClient {
         if result.is_null() {
             return Ok(None);
         }
-        let resp: CompletionResponse =
-            serde_json::from_value(result).map_err(|e| e.to_string())?;
+        let resp: CompletionResponse = serde_json::from_value(result).map_err(|e| e.to_string())?;
         Ok(Some(resp))
     }
 
     /// Request document formatting.
     pub async fn formatting(&self, path: &Path) -> Result<Vec<TextEdit>, String> {
-        if self.state != ClientState::Running { return Ok(Vec::new()); }
-        let Some(doc) = self.open_docs.get(path) else { return Ok(Vec::new()) };
+        if self.state != ClientState::Running {
+            return Ok(Vec::new());
+        }
+        let Some(doc) = self.open_docs.get(path) else {
+            return Ok(Vec::new());
+        };
 
         let params = DocumentFormattingParams {
-            text_document: TextDocumentIdentifier { uri: doc.uri.clone() },
+            text_document: TextDocumentIdentifier {
+                uri: doc.uri.clone(),
+            },
             options: FormattingOptions {
                 tab_size: 4,
                 insert_spaces: true,
@@ -430,41 +509,88 @@ impl LspClient {
             work_done_progress_params: Default::default(),
         };
 
-        let result = self.transport.request("textDocument/formatting", serde_json::to_value(params).unwrap()).await?;
-        if result.is_null() { return Ok(Vec::new()); }
+        let result = self
+            .transport
+            .request(
+                "textDocument/formatting",
+                serde_json::to_value(params).unwrap(),
+            )
+            .await?;
+        if result.is_null() {
+            return Ok(Vec::new());
+        }
         serde_json::from_value(result).map_err(|e| e.to_string())
     }
 
     /// Request rename at a position.
-    pub async fn rename(&self, path: &Path, line: u32, col: u32, new_name: &str) -> Result<Option<WorkspaceEdit>, String> {
-        if self.state != ClientState::Running { return Ok(None); }
-        let Some(doc) = self.open_docs.get(path) else { return Ok(None) };
+    pub async fn rename(
+        &self,
+        path: &Path,
+        line: u32,
+        col: u32,
+        new_name: &str,
+    ) -> Result<Option<WorkspaceEdit>, String> {
+        if self.state != ClientState::Running {
+            return Ok(None);
+        }
+        let Some(doc) = self.open_docs.get(path) else {
+            return Ok(None);
+        };
 
         let params = RenameParams {
             text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: doc.uri.clone() },
-                position: Position { line, character: col },
+                text_document: TextDocumentIdentifier {
+                    uri: doc.uri.clone(),
+                },
+                position: Position {
+                    line,
+                    character: col,
+                },
             },
             new_name: new_name.to_string(),
             work_done_progress_params: Default::default(),
         };
 
-        let result = self.transport.request("textDocument/rename", serde_json::to_value(params).unwrap()).await?;
-        if result.is_null() { return Ok(None); }
+        let result = self
+            .transport
+            .request("textDocument/rename", serde_json::to_value(params).unwrap())
+            .await?;
+        if result.is_null() {
+            return Ok(None);
+        }
         let edit: WorkspaceEdit = serde_json::from_value(result).map_err(|e| e.to_string())?;
         Ok(Some(edit))
     }
 
     /// Request code actions at a range.
-    pub async fn code_actions(&self, path: &Path, start_line: u32, start_col: u32, end_line: u32, end_col: u32) -> Result<Vec<CodeActionOrCommand>, String> {
-        if self.state != ClientState::Running { return Ok(Vec::new()); }
-        let Some(doc) = self.open_docs.get(path) else { return Ok(Vec::new()) };
+    pub async fn code_actions(
+        &self,
+        path: &Path,
+        start_line: u32,
+        start_col: u32,
+        end_line: u32,
+        end_col: u32,
+    ) -> Result<Vec<CodeActionOrCommand>, String> {
+        if self.state != ClientState::Running {
+            return Ok(Vec::new());
+        }
+        let Some(doc) = self.open_docs.get(path) else {
+            return Ok(Vec::new());
+        };
 
         let params = CodeActionParams {
-            text_document: TextDocumentIdentifier { uri: doc.uri.clone() },
+            text_document: TextDocumentIdentifier {
+                uri: doc.uri.clone(),
+            },
             range: Range {
-                start: Position { line: start_line, character: start_col },
-                end: Position { line: end_line, character: end_col },
+                start: Position {
+                    line: start_line,
+                    character: start_col,
+                },
+                end: Position {
+                    line: end_line,
+                    character: end_col,
+                },
             },
             context: CodeActionContext {
                 diagnostics: Vec::new(),
@@ -475,57 +601,120 @@ impl LspClient {
             partial_result_params: Default::default(),
         };
 
-        let result = self.transport.request("textDocument/codeAction", serde_json::to_value(params).unwrap()).await?;
-        if result.is_null() { return Ok(Vec::new()); }
+        let result = self
+            .transport
+            .request(
+                "textDocument/codeAction",
+                serde_json::to_value(params).unwrap(),
+            )
+            .await?;
+        if result.is_null() {
+            return Ok(Vec::new());
+        }
         serde_json::from_value(result).map_err(|e| e.to_string())
     }
 
     /// Request document symbols.
-    pub async fn document_symbols(&self, path: &Path) -> Result<Option<DocumentSymbolResponse>, String> {
-        if self.state != ClientState::Running { return Ok(None); }
-        let Some(doc) = self.open_docs.get(path) else { return Ok(None) };
+    pub async fn document_symbols(
+        &self,
+        path: &Path,
+    ) -> Result<Option<DocumentSymbolResponse>, String> {
+        if self.state != ClientState::Running {
+            return Ok(None);
+        }
+        let Some(doc) = self.open_docs.get(path) else {
+            return Ok(None);
+        };
 
         let params = DocumentSymbolParams {
-            text_document: TextDocumentIdentifier { uri: doc.uri.clone() },
+            text_document: TextDocumentIdentifier {
+                uri: doc.uri.clone(),
+            },
             work_done_progress_params: Default::default(),
             partial_result_params: Default::default(),
         };
 
-        let result = self.transport.request("textDocument/documentSymbol", serde_json::to_value(params).unwrap()).await?;
-        if result.is_null() { return Ok(None); }
-        let resp: DocumentSymbolResponse = serde_json::from_value(result).map_err(|e| e.to_string())?;
+        let result = self
+            .transport
+            .request(
+                "textDocument/documentSymbol",
+                serde_json::to_value(params).unwrap(),
+            )
+            .await?;
+        if result.is_null() {
+            return Ok(None);
+        }
+        let resp: DocumentSymbolResponse =
+            serde_json::from_value(result).map_err(|e| e.to_string())?;
         Ok(Some(resp))
     }
 
     /// Request signature help at a position.
-    pub async fn signature_help(&self, path: &Path, line: u32, col: u32) -> Result<Option<lsp_types::SignatureHelp>, String> {
-        if self.state != ClientState::Running { return Ok(None); }
-        let Some(doc) = self.open_docs.get(path) else { return Ok(None) };
+    pub async fn signature_help(
+        &self,
+        path: &Path,
+        line: u32,
+        col: u32,
+    ) -> Result<Option<lsp_types::SignatureHelp>, String> {
+        if self.state != ClientState::Running {
+            return Ok(None);
+        }
+        let Some(doc) = self.open_docs.get(path) else {
+            return Ok(None);
+        };
 
         let params = SignatureHelpParams {
             text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: doc.uri.clone() },
-                position: Position { line, character: col },
+                text_document: TextDocumentIdentifier {
+                    uri: doc.uri.clone(),
+                },
+                position: Position {
+                    line,
+                    character: col,
+                },
             },
             work_done_progress_params: Default::default(),
             context: None,
         };
 
-        let result = self.transport.request("textDocument/signatureHelp", serde_json::to_value(params).unwrap()).await?;
-        if result.is_null() { return Ok(None); }
-        let sig: lsp_types::SignatureHelp = serde_json::from_value(result).map_err(|e| e.to_string())?;
+        let result = self
+            .transport
+            .request(
+                "textDocument/signatureHelp",
+                serde_json::to_value(params).unwrap(),
+            )
+            .await?;
+        if result.is_null() {
+            return Ok(None);
+        }
+        let sig: lsp_types::SignatureHelp =
+            serde_json::from_value(result).map_err(|e| e.to_string())?;
         Ok(Some(sig))
     }
 
     /// Request find references at a position.
-    pub async fn references(&self, path: &Path, line: u32, col: u32) -> Result<Vec<lsp_types::Location>, String> {
-        if self.state != ClientState::Running { return Ok(Vec::new()); }
-        let Some(doc) = self.open_docs.get(path) else { return Ok(Vec::new()) };
+    pub async fn references(
+        &self,
+        path: &Path,
+        line: u32,
+        col: u32,
+    ) -> Result<Vec<lsp_types::Location>, String> {
+        if self.state != ClientState::Running {
+            return Ok(Vec::new());
+        }
+        let Some(doc) = self.open_docs.get(path) else {
+            return Ok(Vec::new());
+        };
 
         let params = ReferenceParams {
             text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: doc.uri.clone() },
-                position: Position { line, character: col },
+                text_document: TextDocumentIdentifier {
+                    uri: doc.uri.clone(),
+                },
+                position: Position {
+                    line,
+                    character: col,
+                },
             },
             work_done_progress_params: Default::default(),
             partial_result_params: Default::default(),
@@ -534,14 +723,27 @@ impl LspClient {
             },
         };
 
-        let result = self.transport.request("textDocument/references", serde_json::to_value(params).unwrap()).await?;
-        if result.is_null() { return Ok(Vec::new()); }
+        let result = self
+            .transport
+            .request(
+                "textDocument/references",
+                serde_json::to_value(params).unwrap(),
+            )
+            .await?;
+        if result.is_null() {
+            return Ok(Vec::new());
+        }
         serde_json::from_value(result).map_err(|e| e.to_string())
     }
 
     /// Request workspace symbols.
-    pub async fn workspace_symbols(&self, query: &str) -> Result<Vec<lsp_types::SymbolInformation>, String> {
-        if self.state != ClientState::Running { return Ok(Vec::new()); }
+    pub async fn workspace_symbols(
+        &self,
+        query: &str,
+    ) -> Result<Vec<lsp_types::SymbolInformation>, String> {
+        if self.state != ClientState::Running {
+            return Ok(Vec::new());
+        }
 
         let params = WorkspaceSymbolParams {
             query: query.to_string(),
@@ -549,48 +751,94 @@ impl LspClient {
             partial_result_params: Default::default(),
         };
 
-        let result = self.transport.request("workspace/symbol", serde_json::to_value(params).unwrap()).await?;
-        if result.is_null() { return Ok(Vec::new()); }
+        let result = self
+            .transport
+            .request("workspace/symbol", serde_json::to_value(params).unwrap())
+            .await?;
+        if result.is_null() {
+            return Ok(Vec::new());
+        }
         // workspace/symbol can return Vec<SymbolInformation> or WorkspaceSymbolResponse
         // Try Vec<SymbolInformation> first (most common)
-        if let Ok(symbols) = serde_json::from_value::<Vec<lsp_types::SymbolInformation>>(result.clone()) {
+        if let Ok(symbols) =
+            serde_json::from_value::<Vec<lsp_types::SymbolInformation>>(result.clone())
+        {
             return Ok(symbols);
         }
         Ok(Vec::new())
     }
 
     /// Request inlay hints for a range.
-    pub async fn inlay_hints(&self, path: &Path, start_line: u32, end_line: u32) -> Result<Vec<lsp_types::InlayHint>, String> {
-        if self.state != ClientState::Running { return Ok(Vec::new()); }
-        let Some(doc) = self.open_docs.get(path) else { return Ok(Vec::new()) };
+    pub async fn inlay_hints(
+        &self,
+        path: &Path,
+        start_line: u32,
+        end_line: u32,
+    ) -> Result<Vec<lsp_types::InlayHint>, String> {
+        if self.state != ClientState::Running {
+            return Ok(Vec::new());
+        }
+        let Some(doc) = self.open_docs.get(path) else {
+            return Ok(Vec::new());
+        };
 
         let params = lsp_types::InlayHintParams {
-            text_document: TextDocumentIdentifier { uri: doc.uri.clone() },
+            text_document: TextDocumentIdentifier {
+                uri: doc.uri.clone(),
+            },
             range: lsp_types::Range {
-                start: Position { line: start_line, character: 0 },
-                end: Position { line: end_line, character: 0 },
+                start: Position {
+                    line: start_line,
+                    character: 0,
+                },
+                end: Position {
+                    line: end_line,
+                    character: 0,
+                },
             },
             work_done_progress_params: Default::default(),
         };
 
-        let result = self.transport.request("textDocument/inlayHint", serde_json::to_value(params).unwrap()).await?;
-        if result.is_null() { return Ok(Vec::new()); }
+        let result = self
+            .transport
+            .request(
+                "textDocument/inlayHint",
+                serde_json::to_value(params).unwrap(),
+            )
+            .await?;
+        if result.is_null() {
+            return Ok(Vec::new());
+        }
         serde_json::from_value(result).map_err(|e| e.to_string())
     }
 
     /// Request code lenses for a document.
     pub async fn code_lens(&self, path: &Path) -> Result<Vec<lsp_types::CodeLens>, String> {
-        if self.state != ClientState::Running { return Ok(Vec::new()); }
-        let Some(doc) = self.open_docs.get(path) else { return Ok(Vec::new()) };
+        if self.state != ClientState::Running {
+            return Ok(Vec::new());
+        }
+        let Some(doc) = self.open_docs.get(path) else {
+            return Ok(Vec::new());
+        };
 
         let params = lsp_types::CodeLensParams {
-            text_document: TextDocumentIdentifier { uri: doc.uri.clone() },
+            text_document: TextDocumentIdentifier {
+                uri: doc.uri.clone(),
+            },
             work_done_progress_params: Default::default(),
             partial_result_params: Default::default(),
         };
 
-        let result = self.transport.request("textDocument/codeLens", serde_json::to_value(params).unwrap()).await?;
-        if result.is_null() { return Ok(Vec::new()); }
+        let result = self
+            .transport
+            .request(
+                "textDocument/codeLens",
+                serde_json::to_value(params).unwrap(),
+            )
+            .await?;
+        if result.is_null() {
+            return Ok(Vec::new());
+        }
         serde_json::from_value(result).map_err(|e| e.to_string())
     }
 
@@ -601,6 +849,14 @@ impl LspClient {
 
     pub fn transport(&self) -> &Arc<Transport> {
         &self.transport
+    }
+
+    pub fn drain_messages(&mut self) -> Vec<ServerMessage> {
+        let mut messages = Vec::new();
+        while let Ok(message) = self.notifications_rx.try_recv() {
+            messages.push(message);
+        }
+        messages
     }
 
     pub fn is_running(&self) -> bool {

@@ -269,7 +269,10 @@ impl EditorState {
             return;
         };
         view.parse_pending = false;
-        if view.parse_generation != result.generation || view.tree_dirty || view.lang_id != Some(result.lang_id) {
+        if view.parse_generation != result.generation
+            || view.tree_dirty
+            || view.lang_id != Some(result.lang_id)
+        {
             return;
         }
         let buffer_path = self
@@ -281,8 +284,9 @@ impl EditorState {
         }
 
         view.tree = result.tree;
-        view.folded_ranges
-            .retain(|range| range.start_line < range.end_line && range.end_line < result.line_count);
+        view.folded_ranges.retain(|range| {
+            range.start_line < range.end_line && range.end_line < result.line_count
+        });
     }
 
     /// Tab titles for rendering: (name, is_active, is_modified).
@@ -307,11 +311,8 @@ mod tests {
 
     #[test]
     fn open_defers_tree_sitter_parse_to_background() {
-        let path = std::env::temp_dir().join(format!(
-            "llnzy_async_parse_{}_{}.rs",
-            std::process::id(),
-            1
-        ));
+        let path =
+            std::env::temp_dir().join(format!("llnzy_async_parse_{}_{}.rs", std::process::id(), 1));
         std::fs::write(&path, "fn main() {\n    println!(\"hi\");\n}\n").unwrap();
 
         let mut editor = EditorState::new();

@@ -1,111 +1,8 @@
 use std::time::Instant;
 
 use super::command_palette::{self, CommandId, PaletteState};
-use super::types::{ActiveView, CopyGhost, PendingClose, SavePromptResponse, BUMPER_WIDTH, SIDEBAR_WIDTH};
+use super::types::{CopyGhost, PendingClose, SavePromptResponse};
 use super::types::{GHOST_DURATION_SECS, GHOST_FLOAT_PX};
-
-// ── Tab bar interaction ──
-
-/// Mutable state passed in/out for tab rename editing.
-pub struct TabBarState {
-    pub editing_tab: Option<usize>,
-    pub editing_tab_text: String,
-    pub last_tab_click: Option<(usize, Instant)>,
-    pub saved_tab_name: Option<(usize, String)>,
-}
-
-/// Handle tab-bar double-click-to-rename interaction.
-pub fn handle_tab_bar(
-    ctx: &egui::Context,
-    tab_count: usize,
-    current_view: ActiveView,
-    sidebar_open: bool,
-    state: &mut TabBarState,
-) {
-    const TAB_BAR_HEIGHT: f32 = 32.0;
-    const DOUBLE_CLICK_TIME_MS: u128 = 300;
-
-    // Tab renaming works on any view that shows tabs (not overlays like Home/Appearances/Settings)
-    if tab_count == 0 || matches!(current_view, ActiveView::Home | ActiveView::Appearances | ActiveView::Settings) {
-        return;
-    }
-
-    let viewport_rect = ctx.screen_rect();
-    let tab_w = (viewport_rect.width() / tab_count as f32).min(200.0);
-    let sidebar_offset = if sidebar_open {
-        SIDEBAR_WIDTH
-    } else {
-        BUMPER_WIDTH
-    };
-
-    // Detect click on a tab
-    let mut tab_clicked: Option<usize> = None;
-    ctx.input(|input| {
-        if input.pointer.button_pressed(egui::PointerButton::Primary) {
-            if let Some(pos) = input.pointer.latest_pos() {
-                if pos.y >= viewport_rect.top()
-                    && pos.y < viewport_rect.top() + TAB_BAR_HEIGHT
-                {
-                    let rel_x = pos.x - viewport_rect.left() - sidebar_offset;
-                    if rel_x >= 0.0 && rel_x < viewport_rect.width() - sidebar_offset {
-                        let tab_idx = (rel_x / tab_w).floor() as usize;
-                        if tab_idx < tab_count {
-                            tab_clicked = Some(tab_idx);
-                        }
-                    }
-                }
-            }
-        }
-    });
-
-    // Double-click detection
-    if let Some(tab_idx) = tab_clicked {
-        if let Some((last_idx, last_time)) = state.last_tab_click {
-            if last_idx == tab_idx
-                && last_time.elapsed().as_millis() < DOUBLE_CLICK_TIME_MS
-            {
-                state.editing_tab = Some(tab_idx);
-                state.editing_tab_text.clear();
-                state.last_tab_click = None;
-            } else {
-                state.last_tab_click = Some((tab_idx, Instant::now()));
-            }
-        } else {
-            state.last_tab_click = Some((tab_idx, Instant::now()));
-        }
-    }
-
-    // Inline rename overlay
-    if let Some(edit_idx) = state.editing_tab {
-        let tab_x = sidebar_offset + edit_idx as f32 * tab_w;
-
-        egui::Area::new(egui::Id::new(("tab_edit", edit_idx)))
-            .fixed_pos(egui::pos2(tab_x + 4.0, viewport_rect.top() + 4.0))
-            .show(ctx, |ui| {
-                ui.set_max_width(tab_w - 8.0);
-                let mut text = state.editing_tab_text.clone();
-                let response = ui.text_edit_singleline(&mut text);
-                state.editing_tab_text = text;
-
-                response.request_focus();
-
-                let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter));
-                let escape_pressed = ui.input(|i| i.key_pressed(egui::Key::Escape));
-
-                if enter_pressed {
-                    state.saved_tab_name =
-                        Some((edit_idx, state.editing_tab_text.clone()));
-                    state.editing_tab = None;
-                    state.editing_tab_text.clear();
-                    state.last_tab_click = None;
-                } else if escape_pressed {
-                    state.editing_tab = None;
-                    state.editing_tab_text.clear();
-                    state.last_tab_click = None;
-                }
-            });
-    }
-}
 
 // ── Copy ghost animations ──
 
@@ -126,9 +23,7 @@ pub fn render_copy_ghosts(ctx: &egui::Context, ghosts: &mut Vec<CopyGhost>) {
                 ui.label(
                     egui::RichText::new(&ghost.text)
                         .size(12.0)
-                        .color(egui::Color32::from_rgba_unmultiplied(
-                            255, 255, 255, alpha,
-                        )),
+                        .color(egui::Color32::from_rgba_unmultiplied(255, 255, 255, alpha)),
                 );
             });
     }
@@ -158,10 +53,7 @@ pub fn render_command_palette(
                 egui::Frame::none()
                     .fill(egui::Color32::from_rgb(30, 32, 42))
                     .rounding(egui::Rounding::same(8.0))
-                    .stroke(egui::Stroke::new(
-                        1.0,
-                        egui::Color32::from_rgb(60, 65, 80),
-                    ))
+                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(60, 65, 80)))
                     .inner_margin(egui::Margin::same(12.0))
                     .show(ui, |ui| {
                         ui.set_min_width(400.0);
@@ -172,10 +64,7 @@ pub fn render_command_palette(
 
     // Cmd+Shift+P to toggle
     ctx.input(|input| {
-        if input.modifiers.command
-            && input.modifiers.shift
-            && input.key_pressed(egui::Key::P)
-        {
+        if input.modifiers.command && input.modifiers.shift && input.key_pressed(egui::Key::P) {
             if palette.open {
                 palette.close();
             } else {
@@ -230,7 +119,11 @@ pub fn render_save_prompt(
         .interactable(false)
         .show(ctx, |ui| {
             let painter = ui.painter();
-            painter.rect_filled(screen, 0.0, egui::Color32::from_rgba_unmultiplied(0, 0, 0, 140));
+            painter.rect_filled(
+                screen,
+                0.0,
+                egui::Color32::from_rgba_unmultiplied(0, 0, 0, 140),
+            );
         });
 
     // Dialog box

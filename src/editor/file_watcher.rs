@@ -33,9 +33,7 @@ pub enum FileChange {
 
 impl FileWatcher {
     /// Create a new file watcher. The proxy is used to wake the event loop.
-    pub fn new(
-        proxy: winit::event_loop::EventLoopProxy<crate::UserEvent>,
-    ) -> Result<Self, String> {
+    pub fn new(proxy: winit::event_loop::EventLoopProxy<crate::UserEvent>) -> Result<Self, String> {
         let (tx, rx) = mpsc::channel();
 
         let proxy_clone = proxy;

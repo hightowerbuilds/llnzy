@@ -142,10 +142,20 @@ pub struct EffectStack {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum EffectPass {
-    Bloom { intensity: f32 },
-    Crt { curvature: f32, scanline_strength: f32 },
-    Blur { radius: f32 },
-    ColorGrade { saturation: f32, contrast: f32 },
+    Bloom {
+        intensity: f32,
+    },
+    Crt {
+        curvature: f32,
+        scanline_strength: f32,
+    },
+    Blur {
+        radius: f32,
+    },
+    ColorGrade {
+        saturation: f32,
+        contrast: f32,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]

@@ -9,6 +9,7 @@ pub struct Session {
     pub cwd: Option<String>,         // working directory from OSC 7 or title
     pub custom_name: Option<String>, // user-assigned session name
     pub exited: Option<i32>,         // exit code if shell has exited
+    pub process_id: Option<u32>,
 }
 
 impl Session {
@@ -30,6 +31,7 @@ impl Session {
     ) -> std::io::Result<Self> {
         let terminal = Terminal::new(cols, rows);
         let pty = Pty::spawn_in(&config.shell, cols, rows, proxy, cwd)?;
+        let process_id = pty.process_id();
         Ok(Session {
             terminal,
             pty,
@@ -37,6 +39,7 @@ impl Session {
             cwd: cwd.map(|s| s.to_string()),
             custom_name: None,
             exited: None,
+            process_id,
         })
     }
 
@@ -48,7 +51,10 @@ impl Session {
             match self.pty.try_read() {
                 PtyReadResult::Data(bytes) => all_bytes.extend_from_slice(&bytes),
                 PtyReadResult::Empty => break,
-                PtyReadResult::Disconnected => {
+                PtyReadResult::Disconnected(exit_code) => {
+                    if self.exited.is_none() {
+                        self.exited = Some(exit_code.unwrap_or(0));
+                    }
                     disconnected = true;
                     break;
                 }
@@ -86,8 +92,10 @@ impl Session {
         // Detect shell exit via PTY reader channel disconnect.
         // The VTE parser never emits ChildExit, so this is the primary
         // exit detection mechanism.
-        if disconnected && self.exited.is_none() {
-            self.exited = Some(0);
+        if disconnected {
+            let code = self.exited.unwrap_or(0);
+            let msg = format!("\r\n[process exited with status {code}]\r\n");
+            self.terminal.process(msg.as_bytes());
         }
         (disconnected || !all_bytes.is_empty(), clipboard_text, bell)
     }
@@ -111,6 +119,10 @@ impl Session {
     pub fn write(&mut self, data: &[u8]) {
         self.terminal.scroll_to_bottom();
         self.pty.write(data);
+    }
+
+    pub fn kill(&mut self) -> std::io::Result<()> {
+        self.pty.kill()
     }
 }
 
@@ -163,4 +175,3 @@ pub struct Rect {
     pub w: f32,
     pub h: f32,
 }
-

@@ -118,55 +118,48 @@ pub(crate) fn render_stacker_view(
                 .selected_text(display)
                 .width(100.0)
                 .show_ui(ui, |ui| {
-                    if ui
-                        .selectable_label(filter_cat.is_empty(), "All")
-                        .clicked()
-                    {
+                    if ui.selectable_label(filter_cat.is_empty(), "All").clicked() {
                         filter_cat.clear();
                     }
                     for cat in &categories {
-                        if ui
-                            .selectable_label(filter_cat == *cat, cat)
-                            .clicked()
-                        {
+                        if ui.selectable_label(filter_cat == *cat, cat).clicked() {
                             filter_cat = cat.clone();
                         }
                     }
                 });
         }
 
-        ui.with_layout(
-            egui::Layout::right_to_left(egui::Align::Center),
-            |ui| {
-                if ui
-                    .add(egui::Button::new(
-                        egui::RichText::new("Export").size(11.0).color(DIM),
-                    ).frame(false))
-                    .clicked()
-                {
-                    if let Some(path) = stacker_path() {
-                        let export_path = path.with_extension("export.json");
-                        let _ = export_prompts(prompts, &export_path);
-                    }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui
+                .add(
+                    egui::Button::new(egui::RichText::new("Export").size(11.0).color(DIM))
+                        .frame(false),
+                )
+                .clicked()
+            {
+                if let Some(path) = stacker_path() {
+                    let export_path = path.with_extension("export.json");
+                    let _ = export_prompts(prompts, &export_path);
                 }
-                ui.label(egui::RichText::new("|").size(11.0).color(DIM));
-                if ui
-                    .add(egui::Button::new(
-                        egui::RichText::new("Import").size(11.0).color(DIM),
-                    ).frame(false))
-                    .clicked()
-                {
-                    if let Some(path) = stacker_path() {
-                        let import_path = path.with_extension("export.json");
-                        if let Ok(imported) = import_prompts(&import_path) {
-                            if merge_unique_prompts(prompts, imported) > 0 {
-                                *dirty = true;
-                            }
+            }
+            ui.label(egui::RichText::new("|").size(11.0).color(DIM));
+            if ui
+                .add(
+                    egui::Button::new(egui::RichText::new("Import").size(11.0).color(DIM))
+                        .frame(false),
+                )
+                .clicked()
+            {
+                if let Some(path) = stacker_path() {
+                    let import_path = path.with_extension("export.json");
+                    if let Ok(imported) = import_prompts(&import_path) {
+                        if merge_unique_prompts(prompts, imported) > 0 {
+                            *dirty = true;
                         }
                     }
                 }
-            },
-        );
+            }
+        });
     });
 
     ui.add_space(6.0);
@@ -183,22 +176,16 @@ pub(crate) fn render_stacker_view(
     // ── Prompt bar toggle ──
     ui.horizontal(|ui| {
         ui.label(
-            egui::RichText::new(format!(
-                "{} prompts",
-                prompts.len()
-            ))
-            .size(12.0)
-            .color(DIM),
+            egui::RichText::new(format!("{} prompts", prompts.len()))
+                .size(12.0)
+                .color(DIM),
         );
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let mut editor_on = *prompt_bar_views & BAR_VIEW_EDITOR != 0;
             let mut shell_on = *prompt_bar_views & BAR_VIEW_SHELL != 0;
 
-            if ui
-                .add(egui::Checkbox::new(&mut editor_on, ""))
-                .changed()
-            {
+            if ui.add(egui::Checkbox::new(&mut editor_on, "")).changed() {
                 if editor_on {
                     *prompt_bar_views |= BAR_VIEW_EDITOR;
                 } else {
@@ -207,10 +194,7 @@ pub(crate) fn render_stacker_view(
             }
             ui.label(egui::RichText::new("Editor").size(11.0).color(DIM));
 
-            if ui
-                .add(egui::Checkbox::new(&mut shell_on, ""))
-                .changed()
-            {
+            if ui.add(egui::Checkbox::new(&mut shell_on, "")).changed() {
                 if shell_on {
                     *prompt_bar_views |= BAR_VIEW_SHELL;
                 } else {
@@ -307,9 +291,7 @@ pub(crate) fn render_stacker_view(
                                     if ui
                                         .add(
                                             egui::Button::new(
-                                                egui::RichText::new("x")
-                                                    .size(11.0)
-                                                    .color(DIM),
+                                                egui::RichText::new("x").size(11.0).color(DIM),
                                             )
                                             .frame(false),
                                         )
@@ -322,9 +304,7 @@ pub(crate) fn render_stacker_view(
                                     if ui
                                         .add(
                                             egui::Button::new(
-                                                egui::RichText::new("edit")
-                                                    .size(11.0)
-                                                    .color(DIM),
+                                                egui::RichText::new("edit").size(11.0).color(DIM),
                                             )
                                             .frame(false),
                                         )
@@ -337,9 +317,7 @@ pub(crate) fn render_stacker_view(
                                     if ui
                                         .add(
                                             egui::Button::new(
-                                                egui::RichText::new("copy")
-                                                    .size(11.0)
-                                                    .color(DIM),
+                                                egui::RichText::new("copy").size(11.0).color(DIM),
                                             )
                                             .frame(false),
                                         )
@@ -386,10 +364,7 @@ pub(crate) fn render_stacker_view(
 
 /// Render the prompt queue bar (thin horizontal strip above footer).
 /// Returns `Some(text)` if a prompt was clicked (to copy to clipboard).
-pub(crate) fn render_prompt_bar(
-    ctx: &egui::Context,
-    prompts: &[StackerPrompt],
-) -> Option<String> {
+pub(crate) fn render_prompt_bar(ctx: &egui::Context, prompts: &[StackerPrompt]) -> Option<String> {
     let mut copied: Option<String> = None;
 
     egui::TopBottomPanel::bottom("prompt_queue_bar")

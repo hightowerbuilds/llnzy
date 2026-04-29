@@ -7,10 +7,7 @@ pub enum TabContent {
     /// A terminal shell session.
     Terminal(Box<Session>),
     /// A source code file open in the editor.
-    CodeFile {
-        path: PathBuf,
-        buffer_idx: usize,
-    },
+    CodeFile { path: PathBuf, buffer_idx: usize },
     /// The prompt queue manager (singleton).
     Stacker,
     /// The drawing canvas (singleton).
@@ -51,7 +48,10 @@ impl TabContent {
     pub fn is_singleton(&self) -> bool {
         matches!(
             self,
-            TabContent::Stacker | TabContent::Sketch | TabContent::Appearances | TabContent::Settings
+            TabContent::Stacker
+                | TabContent::Sketch
+                | TabContent::Appearances
+                | TabContent::Settings
         )
     }
 

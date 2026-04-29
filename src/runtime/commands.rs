@@ -1,0 +1,378 @@
+use std::path::PathBuf;
+use std::time::Instant;
+
+use winit::event_loop::ActiveEventLoop;
+
+use llnzy::app::commands::AppCommand;
+use llnzy::session::Session;
+use llnzy::ui::{ActiveView, PendingClose, SavePromptResponse, UiFrameOutput};
+use llnzy::workspace::{find_singleton, TabContent, TabKind, WorkspaceTab};
+
+use crate::App;
+
+impl App {
+    pub(crate) fn open_singleton_tab(&mut self, kind: TabKind) {
+        if let Some(idx) = find_singleton(&self.tabs, kind) {
+            self.active_tab = idx;
+            return;
+        }
+        let id = self.alloc_tab_id();
+        let content = match kind {
+            TabKind::Stacker => TabContent::Stacker,
+            TabKind::Sketch => TabContent::Sketch,
+            TabKind::Appearances => TabContent::Appearances,
+            TabKind::Settings => TabContent::Settings,
+            _ => return,
+        };
+        self.tabs.push(WorkspaceTab {
+            content,
+            name: None,
+            id,
+        });
+        self.active_tab = self.tabs.len() - 1;
+    }
+
+    pub(crate) fn open_code_file_tab(&mut self, path: PathBuf, buffer_idx: usize) {
+        let existing = self
+            .tabs
+            .iter()
+            .position(|t| matches!(&t.content, TabContent::CodeFile { path: p, .. } if *p == path));
+        if let Some(idx) = existing {
+            self.active_tab = idx;
+        } else {
+            let id = self.alloc_tab_id();
+            self.tabs.push(WorkspaceTab {
+                content: TabContent::CodeFile { path, buffer_idx },
+                name: None,
+                id,
+            });
+            self.active_tab = self.tabs.len() - 1;
+        }
+        if let Some(ui) = &mut self.ui {
+            ui.active_view = ActiveView::Shells;
+        }
+    }
+
+    pub(crate) fn open_workspace_tab_entry(&mut self, entry: llnzy::workspace_store::TabEntry) {
+        match entry {
+            llnzy::workspace_store::TabEntry::Terminal => self.new_tab(),
+            llnzy::workspace_store::TabEntry::CodeFile { path } => {
+                let Some(ui) = &mut self.ui else { return };
+                match ui.editor_view.open_file(path.clone()) {
+                    Ok(idx) => self.open_code_file_tab(path, idx),
+                    Err(e) => self.error_log.error(format!("Workspace: {e}")),
+                }
+            }
+            llnzy::workspace_store::TabEntry::Stacker => self.open_singleton_tab(TabKind::Stacker),
+            llnzy::workspace_store::TabEntry::Sketch => self.open_singleton_tab(TabKind::Sketch),
+        }
+    }
+
+    pub(crate) fn handle_app_command(
+        &mut self,
+        command: AppCommand,
+        sidebar_changed: &mut bool,
+    ) -> bool {
+        match command {
+            AppCommand::NewTerminalTab => {
+                self.new_tab();
+                if let Some(ui) = &mut self.ui {
+                    ui.active_view = ActiveView::Shells;
+                }
+                true
+            }
+            AppCommand::OpenSingletonTab(kind) => {
+                self.open_singleton_tab(kind);
+                if let Some(ui) = &mut self.ui {
+                    ui.active_view = ActiveView::Shells;
+                }
+                true
+            }
+            AppCommand::SwitchTab(idx) => {
+                self.switch_tab(idx);
+                true
+            }
+            AppCommand::CloseTab(idx) => {
+                self.active_tab = idx;
+                self.close_tab();
+                true
+            }
+            AppCommand::SplitRight(idx) => {
+                if idx != self.active_tab && idx < self.tabs.len() {
+                    if let Some(ui) = &mut self.ui {
+                        ui.split_view = Some((idx, 0.5));
+                    }
+                    true
+                } else {
+                    false
+                }
+            }
+            AppCommand::Unsplit => {
+                if let Some(ui) = &mut self.ui {
+                    ui.split_view = None;
+                }
+                true
+            }
+            AppCommand::CloseOtherTabs(keep_idx) => {
+                if keep_idx >= self.tabs.len() {
+                    return false;
+                }
+                let kept = self.tabs.remove(keep_idx);
+                self.tabs.clear();
+                self.tabs.push(kept);
+                self.active_tab = 0;
+                if let Some(ui) = &mut self.ui {
+                    ui.split_view = None;
+                }
+                self.selection.clear();
+                true
+            }
+            AppCommand::CloseTabsToRight(idx) => {
+                if idx + 1 >= self.tabs.len() {
+                    return false;
+                }
+                self.tabs.truncate(idx + 1);
+                if self.active_tab > idx {
+                    self.active_tab = idx;
+                }
+                if let Some(ui) = &mut self.ui {
+                    if let Some((right_idx, _)) = ui.split_view {
+                        if right_idx > idx {
+                            ui.split_view = None;
+                        }
+                    }
+                }
+                self.selection.clear();
+                true
+            }
+            AppCommand::KillTerminalTab(idx) => self.kill_terminal_tab(idx),
+            AppCommand::RestartTerminalTab(idx) => self.restart_terminal_tab(idx),
+            AppCommand::ApplyConfig(new_config) => {
+                self.config = new_config;
+                if let Some(renderer) = &mut self.renderer {
+                    renderer.update_config(self.config.clone());
+                }
+                self.last_ui_config_change = Instant::now();
+                true
+            }
+            AppCommand::CopyToClipboard(text) => {
+                if let Some(cb) = &mut self.clipboard {
+                    let _ = cb.set_text(text);
+                }
+                false
+            }
+            AppCommand::RenameTab { tab_idx, name } => {
+                if let Some(tab) = self.tabs.get_mut(tab_idx) {
+                    if name.trim().is_empty() {
+                        tab.name = None;
+                    } else {
+                        tab.name = Some(name);
+                    }
+                    true
+                } else {
+                    false
+                }
+            }
+            AppCommand::OpenCodeFile { path, buffer_idx } => {
+                self.open_code_file_tab(path, buffer_idx);
+                true
+            }
+            AppCommand::OpenProject(project_path) => {
+                if !project_path.is_dir() {
+                    let message = format!("Project folder not found: {}", project_path.display());
+                    self.error_log.error(message.clone());
+                    if let Some(ui) = &mut self.ui {
+                        ui.explorer.error = Some(message);
+                    }
+                    return false;
+                }
+                if let Some(ui) = &mut self.ui {
+                    ui.explorer.set_root(project_path.clone());
+                    llnzy::explorer::add_recent_project(&mut ui.recent_projects, project_path);
+                    ui.sidebar.open = true;
+                }
+                *sidebar_changed = true;
+                true
+            }
+            AppCommand::LaunchWorkspace(ws) => {
+                if let Some(ref theme_name) = ws.theme {
+                    if let Some(theme) = llnzy::theme::builtin_themes()
+                        .into_iter()
+                        .find(|t| t.name == *theme_name)
+                    {
+                        theme.apply_to(&mut self.config);
+                    } else if let Some((theme, _)) = llnzy::theme_store::load_user_themes()
+                        .into_iter()
+                        .find(|(t, _)| t.name == *theme_name)
+                    {
+                        theme.apply_to(&mut self.config);
+                    }
+                    if let Some(renderer) = &mut self.renderer {
+                        renderer.update_config(self.config.clone());
+                    }
+                }
+                if let Some(ui) = &mut self.ui {
+                    if let Some(ref project_path) = ws.project_path {
+                        if project_path.is_dir() {
+                            ui.explorer.set_root(project_path.clone());
+                            llnzy::explorer::add_recent_project(
+                                &mut ui.recent_projects,
+                                project_path.clone(),
+                            );
+                            ui.sidebar.open = true;
+                            *sidebar_changed = true;
+                        } else {
+                            let message =
+                                format!("Project folder not found: {}", project_path.display());
+                            self.error_log.error(message.clone());
+                            ui.explorer.error = Some(message);
+                        }
+                    }
+                    ui.active_view = ActiveView::Shells;
+                }
+                for entry in ws.tabs {
+                    self.open_workspace_tab_entry(entry);
+                }
+                true
+            }
+            AppCommand::RunTask(task) => {
+                let (cols, rows) = self.grid_size();
+                let cwd = task.cwd.to_string_lossy().to_string();
+                let cmd_str = if task.args.is_empty() {
+                    format!("{}\n", task.command)
+                } else {
+                    format!("{} {}\n", task.command, task.args.join(" "))
+                };
+                match Session::new_in_dir(cols, rows, &self.config, self.proxy.clone(), Some(&cwd))
+                {
+                    Ok(mut session) => {
+                        session.write(cmd_str.as_bytes());
+                        let id = self.alloc_tab_id();
+                        self.tabs.push(WorkspaceTab {
+                            content: TabContent::Terminal(Box::new(session)),
+                            name: Some(task.name),
+                            id,
+                        });
+                        self.active_tab = self.tabs.len() - 1;
+                        if let Some(ui) = &mut self.ui {
+                            ui.active_view = ActiveView::Shells;
+                        }
+                        self.recompute_layout();
+                        true
+                    }
+                    Err(e) => {
+                        self.error_log.error(format!("Failed to run task: {e}"));
+                        false
+                    }
+                }
+            }
+        }
+    }
+
+    pub(crate) fn handle_ui_frame_output(
+        &mut self,
+        output: UiFrameOutput,
+        event_loop: &ActiveEventLoop,
+    ) {
+        let mut need_redraw = false;
+        let mut sidebar_changed = false;
+
+        if self.handle_save_prompt_response(output.save_prompt_response, event_loop) {
+            need_redraw = true;
+        }
+
+        for command in output.commands {
+            if self.handle_app_command(command, &mut sidebar_changed) {
+                need_redraw = true;
+            }
+        }
+
+        if sidebar_changed {
+            self.recompute_layout();
+            self.resize_terminal_tabs();
+        }
+        if need_redraw {
+            self.request_redraw();
+        }
+    }
+
+    pub(crate) fn handle_save_prompt_response(
+        &mut self,
+        response: Option<SavePromptResponse>,
+        event_loop: &ActiveEventLoop,
+    ) -> bool {
+        let Some(response) = response else {
+            return false;
+        };
+
+        let pending = self.ui.as_mut().and_then(|u| u.pending_close.take());
+        match (response, pending) {
+            (SavePromptResponse::Save, Some(PendingClose::Tab(idx, name))) => {
+                match self.save_code_tab_for_close(idx) {
+                    Ok(()) => {
+                        if let Some(ui) = &mut self.ui {
+                            ui.save_prompt_error = None;
+                        }
+                        self.active_tab = idx;
+                        self.force_close_tab();
+                    }
+                    Err(e) => {
+                        if let Some(ui) = &mut self.ui {
+                            ui.pending_close = Some(PendingClose::Tab(idx, name));
+                        }
+                        self.report_save_failure(e);
+                    }
+                }
+                true
+            }
+            (SavePromptResponse::DontSave, Some(PendingClose::Tab(idx, _))) => {
+                if let Some(ui) = &mut self.ui {
+                    ui.save_prompt_error = None;
+                }
+                self.active_tab = idx;
+                self.force_close_tab();
+                true
+            }
+            (SavePromptResponse::Save, Some(PendingClose::Window(tabs))) => {
+                match self.save_modified_tabs_for_close(&tabs) {
+                    Ok(()) => {
+                        if let Some(ui) = &mut self.ui {
+                            ui.save_prompt_error = None;
+                        }
+                        self.save_window_state();
+                        event_loop.exit();
+                    }
+                    Err(e) => {
+                        let still_modified = self.modified_code_tabs();
+                        if let Some(ui) = &mut self.ui {
+                            ui.pending_close =
+                                Some(PendingClose::Window(if still_modified.is_empty() {
+                                    tabs
+                                } else {
+                                    still_modified
+                                }));
+                        }
+                        self.report_save_failure(e);
+                    }
+                }
+                true
+            }
+            (SavePromptResponse::DontSave, Some(PendingClose::Window(_))) => {
+                if let Some(ui) = &mut self.ui {
+                    ui.save_prompt_error = None;
+                }
+                self.save_window_state();
+                event_loop.exit();
+                true
+            }
+            (SavePromptResponse::Cancel, pending) => {
+                drop(pending);
+                if let Some(ui) = &mut self.ui {
+                    ui.save_prompt_error = None;
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+}

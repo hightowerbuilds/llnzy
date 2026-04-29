@@ -11,10 +11,7 @@ pub struct HomeAction {
 }
 
 /// Render the home screen with Terminal, Open Project, Workspace buttons and recent projects.
-pub fn render_home_view(
-    ctx: &egui::Context,
-    recent_projects: &[PathBuf],
-) -> HomeAction {
+pub fn render_home_view(ctx: &egui::Context, recent_projects: &[PathBuf]) -> HomeAction {
     let mut action = HomeAction {
         nav_target: None,
         open_project: None,

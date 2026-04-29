@@ -67,12 +67,7 @@ impl UndoHistory {
 
     /// Try to coalesce a character insertion with the previous operation.
     /// Returns true if coalesced, false if a new op should be pushed.
-    pub fn try_coalesce_insert(
-        &mut self,
-        pos: Position,
-        text: &str,
-        end_pos: Position,
-    ) -> bool {
+    pub fn try_coalesce_insert(&mut self, pos: Position, text: &str, end_pos: Position) -> bool {
         let now = Instant::now();
         let elapsed = now.duration_since(self.last_push).as_millis();
 
@@ -226,11 +221,7 @@ mod tests {
         let mut h = UndoHistory::new();
         h.push(insert_op(0, 0, "h"));
         // Immediate follow-up at the next position
-        let coalesced = h.try_coalesce_insert(
-            Position::new(0, 1),
-            "e",
-            Position::new(0, 2),
-        );
+        let coalesced = h.try_coalesce_insert(Position::new(0, 1), "e", Position::new(0, 2));
         assert!(coalesced);
         assert_eq!(h.undo_stack.len(), 1);
         assert_eq!(h.undo_stack[0].new_text, "he");
@@ -240,11 +231,7 @@ mod tests {
     fn no_coalesce_after_newline() {
         let mut h = UndoHistory::new();
         h.push(insert_op(0, 0, "a"));
-        let coalesced = h.try_coalesce_insert(
-            Position::new(0, 1),
-            "\n",
-            Position::new(1, 0),
-        );
+        let coalesced = h.try_coalesce_insert(Position::new(0, 1), "\n", Position::new(1, 0));
         assert!(!coalesced);
     }
 
@@ -253,11 +240,7 @@ mod tests {
         let mut h = UndoHistory::new();
         h.push(insert_op(0, 0, "a"));
         // Position gap: insert at col 5 instead of col 1
-        let coalesced = h.try_coalesce_insert(
-            Position::new(0, 5),
-            "b",
-            Position::new(0, 6),
-        );
+        let coalesced = h.try_coalesce_insert(Position::new(0, 5), "b", Position::new(0, 6));
         assert!(!coalesced);
     }
 

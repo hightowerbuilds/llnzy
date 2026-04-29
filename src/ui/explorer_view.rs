@@ -3,14 +3,14 @@ use std::time::Instant;
 
 use tokio::sync::oneshot;
 
-use crate::editor::EditorState;
 use crate::editor::file_watcher::{FileChange, FileWatcher};
 use crate::editor::perf;
 use crate::editor::project_search::ProjectSearch;
 use crate::editor::search::EditorSearch;
 use crate::editor::snippet::ActiveSnippet;
+use crate::editor::EditorState;
 use crate::explorer::{format_size, ExplorerState, FileContent};
-use crate::lsp::LspManager;
+use crate::lsp::{LspEnsureStatus, LspManager};
 
 use super::editor_view;
 
@@ -25,6 +25,10 @@ pub struct LspPending {
     pub format: Option<oneshot::Receiver<Vec<crate::lsp::FormatEdit>>>,
     pub inlay_hints: Option<oneshot::Receiver<Vec<crate::lsp::InlayHintInfo>>>,
     pub code_lens: Option<oneshot::Receiver<Vec<crate::lsp::CodeLensInfo>>>,
+    pub code_actions: Option<oneshot::Receiver<Vec<crate::lsp::CodeAction>>>,
+    pub document_symbols: Option<oneshot::Receiver<Vec<crate::lsp::SymbolInfo>>>,
+    pub workspace_symbols: Option<oneshot::Receiver<Vec<crate::lsp::WorkspaceSymbol>>>,
+    pub rename: Option<oneshot::Receiver<Vec<(PathBuf, Vec<crate::lsp::FormatEdit>)>>>,
 }
 
 /// Persistent editor UI state -- lives alongside the ExplorerState.
@@ -83,7 +87,11 @@ pub struct EditorViewState {
     pub reload_prompt: Option<(usize, PathBuf, bool)>,
     /// Last edit info for incremental LSP sync: (start_pos, end_pos, new_text).
     /// Set by the editor after each edit, consumed by lsp_did_change.
-    pub last_edit: Option<(crate::editor::buffer::Position, crate::editor::buffer::Position, String)>,
+    pub last_edit: Option<(
+        crate::editor::buffer::Position,
+        crate::editor::buffer::Position,
+        String,
+    )>,
     /// LSP status text displayed in the status bar (e.g. "rust-analyzer" or "Starting...").
     pub lsp_status: String,
     /// Last time server health was checked (for auto-restart of crashed servers).
@@ -186,18 +194,22 @@ impl EditorViewState {
                 if let Some(root) = LspManager::detect_root(path) {
                     lsp.set_root(root);
                 }
-                self.lsp_status = format!("LSP: Starting {lang_id}...");
-                if lsp.ensure_server(lang_id) {
-                    let text = buf.text();
-                    lsp.did_open(path, lang_id, &text);
-                    let status = lsp.server_status(lang_id);
-                    self.lsp_status = if status.is_empty() {
-                        String::new()
-                    } else {
-                        format!("LSP: {status}")
-                    };
-                } else {
-                    self.lsp_status = format!("LSP: {lang_id} unavailable");
+                let text = buf.text();
+                match lsp.open_document(path, lang_id, &text) {
+                    LspEnsureStatus::Running => {
+                        let status = lsp.server_status(lang_id);
+                        self.lsp_status = if status.is_empty() {
+                            String::new()
+                        } else {
+                            format!("LSP: {status}")
+                        };
+                    }
+                    LspEnsureStatus::Starting => {
+                        self.lsp_status = format!("LSP: Starting {lang_id}...");
+                    }
+                    LspEnsureStatus::Unavailable => {
+                        self.lsp_status = format!("LSP: {}", lsp.server_status(lang_id));
+                    }
                 }
             }
         }
@@ -216,15 +228,27 @@ impl EditorViewState {
         }
         let Some(lsp) = &mut self.lsp else { return };
         let active = self.editor.active;
-        if active >= self.editor.buffers.len() { return }
+        if active >= self.editor.buffers.len() {
+            return;
+        }
         let buf = &self.editor.buffers[active];
         let view = &self.editor.views[active];
         // Skip LSP sync for very large files (sync on save only)
-        if buf.line_count() > perf::LSP_CHANGE_LINE_LIMIT { return }
+        if buf.line_count() > perf::LSP_CHANGE_LINE_LIMIT {
+            return;
+        }
         if let (Some(lang_id), Some(path)) = (view.lang_id, buf.path()) {
             // Try incremental sync if we have the last edit info
             if let Some((start, end, new_text)) = self.last_edit.take() {
-                lsp.did_change_incremental(path, lang_id, start.line as u32, start.col as u32, end.line as u32, end.col as u32, &new_text);
+                lsp.did_change_incremental(
+                    path,
+                    lang_id,
+                    start.line as u32,
+                    start.col as u32,
+                    end.line as u32,
+                    end.col as u32,
+                    &new_text,
+                );
             } else {
                 let text = buf.text();
                 lsp.did_change(path, lang_id, &text);
@@ -237,7 +261,9 @@ impl EditorViewState {
     pub fn request_hover(&mut self) {
         let Some(lsp) = &self.lsp else { return };
         let active = self.editor.active;
-        if active >= self.editor.buffers.len() { return }
+        if active >= self.editor.buffers.len() {
+            return;
+        }
         let buf = &self.editor.buffers[active];
         let view = &self.editor.views[active];
         let pos = view.cursor.pos;
@@ -253,7 +279,9 @@ impl EditorViewState {
     pub fn request_goto_definition(&mut self) {
         let Some(lsp) = &self.lsp else { return };
         let active = self.editor.active;
-        if active >= self.editor.buffers.len() { return }
+        if active >= self.editor.buffers.len() {
+            return;
+        }
         let buf = &self.editor.buffers[active];
         let view = &self.editor.views[active];
         let pos = view.cursor.pos;
@@ -266,7 +294,9 @@ impl EditorViewState {
 
     /// Apply a pending goto target (open file, jump to position).
     pub fn apply_goto(&mut self) {
-        let Some((path, line, col)) = self.goto_target.take() else { return };
+        let Some((path, line, col)) = self.goto_target.take() else {
+            return;
+        };
         match self.open_file(path) {
             Ok(idx) => {
                 let view = &mut self.editor.views[idx];
@@ -283,7 +313,9 @@ impl EditorViewState {
     pub fn request_completion(&mut self) {
         let Some(lsp) = &self.lsp else { return };
         let active = self.editor.active;
-        if active >= self.editor.buffers.len() { return }
+        if active >= self.editor.buffers.len() {
+            return;
+        }
         let buf = &self.editor.buffers[active];
         let view = &self.editor.views[active];
         let pos = view.cursor.pos;
@@ -304,12 +336,16 @@ impl EditorViewState {
 
     /// Get filtered completion items for the popup.
     pub fn filtered_completions(&self) -> Vec<&crate::lsp::CompletionItem> {
-        let Some(state) = &self.completion else { return Vec::new() };
+        let Some(state) = &self.completion else {
+            return Vec::new();
+        };
         if state.filter.is_empty() {
             state.items.iter().take(20).collect()
         } else {
             let lower = state.filter.to_lowercase();
-            state.items.iter()
+            state
+                .items
+                .iter()
                 .filter(|i| i.label.to_lowercase().contains(&lower))
                 .take(20)
                 .collect()
@@ -320,7 +356,9 @@ impl EditorViewState {
     pub fn format_document(&mut self) {
         let Some(lsp) = &self.lsp else { return };
         let active = self.editor.active;
-        if active >= self.editor.buffers.len() { return }
+        if active >= self.editor.buffers.len() {
+            return;
+        }
         let buf = &self.editor.buffers[active];
         let view = &self.editor.views[active];
         if let (Some(lang_id), Some(path)) = (view.lang_id, buf.path()) {
@@ -333,68 +371,112 @@ impl EditorViewState {
 
     /// Rename the symbol at cursor. Prompts for new name via status_msg.
     pub fn rename_symbol(&mut self, new_name: &str) {
-        let Some(lsp) = &mut self.lsp else { return };
+        let Some(lsp) = &self.lsp else { return };
         let active = self.editor.active;
-        if active >= self.editor.buffers.len() { return }
+        if active >= self.editor.buffers.len() {
+            return;
+        }
         let buf = &self.editor.buffers[active];
         let view = &self.editor.views[active];
         let pos = view.cursor.pos;
         if let (Some(lang_id), Some(path)) = (view.lang_id, buf.path()) {
-            let file_edits = lsp.rename(path, lang_id, pos.line as u32, pos.col as u32, new_name);
-            if file_edits.is_empty() {
-                self.status_msg = Some("Rename returned no changes".to_string());
-                return;
+            if let Some(rx) =
+                lsp.rename_async(path, lang_id, pos.line as u32, pos.col as u32, new_name)
+            {
+                self.pending.rename = Some(rx);
+                self.status_msg = Some("Renaming...".to_string());
             }
-            let mut total = 0;
-            for (file_path, edits) in &file_edits {
-                // Only apply edits to the current open buffer for now
-                if self.editor.buffers[active].path() == Some(file_path.as_path()) {
-                    let buf = &mut self.editor.buffers[active];
-                    let mut sorted = edits.clone();
-                    sorted.sort_by(|a, b| b.start_line.cmp(&a.start_line).then(b.start_col.cmp(&a.start_col)));
-                    for edit in &sorted {
-                        let start = crate::editor::buffer::Position::new(edit.start_line as usize, edit.start_col as usize);
-                        let end = crate::editor::buffer::Position::new(edit.end_line as usize, edit.end_col as usize);
-                        buf.replace(start, end, &edit.new_text);
-                        total += 1;
-                    }
-                }
-            }
-            self.editor.views[active].tree_dirty = true;
-            self.lsp_did_change();
-            self.status_msg = Some(format!("Renamed: {total} occurrence{}", if total == 1 { "" } else { "s" }));
         }
     }
 
+    fn apply_lsp_file_edits(
+        &mut self,
+        file_edits: Vec<(PathBuf, Vec<crate::lsp::FormatEdit>)>,
+    ) -> usize {
+        let mut total = 0;
+        for (file_path, edits) in file_edits {
+            for (idx, buf) in self.editor.buffers.iter_mut().enumerate() {
+                if buf.path() == Some(file_path.as_path()) {
+                    let mut sorted = edits.clone();
+                    sorted.sort_by(|a, b| {
+                        b.start_line
+                            .cmp(&a.start_line)
+                            .then(b.start_col.cmp(&a.start_col))
+                    });
+                    for edit in &sorted {
+                        let start = crate::editor::buffer::Position::new(
+                            edit.start_line as usize,
+                            edit.start_col as usize,
+                        );
+                        let end = crate::editor::buffer::Position::new(
+                            edit.end_line as usize,
+                            edit.end_col as usize,
+                        );
+                        buf.replace(start, end, &edit.new_text);
+                        total += 1;
+                    }
+                    if let Some(view) = self.editor.views.get_mut(idx) {
+                        view.tree_dirty = true;
+                    }
+                }
+            }
+        }
+        total
+    }
+
     /// Request code actions at the cursor position.
-    pub fn request_code_actions(&mut self) -> Vec<crate::lsp::CodeAction> {
-        let Some(lsp) = &mut self.lsp else { return Vec::new() };
+    pub fn request_code_actions(&mut self) {
+        let Some(lsp) = &self.lsp else {
+            return;
+        };
         let active = self.editor.active;
-        if active >= self.editor.buffers.len() { return Vec::new() }
+        if active >= self.editor.buffers.len() {
+            return;
+        }
         let buf = &self.editor.buffers[active];
         let view = &self.editor.views[active];
         let pos = view.cursor.pos;
         let (start, end) = view.cursor.selection().unwrap_or((pos, pos));
         if let (Some(lang_id), Some(path)) = (view.lang_id, buf.path()) {
-            lsp.code_actions(path, lang_id, start.line as u32, start.col as u32, end.line as u32, end.col as u32)
-        } else {
-            Vec::new()
+            if let Some(rx) = lsp.code_actions_async(
+                path,
+                lang_id,
+                start.line as u32,
+                start.col as u32,
+                end.line as u32,
+                end.col as u32,
+            ) {
+                self.pending.code_actions = Some(rx);
+                self.status_msg = Some("Loading code actions...".to_string());
+            }
         }
     }
 
     /// Apply a code action's workspace edits.
     pub fn apply_code_action(&mut self, action: &crate::lsp::CodeAction) {
         let active = self.editor.active;
-        if active >= self.editor.buffers.len() { return }
+        if active >= self.editor.buffers.len() {
+            return;
+        }
         let mut total = 0;
         for (file_path, edits) in &action.edits {
             if self.editor.buffers[active].path() == Some(file_path.as_path()) {
                 let buf = &mut self.editor.buffers[active];
                 let mut sorted = edits.clone();
-                sorted.sort_by(|a, b| b.start_line.cmp(&a.start_line).then(b.start_col.cmp(&a.start_col)));
+                sorted.sort_by(|a, b| {
+                    b.start_line
+                        .cmp(&a.start_line)
+                        .then(b.start_col.cmp(&a.start_col))
+                });
                 for edit in &sorted {
-                    let start = crate::editor::buffer::Position::new(edit.start_line as usize, edit.start_col as usize);
-                    let end = crate::editor::buffer::Position::new(edit.end_line as usize, edit.end_col as usize);
+                    let start = crate::editor::buffer::Position::new(
+                        edit.start_line as usize,
+                        edit.start_col as usize,
+                    );
+                    let end = crate::editor::buffer::Position::new(
+                        edit.end_line as usize,
+                        edit.end_col as usize,
+                    );
                     buf.replace(start, end, &edit.new_text);
                     total += 1;
                 }
@@ -408,16 +490,21 @@ impl EditorViewState {
     }
 
     /// Request document symbols for the active buffer.
-    pub fn request_document_symbols(&mut self) -> Vec<crate::lsp::SymbolInfo> {
-        let Some(lsp) = &mut self.lsp else { return Vec::new() };
+    pub fn request_document_symbols(&mut self) {
+        let Some(lsp) = &self.lsp else {
+            return;
+        };
         let active = self.editor.active;
-        if active >= self.editor.buffers.len() { return Vec::new() }
+        if active >= self.editor.buffers.len() {
+            return;
+        }
         let buf = &self.editor.buffers[active];
         let view = &self.editor.views[active];
         if let (Some(lang_id), Some(path)) = (view.lang_id, buf.path()) {
-            lsp.document_symbols(path, lang_id)
-        } else {
-            Vec::new()
+            if let Some(rx) = lsp.document_symbols_async(path, lang_id) {
+                self.pending.document_symbols = Some(rx);
+                self.status_msg = Some("Loading symbols...".to_string());
+            }
         }
     }
 
@@ -425,27 +512,35 @@ impl EditorViewState {
     pub fn request_signature_help(&mut self) {
         let Some(lsp) = &self.lsp else { return };
         let active = self.editor.active;
-        if active >= self.editor.buffers.len() { return }
+        if active >= self.editor.buffers.len() {
+            return;
+        }
         let buf = &self.editor.buffers[active];
         let view = &self.editor.views[active];
         let pos = view.cursor.pos;
         if let (Some(lang_id), Some(path)) = (view.lang_id, buf.path()) {
-            if let Some(rx) = lsp.signature_help_async(path, lang_id, pos.line as u32, pos.col as u32) {
+            if let Some(rx) =
+                lsp.signature_help_async(path, lang_id, pos.line as u32, pos.col as u32)
+            {
                 self.pending.signature_help = Some(rx);
             }
         }
     }
 
     /// Request workspace symbols for a query (still blocking -- interactive search needs immediate results).
-    pub fn request_workspace_symbols(&mut self, query: &str) -> Vec<crate::lsp::WorkspaceSymbol> {
-        let Some(lsp) = &mut self.lsp else { return Vec::new() };
+    pub fn request_workspace_symbols(&mut self, query: &str) {
+        let Some(lsp) = &self.lsp else {
+            return;
+        };
         let active = self.editor.active;
-        if active >= self.editor.buffers.len() { return Vec::new() }
+        if active >= self.editor.buffers.len() {
+            return;
+        }
         let view = &self.editor.views[active];
         if let Some(lang_id) = view.lang_id {
-            lsp.workspace_symbols(lang_id, query)
-        } else {
-            Vec::new()
+            if let Some(rx) = lsp.workspace_symbols_async(lang_id, query) {
+                self.pending.workspace_symbols = Some(rx);
+            }
         }
     }
 
@@ -453,7 +548,9 @@ impl EditorViewState {
     pub fn request_references(&mut self) {
         let Some(lsp) = &self.lsp else { return };
         let active = self.editor.active;
-        if active >= self.editor.buffers.len() { return }
+        if active >= self.editor.buffers.len() {
+            return;
+        }
         let buf = &self.editor.buffers[active];
         let view = &self.editor.views[active];
         let pos = view.cursor.pos;
@@ -469,7 +566,9 @@ impl EditorViewState {
     pub fn request_hints_and_lenses(&mut self) {
         let Some(lsp) = &self.lsp else { return };
         let active = self.editor.active;
-        if active >= self.editor.buffers.len() { return }
+        if active >= self.editor.buffers.len() {
+            return;
+        }
         let buf = &self.editor.buffers[active];
         let view = &self.editor.views[active];
         if let (Some(lang_id), Some(path)) = (view.lang_id, buf.path()) {
@@ -486,7 +585,9 @@ impl EditorViewState {
     pub fn lsp_did_save(&mut self) {
         let Some(lsp) = &mut self.lsp else { return };
         let active = self.editor.active;
-        if active >= self.editor.buffers.len() { return }
+        if active >= self.editor.buffers.len() {
+            return;
+        }
         let buf = &self.editor.buffers[active];
         let view = &self.editor.views[active];
         if let (Some(lang_id), Some(path)) = (view.lang_id, buf.path()) {
@@ -514,7 +615,8 @@ pub(crate) fn render_explorer_view(
     // Reparse syntax tree if dirty
     editor_state.editor.reparse_active();
     if editor_state.editor.active_parse_pending() {
-        ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(16));
     }
 
     // ── Poll pending async LSP results ──
@@ -529,8 +631,12 @@ pub(crate) fn render_explorer_view(
                 }
                 editor_state.pending.hover = None;
             }
-            Err(oneshot::error::TryRecvError::Closed) => { editor_state.pending.hover = None; }
-            Err(oneshot::error::TryRecvError::Empty) => { need_repaint = true; }
+            Err(oneshot::error::TryRecvError::Closed) => {
+                editor_state.pending.hover = None;
+            }
+            Err(oneshot::error::TryRecvError::Empty) => {
+                need_repaint = true;
+            }
         }
     }
 
@@ -548,7 +654,9 @@ pub(crate) fn render_explorer_view(
                 editor_state.completion = None;
                 editor_state.pending.completion = None;
             }
-            Err(oneshot::error::TryRecvError::Empty) => { need_repaint = true; }
+            Err(oneshot::error::TryRecvError::Empty) => {
+                need_repaint = true;
+            }
         }
     }
 
@@ -559,8 +667,12 @@ pub(crate) fn render_explorer_view(
                 editor_state.pending.definition = None;
                 editor_state.apply_goto();
             }
-            Err(oneshot::error::TryRecvError::Closed) => { editor_state.pending.definition = None; }
-            Err(oneshot::error::TryRecvError::Empty) => { need_repaint = true; }
+            Err(oneshot::error::TryRecvError::Closed) => {
+                editor_state.pending.definition = None;
+            }
+            Err(oneshot::error::TryRecvError::Empty) => {
+                need_repaint = true;
+            }
         }
     }
 
@@ -570,8 +682,12 @@ pub(crate) fn render_explorer_view(
                 editor_state.signature_help = result;
                 editor_state.pending.signature_help = None;
             }
-            Err(oneshot::error::TryRecvError::Closed) => { editor_state.pending.signature_help = None; }
-            Err(oneshot::error::TryRecvError::Empty) => { need_repaint = true; }
+            Err(oneshot::error::TryRecvError::Closed) => {
+                editor_state.pending.signature_help = None;
+            }
+            Err(oneshot::error::TryRecvError::Empty) => {
+                need_repaint = true;
+            }
         }
     }
 
@@ -587,8 +703,12 @@ pub(crate) fn render_explorer_view(
                 }
                 editor_state.pending.references = None;
             }
-            Err(oneshot::error::TryRecvError::Closed) => { editor_state.pending.references = None; }
-            Err(oneshot::error::TryRecvError::Empty) => { need_repaint = true; }
+            Err(oneshot::error::TryRecvError::Closed) => {
+                editor_state.pending.references = None;
+            }
+            Err(oneshot::error::TryRecvError::Empty) => {
+                need_repaint = true;
+            }
         }
     }
 
@@ -599,10 +719,20 @@ pub(crate) fn render_explorer_view(
                 if !edits.is_empty() && active < editor_state.editor.buffers.len() {
                     let buf = &mut editor_state.editor.buffers[active];
                     let mut sorted = edits;
-                    sorted.sort_by(|a, b| b.start_line.cmp(&a.start_line).then(b.start_col.cmp(&a.start_col)));
+                    sorted.sort_by(|a, b| {
+                        b.start_line
+                            .cmp(&a.start_line)
+                            .then(b.start_col.cmp(&a.start_col))
+                    });
                     for edit in sorted {
-                        let start = crate::editor::buffer::Position::new(edit.start_line as usize, edit.start_col as usize);
-                        let end = crate::editor::buffer::Position::new(edit.end_line as usize, edit.end_col as usize);
+                        let start = crate::editor::buffer::Position::new(
+                            edit.start_line as usize,
+                            edit.start_col as usize,
+                        );
+                        let end = crate::editor::buffer::Position::new(
+                            edit.end_line as usize,
+                            edit.end_col as usize,
+                        );
                         buf.replace(start, end, &edit.new_text);
                     }
                     editor_state.editor.views[active].tree_dirty = true;
@@ -613,8 +743,12 @@ pub(crate) fn render_explorer_view(
                 }
                 editor_state.pending.format = None;
             }
-            Err(oneshot::error::TryRecvError::Closed) => { editor_state.pending.format = None; }
-            Err(oneshot::error::TryRecvError::Empty) => { need_repaint = true; }
+            Err(oneshot::error::TryRecvError::Closed) => {
+                editor_state.pending.format = None;
+            }
+            Err(oneshot::error::TryRecvError::Empty) => {
+                need_repaint = true;
+            }
         }
     }
 
@@ -624,8 +758,12 @@ pub(crate) fn render_explorer_view(
                 editor_state.inlay_hints = hints;
                 editor_state.pending.inlay_hints = None;
             }
-            Err(oneshot::error::TryRecvError::Closed) => { editor_state.pending.inlay_hints = None; }
-            Err(oneshot::error::TryRecvError::Empty) => { need_repaint = true; }
+            Err(oneshot::error::TryRecvError::Closed) => {
+                editor_state.pending.inlay_hints = None;
+            }
+            Err(oneshot::error::TryRecvError::Empty) => {
+                need_repaint = true;
+            }
         }
     }
 
@@ -635,17 +773,111 @@ pub(crate) fn render_explorer_view(
                 editor_state.code_lenses = lenses;
                 editor_state.pending.code_lens = None;
             }
-            Err(oneshot::error::TryRecvError::Closed) => { editor_state.pending.code_lens = None; }
-            Err(oneshot::error::TryRecvError::Empty) => { need_repaint = true; }
+            Err(oneshot::error::TryRecvError::Closed) => {
+                editor_state.pending.code_lens = None;
+            }
+            Err(oneshot::error::TryRecvError::Empty) => {
+                need_repaint = true;
+            }
+        }
+    }
+
+    if let Some(rx) = &mut editor_state.pending.code_actions {
+        match rx.try_recv() {
+            Ok(actions) => {
+                if actions.is_empty() {
+                    editor_state.status_msg = Some("No code actions available".to_string());
+                } else {
+                    editor_state.code_actions_popup = Some(actions);
+                    editor_state.code_actions_selected = 0;
+                    editor_state.status_msg = None;
+                }
+                editor_state.pending.code_actions = None;
+            }
+            Err(oneshot::error::TryRecvError::Closed) => {
+                editor_state.pending.code_actions = None;
+            }
+            Err(oneshot::error::TryRecvError::Empty) => {
+                need_repaint = true;
+            }
+        }
+    }
+
+    if let Some(rx) = &mut editor_state.pending.document_symbols {
+        match rx.try_recv() {
+            Ok(symbols) => {
+                if symbols.is_empty() {
+                    editor_state.status_msg = Some("No symbols found".to_string());
+                } else {
+                    editor_state.symbols_popup = Some(symbols);
+                    editor_state.symbols_selected = 0;
+                    editor_state.symbols_filter.clear();
+                    editor_state.status_msg = None;
+                }
+                editor_state.pending.document_symbols = None;
+            }
+            Err(oneshot::error::TryRecvError::Closed) => {
+                editor_state.pending.document_symbols = None;
+            }
+            Err(oneshot::error::TryRecvError::Empty) => {
+                need_repaint = true;
+            }
+        }
+    }
+
+    if let Some(rx) = &mut editor_state.pending.workspace_symbols {
+        match rx.try_recv() {
+            Ok(symbols) => {
+                editor_state.workspace_symbols_popup = Some(symbols);
+                editor_state.workspace_symbols_selected = 0;
+                editor_state.pending.workspace_symbols = None;
+            }
+            Err(oneshot::error::TryRecvError::Closed) => {
+                editor_state.pending.workspace_symbols = None;
+            }
+            Err(oneshot::error::TryRecvError::Empty) => {
+                need_repaint = true;
+            }
+        }
+    }
+
+    if let Some(rx) = &mut editor_state.pending.rename {
+        match rx.try_recv() {
+            Ok(file_edits) => {
+                if file_edits.is_empty() {
+                    editor_state.status_msg = Some("Rename returned no changes".to_string());
+                } else {
+                    let total = editor_state.apply_lsp_file_edits(file_edits);
+                    if total > 0 {
+                        editor_state.lsp_did_change();
+                    }
+                    editor_state.status_msg = Some(format!(
+                        "Renamed: {total} occurrence{}",
+                        if total == 1 { "" } else { "s" }
+                    ));
+                }
+                editor_state.pending.rename = None;
+            }
+            Err(oneshot::error::TryRecvError::Closed) => {
+                editor_state.pending.rename = None;
+            }
+            Err(oneshot::error::TryRecvError::Empty) => {
+                need_repaint = true;
+            }
         }
     }
 
     if need_repaint {
-        ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(16));
     }
 
     // ── Update LSP status and check server health ──
     {
+        if let Some(lsp) = &mut editor_state.lsp {
+            lsp.drain_server_messages();
+        }
+
         let active = editor_state.editor.active;
         if active < editor_state.editor.views.len() {
             let lang_id = editor_state.editor.views[active].lang_id;
@@ -687,7 +919,8 @@ pub(crate) fn render_explorer_view(
                             if let Ok(new_buf) = crate::editor::buffer::Buffer::from_file(&path) {
                                 editor_state.editor.buffers[idx] = new_buf;
                                 editor_state.editor.views[idx].tree_dirty = true;
-                                editor_state.status_msg = Some("File reloaded (external change)".to_string());
+                                editor_state.status_msg =
+                                    Some("File reloaded (external change)".to_string());
                             }
                         }
                     }
@@ -721,15 +954,39 @@ pub(crate) fn render_explorer_view(
             ))
             .resizable(false)
             .show(ui.ctx(), |ui| {
-                ui.label(egui::RichText::new(&msg).size(13.0).color(egui::Color32::from_rgb(210, 215, 225)));
+                ui.label(
+                    egui::RichText::new(&msg)
+                        .size(13.0)
+                        .color(egui::Color32::from_rgb(210, 215, 225)),
+                );
                 ui.add_space(12.0);
                 ui.horizontal(|ui| {
                     if !is_deleted {
-                        if ui.add(egui::Button::new(egui::RichText::new("Reload").size(12.0).color(egui::Color32::WHITE)).fill(egui::Color32::from_rgb(40, 100, 200))).clicked() {
+                        if ui
+                            .add(
+                                egui::Button::new(
+                                    egui::RichText::new("Reload")
+                                        .size(12.0)
+                                        .color(egui::Color32::WHITE),
+                                )
+                                .fill(egui::Color32::from_rgb(40, 100, 200)),
+                            )
+                            .clicked()
+                        {
                             action = Some(true);
                         }
                     }
-                    if ui.add(egui::Button::new(egui::RichText::new("Keep My Version").size(12.0).color(egui::Color32::WHITE)).fill(egui::Color32::from_rgb(50, 52, 62))).clicked() {
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new("Keep My Version")
+                                    .size(12.0)
+                                    .color(egui::Color32::WHITE),
+                            )
+                            .fill(egui::Color32::from_rgb(50, 52, 62)),
+                        )
+                        .clicked()
+                    {
                         action = Some(false);
                     }
                 });
@@ -757,7 +1014,11 @@ pub(crate) fn render_explorer_view(
         let diags = editor_state.lsp.as_ref().and_then(|lsp| {
             let path = editor_state.editor.buffers[active].path()?;
             let d = lsp.get_diagnostics(path);
-            if d.is_empty() { None } else { Some(d.to_vec()) }
+            if d.is_empty() {
+                None
+            } else {
+                Some(d.to_vec())
+            }
         });
 
         let len_before = editor_state.editor.buffers[active].len_chars();
@@ -772,9 +1033,12 @@ pub(crate) fn render_explorer_view(
                 let filtered: Vec<_> = if c.filter.is_empty() {
                     c.items.iter().take(20).cloned().collect()
                 } else {
-                    c.items.iter()
+                    c.items
+                        .iter()
                         .filter(|i| i.label.to_lowercase().contains(&lower))
-                        .take(20).cloned().collect()
+                        .take(20)
+                        .cloned()
+                        .collect()
                 };
                 (filtered, c.selected)
             });
@@ -832,7 +1096,7 @@ pub(crate) fn render_explorer_view(
             &mut editor_state.clipboard_out,
             &mut editor_state.clipboard_in,
             &mut editor_state.editor_search,
-&lsp_status_snapshot,
+            &lsp_status_snapshot,
             config.editor.keybinding_preset,
         );
 
@@ -846,7 +1110,8 @@ pub(crate) fn render_explorer_view(
             let chars_delta = len_after as i64 - len_before as i64;
             if chars_delta > 0 {
                 // Text was inserted: range is empty at cursor_before, new_text is what was inserted
-                let new_text = editor_state.editor.buffers[active].text_range(cursor_before, cursor_after);
+                let new_text =
+                    editor_state.editor.buffers[active].text_range(cursor_before, cursor_after);
                 editor_state.last_edit = Some((cursor_before, cursor_before, new_text));
             } else {
                 // Text was deleted: the range that was removed is from cursor_after to cursor_before
@@ -865,7 +1130,7 @@ pub(crate) fn render_explorer_view(
             let cursor_pos = editor_state.editor.views[active].cursor.pos;
             if cursor_pos.col > 0 {
                 let ch = editor_state.editor.buffers[active].char_at(
-                    crate::editor::buffer::Position::new(cursor_pos.line, cursor_pos.col - 1)
+                    crate::editor::buffer::Position::new(cursor_pos.line, cursor_pos.col - 1),
                 );
                 if ch == Some('(') || ch == Some(',') {
                     editor_state.request_signature_help();
@@ -909,18 +1174,22 @@ pub(crate) fn render_explorer_view(
                     let snapshot = &completion_snapshot;
                     snapshot.as_ref().and_then(|(items, _)| {
                         items.get(comp.selected).map(|item| {
-                            item.insert_text.clone().unwrap_or_else(|| item.label.clone())
+                            item.insert_text
+                                .clone()
+                                .unwrap_or_else(|| item.label.clone())
                         })
                     })
                 };
                 if let Some(insert) = insert_text {
                     let buf = &mut editor_state.editor.buffers[active];
                     let view = &mut editor_state.editor.views[active];
-                    let start = crate::editor::buffer::Position::new(comp.trigger_line, comp.trigger_col);
+                    let start =
+                        crate::editor::buffer::Position::new(comp.trigger_line, comp.trigger_col);
                     let end = view.cursor.pos;
                     buf.replace(start, end, &insert);
                     let new_col = comp.trigger_col + insert.chars().count();
-                    view.cursor.pos = crate::editor::buffer::Position::new(comp.trigger_line, new_col);
+                    view.cursor.pos =
+                        crate::editor::buffer::Position::new(comp.trigger_line, new_col);
                     view.cursor.desired_col = None;
                     view.tree_dirty = true;
                     editor_state.lsp_did_change();
@@ -944,8 +1213,20 @@ pub(crate) fn render_explorer_view(
                 let chars: Vec<char> = line.chars().collect();
                 let mut start = pos.col;
                 let mut end = pos.col;
-                while start > 0 && chars.get(start - 1).is_some_and(|c| c.is_alphanumeric() || *c == '_') { start -= 1; }
-                while end < chars.len() && chars.get(end).is_some_and(|c| c.is_alphanumeric() || *c == '_') { end += 1; }
+                while start > 0
+                    && chars
+                        .get(start - 1)
+                        .is_some_and(|c| c.is_alphanumeric() || *c == '_')
+                {
+                    start -= 1;
+                }
+                while end < chars.len()
+                    && chars
+                        .get(end)
+                        .is_some_and(|c| c.is_alphanumeric() || *c == '_')
+                {
+                    end += 1;
+                }
                 chars[start..end].iter().collect::<String>()
             };
             editor_state.rename_input = Some(word);
@@ -953,13 +1234,7 @@ pub(crate) fn render_explorer_view(
 
         // Code actions
         if frame_result.key_action.code_actions {
-            let actions = editor_state.request_code_actions();
-            if actions.is_empty() {
-                editor_state.status_msg = Some("No code actions available".to_string());
-            } else {
-                editor_state.code_actions_popup = Some(actions);
-                editor_state.code_actions_selected = 0;
-            }
+            editor_state.request_code_actions();
         }
 
         // File finder (Cmd+P)
@@ -969,21 +1244,14 @@ pub(crate) fn render_explorer_view(
 
         // Document symbols
         if frame_result.key_action.document_symbols {
-            let symbols = editor_state.request_document_symbols();
-            if symbols.is_empty() {
-                editor_state.status_msg = Some("No symbols found".to_string());
-            } else {
-                editor_state.symbols_popup = Some(symbols);
-                editor_state.symbols_selected = 0;
-                editor_state.symbols_filter.clear();
-            }
+            editor_state.request_document_symbols();
         }
 
         // Workspace symbols
         if frame_result.key_action.workspace_symbols {
             // Initial query: fetch all symbols with empty query
-            let symbols = editor_state.request_workspace_symbols("");
-            editor_state.workspace_symbols_popup = Some(symbols);
+            editor_state.request_workspace_symbols("");
+            editor_state.workspace_symbols_popup = Some(Vec::new());
             editor_state.workspace_symbols_selected = 0;
             editor_state.workspace_symbols_query.clear();
         }
@@ -1019,7 +1287,8 @@ pub(crate) fn render_explorer_view(
         if editor_state.project_search.active {
             editor_state.project_search.poll();
             if editor_state.project_search.is_searching() {
-                ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+                ui.ctx()
+                    .request_repaint_after(std::time::Duration::from_millis(50));
             }
 
             let mut navigate_to: Option<(std::path::PathBuf, usize, usize)> = None;
@@ -1051,55 +1320,123 @@ pub(crate) fn render_explorer_view(
                         } else {
                             egui::Color32::from_rgb(50, 52, 62)
                         };
-                        if ui.add(egui::Button::new(egui::RichText::new(".*").size(11.0).color(egui::Color32::WHITE)).fill(regex_bg).min_size(egui::Vec2::new(28.0, 20.0))).clicked() {
-                            editor_state.project_search.regex_mode = !editor_state.project_search.regex_mode;
+                        if ui
+                            .add(
+                                egui::Button::new(
+                                    egui::RichText::new(".*")
+                                        .size(11.0)
+                                        .color(egui::Color32::WHITE),
+                                )
+                                .fill(regex_bg)
+                                .min_size(egui::Vec2::new(28.0, 20.0)),
+                            )
+                            .clicked()
+                        {
+                            editor_state.project_search.regex_mode =
+                                !editor_state.project_search.regex_mode;
                         }
 
-                        if ui.add(egui::Button::new(egui::RichText::new("Search").size(12.0).color(egui::Color32::WHITE)).fill(egui::Color32::from_rgb(40, 100, 200))).clicked() {
+                        if ui
+                            .add(
+                                egui::Button::new(
+                                    egui::RichText::new("Search")
+                                        .size(12.0)
+                                        .color(egui::Color32::WHITE),
+                                )
+                                .fill(egui::Color32::from_rgb(40, 100, 200)),
+                            )
+                            .clicked()
+                        {
                             do_search = true;
                         }
                     });
 
-                    if ui.input(|i| i.key_pressed(egui::Key::Escape)) { dismiss = true; }
-                    if ui.input(|i| i.key_pressed(egui::Key::Enter)) { do_search = true; }
+                    if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                        dismiss = true;
+                    }
+                    if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        do_search = true;
+                    }
 
                     ui.separator();
 
                     if editor_state.project_search.is_searching() {
-                        ui.label(egui::RichText::new("Searching...").size(12.0).color(egui::Color32::from_rgb(150, 155, 170)));
+                        ui.label(
+                            egui::RichText::new("Searching...")
+                                .size(12.0)
+                                .color(egui::Color32::from_rgb(150, 155, 170)),
+                        );
                     }
 
                     if let Some(result) = &editor_state.project_search.result {
-                        ui.label(egui::RichText::new(format!("{} matches", result.matches.len())).size(11.0).color(egui::Color32::from_rgb(150, 155, 170)));
+                        ui.label(
+                            egui::RichText::new(format!("{} matches", result.matches.len()))
+                                .size(11.0)
+                                .color(egui::Color32::from_rgb(150, 155, 170)),
+                        );
 
                         let selected = editor_state.project_search.selected;
-                        egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
-                            for (i, m) in result.matches.iter().enumerate() {
-                                let bg = if i == selected { egui::Color32::from_rgb(50, 80, 130) } else { egui::Color32::TRANSPARENT };
-                                let text_color = if i == selected { egui::Color32::WHITE } else { egui::Color32::from_rgb(200, 205, 215) };
-                                let file_name = m.path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
+                        egui::ScrollArea::vertical()
+                            .max_height(320.0)
+                            .show(ui, |ui| {
+                                for (i, m) in result.matches.iter().enumerate() {
+                                    let bg = if i == selected {
+                                        egui::Color32::from_rgb(50, 80, 130)
+                                    } else {
+                                        egui::Color32::TRANSPARENT
+                                    };
+                                    let text_color = if i == selected {
+                                        egui::Color32::WHITE
+                                    } else {
+                                        egui::Color32::from_rgb(200, 205, 215)
+                                    };
+                                    let file_name =
+                                        m.path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
 
-                                egui::Frame::none().fill(bg).inner_margin(egui::Margin::symmetric(4.0, 1.0)).show(ui, |ui| {
-                                    let resp = ui.horizontal(|ui| {
-                                        ui.label(egui::RichText::new(format!("{}:{}", file_name, m.line + 1)).size(11.0).color(egui::Color32::from_rgb(100, 180, 255)).monospace());
-                                        ui.label(egui::RichText::new(&m.line_text).size(11.0).color(text_color).monospace());
-                                    }).response;
-                                    if resp.interact(egui::Sense::click()).clicked() {
-                                        navigate_to = Some((m.path.clone(), m.line, m.col));
-                                    }
-                                });
-                            }
-                        });
+                                    egui::Frame::none()
+                                        .fill(bg)
+                                        .inner_margin(egui::Margin::symmetric(4.0, 1.0))
+                                        .show(ui, |ui| {
+                                            let resp = ui
+                                                .horizontal(|ui| {
+                                                    ui.label(
+                                                        egui::RichText::new(format!(
+                                                            "{}:{}",
+                                                            file_name,
+                                                            m.line + 1
+                                                        ))
+                                                        .size(11.0)
+                                                        .color(egui::Color32::from_rgb(
+                                                            100, 180, 255,
+                                                        ))
+                                                        .monospace(),
+                                                    );
+                                                    ui.label(
+                                                        egui::RichText::new(&m.line_text)
+                                                            .size(11.0)
+                                                            .color(text_color)
+                                                            .monospace(),
+                                                    );
+                                                })
+                                                .response;
+                                            if resp.interact(egui::Sense::click()).clicked() {
+                                                navigate_to = Some((m.path.clone(), m.line, m.col));
+                                            }
+                                        });
+                                }
+                            });
                     }
                 });
 
             // Keyboard nav
             let count = editor_state.project_search.match_count();
             if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
-                editor_state.project_search.selected = (editor_state.project_search.selected + 1).min(count.saturating_sub(1));
+                editor_state.project_search.selected =
+                    (editor_state.project_search.selected + 1).min(count.saturating_sub(1));
             }
             if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
-                editor_state.project_search.selected = editor_state.project_search.selected.saturating_sub(1);
+                editor_state.project_search.selected =
+                    editor_state.project_search.selected.saturating_sub(1);
             }
 
             if do_search {
@@ -1140,33 +1477,54 @@ pub(crate) fn render_explorer_view(
                 ))
                 .resizable(false)
                 .show(ui.ctx(), |ui| {
-                    ui.label(egui::RichText::new("Select a task to run:").size(13.0).color(egui::Color32::WHITE));
+                    ui.label(
+                        egui::RichText::new("Select a task to run:")
+                            .size(13.0)
+                            .color(egui::Color32::WHITE),
+                    );
                     ui.separator();
 
-                    if ui.input(|i| i.key_pressed(egui::Key::Escape)) { dismiss = true; }
+                    if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                        dismiss = true;
+                    }
                     if ui.input(|i| i.key_pressed(egui::Key::Enter)) && !tasks.is_empty() {
                         selected_task = Some(tasks[selected].clone());
                     }
 
                     for (i, task) in tasks.iter().enumerate() {
-                        let bg = if i == selected { egui::Color32::from_rgb(50, 80, 130) } else { egui::Color32::TRANSPARENT };
-                        let text_color = if i == selected { egui::Color32::WHITE } else { egui::Color32::from_rgb(200, 205, 215) };
+                        let bg = if i == selected {
+                            egui::Color32::from_rgb(50, 80, 130)
+                        } else {
+                            egui::Color32::TRANSPARENT
+                        };
+                        let text_color = if i == selected {
+                            egui::Color32::WHITE
+                        } else {
+                            egui::Color32::from_rgb(200, 205, 215)
+                        };
 
-                        egui::Frame::none().fill(bg).inner_margin(egui::Margin::symmetric(8.0, 4.0)).show(ui, |ui| {
-                            let resp = ui.label(egui::RichText::new(&task.name).size(13.0).color(text_color));
-                            if resp.interact(egui::Sense::click()).clicked() {
-                                selected_task = Some(task.clone());
-                            }
-                        });
+                        egui::Frame::none()
+                            .fill(bg)
+                            .inner_margin(egui::Margin::symmetric(8.0, 4.0))
+                            .show(ui, |ui| {
+                                let resp = ui.label(
+                                    egui::RichText::new(&task.name).size(13.0).color(text_color),
+                                );
+                                if resp.interact(egui::Sense::click()).clicked() {
+                                    selected_task = Some(task.clone());
+                                }
+                            });
                     }
                 });
 
             let task_count = editor_state.task_picker.as_ref().map_or(0, |t| t.len());
             if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
-                editor_state.task_picker_selected = (editor_state.task_picker_selected + 1).min(task_count.saturating_sub(1));
+                editor_state.task_picker_selected =
+                    (editor_state.task_picker_selected + 1).min(task_count.saturating_sub(1));
             }
             if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
-                editor_state.task_picker_selected = editor_state.task_picker_selected.saturating_sub(1);
+                editor_state.task_picker_selected =
+                    editor_state.task_picker_selected.saturating_sub(1);
             }
 
             if dismiss {
@@ -1209,50 +1567,93 @@ pub(crate) fn render_explorer_view(
 
                     let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
                     let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
-                    if escape { dismiss = true; }
+                    if escape {
+                        dismiss = true;
+                    }
                     if enter && !symbols.is_empty() {
                         let s = &symbols[selected];
                         navigate_to = Some((s.path.clone(), s.line, s.col));
                     }
 
                     ui.separator();
-                    ui.label(egui::RichText::new(format!("{} symbols", symbols.len())).size(11.0).color(egui::Color32::from_rgb(150, 155, 170)));
+                    ui.label(
+                        egui::RichText::new(format!("{} symbols", symbols.len()))
+                            .size(11.0)
+                            .color(egui::Color32::from_rgb(150, 155, 170)),
+                    );
 
-                    egui::ScrollArea::vertical().max_height(280.0).show(ui, |ui| {
-                        for (i, s) in symbols.iter().enumerate() {
-                            let bg = if i == selected { egui::Color32::from_rgb(50, 80, 130) } else { egui::Color32::TRANSPARENT };
-                            let text_color = if i == selected { egui::Color32::WHITE } else { egui::Color32::from_rgb(200, 205, 215) };
-                            let file_name = s.path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
+                    egui::ScrollArea::vertical()
+                        .max_height(280.0)
+                        .show(ui, |ui| {
+                            for (i, s) in symbols.iter().enumerate() {
+                                let bg = if i == selected {
+                                    egui::Color32::from_rgb(50, 80, 130)
+                                } else {
+                                    egui::Color32::TRANSPARENT
+                                };
+                                let text_color = if i == selected {
+                                    egui::Color32::WHITE
+                                } else {
+                                    egui::Color32::from_rgb(200, 205, 215)
+                                };
+                                let file_name =
+                                    s.path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
 
-                            egui::Frame::none().fill(bg).inner_margin(egui::Margin::symmetric(4.0, 2.0)).show(ui, |ui| {
-                                let resp = ui.horizontal(|ui| {
-                                    ui.label(egui::RichText::new(&s.name).size(12.0).color(text_color).monospace());
-                                    ui.label(egui::RichText::new(&s.kind).size(10.0).color(egui::Color32::from_rgb(120, 130, 160)));
-                                    ui.label(egui::RichText::new(format!("{}:{}", file_name, s.line + 1)).size(10.0).color(egui::Color32::from_rgb(100, 105, 120)));
-                                }).response;
-                                if resp.interact(egui::Sense::click()).clicked() {
-                                    navigate_to = Some((s.path.clone(), s.line, s.col));
-                                }
-                            });
-                        }
-                    });
+                                egui::Frame::none()
+                                    .fill(bg)
+                                    .inner_margin(egui::Margin::symmetric(4.0, 2.0))
+                                    .show(ui, |ui| {
+                                        let resp = ui
+                                            .horizontal(|ui| {
+                                                ui.label(
+                                                    egui::RichText::new(&s.name)
+                                                        .size(12.0)
+                                                        .color(text_color)
+                                                        .monospace(),
+                                                );
+                                                ui.label(
+                                                    egui::RichText::new(&s.kind).size(10.0).color(
+                                                        egui::Color32::from_rgb(120, 130, 160),
+                                                    ),
+                                                );
+                                                ui.label(
+                                                    egui::RichText::new(format!(
+                                                        "{}:{}",
+                                                        file_name,
+                                                        s.line + 1
+                                                    ))
+                                                    .size(10.0)
+                                                    .color(egui::Color32::from_rgb(100, 105, 120)),
+                                                );
+                                            })
+                                            .response;
+                                        if resp.interact(egui::Sense::click()).clicked() {
+                                            navigate_to = Some((s.path.clone(), s.line, s.col));
+                                        }
+                                    });
+                            }
+                        });
                 });
 
             // Keyboard nav
-            let syms_len = editor_state.workspace_symbols_popup.as_ref().map_or(0, |s| s.len());
+            let syms_len = editor_state
+                .workspace_symbols_popup
+                .as_ref()
+                .map_or(0, |s| s.len());
             let down_pressed = ui.input(|i| i.key_pressed(egui::Key::ArrowDown));
             let up_pressed = ui.input(|i| i.key_pressed(egui::Key::ArrowUp));
             if down_pressed {
-                editor_state.workspace_symbols_selected = (editor_state.workspace_symbols_selected + 1).min(syms_len.saturating_sub(1));
+                editor_state.workspace_symbols_selected =
+                    (editor_state.workspace_symbols_selected + 1).min(syms_len.saturating_sub(1));
             }
             if up_pressed {
-                editor_state.workspace_symbols_selected = editor_state.workspace_symbols_selected.saturating_sub(1);
+                editor_state.workspace_symbols_selected =
+                    editor_state.workspace_symbols_selected.saturating_sub(1);
             }
 
             if query_changed {
                 let query = editor_state.workspace_symbols_query.clone();
-                let symbols = editor_state.request_workspace_symbols(&query);
-                editor_state.workspace_symbols_popup = Some(symbols);
+                editor_state.request_workspace_symbols(&query);
                 editor_state.workspace_symbols_selected = 0;
             }
 
@@ -1264,7 +1665,8 @@ pub(crate) fn render_explorer_view(
                 match editor_state.open_file(path) {
                     Ok(idx) => {
                         let view = &mut editor_state.editor.views[idx];
-                        view.cursor.pos = crate::editor::buffer::Position::new(line as usize, col as usize);
+                        view.cursor.pos =
+                            crate::editor::buffer::Position::new(line as usize, col as usize);
                         view.cursor.clear_selection();
                         view.cursor.desired_col = None;
                         editor_state.status_msg = None;
@@ -1289,7 +1691,11 @@ pub(crate) fn render_explorer_view(
                 .default_size(egui::Vec2::new(500.0, 300.0))
                 .resizable(true)
                 .show(ui.ctx(), |ui| {
-                    ui.label(egui::RichText::new(format!("{} references", refs.len())).size(13.0).color(egui::Color32::WHITE));
+                    ui.label(
+                        egui::RichText::new(format!("{} references", refs.len()))
+                            .size(13.0)
+                            .color(egui::Color32::WHITE),
+                    );
                     ui.separator();
 
                     let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
@@ -1297,48 +1703,77 @@ pub(crate) fn render_explorer_view(
                     let _down = ui.input(|i| i.key_pressed(egui::Key::ArrowDown));
                     let _up = ui.input(|i| i.key_pressed(egui::Key::ArrowUp));
 
-                    if escape { dismiss = true; }
+                    if escape {
+                        dismiss = true;
+                    }
                     if enter && !refs.is_empty() {
                         let r = &refs[selected];
                         navigate_to = Some((r.path.clone(), r.line, r.col));
                     }
 
-                    egui::ScrollArea::vertical().max_height(250.0).show(ui, |ui| {
-                        for (i, r) in refs.iter().enumerate() {
-                            let bg = if i == selected {
-                                egui::Color32::from_rgb(50, 80, 130)
-                            } else {
-                                egui::Color32::TRANSPARENT
-                            };
-                            let text_color = if i == selected {
-                                egui::Color32::WHITE
-                            } else {
-                                egui::Color32::from_rgb(200, 205, 215)
-                            };
-                            let file_name = r.path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
+                    egui::ScrollArea::vertical()
+                        .max_height(250.0)
+                        .show(ui, |ui| {
+                            for (i, r) in refs.iter().enumerate() {
+                                let bg = if i == selected {
+                                    egui::Color32::from_rgb(50, 80, 130)
+                                } else {
+                                    egui::Color32::TRANSPARENT
+                                };
+                                let text_color = if i == selected {
+                                    egui::Color32::WHITE
+                                } else {
+                                    egui::Color32::from_rgb(200, 205, 215)
+                                };
+                                let file_name =
+                                    r.path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
 
-                            egui::Frame::none().fill(bg).inner_margin(egui::Margin::symmetric(4.0, 2.0)).show(ui, |ui| {
-                                let resp = ui.horizontal(|ui| {
-                                    ui.label(egui::RichText::new(format!("{}:{}", file_name, r.line + 1)).size(12.0).color(egui::Color32::from_rgb(100, 180, 255)).monospace());
-                                    ui.label(egui::RichText::new(&r.context).size(12.0).color(text_color).monospace());
-                                }).response;
-                                if resp.interact(egui::Sense::click()).clicked() {
-                                    navigate_to = Some((r.path.clone(), r.line, r.col));
-                                }
-                            });
-                        }
-                    });
+                                egui::Frame::none()
+                                    .fill(bg)
+                                    .inner_margin(egui::Margin::symmetric(4.0, 2.0))
+                                    .show(ui, |ui| {
+                                        let resp = ui
+                                            .horizontal(|ui| {
+                                                ui.label(
+                                                    egui::RichText::new(format!(
+                                                        "{}:{}",
+                                                        file_name,
+                                                        r.line + 1
+                                                    ))
+                                                    .size(12.0)
+                                                    .color(egui::Color32::from_rgb(100, 180, 255))
+                                                    .monospace(),
+                                                );
+                                                ui.label(
+                                                    egui::RichText::new(&r.context)
+                                                        .size(12.0)
+                                                        .color(text_color)
+                                                        .monospace(),
+                                                );
+                                            })
+                                            .response;
+                                        if resp.interact(egui::Sense::click()).clicked() {
+                                            navigate_to = Some((r.path.clone(), r.line, r.col));
+                                        }
+                                    });
+                            }
+                        });
                 });
 
             // Apply keyboard nav
-            let refs_len = editor_state.references_popup.as_ref().map_or(0, |r| r.len());
+            let refs_len = editor_state
+                .references_popup
+                .as_ref()
+                .map_or(0, |r| r.len());
             let down_pressed = ui.input(|i| i.key_pressed(egui::Key::ArrowDown));
             let up_pressed = ui.input(|i| i.key_pressed(egui::Key::ArrowUp));
             if down_pressed {
-                editor_state.references_selected = (editor_state.references_selected + 1).min(refs_len.saturating_sub(1));
+                editor_state.references_selected =
+                    (editor_state.references_selected + 1).min(refs_len.saturating_sub(1));
             }
             if up_pressed {
-                editor_state.references_selected = editor_state.references_selected.saturating_sub(1);
+                editor_state.references_selected =
+                    editor_state.references_selected.saturating_sub(1);
             }
 
             if dismiss {
@@ -1349,12 +1784,15 @@ pub(crate) fn render_explorer_view(
                 match editor_state.open_file(path) {
                     Ok(idx) => {
                         let view = &mut editor_state.editor.views[idx];
-                        view.cursor.pos = crate::editor::buffer::Position::new(line as usize, col as usize);
+                        view.cursor.pos =
+                            crate::editor::buffer::Position::new(line as usize, col as usize);
                         view.cursor.clear_selection();
                         view.cursor.desired_col = None;
                         editor_state.status_msg = None;
                     }
-                    Err(e) => editor_state.status_msg = Some(format!("Failed to open reference: {e}")),
+                    Err(e) => {
+                        editor_state.status_msg = Some(format!("Failed to open reference: {e}"))
+                    }
                 }
             }
         }
@@ -1369,7 +1807,9 @@ fn render_image_viewer(ui: &mut egui::Ui, explorer: &mut ExplorerState) {
         if ui
             .add(
                 egui::Button::new(
-                    egui::RichText::new("< Back").size(14.0).color(egui::Color32::from_rgb(100, 180, 255)),
+                    egui::RichText::new("< Back")
+                        .size(14.0)
+                        .color(egui::Color32::from_rgb(100, 180, 255)),
                 )
                 .fill(egui::Color32::TRANSPARENT),
             )
@@ -1377,9 +1817,17 @@ fn render_image_viewer(ui: &mut egui::Ui, explorer: &mut ExplorerState) {
         {
             close = true;
         }
-        ui.label(egui::RichText::new(&file_name).size(18.0).color(egui::Color32::WHITE).strong());
+        ui.label(
+            egui::RichText::new(&file_name)
+                .size(18.0)
+                .color(egui::Color32::WHITE)
+                .strong(),
+        );
     });
-    if close { explorer.close_file(); return; }
+    if close {
+        explorer.close_file();
+        return;
+    }
 
     ui.add_space(8.0);
     ui.separator();
@@ -1388,20 +1836,32 @@ fn render_image_viewer(ui: &mut egui::Ui, explorer: &mut ExplorerState) {
     let open = explorer.open_file.as_mut().unwrap();
     match &mut open.content {
         FileContent::Text(_) => {} // Text files go through editor
-        FileContent::Image { rgba, width, height, texture } => {
+        FileContent::Image {
+            rgba,
+            width,
+            height,
+            texture,
+        } => {
             let handle = texture.get_or_insert_with(|| {
                 ui.ctx().load_texture(
                     "explorer_image",
-                    egui::ColorImage::from_rgba_unmultiplied([*width as usize, *height as usize], rgba),
+                    egui::ColorImage::from_rgba_unmultiplied(
+                        [*width as usize, *height as usize],
+                        rgba,
+                    ),
                     Default::default(),
                 )
             });
             let available = ui.available_size();
-            let scale = (available.x / *width as f32).min(available.y / *height as f32).min(1.0);
+            let scale = (available.x / *width as f32)
+                .min(available.y / *height as f32)
+                .min(1.0);
             let display_size = egui::Vec2::new(*width as f32 * scale, *height as f32 * scale);
-            egui::ScrollArea::both().auto_shrink([false; 2]).show(ui, |ui| {
-                ui.image(egui::load::SizedTexture::new(handle.id(), display_size));
-            });
+            egui::ScrollArea::both()
+                .auto_shrink([false; 2])
+                .show(ui, |ui| {
+                    ui.image(egui::load::SizedTexture::new(handle.id(), display_size));
+                });
         }
     }
 }
@@ -1420,15 +1880,29 @@ fn render_file_browser(
 
     // Header with project root and Cmd+P hint
     ui.horizontal(|ui| {
-        let project_name = explorer.root.file_name()
+        let project_name = explorer
+            .root
+            .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("Project");
-        ui.label(egui::RichText::new(project_name).size(16.0).color(egui::Color32::WHITE).strong());
+        ui.label(
+            egui::RichText::new(project_name)
+                .size(16.0)
+                .color(egui::Color32::WHITE)
+                .strong(),
+        );
         ui.add_space(12.0);
-        if ui.add(
-            egui::Button::new(egui::RichText::new("Find File").size(12.0).color(egui::Color32::from_rgb(100, 180, 255)))
+        if ui
+            .add(
+                egui::Button::new(
+                    egui::RichText::new("Find File")
+                        .size(12.0)
+                        .color(egui::Color32::from_rgb(100, 180, 255)),
+                )
                 .fill(egui::Color32::TRANSPARENT),
-        ).clicked() {
+            )
+            .clicked()
+        {
             explorer.open_finder();
         }
     });
@@ -1438,33 +1912,39 @@ fn render_file_browser(
     ui.add_space(4.0);
 
     if let Some(err) = &explorer.error {
-        ui.label(egui::RichText::new(err).size(14.0).color(egui::Color32::from_rgb(255, 100, 100)));
+        ui.label(
+            egui::RichText::new(err)
+                .size(14.0)
+                .color(egui::Color32::from_rgb(255, 100, 100)),
+        );
         ui.add_space(8.0);
     }
 
     // File tree
-    egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
-        // Collect click actions to apply after iteration (avoid borrow conflicts)
-        let mut action: Option<TreeAction> = None;
-        render_tree_nodes(ui, &mut explorer.tree, &explorer.root, 0, &mut action, 13.0);
+    egui::ScrollArea::vertical()
+        .auto_shrink([false; 2])
+        .show(ui, |ui| {
+            // Collect click actions to apply after iteration (avoid borrow conflicts)
+            let mut action: Option<TreeAction> = None;
+            render_tree_nodes(ui, &mut explorer.tree, &explorer.root, 0, &mut action, 13.0);
 
-        match action {
-            Some(TreeAction::OpenFile(path)) => {
-                if is_image_ext(&path) {
-                    explorer.open(path);
-                } else {
-                    match editor_state.open_file(path) {
-                        Ok(_) => editor_state.status_msg = None,
-                        Err(e) => editor_state.status_msg = Some(e),
+            match action {
+                Some(TreeAction::OpenFile(path)) => {
+                    if is_image_ext(&path) {
+                        explorer.open(path);
+                    } else {
+                        match editor_state.open_file(path) {
+                            Ok(_) => editor_state.status_msg = None,
+                            Err(e) => editor_state.status_msg = Some(e),
+                        }
                     }
                 }
+                Some(TreeAction::Toggle(indices)) => {
+                    toggle_at(&mut explorer.tree, &indices);
+                }
+                _ => {} // Other actions not used in standalone file browser
             }
-            Some(TreeAction::Toggle(indices)) => {
-                toggle_at(&mut explorer.tree, &indices);
-            }
-            _ => {} // Other actions not used in standalone file browser
-        }
-    });
+        });
 }
 
 enum TreeAction {
@@ -1499,7 +1979,9 @@ fn render_tree_nodes(
     let dim_color = egui::Color32::from_rgb(120, 120, 130);
 
     for (i, node) in nodes.iter().enumerate() {
-        if action.is_some() { break; } // Only one action per frame
+        if action.is_some() {
+            break;
+        } // Only one action per frame
 
         let resp = ui.horizontal(|ui| {
             ui.add_space(indent);
@@ -1508,8 +1990,13 @@ fn render_tree_nodes(
                 let folder_icon = if node.expanded { "v " } else { "> " };
                 let label = format!("{folder_icon}{}", node.name);
                 let resp = ui.add(
-                    egui::Label::new(egui::RichText::new(&label).size(font_size).color(dir_color).strong())
-                        .sense(egui::Sense::click()),
+                    egui::Label::new(
+                        egui::RichText::new(&label)
+                            .size(font_size)
+                            .color(dir_color)
+                            .strong(),
+                    )
+                    .sense(egui::Sense::click()),
                 );
                 if resp.clicked() {
                     let mut indices = Vec::new();
@@ -1520,14 +2007,27 @@ fn render_tree_nodes(
             } else {
                 // File type icon
                 if let Some((icon, color)) = file_type_icon(&node.name) {
-                    ui.label(egui::RichText::new(icon).size(font_size).color(color).strong());
+                    ui.label(
+                        egui::RichText::new(icon)
+                            .size(font_size)
+                            .color(color)
+                            .strong(),
+                    );
                 }
                 let resp = ui.add(
-                    egui::Label::new(egui::RichText::new(&node.name).size(font_size).color(file_color))
-                        .sense(egui::Sense::click()),
+                    egui::Label::new(
+                        egui::RichText::new(&node.name)
+                            .size(font_size)
+                            .color(file_color),
+                    )
+                    .sense(egui::Sense::click()),
                 );
                 if node.size > 0 {
-                    ui.label(egui::RichText::new(format_size(node.size)).size(font_size - 2.0).color(dim_color));
+                    ui.label(
+                        egui::RichText::new(format_size(node.size))
+                            .size(font_size - 2.0)
+                            .color(dim_color),
+                    );
                 }
                 if resp.clicked() {
                     *action = Some(TreeAction::OpenFile(node.path.clone()));
@@ -1547,7 +2047,15 @@ fn render_tree_nodes(
         if node.is_dir && node.expanded {
             if let Some(children) = &node.children {
                 let mut child_action: Option<TreeAction> = None;
-                render_tree_children(ui, children, root, depth + 1, &mut child_action, &[i], font_size);
+                render_tree_children(
+                    ui,
+                    children,
+                    root,
+                    depth + 1,
+                    &mut child_action,
+                    &[i],
+                    font_size,
+                );
                 if child_action.is_some() && action.is_none() {
                     *action = child_action;
                 }
@@ -1572,7 +2080,9 @@ fn render_tree_children(
     let dim_color = egui::Color32::from_rgb(120, 120, 130);
 
     for (i, node) in nodes.iter().enumerate() {
-        if action.is_some() { break; }
+        if action.is_some() {
+            break;
+        }
 
         let resp = ui.horizontal(|ui| {
             ui.add_space(indent);
@@ -1580,8 +2090,13 @@ fn render_tree_children(
                 let folder_icon = if node.expanded { "v " } else { "> " };
                 let label = format!("{folder_icon}{}", node.name);
                 let resp = ui.add(
-                    egui::Label::new(egui::RichText::new(&label).size(font_size).color(dir_color).strong())
-                        .sense(egui::Sense::click()),
+                    egui::Label::new(
+                        egui::RichText::new(&label)
+                            .size(font_size)
+                            .color(dir_color)
+                            .strong(),
+                    )
+                    .sense(egui::Sense::click()),
                 );
                 if resp.clicked() {
                     let mut indices: Vec<usize> = parent_path.to_vec();
@@ -1592,14 +2107,27 @@ fn render_tree_children(
             } else {
                 // File type icon
                 if let Some((icon, color)) = file_type_icon(&node.name) {
-                    ui.label(egui::RichText::new(icon).size(font_size).color(color).strong());
+                    ui.label(
+                        egui::RichText::new(icon)
+                            .size(font_size)
+                            .color(color)
+                            .strong(),
+                    );
                 }
                 let resp = ui.add(
-                    egui::Label::new(egui::RichText::new(&node.name).size(font_size).color(file_color))
-                        .sense(egui::Sense::click()),
+                    egui::Label::new(
+                        egui::RichText::new(&node.name)
+                            .size(font_size)
+                            .color(file_color),
+                    )
+                    .sense(egui::Sense::click()),
                 );
                 if node.size > 0 {
-                    ui.label(egui::RichText::new(format_size(node.size)).size(font_size - 2.0).color(dim_color));
+                    ui.label(
+                        egui::RichText::new(format_size(node.size))
+                            .size(font_size - 2.0)
+                            .color(dim_color),
+                    );
                 }
                 if resp.clicked() {
                     *action = Some(TreeAction::OpenFile(node.path.clone()));
@@ -1658,7 +2186,10 @@ fn render_tree_context_menu(
         }
     }
     ui.separator();
-    if ui.button(egui::RichText::new("Delete").color(egui::Color32::from_rgb(220, 80, 80))).clicked() {
+    if ui
+        .button(egui::RichText::new("Delete").color(egui::Color32::from_rgb(220, 80, 80)))
+        .clicked()
+    {
         *action = Some(TreeAction::Delete(path.to_path_buf()));
         ui.close_menu();
     }
@@ -1666,9 +2197,13 @@ fn render_tree_context_menu(
 
 /// Toggle a tree node at the given index path.
 fn toggle_at(tree: &mut [crate::explorer::TreeNode], indices: &[usize]) {
-    if indices.is_empty() { return; }
+    if indices.is_empty() {
+        return;
+    }
     let idx = indices[0];
-    if idx >= tree.len() { return; }
+    if idx >= tree.len() {
+        return;
+    }
     if indices.len() == 1 {
         tree[idx].toggle();
     } else if let Some(children) = &mut tree[idx].children {
@@ -1684,11 +2219,17 @@ fn render_finder(
 ) {
     explorer.poll_file_index();
     if explorer.is_indexing() {
-        ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(50));
     }
 
     ui.vertical(|ui| {
-        ui.label(egui::RichText::new("Find File").size(16.0).color(egui::Color32::WHITE).strong());
+        ui.label(
+            egui::RichText::new("Find File")
+                .size(16.0)
+                .color(egui::Color32::WHITE)
+                .strong(),
+        );
         ui.add_space(4.0);
 
         // Search input
@@ -1718,7 +2259,8 @@ fn render_finder(
             return;
         }
         if down {
-            explorer.finder_selected = (explorer.finder_selected + 1).min(explorer.finder_results.len().saturating_sub(1));
+            explorer.finder_selected =
+                (explorer.finder_selected + 1).min(explorer.finder_results.len().saturating_sub(1));
         }
         if up {
             explorer.finder_selected = explorer.finder_selected.saturating_sub(1);
@@ -1743,79 +2285,107 @@ fn render_finder(
 
         // Results
         let selected_color = egui::Color32::from_rgb(50, 80, 130);
-        egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
-            if explorer.is_indexing() && explorer.finder_results.is_empty() {
-                ui.label(
-                    egui::RichText::new("Indexing project files...")
-                        .size(13.0)
-                        .color(egui::Color32::from_rgb(150, 155, 170)),
-                );
-            }
-            for (i, path) in explorer.finder_results.iter().enumerate() {
-                let rel = explorer.relative_path(path);
-                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-
-                let bg = if i == explorer.finder_selected { selected_color } else { egui::Color32::TRANSPARENT };
-                let text_color = if i == explorer.finder_selected { egui::Color32::WHITE } else { egui::Color32::from_rgb(200, 205, 215) };
-
-                let frame = egui::Frame::none().fill(bg).inner_margin(egui::Margin::symmetric(4.0, 2.0));
-                frame.show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new(name).size(13.0).color(text_color));
-                        ui.label(egui::RichText::new(&rel).size(11.0).color(egui::Color32::from_rgb(100, 105, 120)));
-                    });
-                });
-
-                // Click to select
-                let resp = ui.interact(ui.min_rect(), egui::Id::new(("finder_item", i)), egui::Sense::click());
-                if resp.clicked() {
-                    let path = path.clone();
-                    explorer.close_finder();
-                    if is_image_ext(&path) {
-                        explorer.open(path);
-                    } else {
-                        match editor_state.open_file(path) {
-                            Ok(_) => editor_state.status_msg = None,
-                            Err(e) => editor_state.status_msg = Some(e),
-                        }
-                    }
-                    return;
+        egui::ScrollArea::vertical()
+            .auto_shrink([false; 2])
+            .show(ui, |ui| {
+                if explorer.is_indexing() && explorer.finder_results.is_empty() {
+                    ui.label(
+                        egui::RichText::new("Indexing project files...")
+                            .size(13.0)
+                            .color(egui::Color32::from_rgb(150, 155, 170)),
+                    );
                 }
-            }
-        });
+                for (i, path) in explorer.finder_results.iter().enumerate() {
+                    let rel = explorer.relative_path(path);
+                    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+
+                    let bg = if i == explorer.finder_selected {
+                        selected_color
+                    } else {
+                        egui::Color32::TRANSPARENT
+                    };
+                    let text_color = if i == explorer.finder_selected {
+                        egui::Color32::WHITE
+                    } else {
+                        egui::Color32::from_rgb(200, 205, 215)
+                    };
+
+                    let frame = egui::Frame::none()
+                        .fill(bg)
+                        .inner_margin(egui::Margin::symmetric(4.0, 2.0));
+                    frame.show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new(name).size(13.0).color(text_color));
+                            ui.label(
+                                egui::RichText::new(&rel)
+                                    .size(11.0)
+                                    .color(egui::Color32::from_rgb(100, 105, 120)),
+                            );
+                        });
+                    });
+
+                    // Click to select
+                    let resp = ui.interact(
+                        ui.min_rect(),
+                        egui::Id::new(("finder_item", i)),
+                        egui::Sense::click(),
+                    );
+                    if resp.clicked() {
+                        let path = path.clone();
+                        explorer.close_finder();
+                        if is_image_ext(&path) {
+                            explorer.open(path);
+                        } else {
+                            match editor_state.open_file(path) {
+                                Ok(_) => editor_state.status_msg = None,
+                                Err(e) => editor_state.status_msg = Some(e),
+                            }
+                        }
+                        return;
+                    }
+                }
+            });
     });
 }
 
 fn is_image_ext(path: &std::path::Path) -> bool {
-    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
-    matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp" | "tiff" | "tif" | "ico")
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    matches!(
+        ext.as_str(),
+        "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp" | "tiff" | "tif" | "ico"
+    )
 }
 
 /// Return a (label, color) file-type indicator based on the file extension.
 fn file_type_icon(name: &str) -> Option<(&'static str, egui::Color32)> {
     let ext = name.rsplit('.').next().unwrap_or("").to_lowercase();
     match ext.as_str() {
-        "rs" => Some(("R", egui::Color32::from_rgb(230, 140, 60))),       // orange
+        "rs" => Some(("R", egui::Color32::from_rgb(230, 140, 60))), // orange
         "js" | "jsx" | "mjs" | "cjs" => Some(("J", egui::Color32::from_rgb(240, 220, 80))), // yellow
-        "ts" | "tsx" => Some(("T", egui::Color32::from_rgb(70, 140, 230))),  // blue
-        "py" | "pyi" => Some(("P", egui::Color32::from_rgb(80, 140, 220))), // blue
-        "go" => Some(("G", egui::Color32::from_rgb(80, 200, 200))),        // cyan
+        "ts" | "tsx" => Some(("T", egui::Color32::from_rgb(70, 140, 230))),                 // blue
+        "py" | "pyi" => Some(("P", egui::Color32::from_rgb(80, 140, 220))),                 // blue
+        "go" => Some(("G", egui::Color32::from_rgb(80, 200, 200))),                         // cyan
         "json" | "jsonc" => Some(("{", egui::Color32::from_rgb(240, 220, 80))), // yellow
-        "md" | "mdx" => Some(("#", egui::Color32::from_rgb(100, 200, 120))), // green
+        "md" | "mdx" => Some(("#", egui::Color32::from_rgb(100, 200, 120))),    // green
         "toml" | "yaml" | "yml" => Some(("*", egui::Color32::from_rgb(180, 140, 220))), // purple
-        "html" | "htm" => Some(("<", egui::Color32::from_rgb(230, 120, 80))), // orange-red
+        "html" | "htm" => Some(("<", egui::Color32::from_rgb(230, 120, 80))),   // orange-red
         "css" | "scss" | "sass" | "less" => Some(("S", egui::Color32::from_rgb(80, 160, 230))), // blue
         "sh" | "bash" | "zsh" | "fish" => Some(("$", egui::Color32::from_rgb(130, 200, 130))), // green
-        "c" | "h" => Some(("C", egui::Color32::from_rgb(100, 160, 230))),  // blue
+        "c" | "h" => Some(("C", egui::Color32::from_rgb(100, 160, 230))), // blue
         "cpp" | "cc" | "cxx" | "hpp" | "hxx" => Some(("C", egui::Color32::from_rgb(130, 100, 230))), // purple
-        "java" => Some(("J", egui::Color32::from_rgb(230, 100, 80))),      // red-orange
-        "rb" => Some(("R", egui::Color32::from_rgb(220, 70, 70))),         // red
-        "swift" => Some(("S", egui::Color32::from_rgb(230, 120, 60))),     // orange
-        "lua" => Some(("L", egui::Color32::from_rgb(80, 80, 230))),        // blue
-        "sql" => Some(("Q", egui::Color32::from_rgb(200, 180, 80))),       // gold
-        "lock" => Some(("L", egui::Color32::from_rgb(120, 120, 130))),     // dim
-        "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp" | "svg" | "ico" =>
-            Some(("I", egui::Color32::from_rgb(180, 130, 220))), // purple
+        "java" => Some(("J", egui::Color32::from_rgb(230, 100, 80))), // red-orange
+        "rb" => Some(("R", egui::Color32::from_rgb(220, 70, 70))),    // red
+        "swift" => Some(("S", egui::Color32::from_rgb(230, 120, 60))), // orange
+        "lua" => Some(("L", egui::Color32::from_rgb(80, 80, 230))),   // blue
+        "sql" => Some(("Q", egui::Color32::from_rgb(200, 180, 80))),  // gold
+        "lock" => Some(("L", egui::Color32::from_rgb(120, 120, 130))), // dim
+        "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp" | "svg" | "ico" => {
+            Some(("I", egui::Color32::from_rgb(180, 130, 220)))
+        } // purple
         _ => None,
     }
 }
@@ -1831,7 +2401,11 @@ pub(crate) fn render_sidebar_tree(
     // ── Render rename input modal ──
     if editor_state.sidebar_rename.is_some() {
         let (rename_path, mut rename_text) = editor_state.sidebar_rename.take().unwrap();
-        let file_name = rename_path.file_name().and_then(|n| n.to_str()).unwrap_or("file").to_string();
+        let file_name = rename_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("file")
+            .to_string();
         let mut done = false;
         let mut cancel = false;
         egui::Window::new("Rename")
@@ -1842,7 +2416,11 @@ pub(crate) fn render_sidebar_tree(
             ))
             .resizable(false)
             .show(ui.ctx(), |ui| {
-                ui.label(egui::RichText::new(format!("Rename: {file_name}")).size(13.0).color(egui::Color32::WHITE));
+                ui.label(
+                    egui::RichText::new(format!("Rename: {file_name}"))
+                        .size(13.0)
+                        .color(egui::Color32::WHITE),
+                );
                 ui.add_space(4.0);
                 let resp = ui.add(
                     egui::TextEdit::singleline(&mut rename_text)
@@ -1851,14 +2429,39 @@ pub(crate) fn render_sidebar_tree(
                         .font(egui::TextStyle::Monospace),
                 );
                 resp.request_focus();
-                if ui.input(|i| i.key_pressed(egui::Key::Escape)) { cancel = true; }
-                if ui.input(|i| i.key_pressed(egui::Key::Enter)) && !rename_text.trim().is_empty() { done = true; }
+                if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    cancel = true;
+                }
+                if ui.input(|i| i.key_pressed(egui::Key::Enter)) && !rename_text.trim().is_empty() {
+                    done = true;
+                }
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
-                    if ui.add(egui::Button::new(egui::RichText::new("Rename").size(12.0).color(egui::Color32::WHITE)).fill(egui::Color32::from_rgb(40, 100, 200))).clicked() && !rename_text.trim().is_empty() {
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new("Rename")
+                                    .size(12.0)
+                                    .color(egui::Color32::WHITE),
+                            )
+                            .fill(egui::Color32::from_rgb(40, 100, 200)),
+                        )
+                        .clicked()
+                        && !rename_text.trim().is_empty()
+                    {
                         done = true;
                     }
-                    if ui.add(egui::Button::new(egui::RichText::new("Cancel").size(12.0).color(egui::Color32::WHITE)).fill(egui::Color32::from_rgb(50, 52, 62))).clicked() {
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new("Cancel")
+                                    .size(12.0)
+                                    .color(egui::Color32::WHITE),
+                            )
+                            .fill(egui::Color32::from_rgb(50, 52, 62)),
+                        )
+                        .clicked()
+                    {
                         cancel = true;
                     }
                 });
@@ -1887,7 +2490,10 @@ pub(crate) fn render_sidebar_tree(
 
     // ── Render delete confirmation modal ──
     if let Some(ref delete_path) = editor_state.sidebar_delete_confirm.clone() {
-        let display_name = delete_path.file_name().and_then(|n| n.to_str()).unwrap_or("item");
+        let display_name = delete_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("item");
         let is_dir = delete_path.is_dir();
         let mut confirm = false;
         let mut cancel = false;
@@ -1899,17 +2505,45 @@ pub(crate) fn render_sidebar_tree(
             ))
             .resizable(false)
             .show(ui.ctx(), |ui| {
-                ui.label(egui::RichText::new(format!("Delete \"{display_name}\"? This cannot be undone.")).size(13.0).color(egui::Color32::from_rgb(210, 215, 225)));
+                ui.label(
+                    egui::RichText::new(format!(
+                        "Delete \"{display_name}\"? This cannot be undone."
+                    ))
+                    .size(13.0)
+                    .color(egui::Color32::from_rgb(210, 215, 225)),
+                );
                 ui.add_space(12.0);
                 ui.horizontal(|ui| {
-                    if ui.add(egui::Button::new(egui::RichText::new("Delete").size(12.0).color(egui::Color32::WHITE)).fill(egui::Color32::from_rgb(180, 50, 50))).clicked() {
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new("Delete")
+                                    .size(12.0)
+                                    .color(egui::Color32::WHITE),
+                            )
+                            .fill(egui::Color32::from_rgb(180, 50, 50)),
+                        )
+                        .clicked()
+                    {
                         confirm = true;
                     }
-                    if ui.add(egui::Button::new(egui::RichText::new("Cancel").size(12.0).color(egui::Color32::WHITE)).fill(egui::Color32::from_rgb(50, 52, 62))).clicked() {
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new("Cancel")
+                                    .size(12.0)
+                                    .color(egui::Color32::WHITE),
+                            )
+                            .fill(egui::Color32::from_rgb(50, 52, 62)),
+                        )
+                        .clicked()
+                    {
                         cancel = true;
                     }
                 });
-                if ui.input(|i| i.key_pressed(egui::Key::Escape)) { cancel = true; }
+                if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    cancel = true;
+                }
             });
 
         if confirm {
@@ -1933,7 +2567,8 @@ pub(crate) fn render_sidebar_tree(
 
     // ── Render new file/folder input modal ──
     if editor_state.sidebar_new_entry.is_some() {
-        let (parent_dir, mut input_text, is_folder) = editor_state.sidebar_new_entry.take().unwrap();
+        let (parent_dir, mut input_text, is_folder) =
+            editor_state.sidebar_new_entry.take().unwrap();
         let kind = if is_folder { "Folder" } else { "File" };
         let mut done = false;
         let mut cancel = false;
@@ -1945,7 +2580,11 @@ pub(crate) fn render_sidebar_tree(
             ))
             .resizable(false)
             .show(ui.ctx(), |ui| {
-                ui.label(egui::RichText::new(format!("New {kind} name:")).size(13.0).color(egui::Color32::WHITE));
+                ui.label(
+                    egui::RichText::new(format!("New {kind} name:"))
+                        .size(13.0)
+                        .color(egui::Color32::WHITE),
+                );
                 ui.add_space(4.0);
                 let resp = ui.add(
                     egui::TextEdit::singleline(&mut input_text)
@@ -1954,14 +2593,39 @@ pub(crate) fn render_sidebar_tree(
                         .font(egui::TextStyle::Monospace),
                 );
                 resp.request_focus();
-                if ui.input(|i| i.key_pressed(egui::Key::Escape)) { cancel = true; }
-                if ui.input(|i| i.key_pressed(egui::Key::Enter)) && !input_text.trim().is_empty() { done = true; }
+                if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    cancel = true;
+                }
+                if ui.input(|i| i.key_pressed(egui::Key::Enter)) && !input_text.trim().is_empty() {
+                    done = true;
+                }
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
-                    if ui.add(egui::Button::new(egui::RichText::new("Create").size(12.0).color(egui::Color32::WHITE)).fill(egui::Color32::from_rgb(40, 100, 200))).clicked() && !input_text.trim().is_empty() {
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new("Create")
+                                    .size(12.0)
+                                    .color(egui::Color32::WHITE),
+                            )
+                            .fill(egui::Color32::from_rgb(40, 100, 200)),
+                        )
+                        .clicked()
+                        && !input_text.trim().is_empty()
+                    {
                         done = true;
                     }
-                    if ui.add(egui::Button::new(egui::RichText::new("Cancel").size(12.0).color(egui::Color32::WHITE)).fill(egui::Color32::from_rgb(50, 52, 62))).clicked() {
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new("Cancel")
+                                    .size(12.0)
+                                    .color(egui::Color32::WHITE),
+                            )
+                            .fill(egui::Color32::from_rgb(50, 52, 62)),
+                        )
+                        .clicked()
+                    {
                         cancel = true;
                     }
                 });
@@ -1996,7 +2660,14 @@ pub(crate) fn render_sidebar_tree(
 
     // ── Render tree ──
     let mut action: Option<TreeAction> = None;
-    render_tree_nodes(ui, &explorer.tree, &explorer.root, 0, &mut action, sidebar_font_size);
+    render_tree_nodes(
+        ui,
+        &explorer.tree,
+        &explorer.root,
+        0,
+        &mut action,
+        sidebar_font_size,
+    );
 
     match action {
         Some(TreeAction::OpenFile(path)) => {
@@ -2027,7 +2698,11 @@ pub(crate) fn render_sidebar_tree(
             editor_state.status_msg = Some("Copied relative path".to_string());
         }
         Some(TreeAction::Rename(path)) => {
-            let current_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+            let current_name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_string();
             editor_state.sidebar_rename = Some((path, current_name));
         }
         Some(TreeAction::Delete(path)) => {

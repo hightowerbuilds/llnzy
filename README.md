@@ -41,7 +41,7 @@ Requires Rust 1.75+ and a GPU that supports wgpu (Metal on macOS, Vulkan/DX12 el
 
 **Themes** -- Built-in presets plus custom theme creation. Save your colors, effects, and background as a named theme. Per-view application (terminal only, editor too, etc.). Background image library with persistent gallery.
 
-**Workspaces** -- Bundle a theme, a project folder, and a tab layout into a named workspace. Launch from the Home screen to restore everything at once. Session auto-save on close.
+**Workspaces** -- Bundle a theme, a project folder, and a tab layout into a named workspace. Launch from the Home screen to restore everything at once. The last session is saved on close and restored on startup.
 
 **Keybinding Presets** -- VS Code (default), Vim (normal/insert/visual modes with motions), Emacs (Ctrl chords). Cross-platform modifier handling (Cmd on macOS, Ctrl on Linux/Windows).
 

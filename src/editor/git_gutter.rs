@@ -99,8 +99,11 @@ impl GitGutter {
         let mut li = 0usize; // index into lcs
 
         while bi < base.len() || ci < curr.len() {
-            if li < lcs.len() && bi < base.len() && ci < curr.len()
-                && base[bi] == lcs[li] && curr[ci] == lcs[li]
+            if li < lcs.len()
+                && bi < base.len()
+                && ci < curr.len()
+                && base[bi] == lcs[li]
+                && curr[ci] == lcs[li]
             {
                 // Lines match -- advance all three
                 bi += 1;
@@ -272,7 +275,11 @@ mod tests {
 
     #[test]
     fn no_changes_produces_no_hunks() {
-        let base = vec!["line1".to_string(), "line2".to_string(), "line3".to_string()];
+        let base = vec![
+            "line1".to_string(),
+            "line2".to_string(),
+            "line3".to_string(),
+        ];
         let curr = vec!["line1", "line2", "line3"];
         let mut gutter = GitGutter {
             base_lines: base,
@@ -303,7 +310,11 @@ mod tests {
 
     #[test]
     fn deleted_lines_detected() {
-        let base = vec!["line1".to_string(), "line2".to_string(), "line3".to_string()];
+        let base = vec![
+            "line1".to_string(),
+            "line2".to_string(),
+            "line3".to_string(),
+        ];
         let curr = vec!["line1", "line3"];
         let mut gutter = GitGutter {
             base_lines: base,
@@ -318,7 +329,11 @@ mod tests {
 
     #[test]
     fn modified_lines_detected() {
-        let base = vec!["line1".to_string(), "old_line".to_string(), "line3".to_string()];
+        let base = vec![
+            "line1".to_string(),
+            "old_line".to_string(),
+            "line3".to_string(),
+        ];
         let curr = vec!["line1", "new_line", "line3"];
         let mut gutter = GitGutter {
             base_lines: base,

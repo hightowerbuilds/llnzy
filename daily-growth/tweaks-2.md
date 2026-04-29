@@ -1,7 +1,8 @@
 - word wrap in the sidebar
 - x buttons dont work
 - tab bar needs to be taller/bigger
+- tab buttons dont do anything
 - footer is too small, bigger/bigger font
 - finish set up with appearance
-- wisp flow 2 second latency
+- wisp flow 2 second latency, 6 seconds
 - fix the background image changing

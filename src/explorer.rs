@@ -11,9 +11,22 @@ const MAX_INDEX_FILES: usize = 10_000;
 
 /// Directories and patterns to always ignore.
 const IGNORED_DIRS: &[&str] = &[
-    ".git", "node_modules", "target", "__pycache__", ".venv", "venv",
-    ".mypy_cache", ".pytest_cache", ".tox", "dist", "build", ".next",
-    ".nuxt", ".svelte-kit", ".turbo", ".cache",
+    ".git",
+    "node_modules",
+    "target",
+    "__pycache__",
+    ".venv",
+    "venv",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".tox",
+    "dist",
+    "build",
+    ".next",
+    ".nuxt",
+    ".svelte-kit",
+    ".turbo",
+    ".cache",
 ];
 
 pub struct DirEntry {
@@ -51,11 +64,25 @@ pub struct TreeNode {
 
 impl TreeNode {
     fn file(name: String, path: PathBuf, size: u64) -> Self {
-        Self { name, path, is_dir: false, size, children: None, expanded: false }
+        Self {
+            name,
+            path,
+            is_dir: false,
+            size,
+            children: None,
+            expanded: false,
+        }
     }
 
     fn dir(name: String, path: PathBuf) -> Self {
-        Self { name, path, is_dir: true, size: 0, children: None, expanded: false }
+        Self {
+            name,
+            path,
+            is_dir: true,
+            size: 0,
+            children: None,
+            expanded: false,
+        }
     }
 
     /// Load children if not already loaded.
@@ -226,7 +253,12 @@ impl ExplorerState {
                 self.open_file = Some(OpenFile {
                     path,
                     name,
-                    content: FileContent::Image { rgba, width, height, texture: None },
+                    content: FileContent::Image {
+                        rgba,
+                        width,
+                        height,
+                        texture: None,
+                    },
                 });
             }
             Err(e) => self.error = Some(format!("Cannot decode image: {e}")),
@@ -294,7 +326,9 @@ impl ExplorerState {
     }
 
     fn refresh_finder_results(&mut self) {
-        let Some(index) = &self.file_index else { return };
+        let Some(index) = &self.file_index else {
+            return;
+        };
         let query = self.finder_query.to_lowercase();
 
         if query.is_empty() {
@@ -347,7 +381,9 @@ fn walk_files_capped(root: &Path, max_files: usize) -> Vec<PathBuf> {
         if files.len() >= max_files {
             break;
         }
-        let Ok(entries) = fs::read_dir(&dir) else { continue };
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
 
         for entry in entries.flatten() {
             if files.len() >= max_files {
@@ -398,8 +434,15 @@ fn fuzzy_match(query: &str, target: &str) -> bool {
 }
 
 fn is_image(path: &Path) -> bool {
-    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
-    matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp" | "tiff" | "tif" | "ico")
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    matches!(
+        ext.as_str(),
+        "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp" | "tiff" | "tif" | "ico"
+    )
 }
 
 pub fn format_size(bytes: u64) -> String {
@@ -420,11 +463,8 @@ mod tests {
 
     #[test]
     fn file_index_builds_on_background_thread() {
-        let root = std::env::temp_dir().join(format!(
-            "llnzy_file_index_{}_{}",
-            std::process::id(),
-            1
-        ));
+        let root =
+            std::env::temp_dir().join(format!("llnzy_file_index_{}_{}", std::process::id(), 1));
         let nested = root.join("src");
         std::fs::create_dir_all(&nested).unwrap();
         std::fs::write(root.join("README.md"), "# test").unwrap();
@@ -443,12 +483,10 @@ mod tests {
         }
 
         assert!(explorer.file_index.is_some());
-        assert!(
-            explorer
-                .finder_results
-                .iter()
-                .any(|path| path.file_name().is_some_and(|name| name == "main.rs"))
-        );
+        assert!(explorer
+            .finder_results
+            .iter()
+            .any(|path| path.file_name().is_some_and(|name| name == "main.rs")));
         let _ = std::fs::remove_dir_all(root);
     }
 }
@@ -461,19 +499,34 @@ fn recent_projects_path() -> Option<PathBuf> {
 
 /// Load recent project paths from disk.
 pub fn load_recent_projects() -> Vec<PathBuf> {
-    let Some(path) = recent_projects_path() else { return Vec::new() };
-    let Ok(data) = fs::read_to_string(&path) else { return Vec::new() };
-    let Ok(paths) = serde_json::from_str::<Vec<String>>(&data) else { return Vec::new() };
-    paths.into_iter().map(PathBuf::from).filter(|p| p.exists()).collect()
+    let Some(path) = recent_projects_path() else {
+        return Vec::new();
+    };
+    let Ok(data) = fs::read_to_string(&path) else {
+        return Vec::new();
+    };
+    let Ok(paths) = serde_json::from_str::<Vec<String>>(&data) else {
+        return Vec::new();
+    };
+    paths
+        .into_iter()
+        .map(PathBuf::from)
+        .filter(|p| p.exists())
+        .collect()
 }
 
 /// Save recent project paths to disk.
 pub fn save_recent_projects(projects: &[PathBuf]) {
-    let Some(path) = recent_projects_path() else { return };
+    let Some(path) = recent_projects_path() else {
+        return;
+    };
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
-    let strings: Vec<String> = projects.iter().map(|p| p.to_string_lossy().to_string()).collect();
+    let strings: Vec<String> = projects
+        .iter()
+        .map(|p| p.to_string_lossy().to_string())
+        .collect();
     if let Ok(json) = serde_json::to_string_pretty(&strings) {
         let _ = fs::write(path, json);
     }
@@ -489,5 +542,7 @@ pub fn add_recent_project(projects: &mut Vec<PathBuf>, path: PathBuf) {
 
 /// Get the display name for a project path (last directory component).
 pub fn project_name(path: &Path) -> &str {
-    path.file_name().and_then(|n| n.to_str()).unwrap_or("unknown")
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown")
 }

@@ -3,9 +3,9 @@ use std::collections::HashMap;
 use crate::config::EffectiveEditorConfig;
 use crate::editor::buffer::IndentStyle;
 use crate::editor::buffer::Position;
+use crate::editor::git_gutter::GutterChange;
 use crate::editor::keymap::{handle_editor_keys, KeyAction};
 use crate::editor::perf;
-use crate::editor::git_gutter::GutterChange;
 use crate::editor::search::EditorSearch;
 use crate::editor::syntax::{FoldRange, HighlightGroup, SyntaxEngine};
 use crate::editor::BufferView;
@@ -38,7 +38,7 @@ pub(crate) fn render_text_editor(
     clipboard_out: &mut Option<String>,
     clipboard_in: &mut Option<String>,
     editor_search: &mut EditorSearch,
-lsp_status: &str,
+    lsp_status: &str,
     keybinding_preset: KeybindingPreset,
 ) -> EditorFrameResult {
     let mut result = EditorFrameResult::default();
@@ -174,7 +174,8 @@ lsp_status: &str,
         let margin_cols = 4;
         if view.cursor.pos.col < view.scroll_col {
             view.scroll_col = view.cursor.pos.col;
-        } else if view.cursor.pos.col >= view.scroll_col + visible_cols.saturating_sub(margin_cols) {
+        } else if view.cursor.pos.col >= view.scroll_col + visible_cols.saturating_sub(margin_cols)
+        {
             view.scroll_col = view
                 .cursor
                 .pos
@@ -224,7 +225,7 @@ lsp_status: &str,
     } else {
         String::new()
     };
-let lsp_label = if lsp_status.is_empty() {
+    let lsp_label = if lsp_status.is_empty() {
         String::new()
     } else {
         format!("  |  {lsp_status}")
@@ -246,14 +247,18 @@ let lsp_label = if lsp_status.is_empty() {
         view.cursor.pos.col + 1,
         line_count,
         indent_label,
-        if editor_config.word_wrap { "Wrap" } else { "No wrap" },
+        if editor_config.word_wrap {
+            "Wrap"
+        } else {
+            "No wrap"
+        },
         if buf.is_modified() {
             "Modified"
         } else {
             "Saved"
         },
         diag_label,
-lsp_label,
+        lsp_label,
         vim_label,
         preset_label,
     );
@@ -298,7 +303,8 @@ lsp_label,
     if response.clicked() {
         if let Some(pos) = response.interact_pointer_pos() {
             if pos.x < rect.left() + gutter_width {
-                let visible_idx = view.scroll_line + ((pos.y - rect.top()) / line_height).max(0.0) as usize;
+                let visible_idx =
+                    view.scroll_line + ((pos.y - rect.top()) / line_height).max(0.0) as usize;
                 if let Some(&doc_line) = visible_doc_lines.get(visible_idx) {
                     if let Some(range) = best_fold_range_starting_at(&foldable_ranges, doc_line) {
                         toggle_fold_range(&mut view.folded_ranges, range);
@@ -317,13 +323,28 @@ lsp_label,
             if pos.x < rect.right() - minimap_w {
                 let (click_line, click_col) = if word_wrap {
                     pixel_to_editor_pos_wrapped(
-                        pos, rect, gutter_width, text_margin, char_width, line_height,
-                        view.scroll_line, &wrap_rows, buf,
+                        pos,
+                        rect,
+                        gutter_width,
+                        text_margin,
+                        char_width,
+                        line_height,
+                        view.scroll_line,
+                        &wrap_rows,
+                        buf,
                     )
                 } else {
                     pixel_to_editor_pos(
-                        pos, rect, gutter_width, text_margin, h_offset, char_width, line_height,
-                        view.scroll_line, &visible_doc_lines, buf,
+                        pos,
+                        rect,
+                        gutter_width,
+                        text_margin,
+                        h_offset,
+                        char_width,
+                        line_height,
+                        view.scroll_line,
+                        &visible_doc_lines,
+                        buf,
                     )
                 };
                 view.cursor.clear_selection();
@@ -337,13 +358,28 @@ lsp_label,
         if let Some(pos) = response.interact_pointer_pos() {
             let (drag_line, drag_col) = if word_wrap {
                 pixel_to_editor_pos_wrapped(
-                    pos, rect, gutter_width, text_margin, char_width, line_height,
-                    view.scroll_line, &wrap_rows, buf,
+                    pos,
+                    rect,
+                    gutter_width,
+                    text_margin,
+                    char_width,
+                    line_height,
+                    view.scroll_line,
+                    &wrap_rows,
+                    buf,
                 )
             } else {
                 pixel_to_editor_pos(
-                    pos, rect, gutter_width, text_margin, h_offset, char_width, line_height,
-                    view.scroll_line, &visible_doc_lines, buf,
+                    pos,
+                    rect,
+                    gutter_width,
+                    text_margin,
+                    h_offset,
+                    char_width,
+                    line_height,
+                    view.scroll_line,
+                    &visible_doc_lines,
+                    buf,
                 )
             };
             // Start selection on first drag if not already selecting
@@ -365,19 +401,33 @@ lsp_label,
                 }
                 let vis_y = vis_idx as f32 * line_height;
                 let line_len = buf.line_len(row.doc_line);
-                let doc_col_start = if row.doc_line == sel_start.line { sel_start.col } else { 0 };
-                let doc_col_end = if row.doc_line == sel_end.line { sel_end.col } else { line_len };
+                let doc_col_start = if row.doc_line == sel_start.line {
+                    sel_start.col
+                } else {
+                    0
+                };
+                let doc_col_end = if row.doc_line == sel_end.line {
+                    sel_end.col
+                } else {
+                    line_len
+                };
                 // Clamp to this row's column range
-                let row_sel_start = doc_col_start.max(row.col_start).saturating_sub(row.col_start);
+                let row_sel_start = doc_col_start
+                    .max(row.col_start)
+                    .saturating_sub(row.col_start);
                 let row_sel_end = doc_col_end.min(row.col_end).saturating_sub(row.col_start);
                 if row_sel_start >= row_sel_end {
                     continue;
                 }
-                let x1 = rect.left() + gutter_width + text_margin + row_sel_start as f32 * char_width;
+                let x1 =
+                    rect.left() + gutter_width + text_margin + row_sel_start as f32 * char_width;
                 let x2 = rect.left() + gutter_width + text_margin + row_sel_end as f32 * char_width;
                 let sel_rect = egui::Rect::from_min_max(
                     egui::pos2(x1.max(text_clip.left()), rect.top() + vis_y),
-                    egui::pos2(x2.max(x1 + char_width).min(text_clip.right()), rect.top() + vis_y + line_height),
+                    egui::pos2(
+                        x2.max(x1 + char_width).min(text_clip.right()),
+                        rect.top() + vis_y + line_height,
+                    ),
                 );
                 if sel_rect.width() > 0.0 {
                     painter.rect_filled(sel_rect, 0.0, sel_color);
@@ -400,10 +450,10 @@ lsp_label,
                 } else {
                     line_len
                 };
-                let x1 =
-                    rect.left() + gutter_width + text_margin + col_start as f32 * char_width - h_offset;
-                let x2 =
-                    rect.left() + gutter_width + text_margin + col_end as f32 * char_width - h_offset;
+                let x1 = rect.left() + gutter_width + text_margin + col_start as f32 * char_width
+                    - h_offset;
+                let x2 = rect.left() + gutter_width + text_margin + col_end as f32 * char_width
+                    - h_offset;
                 let sel_rect = egui::Rect::from_min_max(
                     egui::pos2(x1.max(text_clip.left()), rect.top() + vis_y),
                     egui::pos2(
@@ -432,11 +482,25 @@ lsp_label,
                     continue;
                 }
                 let vis_y = visible_offset as f32 * line_height;
-                let col_start = if line_idx == start_line { m.start.col } else { 0 };
-                let col_end = if line_idx == end_line { m.end.col } else { buf.line_len(line_idx) };
-                let x1 = rect.left() + gutter_width + text_margin + col_start as f32 * char_width - h_offset;
-                let x2 = rect.left() + gutter_width + text_margin + col_end as f32 * char_width - h_offset;
-                let color = if i == editor_search.focus { focus_bg } else { match_bg };
+                let col_start = if line_idx == start_line {
+                    m.start.col
+                } else {
+                    0
+                };
+                let col_end = if line_idx == end_line {
+                    m.end.col
+                } else {
+                    buf.line_len(line_idx)
+                };
+                let x1 = rect.left() + gutter_width + text_margin + col_start as f32 * char_width
+                    - h_offset;
+                let x2 = rect.left() + gutter_width + text_margin + col_end as f32 * char_width
+                    - h_offset;
+                let color = if i == editor_search.focus {
+                    focus_bg
+                } else {
+                    match_bg
+                };
                 let match_rect = egui::Rect::from_min_max(
                     egui::pos2(x1.max(text_clip.left()), rect.top() + vis_y),
                     egui::pos2(x2.min(text_clip.right()), rect.top() + vis_y + line_height),
@@ -542,11 +606,19 @@ lsp_label,
                 if let Some(gutter) = &view.git_gutter {
                     if let Some(change) = gutter.change_at(row.doc_line) {
                         let (color, bar_h) = match change {
-                            GutterChange::Added => (egui::Color32::from_rgb(80, 200, 80), line_height),
-                            GutterChange::Modified => (egui::Color32::from_rgb(80, 140, 230), line_height),
+                            GutterChange::Added => {
+                                (egui::Color32::from_rgb(80, 200, 80), line_height)
+                            }
+                            GutterChange::Modified => {
+                                (egui::Color32::from_rgb(80, 140, 230), line_height)
+                            }
                             GutterChange::Deleted => (egui::Color32::from_rgb(220, 70, 70), 4.0),
                         };
-                        let bar_y = if change == GutterChange::Deleted { y - 2.0 } else { y };
+                        let bar_y = if change == GutterChange::Deleted {
+                            y - 2.0
+                        } else {
+                            y
+                        };
                         painter.rect_filled(
                             egui::Rect::from_min_size(
                                 egui::pos2(rect.left() + gutter_width - 4.0, bar_y),
@@ -606,7 +678,10 @@ lsp_label,
                         .iter()
                         .find(|s| doc_col >= s.col_start && doc_col < s.col_end)
                         .map(|s| {
-                            let rgb = crate::editor::syntax::group_color_with_overrides(s.group, syntax_colors);
+                            let rgb = crate::editor::syntax::group_color_with_overrides(
+                                s.group,
+                                syntax_colors,
+                            );
                             egui::Color32::from_rgb(rgb[0], rgb[1], rgb[2])
                         })
                         .unwrap_or(text_color);
@@ -618,7 +693,10 @@ lsp_label,
                             .iter()
                             .find(|s| next_doc_col >= s.col_start && next_doc_col < s.col_end)
                             .map(|s| {
-                                let rgb = crate::editor::syntax::group_color_with_overrides(s.group, syntax_colors);
+                                let rgb = crate::editor::syntax::group_color_with_overrides(
+                                    s.group,
+                                    syntax_colors,
+                                );
                                 egui::Color32::from_rgb(rgb[0], rgb[1], rgb[2])
                             })
                             .unwrap_or(text_color);
@@ -675,7 +753,9 @@ lsp_label,
                 if let Some(change) = gutter.change_at(line_idx) {
                     let (color, bar_h) = match change {
                         GutterChange::Added => (egui::Color32::from_rgb(80, 200, 80), line_height),
-                        GutterChange::Modified => (egui::Color32::from_rgb(80, 140, 230), line_height),
+                        GutterChange::Modified => {
+                            (egui::Color32::from_rgb(80, 140, 230), line_height)
+                        }
                         GutterChange::Deleted => (egui::Color32::from_rgb(220, 70, 70), 4.0),
                     };
                     let bar_y = if change == GutterChange::Deleted {
@@ -695,7 +775,11 @@ lsp_label,
             }
 
             if let Some(range) = foldable_ranges.iter().find(|r| r.start_line == line_idx) {
-                let marker = if is_range_folded(&view.folded_ranges, range.start_line) { ">" } else { "v" };
+                let marker = if is_range_folded(&view.folded_ranges, range.start_line) {
+                    ">"
+                } else {
+                    "v"
+                };
                 painter.text(
                     egui::pos2(rect.left() + gutter_width - 12.0, y + 1.0),
                     egui::Align2::LEFT_TOP,
@@ -754,7 +838,10 @@ lsp_label,
 
             if let Some(range) = folded_range_starting_at(&view.folded_ranges, line_idx) {
                 let hidden_count = range.end_line.saturating_sub(range.start_line);
-                let placeholder = format!(" ... {hidden_count} folded line{}", if hidden_count == 1 { "" } else { "s" });
+                let placeholder = format!(
+                    " ... {hidden_count} folded line{}",
+                    if hidden_count == 1 { "" } else { "s" }
+                );
                 let placeholder_x = text_x_base + line_text.chars().count() as f32 * char_width;
                 painter.with_clip_rect(text_clip).text(
                     egui::pos2(placeholder_x, y + 1.0),
@@ -831,19 +918,24 @@ lsp_label,
     // Cursor (smooth animation + smooth blink)
     let cursor_vis_info: Option<(f32, f32)> = if word_wrap {
         // Find the wrap row containing the cursor
-        visible_wrap_window.iter().enumerate().find_map(|(vis_idx, row)| {
-            if row.doc_line == view.cursor.pos.line
-                && view.cursor.pos.col >= row.col_start
-                && (view.cursor.pos.col < row.col_end
-                    || (row.col_end == row.col_start && view.cursor.pos.col == 0)
-                    || visible_wrap_window.get(vis_idx + 1).is_none_or(|next| next.doc_line != row.doc_line))
-            {
-                let col_in_row = view.cursor.pos.col.saturating_sub(row.col_start);
-                Some((vis_idx as f32, col_in_row as f32))
-            } else {
-                None
-            }
-        })
+        visible_wrap_window
+            .iter()
+            .enumerate()
+            .find_map(|(vis_idx, row)| {
+                if row.doc_line == view.cursor.pos.line
+                    && view.cursor.pos.col >= row.col_start
+                    && (view.cursor.pos.col < row.col_end
+                        || (row.col_end == row.col_start && view.cursor.pos.col == 0)
+                        || visible_wrap_window
+                            .get(vis_idx + 1)
+                            .is_none_or(|next| next.doc_line != row.doc_line))
+                {
+                    let col_in_row = view.cursor.pos.col.saturating_sub(row.col_start);
+                    Some((vis_idx as f32, col_in_row as f32))
+                } else {
+                    None
+                }
+            })
     } else {
         visible_window
             .iter()
@@ -852,9 +944,8 @@ lsp_label,
     };
     if let Some((vis_row, col_offset)) = cursor_vis_info {
         let vis_y = vis_row * line_height;
-        let target_x =
-            rect.left() + gutter_width + text_margin + col_offset * char_width
-                - if word_wrap { 0.0 } else { h_offset };
+        let target_x = rect.left() + gutter_width + text_margin + col_offset * char_width
+            - if word_wrap { 0.0 } else { h_offset };
         let target_y = rect.top() + vis_y;
 
         // Initialize or lerp the display position
@@ -940,13 +1031,27 @@ lsp_label,
                     }
                     let vis_y = visible_offset as f32 * line_height;
                     let line_len = buf.line_len(line_idx);
-                    let col_start = if line_idx == sel_start.line { sel_start.col } else { 0 };
-                    let col_end = if line_idx == sel_end.line { sel_end.col } else { line_len };
-                    let x1 = rect.left() + gutter_width + text_margin + col_start as f32 * char_width - h_offset;
-                    let x2 = rect.left() + gutter_width + text_margin + col_end as f32 * char_width - h_offset;
+                    let col_start = if line_idx == sel_start.line {
+                        sel_start.col
+                    } else {
+                        0
+                    };
+                    let col_end = if line_idx == sel_end.line {
+                        sel_end.col
+                    } else {
+                        line_len
+                    };
+                    let x1 =
+                        rect.left() + gutter_width + text_margin + col_start as f32 * char_width
+                            - h_offset;
+                    let x2 = rect.left() + gutter_width + text_margin + col_end as f32 * char_width
+                        - h_offset;
                     let sel_rect = egui::Rect::from_min_max(
                         egui::pos2(x1.max(text_clip.left()), rect.top() + vis_y),
-                        egui::pos2(x2.max(x1 + char_width).min(text_clip.right()), rect.top() + vis_y + line_height),
+                        egui::pos2(
+                            x2.max(x1 + char_width).min(text_clip.right()),
+                            rect.top() + vis_y + line_height,
+                        ),
                     );
                     if sel_rect.width() > 0.0 {
                         painter.rect_filled(sel_rect, 0.0, sel_color);
@@ -964,10 +1069,11 @@ lsp_label,
             if let Some(click_pos) = response.interact_pointer_pos() {
                 if click_pos.x >= minimap_x && click_pos.x <= rect.right() {
                     let rel_y = (click_pos.y - rect.top()) / rect.height();
-                    let target_line = (rel_y * visible_line_count as f32)
-                        .clamp(0.0, max_scroll as f32);
+                    let target_line =
+                        (rel_y * visible_line_count as f32).clamp(0.0, max_scroll as f32);
                     // Center the viewport on the clicked position
-                    let centered = (target_line - visible_lines as f32 / 2.0).clamp(0.0, max_scroll as f32);
+                    let centered =
+                        (target_line - visible_lines as f32 / 2.0).clamp(0.0, max_scroll as f32);
                     view.scroll_target = Some(centered);
                 }
             }
@@ -985,7 +1091,10 @@ lsp_label,
 
         // Viewport indicator
         let track_h = rect.height();
-        let top_doc_line = visible_doc_lines.get(view.scroll_line).copied().unwrap_or(0);
+        let top_doc_line = visible_doc_lines
+            .get(view.scroll_line)
+            .copied()
+            .unwrap_or(0);
         let view_top = (top_doc_line as f32 / line_count as f32) * track_h;
         let view_h = (visible_lines as f32 / line_count as f32) * track_h;
         painter.rect_filled(
@@ -1012,16 +1121,16 @@ lsp_label,
             }
 
             // Color from first syntax span if available, else dim white
-            let color = if line_idx < syntax_end_line
-                && line_idx >= syntax_start_line
-            {
+            let color = if line_idx < syntax_end_line && line_idx >= syntax_start_line {
                 let span_idx = line_idx - syntax_start_line;
                 highlight_spans
                     .get(span_idx)
                     .and_then(|spans| spans.first())
                     .map(|s| {
-                        let rgb =
-                            crate::editor::syntax::group_color_with_overrides(s.group, syntax_colors);
+                        let rgb = crate::editor::syntax::group_color_with_overrides(
+                            s.group,
+                            syntax_colors,
+                        );
                         egui::Color32::from_rgba_unmultiplied(rgb[0], rgb[1], rgb[2], 120)
                     })
                     .unwrap_or(egui::Color32::from_rgba_unmultiplied(150, 155, 165, 60))
@@ -1131,7 +1240,11 @@ lsp_label,
                 egui::Vec2::new(max_w, sig_h),
             );
             painter.rect_filled(bg_rect, 4.0, egui::Color32::from_rgb(35, 38, 52));
-            painter.rect_stroke(bg_rect, 4.0, egui::Stroke::new(1.0, egui::Color32::from_rgb(70, 75, 95)));
+            painter.rect_stroke(
+                bg_rect,
+                4.0,
+                egui::Stroke::new(1.0, egui::Color32::from_rgb(70, 75, 95)),
+            );
 
             // Render label, highlighting the active parameter
             if sig.active_parameter < sig.parameters.len() {
@@ -1145,11 +1258,29 @@ lsp_label,
                     let highlight_color = egui::Color32::from_rgb(255, 220, 100);
                     let sig_font = egui::FontId::monospace(12.0);
 
-                    painter.text(egui::pos2(x, bg_rect.top() + 3.0), egui::Align2::LEFT_TOP, before, sig_font.clone(), dim_color);
+                    painter.text(
+                        egui::pos2(x, bg_rect.top() + 3.0),
+                        egui::Align2::LEFT_TOP,
+                        before,
+                        sig_font.clone(),
+                        dim_color,
+                    );
                     let before_w = before.len() as f32 * 7.2;
-                    painter.text(egui::pos2(x + before_w, bg_rect.top() + 3.0), egui::Align2::LEFT_TOP, active_param, sig_font.clone(), highlight_color);
+                    painter.text(
+                        egui::pos2(x + before_w, bg_rect.top() + 3.0),
+                        egui::Align2::LEFT_TOP,
+                        active_param,
+                        sig_font.clone(),
+                        highlight_color,
+                    );
                     let param_w = active_param.len() as f32 * 7.2;
-                    painter.text(egui::pos2(x + before_w + param_w, bg_rect.top() + 3.0), egui::Align2::LEFT_TOP, after, sig_font, dim_color);
+                    painter.text(
+                        egui::pos2(x + before_w + param_w, bg_rect.top() + 3.0),
+                        egui::Align2::LEFT_TOP,
+                        after,
+                        sig_font,
+                        dim_color,
+                    );
                 } else {
                     painter.text(
                         egui::pos2(bg_rect.left() + 6.0, bg_rect.top() + 3.0),
@@ -1328,8 +1459,12 @@ fn render_bracket_match(
             egui::Vec2::new(char_width, line_height - 2.0),
         );
         if bracket_rect.intersects(text_clip) {
-            painter.with_clip_rect(text_clip).rect_filled(bracket_rect, 1.0, fill);
-            painter.with_clip_rect(text_clip).rect_stroke(bracket_rect, 1.0, stroke);
+            painter
+                .with_clip_rect(text_clip)
+                .rect_filled(bracket_rect, 1.0, fill);
+            painter
+                .with_clip_rect(text_clip)
+                .rect_stroke(bracket_rect, 1.0, stroke);
         }
     }
 }
@@ -1424,7 +1559,8 @@ fn apply_folding_actions(
 
     view.folded_ranges
         .retain(|range| range.start_line < range.end_line && range.end_line < line_count);
-    view.folded_ranges.sort_by_key(|range| (range.start_line, range.end_line));
+    view.folded_ranges
+        .sort_by_key(|range| (range.start_line, range.end_line));
     view.folded_ranges.dedup();
 }
 
@@ -1433,10 +1569,9 @@ fn top_level_fold_ranges(foldable_ranges: &[FoldRange]) -> Vec<FoldRange> {
     let mut sorted = foldable_ranges.to_vec();
     sorted.sort_by_key(|range| (range.start_line, std::cmp::Reverse(range.end_line)));
     for range in sorted {
-        if ranges
-            .iter()
-            .any(|parent: &FoldRange| parent.start_line <= range.start_line && parent.end_line >= range.end_line)
-        {
+        if ranges.iter().any(|parent: &FoldRange| {
+            parent.start_line <= range.start_line && parent.end_line >= range.end_line
+        }) {
             continue;
         }
         ranges.push(range);
@@ -1464,7 +1599,9 @@ fn visible_doc_lines(line_count: usize, folded_ranges: &[FoldRange]) -> Vec<usiz
 fn visible_index_for_doc_line(visible_doc_lines: &[usize], doc_line: usize) -> usize {
     match visible_doc_lines.binary_search(&doc_line) {
         Ok(idx) => idx,
-        Err(idx) => idx.saturating_sub(1).min(visible_doc_lines.len().saturating_sub(1)),
+        Err(idx) => idx
+            .saturating_sub(1)
+            .min(visible_doc_lines.len().saturating_sub(1)),
     }
 }
 
@@ -1584,7 +1721,10 @@ fn compute_wrap_rows(
 /// Find the visual row index for a given cursor position in wrap mode.
 fn wrap_row_for_cursor(rows: &[WrapRow], line: usize, col: usize) -> usize {
     for (i, row) in rows.iter().enumerate() {
-        if row.doc_line == line && col >= row.col_start && (col < row.col_end || (row.col_end == row.col_start && col == 0)) {
+        if row.doc_line == line
+            && col >= row.col_start
+            && (col < row.col_end || (row.col_end == row.col_start && col == 0))
+        {
             return i;
         }
         // Cursor at end of line: last row of that line
@@ -1739,8 +1879,10 @@ fn render_visible_whitespace_line(
                     .iter()
                     .find(|s| col >= s.col_start && col < s.col_end)
                     .map(|s| {
-                        let rgb =
-                            crate::editor::syntax::group_color_with_overrides(s.group, syntax_colors);
+                        let rgb = crate::editor::syntax::group_color_with_overrides(
+                            s.group,
+                            syntax_colors,
+                        );
                         egui::Color32::from_rgb(rgb[0], rgb[1], rgb[2])
                     })
                     .unwrap_or(default_color);
@@ -1854,8 +1996,8 @@ fn pixel_to_editor_pos(
 ) -> (usize, usize) {
     let rel_x = pos.x - rect.left() - gutter_width - text_margin + h_offset;
     let rel_y = pos.y - rect.top();
-    let visible_line =
-        (scroll_line + (rel_y / line_height).max(0.0) as usize).min(visible_doc_lines.len().saturating_sub(1));
+    let visible_line = (scroll_line + (rel_y / line_height).max(0.0) as usize)
+        .min(visible_doc_lines.len().saturating_sub(1));
     let line = visible_doc_lines.get(visible_line).copied().unwrap_or(0);
     let col = (rel_x / char_width).max(0.0) as usize;
     let col = col.min(buf.line_len(line));
@@ -1883,7 +2025,11 @@ fn render_search_bar(
         .inner_margin(egui::Margin::symmetric(8.0, 4.0))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Find:").size(12.0).color(egui::Color32::from_rgb(180, 185, 200)));
+                ui.label(
+                    egui::RichText::new("Find:")
+                        .size(12.0)
+                        .color(egui::Color32::from_rgb(180, 185, 200)),
+                );
 
                 let mut query = search.query.clone();
                 let response = ui.add(
@@ -1904,37 +2050,105 @@ fn render_search_bar(
 
                 // Toggle buttons
                 let case_label = if search.case_sensitive { "Aa" } else { "Aa" };
-                let case_bg = if search.case_sensitive { toggle_on } else { toggle_off };
-                if ui.add(egui::Button::new(egui::RichText::new(case_label).size(11.0).color(egui::Color32::WHITE)).fill(case_bg).min_size(egui::Vec2::new(28.0, 20.0))).on_hover_text("Case sensitive").clicked() {
+                let case_bg = if search.case_sensitive {
+                    toggle_on
+                } else {
+                    toggle_off
+                };
+                if ui
+                    .add(
+                        egui::Button::new(
+                            egui::RichText::new(case_label)
+                                .size(11.0)
+                                .color(egui::Color32::WHITE),
+                        )
+                        .fill(case_bg)
+                        .min_size(egui::Vec2::new(28.0, 20.0)),
+                    )
+                    .on_hover_text("Case sensitive")
+                    .clicked()
+                {
                     search.case_sensitive = !search.case_sensitive;
                     search.update_matches(buf);
                     search.focus_nearest(view.cursor.pos);
                 }
-                let word_bg = if search.whole_word { toggle_on } else { toggle_off };
-                if ui.add(egui::Button::new(egui::RichText::new("W").size(11.0).color(egui::Color32::WHITE)).fill(word_bg).min_size(egui::Vec2::new(28.0, 20.0))).on_hover_text("Whole word").clicked() {
+                let word_bg = if search.whole_word {
+                    toggle_on
+                } else {
+                    toggle_off
+                };
+                if ui
+                    .add(
+                        egui::Button::new(
+                            egui::RichText::new("W")
+                                .size(11.0)
+                                .color(egui::Color32::WHITE),
+                        )
+                        .fill(word_bg)
+                        .min_size(egui::Vec2::new(28.0, 20.0)),
+                    )
+                    .on_hover_text("Whole word")
+                    .clicked()
+                {
                     search.whole_word = !search.whole_word;
                     search.update_matches(buf);
                     search.focus_nearest(view.cursor.pos);
                 }
-                let regex_bg = if search.regex_mode { toggle_on } else { toggle_off };
-                if ui.add(egui::Button::new(egui::RichText::new(".*").size(11.0).color(egui::Color32::WHITE)).fill(regex_bg).min_size(egui::Vec2::new(28.0, 20.0))).on_hover_text("Regex").clicked() {
+                let regex_bg = if search.regex_mode {
+                    toggle_on
+                } else {
+                    toggle_off
+                };
+                if ui
+                    .add(
+                        egui::Button::new(
+                            egui::RichText::new(".*")
+                                .size(11.0)
+                                .color(egui::Color32::WHITE),
+                        )
+                        .fill(regex_bg)
+                        .min_size(egui::Vec2::new(28.0, 20.0)),
+                    )
+                    .on_hover_text("Regex")
+                    .clicked()
+                {
                     search.regex_mode = !search.regex_mode;
                     search.update_matches(buf);
                     search.focus_nearest(view.cursor.pos);
                 }
 
                 // Status
-                ui.label(egui::RichText::new(search.status()).size(11.0).color(status_color));
+                ui.label(
+                    egui::RichText::new(search.status())
+                        .size(11.0)
+                        .color(status_color),
+                );
 
                 // Nav buttons
-                if ui.add(egui::Button::new(egui::RichText::new("<").size(12.0).color(btn_color)).fill(egui::Color32::TRANSPARENT).min_size(egui::Vec2::new(24.0, 20.0))).on_hover_text("Previous (Shift+Enter)").clicked() {
+                if ui
+                    .add(
+                        egui::Button::new(egui::RichText::new("<").size(12.0).color(btn_color))
+                            .fill(egui::Color32::TRANSPARENT)
+                            .min_size(egui::Vec2::new(24.0, 20.0)),
+                    )
+                    .on_hover_text("Previous (Shift+Enter)")
+                    .clicked()
+                {
                     if let Some(pos) = search.prev() {
                         view.cursor.pos = pos;
                         view.cursor.clear_selection();
                         view.cursor.desired_col = None;
                     }
                 }
-                if ui.add(egui::Button::new(egui::RichText::new(">").size(12.0).color(btn_color)).fill(egui::Color32::TRANSPARENT).min_size(egui::Vec2::new(24.0, 20.0))).on_hover_text("Next (Enter)").clicked() {
+                if ui
+                    .add(
+                        egui::Button::new(egui::RichText::new(">").size(12.0).color(btn_color))
+                            .fill(egui::Color32::TRANSPARENT)
+                            .min_size(egui::Vec2::new(24.0, 20.0)),
+                    )
+                    .on_hover_text("Next (Enter)")
+                    .clicked()
+                {
                     if let Some(pos) = search.next() {
                         view.cursor.pos = pos;
                         view.cursor.clear_selection();
@@ -1943,7 +2157,19 @@ fn render_search_bar(
                 }
 
                 // Close button
-                if ui.add(egui::Button::new(egui::RichText::new("x").size(12.0).color(egui::Color32::from_rgb(180, 180, 190))).fill(egui::Color32::TRANSPARENT).min_size(egui::Vec2::new(20.0, 20.0))).on_hover_text("Close (Escape)").clicked() {
+                if ui
+                    .add(
+                        egui::Button::new(
+                            egui::RichText::new("x")
+                                .size(12.0)
+                                .color(egui::Color32::from_rgb(180, 180, 190)),
+                        )
+                        .fill(egui::Color32::TRANSPARENT)
+                        .min_size(egui::Vec2::new(20.0, 20.0)),
+                    )
+                    .on_hover_text("Close (Escape)")
+                    .clicked()
+                {
                     search.close();
                 }
             });
@@ -1957,7 +2183,11 @@ fn render_search_bar(
             .inner_margin(egui::Margin::symmetric(8.0, 4.0))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Replace:").size(12.0).color(egui::Color32::from_rgb(180, 185, 200)));
+                    ui.label(
+                        egui::RichText::new("Replace:")
+                            .size(12.0)
+                            .color(egui::Color32::from_rgb(180, 185, 200)),
+                    );
 
                     let mut replacement = search.replacement.clone();
                     ui.add(
@@ -1972,7 +2202,16 @@ fn render_search_bar(
                     }
 
                     // Replace current
-                    if ui.add(egui::Button::new(egui::RichText::new("Replace").size(11.0).color(btn_color)).fill(toggle_off).min_size(egui::Vec2::new(56.0, 20.0))).clicked() {
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new("Replace").size(11.0).color(btn_color),
+                            )
+                            .fill(toggle_off)
+                            .min_size(egui::Vec2::new(56.0, 20.0)),
+                        )
+                        .clicked()
+                    {
                         if let Some(pos) = search.replace_current(buf) {
                             view.cursor.pos = pos;
                             view.cursor.clear_selection();
@@ -1982,7 +2221,18 @@ fn render_search_bar(
                     }
 
                     // Replace all
-                    if ui.add(egui::Button::new(egui::RichText::new("Replace All").size(11.0).color(btn_color)).fill(toggle_off).min_size(egui::Vec2::new(80.0, 20.0))).clicked() {
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new("Replace All")
+                                    .size(11.0)
+                                    .color(btn_color),
+                            )
+                            .fill(toggle_off)
+                            .min_size(egui::Vec2::new(80.0, 20.0)),
+                        )
+                        .clicked()
+                    {
                         let count = search.replace_all(buf);
                         if count > 0 {
                             view.tree_dirty = true;

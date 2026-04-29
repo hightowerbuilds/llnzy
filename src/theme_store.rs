@@ -54,8 +54,16 @@ pub fn list_backgrounds() -> Vec<PathBuf> {
     let mut images: Vec<PathBuf> = entries
         .flatten()
         .filter(|e| {
-            let ext = e.path().extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
-            matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "bmp" | "webp" | "gif")
+            let ext = e
+                .path()
+                .extension()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_lowercase();
+            matches!(
+                ext.as_str(),
+                "png" | "jpg" | "jpeg" | "bmp" | "webp" | "gif"
+            )
         })
         .map(|e| e.path())
         .collect();
@@ -165,12 +173,24 @@ pub struct ThemeViewFlags {
 }
 
 /// Save the current config as a named theme.
-pub fn save_theme(name: &str, description: &str, config: &Config, view_flags: &ThemeViewFlags) -> Result<PathBuf, String> {
+pub fn save_theme(
+    name: &str,
+    description: &str,
+    config: &Config,
+    view_flags: &ThemeViewFlags,
+) -> Result<PathBuf, String> {
     let dir = themes_dir().ok_or("No config directory")?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create themes dir: {e}"))?;
 
-    let safe_name: String = name.chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+    let safe_name: String = name
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     let path = dir.join(format!("{safe_name}.toml"));
 
@@ -212,7 +232,8 @@ pub fn save_theme(name: &str, description: &str, config: &Config, view_flags: &T
         apply_to_stacker: view_flags.stacker,
     };
 
-    let toml_str = toml::to_string_pretty(&theme_file).map_err(|e| format!("Serialize failed: {e}"))?;
+    let toml_str =
+        toml::to_string_pretty(&theme_file).map_err(|e| format!("Serialize failed: {e}"))?;
     std::fs::write(&path, toml_str).map_err(|e| format!("Write failed: {e}"))?;
     Ok(path)
 }
@@ -232,8 +253,12 @@ pub fn load_user_themes() -> Vec<(VisualTheme, ThemeViewFlags)> {
         if path.extension().and_then(|s| s.to_str()) != Some("toml") {
             continue;
         }
-        let Ok(text) = std::fs::read_to_string(&path) else { continue };
-        let Ok(tf) = toml::from_str::<ThemeFile>(&text) else { continue };
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(tf) = toml::from_str::<ThemeFile>(&text) else {
+            continue;
+        };
 
         let mut ansi = [[0u8; 3]; 16];
         for (i, hex) in tf.ansi.iter().enumerate().take(16) {
@@ -296,8 +321,15 @@ pub fn load_user_themes() -> Vec<(VisualTheme, ThemeViewFlags)> {
 /// Delete a user-saved theme by name.
 pub fn delete_user_theme(name: &str) -> Result<(), String> {
     let dir = themes_dir().ok_or("No config directory")?;
-    let safe_name: String = name.chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+    let safe_name: String = name
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     let path = dir.join(format!("{safe_name}.toml"));
     if path.exists() {
@@ -318,7 +350,13 @@ mod tests {
 
     #[test]
     fn cursor_style_roundtrip() {
-        assert_eq!(str_to_cursor_style(cursor_style_to_str(CursorStyle::Beam)), CursorStyle::Beam);
-        assert_eq!(str_to_cursor_style(cursor_style_to_str(CursorStyle::Block)), CursorStyle::Block);
+        assert_eq!(
+            str_to_cursor_style(cursor_style_to_str(CursorStyle::Beam)),
+            CursorStyle::Beam
+        );
+        assert_eq!(
+            str_to_cursor_style(cursor_style_to_str(CursorStyle::Block)),
+            CursorStyle::Block
+        );
     }
 }

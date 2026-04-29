@@ -71,7 +71,9 @@ impl HighlightGroup {
 fn capture_to_group(name: &str) -> Option<HighlightGroup> {
     let base = name.split('.').next().unwrap_or(name);
     match base {
-        "keyword" | "conditional" | "repeat" | "include" | "exception" => Some(HighlightGroup::Keyword),
+        "keyword" | "conditional" | "repeat" | "include" | "exception" => {
+            Some(HighlightGroup::Keyword)
+        }
         "type" | "storageclass" => Some(HighlightGroup::Type),
         "function" | "method" => Some(HighlightGroup::Function),
         "variable" | "parameter" => Some(HighlightGroup::Variable),
@@ -115,7 +117,11 @@ impl SyntaxEngine {
     fn register_builtin_languages(&mut self) {
         self.register("rust", tree_sitter_rust::LANGUAGE.into(), RUST_HL);
         self.register("javascript", tree_sitter_javascript::LANGUAGE.into(), JS_HL);
-        self.register("typescript", tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(), TS_HL);
+        self.register(
+            "typescript",
+            tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            TS_HL,
+        );
         self.register("tsx", tree_sitter_typescript::LANGUAGE_TSX.into(), TS_HL);
         self.register("python", tree_sitter_python::LANGUAGE.into(), PYTHON_HL);
         self.register("go", tree_sitter_go::LANGUAGE.into(), GO_HL);
@@ -143,7 +149,14 @@ impl SyntaxEngine {
             .iter()
             .map(|name| capture_to_group(name))
             .collect();
-        self.langs.push((id, LangData { language, query, capture_groups }));
+        self.langs.push((
+            id,
+            LangData {
+                language,
+                query,
+                capture_groups,
+            },
+        ));
     }
 
     pub fn detect_language(&self, path: &Path) -> Option<&'static str> {
@@ -215,9 +228,17 @@ impl SyntaxEngine {
                         continue;
                     }
                     let col_start = if line == start.row { start.column } else { 0 };
-                    let col_end = if line == end.row { end.column } else { usize::MAX };
+                    let col_end = if line == end.row {
+                        end.column
+                    } else {
+                        usize::MAX
+                    };
                     if col_start < col_end {
-                        result[line - start_line].push(HighlightSpan { col_start, col_end, group });
+                        result[line - start_line].push(HighlightSpan {
+                            col_start,
+                            col_end,
+                            group,
+                        });
                     }
                 }
             }
@@ -243,7 +264,9 @@ impl SyntaxEngine {
 }
 
 impl Default for SyntaxEngine {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 fn line_byte_offset(source: &[u8], target_line: usize) -> usize {
@@ -278,7 +301,7 @@ fn collect_foldable_ranges(node: tree_sitter::Node<'_>, ranges: &mut Vec<FoldRan
 /// Map a HighlightGroup to an RGB color (One Dark inspired).
 pub fn group_color(group: HighlightGroup) -> [u8; 3] {
     match group {
-        HighlightGroup::Keyword => [198, 120, 221],    // purple
+        HighlightGroup::Keyword => [198, 120, 221],     // purple
         HighlightGroup::Type => [86, 182, 194],         // cyan
         HighlightGroup::Function => [97, 175, 239],     // blue
         HighlightGroup::Variable => [224, 108, 117],    // red
@@ -301,7 +324,10 @@ pub fn group_color_with_overrides(
     group: HighlightGroup,
     overrides: &HashMap<HighlightGroup, [u8; 3]>,
 ) -> [u8; 3] {
-    overrides.get(&group).copied().unwrap_or_else(|| group_color(group))
+    overrides
+        .get(&group)
+        .copied()
+        .unwrap_or_else(|| group_color(group))
 }
 
 // ── Highlight queries (compact, one per language) ──
@@ -556,9 +582,18 @@ mod tests {
     #[test]
     fn detect_languages() {
         let engine = SyntaxEngine::new();
-        assert_eq!(engine.detect_language(Path::new("/tmp/main.rs")), Some("rust"));
-        assert_eq!(engine.detect_language(Path::new("/tmp/lib.py")), Some("python"));
-        assert_eq!(engine.detect_language(Path::new("/tmp/index.tsx")), Some("tsx"));
+        assert_eq!(
+            engine.detect_language(Path::new("/tmp/main.rs")),
+            Some("rust")
+        );
+        assert_eq!(
+            engine.detect_language(Path::new("/tmp/lib.py")),
+            Some("python")
+        );
+        assert_eq!(
+            engine.detect_language(Path::new("/tmp/index.tsx")),
+            Some("tsx")
+        );
         assert_eq!(engine.detect_language(Path::new("/tmp/unknown.xyz")), None);
     }
 
@@ -573,7 +608,9 @@ mod tests {
 
         // Line 0 should have a keyword for "fn"
         assert!(
-            spans[0].iter().any(|s| s.group == HighlightGroup::Keyword && s.col_start == 0),
+            spans[0]
+                .iter()
+                .any(|s| s.group == HighlightGroup::Keyword && s.col_start == 0),
             "expected keyword on line 0, got: {:?}",
             spans[0]
         );
@@ -610,7 +647,10 @@ mod tests {
     #[test]
     fn unknown_language_returns_none() {
         let engine = SyntaxEngine::new();
-        assert_eq!(engine.detect_language(Path::new("/tmp/file.brainfuck")), None);
+        assert_eq!(
+            engine.detect_language(Path::new("/tmp/file.brainfuck")),
+            None
+        );
     }
 
     #[test]
@@ -629,10 +669,7 @@ mod tests {
             HighlightGroup::from_config_key("namespace"),
             Some(HighlightGroup::Module)
         );
-        assert_eq!(
-            HighlightGroup::from_config_key("bright.punctuation"),
-            None
-        );
+        assert_eq!(HighlightGroup::from_config_key("bright.punctuation"), None);
     }
 
     #[test]
@@ -641,7 +678,11 @@ mod tests {
         let source = "fn main() {\n    if true {\n        println!(\"x\");\n    }\n}\n";
         let tree = engine.parse("rust", source).expect("should parse");
         let ranges = engine.foldable_ranges(&tree);
-        assert!(ranges.iter().any(|range| range.start_line == 0 && range.end_line >= 4));
-        assert!(ranges.iter().any(|range| range.start_line == 1 && range.end_line >= 3));
+        assert!(ranges
+            .iter()
+            .any(|range| range.start_line == 0 && range.end_line >= 4));
+        assert!(ranges
+            .iter()
+            .any(|range| range.start_line == 1 && range.end_line >= 3));
     }
 }

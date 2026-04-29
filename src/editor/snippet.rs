@@ -80,15 +80,28 @@ pub fn parse_snippet(template: &str, filename: &str, clipboard: &str) -> Snippet
                     let mut content = String::new();
                     let mut depth = 1;
                     while let Some(c) = chars.next() {
-                        if c == '{' { depth += 1; }
-                        if c == '}' { depth -= 1; if depth == 0 { break; } }
+                        if c == '{' {
+                            depth += 1;
+                        }
+                        if c == '}' {
+                            depth -= 1;
+                            if depth == 0 {
+                                break;
+                            }
+                        }
                         content.push(c);
                     }
                     if let Some((idx_str, placeholder)) = content.split_once(':') {
                         if let Ok(idx) = idx_str.parse::<usize>() {
                             let offset = text.len();
                             text.push_str(placeholder);
-                            tab_stops.push((offset, TabStop { index: idx, placeholder: placeholder.to_string() }));
+                            tab_stops.push((
+                                offset,
+                                TabStop {
+                                    index: idx,
+                                    placeholder: placeholder.to_string(),
+                                },
+                            ));
                         } else {
                             // Variable with default: ${VAR:default}
                             let expanded = expand_variable(idx_str, filename, clipboard);
@@ -100,7 +113,13 @@ pub fn parse_snippet(template: &str, filename: &str, clipboard: &str) -> Snippet
                         }
                     } else if let Ok(idx) = content.parse::<usize>() {
                         let offset = text.len();
-                        tab_stops.push((offset, TabStop { index: idx, placeholder: String::new() }));
+                        tab_stops.push((
+                            offset,
+                            TabStop {
+                                index: idx,
+                                placeholder: String::new(),
+                            },
+                        ));
                     } else {
                         // Variable: ${VAR}
                         text.push_str(&expand_variable(&content, filename, clipboard));
@@ -111,19 +130,33 @@ pub fn parse_snippet(template: &str, filename: &str, clipboard: &str) -> Snippet
                     let mut num = String::new();
                     num.push(next);
                     while let Some(&c) = chars.peek() {
-                        if c.is_ascii_digit() { num.push(c); chars.next(); }
-                        else { break; }
+                        if c.is_ascii_digit() {
+                            num.push(c);
+                            chars.next();
+                        } else {
+                            break;
+                        }
                     }
                     if let Ok(idx) = num.parse::<usize>() {
                         let offset = text.len();
-                        tab_stops.push((offset, TabStop { index: idx, placeholder: String::new() }));
+                        tab_stops.push((
+                            offset,
+                            TabStop {
+                                index: idx,
+                                placeholder: String::new(),
+                            },
+                        ));
                     }
                 } else if next.is_ascii_alphabetic() || next == '_' {
                     // $VARIABLE
                     let mut var = String::new();
                     while let Some(&c) = chars.peek() {
-                        if c.is_ascii_alphanumeric() || c == '_' { var.push(c); chars.next(); }
-                        else { break; }
+                        if c.is_ascii_alphanumeric() || c == '_' {
+                            var.push(c);
+                            chars.next();
+                        } else {
+                            break;
+                        }
                     }
                     text.push_str(&expand_variable(&var, filename, clipboard));
                 } else {
@@ -159,13 +192,11 @@ pub fn parse_snippet(template: &str, filename: &str, clipboard: &str) -> Snippet
 fn expand_variable(name: &str, filename: &str, clipboard: &str) -> String {
     match name {
         "TM_FILENAME" => filename.to_string(),
-        "TM_FILENAME_BASE" => {
-            std::path::Path::new(filename)
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or(filename)
-                .to_string()
-        }
+        "TM_FILENAME_BASE" => std::path::Path::new(filename)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(filename)
+            .to_string(),
         "CLIPBOARD" => clipboard.to_string(),
         "CURRENT_YEAR" => {
             // Simple year extraction (avoids chrono dependency)
@@ -181,11 +212,7 @@ fn expand_variable(name: &str, filename: &str, clipboard: &str) -> String {
 
 /// Insert a snippet at the cursor position in the buffer.
 /// Returns the ActiveSnippet for tab-stop navigation, or None if no tab stops.
-pub fn insert_snippet(
-    buf: &mut Buffer,
-    pos: Position,
-    snippet: &Snippet,
-) -> Option<ActiveSnippet> {
+pub fn insert_snippet(buf: &mut Buffer, pos: Position, snippet: &Snippet) -> Option<ActiveSnippet> {
     buf.insert(pos, &snippet.text);
 
     if snippet.tab_stops.is_empty() {
@@ -245,17 +272,26 @@ pub fn builtin_snippets(lang_id: &str) -> Vec<(&'static str, &'static str)> {
         "python" => vec![
             ("def", "def ${1:name}(${2:params}):\n    $0"),
             ("adef", "async def ${1:name}(${2:params}):\n    $0"),
-            ("class", "class ${1:Name}:\n    def __init__(self${2:, params}):\n        $0"),
+            (
+                "class",
+                "class ${1:Name}:\n    def __init__(self${2:, params}):\n        $0",
+            ),
             ("if", "if ${1:condition}:\n    $0"),
             ("for", "for ${1:item} in ${2:iterable}:\n    $0"),
             ("with", "with ${1:expr} as ${2:name}:\n    $0"),
             ("try", "try:\n    $1\nexcept ${2:Exception} as e:\n    $0"),
         ],
         "go" => vec![
-            ("fn", "func ${1:name}(${2:params}) ${3:returnType} {\n\t$0\n}"),
+            (
+                "fn",
+                "func ${1:name}(${2:params}) ${3:returnType} {\n\t$0\n}",
+            ),
             ("if", "if ${1:condition} {\n\t$0\n}"),
             ("for", "for ${1:i := 0; i < n; i++} {\n\t$0\n}"),
-            ("forr", "for ${1:key}, ${2:value} := range ${3:collection} {\n\t$0\n}"),
+            (
+                "forr",
+                "for ${1:key}, ${2:value} := range ${3:collection} {\n\t$0\n}",
+            ),
             ("iferr", "if err != nil {\n\t$0\n}"),
             ("struct", "type ${1:Name} struct {\n\t$0\n}"),
         ],

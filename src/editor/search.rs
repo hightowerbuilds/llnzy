@@ -131,10 +131,9 @@ impl EditorSearch {
                     let end_col = col + query_chars.len();
 
                     if self.whole_word {
-                        let word_start =
-                            col == 0 || !is_word_char(search_chars[col - 1]);
-                        let word_end = end_col >= search_chars.len()
-                            || !is_word_char(search_chars[end_col]);
+                        let word_start = col == 0 || !is_word_char(search_chars[col - 1]);
+                        let word_end =
+                            end_col >= search_chars.len() || !is_word_char(search_chars[end_col]);
                         if !word_start || !word_end {
                             col += 1;
                             continue;
@@ -177,10 +176,8 @@ impl EditorSearch {
                 if self.whole_word {
                     let chars: Vec<char> = line_text.chars().collect();
                     let end_col = start_col + match_len;
-                    let word_start =
-                        start_col == 0 || !is_word_char(chars[start_col - 1]);
-                    let word_end =
-                        end_col >= chars.len() || !is_word_char(chars[end_col]);
+                    let word_start = start_col == 0 || !is_word_char(chars[start_col - 1]);
+                    let word_end = end_col >= chars.len() || !is_word_char(chars[end_col]);
                     if !word_start || !word_end {
                         continue;
                     }

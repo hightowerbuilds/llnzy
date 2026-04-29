@@ -124,10 +124,7 @@ pub(crate) fn render_sketch_view(
             sketch.save_as_open = !sketch.save_as_open;
             if sketch.save_as_open {
                 // Pre-fill with current name if any
-                sketch.save_as_input = sketch
-                    .active_sketch_name
-                    .clone()
-                    .unwrap_or_default();
+                sketch.save_as_input = sketch.active_sketch_name.clone().unwrap_or_default();
             }
         }
         if ui
@@ -278,10 +275,7 @@ fn render_sketch_browser(ui: &mut egui::Ui, sketch: &mut SketchState) {
         .auto_shrink([false; 2])
         .show(ui, |ui| {
             for name in &sketch.saved_sketch_names {
-                let is_active = sketch
-                    .active_sketch_name
-                    .as_deref()
-                    == Some(name.as_str());
+                let is_active = sketch.active_sketch_name.as_deref() == Some(name.as_str());
                 ui.horizontal(|ui| {
                     let label = if is_active {
                         egui::RichText::new(name)
@@ -293,7 +287,10 @@ fn render_sketch_browser(ui: &mut egui::Ui, sketch: &mut SketchState) {
                             .size(13.0)
                             .color(egui::Color32::from_rgb(200, 200, 210))
                     };
-                    if ui.add(egui::Label::new(label).sense(egui::Sense::click())).clicked() {
+                    if ui
+                        .add(egui::Label::new(label).sense(egui::Sense::click()))
+                        .clicked()
+                    {
                         load_name = Some(name.clone());
                     }
                     if ui
@@ -491,10 +488,7 @@ fn handle_sketch_pointer(
 
 fn paint_sketch_document(painter: &egui::Painter, canvas_rect: egui::Rect, sketch: &SketchState) {
     for (index, element) in sketch.document.elements.iter().enumerate() {
-        let is_text_draft = sketch
-            .text_draft
-            .as_ref()
-            .is_some_and(|d| d.index == index);
+        let is_text_draft = sketch.text_draft.as_ref().is_some_and(|d| d.index == index);
         // For a text element being actively edited, we paint it with the
         // draft text (which may differ from the committed text) and with
         // a cursor. The paint_inline_text_cursor function handles the cursor,
@@ -507,8 +501,7 @@ fn paint_sketch_document(painter: &egui::Painter, canvas_rect: egui::Rect, sketc
                     .map(|d| d.text.as_str())
                     .unwrap_or("");
                 if !draft_text.is_empty() {
-                    let pos =
-                        canvas_to_screen(canvas_rect, SketchPoint::new(text_el.x, text_el.y));
+                    let pos = canvas_to_screen(canvas_rect, SketchPoint::new(text_el.x, text_el.y));
                     painter.text(
                         pos,
                         egui::Align2::LEFT_TOP,

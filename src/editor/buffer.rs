@@ -1011,10 +1011,8 @@ mod tests {
 
     #[test]
     fn failed_save_keeps_buffer_modified() {
-        let missing_parent = std::env::temp_dir().join(format!(
-            "llnzy-missing-parent-{}",
-            std::process::id()
-        ));
+        let missing_parent =
+            std::env::temp_dir().join(format!("llnzy-missing-parent-{}", std::process::id()));
         let path = missing_parent.join("file.txt");
 
         let mut buf = Buffer::empty();

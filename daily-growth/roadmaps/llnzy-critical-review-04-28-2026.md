@@ -7,6 +7,25 @@ The tone is intentionally direct. The goal is not to be flattering. The goal is 
 
 ---
 
+## Critical Review Roadmap
+
+Shorthand status for the work called out in this review:
+
+- [x] P0 Save safety: close/window-close save failures now keep modified buffers open, preserve dirty state, surface the error, and have core dirty-buffer regression coverage.
+- [x] Graphics engine boundary: introduced an app-agnostic `engine` frame/layer model plus a renderer adapter so terminal, overlay, and egui visuals can move through a shared graphics spine instead of one-off renderer paths.
+- [x] PTY lifecycle: retain process identity, expose exit status, avoid default auto-close, and add restart/close semantics.
+- [x] LSP nonblocking baseline: remove UI-thread `block_on`, add timeouts, capture stderr, and respond to server requests.
+- [x] Command bus: replace feature-specific pending `Option` fields with typed commands and explicit command results.
+- [x] Session restore truth: either wire startup restore completely or remove/soften the public claim.
+- [ ] Split app/UI ownership: move `main.rs` and `UiState` responsibilities into smaller controllers and feature state modules.
+- [ ] Editor reliability tier: finish boring file/edit/search/selection/reload behavior before widening advanced editor features.
+- [ ] Performance harness: add repeatable terminal/editor/effects/LSP performance scenarios and budgets.
+- [ ] Product truth audit: align README/config/docs/known limitations with implemented, tested behavior.
+
+Completed work should stay marked in the detailed findings below so this review remains a living checklist, not a static critique.
+
+---
+
 ## Executive Summary
 
 `llnzy` is impressive, but it is carrying too much ambition on too little architecture.
@@ -115,6 +134,8 @@ Good decisions:
 - Allows egui to render either into the scene texture or on top, depending on effects behavior.
 
 This part has personality and technical depth. It also carries performance risk, but the ambition is coherent.
+
+Status update, April 28, 2026: the first graphics-engine boundary is now in place. `src/engine/mod.rs` defines the app-agnostic frame, layer, primitive, text, effect, and validation model, and `src/renderer/frame_adapter.rs` adapts the current terminal/editor render request into that engine frame. Terminal backgrounds, decorations, highlights, visual bell, search/error overlays, and egui now have an explicit engine-carried layer path.
 
 ### Editor Building Blocks
 
@@ -335,6 +356,8 @@ That is not a UI state object. That is half the app.
 
 The egui render function starts pulling state out around `src/ui/mod.rs:300`, runs the frame, then writes it back around `src/ui/mod.rs:625`. This is clever Rust ownership management, but it is also a maintainability smell.
 
+Status update, April 28, 2026: the first ownership split is in place. Tab-bar rendering, context-menu actions, command conversion, and double-click rename state now live in `src/ui/tab_bar.rs`; Stacker/prompt-bar state now lives in `src/ui/stacker_state.rs`; Sketch state now lives in `src/ui/sketch_state.rs`; sidebar state now lives in `src/ui/sidebar_state.rs`; settings surface rendering now lives in `src/ui/settings_state.rs`; and the active-tab content switch now lives in `src/ui/tab_content.rs`. `UiState::render` still coordinates egui and wgpu frame plumbing, but feature-owned rendering and command conversion are no longer embedded directly in the central frame function.
+
 The code is saying: "I cannot borrow this state in a sane shape, so I will temporarily disassemble the app."
 
 ### Why This Matters
@@ -454,6 +477,8 @@ Relevant area:
 
 - `src/main.rs:776`
 
+Status: Completed on April 28, 2026.
+
 When the save prompt response is `Save`, the code calls `buf.save()` and ignores the result before closing the tab or exiting.
 
 That is not acceptable for an editor.
@@ -482,13 +507,13 @@ Make save return an explicit result and keep the tab/window open on failure.
 
 Behavior should be:
 
-- attempt save
-- if success, close
-- if failure, show error dialog and keep buffer open
-- log detailed error
-- keep modified state intact
+- [x] attempt save
+- [x] if success, close
+- [x] if failure, show error dialog and keep buffer open
+- [x] log detailed error
+- [x] keep modified state intact
 
-This needs tests.
+This now has regression coverage for the core dirty-buffer behavior, with the close/window-close paths preserving the pending prompt on failure.
 
 ---
 
@@ -498,7 +523,9 @@ Relevant file:
 
 - `src/pty.rs`
 
-The PTY spawn logic creates the child at `src/pty.rs:58`, but the child handle is discarded:
+Status update, April 28, 2026: `Pty` now retains the child handle and process id, reports exit status through a one-shot disconnect event, and exited terminal tabs stay visible by default with a terminal marker. Terminal tab context menus now expose explicit kill and restart actions.
+
+The original issue was that the PTY spawn logic created the child at `src/pty.rs:58`, but the child handle was discarded:
 
 ```rust
 let _child = pair.slave.spawn_command(cmd).map_err(io::Error::other)?;
@@ -564,6 +591,8 @@ Examples start around `src/lsp/mod.rs:168`.
 
 This risks UI stalls. Language servers can be slow. They can hang. They can crash. They can emit unexpected requests. They can do expensive startup indexing. Blocking editor behavior on them is not safe.
 
+Status update, April 28, 2026: the editor-facing LSP path no longer uses `block_on`. Server startup is spawned and polled, opened documents are queued until initialization completes, document lifecycle notifications are fire-and-forget after local state updates, rename/code actions/document symbols/workspace symbols use receiver-polled async requests, and health checks are spawned instead of blocking a frame. The only remaining `block_on` in `src/lsp` is shutdown during manager drop, outside the normal editor interaction path.
+
 ### Server Requests Are Not Answered
 
 `src/lsp/transport.rs:187` detects server-initiated requests but only forwards them as notifications. There is no visible response handling path.
@@ -578,11 +607,15 @@ Many servers ask for:
 
 If the client ignores or fails to respond, some servers degrade or hang waiting.
 
+Status update, April 28, 2026: the transport now answers server-initiated requests instead of only forwarding them. It returns useful baseline responses for configuration, dynamic registration, workspace folders, and message prompts, and returns a JSON-RPC method-not-found error for unsupported requests so servers are not left waiting forever.
+
 ### Stderr Is Dropped
 
 `src/lsp/transport.rs:51` sends server stderr to null.
 
 That makes debugging LSP failures much harder. A dev tool should not hide the one stream servers use to explain what went wrong.
+
+Status update, April 28, 2026: language server stderr is now piped and logged by the transport. LSP request calls also have a bounded timeout, and pending request state is cleaned up on send failure, closed channels, or timeout.
 
 ### Recommended Fix
 
@@ -796,9 +829,9 @@ Relevant files:
 - `src/workspace_store.rs`
 - `src/main.rs`
 
-`src/workspace_store.rs:135` defines `load_last_session`, and `src/main.rs` saves a session snapshot on close. But startup restore does not appear wired.
+`src/workspace_store.rs:135` defines `load_last_session`, and `src/main.rs` saves a session snapshot on close. Startup restore is now wired through `src/runtime/session_restore.rs`, using the same command path as workspace launch.
 
-That is a credibility issue because the README claims session auto-save on close.
+Terminal tabs restore as fresh shells rather than resurrected processes. That is an explicit restore semantic, not process resume.
 
 ### Recommended Fix
 
@@ -952,8 +985,8 @@ There are useful tests. But the most dangerous workflows are not yet sufficientl
 
 Add tests for:
 
-- save failure keeps tab open
-- close window with multiple modified buffers and save failure
+- [ ] save failure keeps tab open in a UI/close-flow test; core dirty-buffer save failure regression exists.
+- [ ] close window with multiple modified buffers and save failure
 - external file modification prompt
 - LSP server unavailable behavior
 - LSP request timeout behavior
@@ -1007,10 +1040,10 @@ That matches the README and is honest.
 
 Before broader users, minimum release hardening should include:
 
-- save error safety
+- [x] save error safety
 - crash reporting path
 - PTY lifecycle cleanup
-- no silent data loss
+- [x] no silent data loss from failed close/save prompts
 - session restore truthfulness
 - LSP timeout behavior
 - clear unsupported platform story
@@ -1055,12 +1088,12 @@ Fix every path where save errors are ignored.
 
 Requirements:
 
-- save failure keeps file open
-- user sees clear error
-- modified state remains
-- close operation aborts
-- logs include path and error
-- tests cover tab close and window close
+- [x] save failure keeps file open
+- [x] user sees clear error
+- [x] modified state remains
+- [x] close operation aborts
+- [x] logs include path and error
+- [ ] tests cover tab close and window close
 
 ### P0.2 PTY Lifecycle
 
@@ -1068,12 +1101,12 @@ Make terminal session process state explicit.
 
 Requirements:
 
-- retain child/process identity
-- expose exit status
-- do not auto-close by default
-- show exited-state UI
-- support close/restart action
-- tests for exit behavior
+- [x] retain child/process identity
+- [x] expose exit status
+- [x] do not auto-close by default
+- [x] show exited-state UI
+- [x] support close/restart action
+- [x] tests for exit behavior
 
 ### P0.3 LSP Nonblocking Baseline
 
@@ -1081,11 +1114,17 @@ Remove UI-thread blocking for server operations.
 
 Requirements:
 
-- no `block_on` in user-interaction path
-- request timeout
-- server unavailable state
-- server stderr captured
-- server request response path
+- [x] no `block_on` in user-interaction path
+- [x] request timeout
+- [x] server unavailable state
+- [x] server stderr captured
+- [x] server request response path
+- [x] nonblocking document lifecycle notifications
+- [x] nonblocking server startup with queued `didOpen`
+- [x] nonblocking rename requests
+- [x] nonblocking health checks
+- [x] nonblocking code action/document symbol/workspace symbol UI requests
+- [x] drain server notifications into manager-owned diagnostics
 
 ### P0.4 Command Bus
 
@@ -1139,6 +1178,15 @@ Move feature state into feature-owned modules:
 - `ui/settings_state.rs`
 
 Goal: `UiState` should coordinate egui integration, not own the whole product.
+
+Status:
+
+- [x] move tab-bar render/action/rename behavior into `ui/tab_bar.rs`
+- [x] move Stacker and prompt-bar state into `ui/stacker_state.rs`
+- [x] move sketch state into a feature-owned UI state module
+- [x] move sidebar state into a feature-owned UI state module
+- [x] move settings state into a feature-owned UI state module
+- [x] reduce `UiState::render` into high-level frame coordination
 
 ### P1.3 Stabilize Editor Core
 
@@ -1237,4 +1285,3 @@ After that, the app can grow.
 Until then, the honest status is:
 
 > A beautiful, terminal-first personal dev environment with serious foundations and serious architectural debt.
-

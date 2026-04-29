@@ -203,7 +203,10 @@ impl Renderer {
         #[cfg(debug_assertions)]
         {
             if let Err(err) = engine_frame.validate() {
-                log::warn!("Invalid engine frame generated from render request: {:?}", err);
+                log::warn!(
+                    "Invalid engine frame generated from render request: {:?}",
+                    err
+                );
             }
         }
 
@@ -262,7 +265,12 @@ impl Renderer {
         } else {
             if use_scene {
                 let mut pp_encoder = self.create_render_encoder();
-                self.apply_post_processing(&mut pp_encoder, &swapchain_view, use_scene, effects_mask);
+                self.apply_post_processing(
+                    &mut pp_encoder,
+                    &swapchain_view,
+                    use_scene,
+                    effects_mask,
+                );
                 self.gpu.queue.submit(std::iter::once(pp_encoder.finish()));
             }
             self.render_egui_overlay(request.egui_render, &swapchain_view);
@@ -404,7 +412,8 @@ impl Renderer {
 
         // Cache management — only keep the active tab's text cache
         let cache_key = pass.tab_id as TextCacheKey;
-        self.text.retain_caches(&std::collections::HashSet::from([cache_key]));
+        self.text
+            .retain_caches(&std::collections::HashSet::from([cache_key]));
 
         let terminal = &session.terminal;
 
@@ -477,8 +486,7 @@ impl Renderer {
         }
 
         // Text
-        let block_cursor = if self.cursor_visible
-            && self.config.cursor_style == CursorStyle::Block
+        let block_cursor = if self.cursor_visible && self.config.cursor_style == CursorStyle::Block
         {
             terminal.cursor_point()
         } else {
@@ -585,13 +593,8 @@ impl Renderer {
         }
         let target = Self::target_view(&self.gpu, swapchain_view, use_scene);
         let line_h = self.text.cell_dimensions().1;
-        self.text.render_text_runs(
-            runs,
-            line_h,
-            &self.gpu,
-            target,
-            encoder,
-        );
+        self.text
+            .render_text_runs(runs, line_h, &self.gpu, target, encoder);
     }
 
     fn apply_post_processing(
@@ -656,10 +659,8 @@ impl Renderer {
     }
 
     fn crt_params(&self, mask: Option<[f32; 4]>) -> CrtParams {
-        let (mask_min, mask_max) = mask.map_or(
-            ([0.0, 0.0], [1.0, 1.0]),
-            |m| ([m[0], m[1]], [m[2], m[3]]),
-        );
+        let (mask_min, mask_max) =
+            mask.map_or(([0.0, 0.0], [1.0, 1.0]), |m| ([m[0], m[1]], [m[2], m[3]]));
         CrtParams {
             scanline_intensity: self.config.effects.scanline_intensity,
             curvature: self.config.effects.curvature,
@@ -682,7 +683,6 @@ impl Renderer {
             egui_fn(&self.gpu.device, &self.gpu.queue, swapchain_view, desc);
         }
     }
-
 }
 
 fn primitive_rects(
@@ -708,9 +708,21 @@ fn primitive_rects(
                     let width = width.min(rect.width / 2.0).min(rect.height / 2.0);
                     let color = color_with_opacity(*color, layer_opacity);
                     rects.push((rect.x, rect.y, rect.width, width, color));
-                    rects.push((rect.x, rect.y + rect.height - width, rect.width, width, color));
+                    rects.push((
+                        rect.x,
+                        rect.y + rect.height - width,
+                        rect.width,
+                        width,
+                        color,
+                    ));
                     rects.push((rect.x, rect.y, width, rect.height, color));
-                    rects.push((rect.x + rect.width - width, rect.y, width, rect.height, color));
+                    rects.push((
+                        rect.x + rect.width - width,
+                        rect.y,
+                        width,
+                        rect.height,
+                        color,
+                    ));
                 }
             }
             Primitive::Line {

@@ -165,7 +165,11 @@ mod tests {
     fn detect_npm_tasks() {
         let dir = std::env::temp_dir().join(format!("llnzy_tasks_npm_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("package.json"), r#"{"scripts":{"build":"tsc","test":"jest"}}"#).unwrap();
+        std::fs::write(
+            dir.join("package.json"),
+            r#"{"scripts":{"build":"tsc","test":"jest"}}"#,
+        )
+        .unwrap();
 
         let tasks = detect_tasks(&dir);
         assert!(tasks.iter().any(|t| t.name.contains("build")));
@@ -178,7 +182,11 @@ mod tests {
     fn detect_makefile_tasks() {
         let dir = std::env::temp_dir().join(format!("llnzy_tasks_make_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("Makefile"), "all:\n\techo hi\nclean:\n\trm -f out\n").unwrap();
+        std::fs::write(
+            dir.join("Makefile"),
+            "all:\n\techo hi\nclean:\n\trm -f out\n",
+        )
+        .unwrap();
 
         let tasks = detect_tasks(&dir);
         assert!(tasks.iter().any(|t| t.name == "make"));

@@ -1,7 +1,7 @@
-use crate::config::Config;
-use crate::explorer::ExplorerState;
 use super::explorer_view;
 use super::types::{BUMPER_WIDTH, SIDEBAR_WIDTH};
+use crate::config::Config;
+use crate::explorer::ExplorerState;
 
 /// Result of rendering the sidebar.
 pub struct SidebarResult {
@@ -34,7 +34,8 @@ pub fn render_sidebar(
     let mut panel_width = SIDEBAR_WIDTH - BUMPER_WIDTH;
 
     if open {
-        let (width, close_req) = render_file_tree(ctx, chrome_bg, text_color, explorer, editor_view, config);
+        let (width, close_req) =
+            render_file_tree(ctx, chrome_bg, text_color, explorer, editor_view, config);
         panel_width = width;
         close_folder = close_req;
         if render_bumper(ctx, bumper_bg, true) {
@@ -44,7 +45,11 @@ pub fn render_sidebar(
         open = true;
     }
 
-    SidebarResult { open, panel_width, close_folder }
+    SidebarResult {
+        open,
+        panel_width,
+        close_folder,
+    }
 }
 
 /// Render the file tree panel. Returns (actual panel width, close_folder_requested).
@@ -122,7 +127,12 @@ fn render_file_tree(
                     .id_salt("sidebar_tree")
                     .auto_shrink([false; 2])
                     .show(ui, |ui| {
-                        explorer_view::render_sidebar_tree(ui, explorer, editor_view, sidebar_font_size);
+                        explorer_view::render_sidebar_tree(
+                            ui,
+                            explorer,
+                            editor_view,
+                            sidebar_font_size,
+                        );
                     });
             }
         });

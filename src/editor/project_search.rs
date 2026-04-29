@@ -45,8 +45,17 @@ impl Default for ProjectSearch {
 
 /// Directories to skip during project search.
 const IGNORED_DIRS: &[&str] = &[
-    ".git", "node_modules", "target", "__pycache__", "venv",
-    ".venv", "dist", "build", ".next", ".cache", ".DS_Store",
+    ".git",
+    "node_modules",
+    "target",
+    "__pycache__",
+    "venv",
+    ".venv",
+    "dist",
+    "build",
+    ".next",
+    ".cache",
+    ".DS_Store",
 ];
 
 impl ProjectSearch {
@@ -210,18 +219,76 @@ fn is_searchable_file(path: &Path) -> bool {
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
     matches!(
         ext,
-        "rs" | "js" | "jsx" | "ts" | "tsx" | "py" | "go" | "c" | "h" | "cpp" | "hpp"
-        | "java" | "rb" | "sh" | "bash" | "zsh" | "fish"
-        | "html" | "htm" | "css" | "scss" | "less" | "sass"
-        | "json" | "toml" | "yaml" | "yml" | "xml" | "csv"
-        | "md" | "txt" | "cfg" | "conf" | "ini" | "env"
-        | "sql" | "graphql" | "proto" | "swift" | "kt" | "kts"
-        | "lua" | "vim" | "el" | "clj" | "ex" | "exs" | "erl"
-        | "zig" | "nim" | "v" | "d" | "ml" | "mli" | "hs"
-        | "Makefile" | "Dockerfile" | "Cargo" | "Gemfile"
+        "rs" | "js"
+            | "jsx"
+            | "ts"
+            | "tsx"
+            | "py"
+            | "go"
+            | "c"
+            | "h"
+            | "cpp"
+            | "hpp"
+            | "java"
+            | "rb"
+            | "sh"
+            | "bash"
+            | "zsh"
+            | "fish"
+            | "html"
+            | "htm"
+            | "css"
+            | "scss"
+            | "less"
+            | "sass"
+            | "json"
+            | "toml"
+            | "yaml"
+            | "yml"
+            | "xml"
+            | "csv"
+            | "md"
+            | "txt"
+            | "cfg"
+            | "conf"
+            | "ini"
+            | "env"
+            | "sql"
+            | "graphql"
+            | "proto"
+            | "swift"
+            | "kt"
+            | "kts"
+            | "lua"
+            | "vim"
+            | "el"
+            | "clj"
+            | "ex"
+            | "exs"
+            | "erl"
+            | "zig"
+            | "nim"
+            | "v"
+            | "d"
+            | "ml"
+            | "mli"
+            | "hs"
+            | "Makefile"
+            | "Dockerfile"
+            | "Cargo"
+            | "Gemfile"
     ) || path.file_name().and_then(|n| n.to_str()).is_some_and(|n| {
-        matches!(n, "Makefile" | "Dockerfile" | "Cargo.toml" | "Cargo.lock"
-            | "package.json" | "tsconfig.json" | ".gitignore" | ".editorconfig")
+        matches!(
+            n,
+            "Makefile"
+                | "Dockerfile"
+                | "Cargo.toml"
+                | "Cargo.lock"
+                | "package.json"
+                | "tsconfig.json"
+                | ".gitignore"
+                | ".editorconfig"
+        )
     })
 }
 
@@ -233,7 +300,11 @@ mod tests {
     fn search_finds_matches_in_files() {
         let dir = std::env::temp_dir().join(format!("llnzy_project_search_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("test.rs"), "fn hello() {\n    println!(\"world\");\n}\n").unwrap();
+        std::fs::write(
+            dir.join("test.rs"),
+            "fn hello() {\n    println!(\"world\");\n}\n",
+        )
+        .unwrap();
         std::fs::write(dir.join("test.py"), "def hello():\n    pass\n").unwrap();
 
         let results = search_files(&dir, "hello", false);
@@ -244,7 +315,8 @@ mod tests {
 
     #[test]
     fn search_regex_mode() {
-        let dir = std::env::temp_dir().join(format!("llnzy_project_search_re_{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("llnzy_project_search_re_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("test.rs"), "fn foo() {}\nfn bar() {}\n").unwrap();
 
@@ -256,7 +328,10 @@ mod tests {
 
     #[test]
     fn search_skips_ignored_dirs() {
-        let dir = std::env::temp_dir().join(format!("llnzy_project_search_ignore_{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "llnzy_project_search_ignore_{}",
+            std::process::id()
+        ));
         let ignored = dir.join("node_modules");
         std::fs::create_dir_all(&ignored).unwrap();
         std::fs::write(ignored.join("lib.js"), "const hello = 1;\n").unwrap();

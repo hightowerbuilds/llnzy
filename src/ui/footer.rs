@@ -41,9 +41,16 @@ pub fn render_footer(
 
                 // Terminal button — creates a new terminal tab
                 let terminal_active = matches!(active_tab_kind, Some(TabKind::Terminal));
-                render_button(ui, "Terminal", terminal_active, active_btn, text_color, || {
-                    result = Some(FooterAction::NewTerminalTab);
-                });
+                render_button(
+                    ui,
+                    "Terminal",
+                    terminal_active,
+                    active_btn,
+                    text_color,
+                    || {
+                        result = Some(FooterAction::NewTerminalTab);
+                    },
+                );
 
                 // All singleton tab buttons
                 let singletons: &[(&str, TabKind)] = &[

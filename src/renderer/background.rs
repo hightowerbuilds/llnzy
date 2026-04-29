@@ -310,36 +310,36 @@ impl BackgroundRenderer {
                     push_constant_ranges: &[],
                 });
 
-        let image_pipeline =
-            gpu.device
-                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                    label: Some("bg_image_pipeline"),
-                    layout: Some(&image_pipeline_layout),
-                    vertex: wgpu::VertexState {
-                        module: &image_shader,
-                        entry_point: "vs_main",
-                        buffers: &[],
-                        compilation_options: Default::default(),
-                    },
-                    fragment: Some(wgpu::FragmentState {
-                        module: &image_shader,
-                        entry_point: "fs_main",
-                        targets: &[Some(wgpu::ColorTargetState {
-                            format: gpu.surface_config.format,
-                            blend: None,
-                            write_mask: wgpu::ColorWrites::ALL,
-                        })],
-                        compilation_options: Default::default(),
-                    }),
-                    primitive: wgpu::PrimitiveState {
-                        topology: wgpu::PrimitiveTopology::TriangleList,
-                        ..Default::default()
-                    },
-                    depth_stencil: None,
-                    multisample: wgpu::MultisampleState::default(),
-                    multiview: None,
-                    cache: None,
-                });
+        let image_pipeline = gpu
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("bg_image_pipeline"),
+                layout: Some(&image_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &image_shader,
+                    entry_point: "vs_main",
+                    buffers: &[],
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &image_shader,
+                    entry_point: "fs_main",
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: gpu.surface_config.format,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    ..Default::default()
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                multiview: None,
+                cache: None,
+            });
 
         BackgroundRenderer {
             pipelines,
@@ -550,11 +550,7 @@ impl BackgroundRenderer {
     }
 
     /// Draw the background image to the target view.
-    pub fn draw_image(
-        &self,
-        encoder: &mut wgpu::CommandEncoder,
-        target: &wgpu::TextureView,
-    ) {
+    pub fn draw_image(&self, encoder: &mut wgpu::CommandEncoder, target: &wgpu::TextureView) {
         let Some(bind_group) = &self.image_bind_group else {
             return;
         };

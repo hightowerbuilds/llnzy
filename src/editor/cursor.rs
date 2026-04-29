@@ -168,13 +168,14 @@ impl EditorCursor {
     pub fn move_home(&mut self, buf: &Buffer, extend: bool) {
         self.desired_col = None;
         let line = buf.line(self.pos.line);
-        let first_non_ws = line
-            .chars()
-            .position(|c| !c.is_whitespace())
-            .unwrap_or(0);
+        let first_non_ws = line.chars().position(|c| !c.is_whitespace()).unwrap_or(0);
 
         let new_col = if self.pos.col == first_non_ws || self.pos.col == 0 {
-            if self.pos.col == first_non_ws { 0 } else { first_non_ws }
+            if self.pos.col == first_non_ws {
+                0
+            } else {
+                first_non_ws
+            }
         } else {
             first_non_ws
         };
@@ -289,7 +290,9 @@ impl EditorCursor {
 
     /// Move to a specific line number (1-indexed, for "go to line").
     pub fn go_to_line(&mut self, line_number: usize, buf: &Buffer) {
-        let line = line_number.saturating_sub(1).min(buf.line_count().saturating_sub(1));
+        let line = line_number
+            .saturating_sub(1)
+            .min(buf.line_count().saturating_sub(1));
         self.clear_selection();
         self.desired_col = None;
         self.pos = Position::new(line, 0);
@@ -367,7 +370,8 @@ impl EditorCursor {
     /// Get all cursor positions (primary + extras), sorted in reverse document order
     /// for safe editing (edits from bottom to top preserve positions).
     pub fn all_positions_reverse(&self) -> Vec<(Position, Option<Position>)> {
-        let mut positions: Vec<(Position, Option<Position>)> = Vec::with_capacity(1 + self.extra_cursors.len());
+        let mut positions: Vec<(Position, Option<Position>)> =
+            Vec::with_capacity(1 + self.extra_cursors.len());
         positions.push((self.pos, self.anchor));
         for extra in &self.extra_cursors {
             positions.push((extra.pos, extra.anchor));
@@ -404,7 +408,11 @@ impl EditorCursor {
             end += 1;
         }
         let word: String = chars[start..end].iter().collect();
-        if word.is_empty() { None } else { Some(word) }
+        if word.is_empty() {
+            None
+        } else {
+            Some(word)
+        }
     }
 
     /// Add a cursor at the next occurrence of `needle` after the last cursor position.
@@ -710,7 +718,10 @@ mod tests {
 
     #[test]
     fn page_down() {
-        let text = (0..50).map(|i| format!("line {i}")).collect::<Vec<_>>().join("\n");
+        let text = (0..50)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
         let buf = buf_with(&text);
         let mut c = EditorCursor::new();
         c.move_page_down(&buf, 20, false);

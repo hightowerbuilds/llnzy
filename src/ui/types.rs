@@ -1,5 +1,8 @@
 use std::time::Instant;
 
+use crate::app::commands::AppCommand;
+use crate::workspace::TabKind;
+
 pub const SIDEBAR_WIDTH: f32 = 200.0;
 pub const BUMPER_WIDTH: f32 = 20.0;
 
@@ -21,6 +24,8 @@ pub enum SettingsTab {
     Themes,
     Background,
     Text,
+    Editor,
+    Workspace,
 }
 
 /// A ghost-text animation that floats up and fades when a prompt is copied.
@@ -48,4 +53,17 @@ pub enum SavePromptResponse {
     Save,
     DontSave,
     Cancel,
+}
+
+#[derive(Default)]
+pub struct UiFrameOutput {
+    pub commands: Vec<AppCommand>,
+    pub save_prompt_response: Option<SavePromptResponse>,
+}
+
+#[derive(Clone)]
+pub struct UiTabInfo {
+    pub title: String,
+    pub kind: TabKind,
+    pub exited: bool,
 }

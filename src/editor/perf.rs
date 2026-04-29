@@ -127,8 +127,11 @@ impl PerfStats {
         }
 
         let rope_kb = self.rope_bytes as f64 / 1024.0;
-        parts.push(format!("Rope: {rope_kb:.0}KB  Undo: {}  TS: {}", self.undo_depth,
-            if self.tree_sitter_active { "on" } else { "off" }));
+        parts.push(format!(
+            "Rope: {rope_kb:.0}KB  Undo: {}  TS: {}",
+            self.undo_depth,
+            if self.tree_sitter_active { "on" } else { "off" }
+        ));
 
         parts.join("  |  ")
     }

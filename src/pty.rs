@@ -1,4 +1,4 @@
-use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use std::io::{self, Read, Write};
 use std::sync::mpsc;
 
@@ -9,11 +9,13 @@ pub enum PtyReadResult {
     /// No data available right now, but the channel is still open.
     Empty,
     /// The PTY reader thread has exited (child process is gone).
-    Disconnected,
+    Disconnected(Option<i32>),
 }
 
 pub struct Pty {
     master: Box<dyn MasterPty + Send>,
+    child: Box<dyn Child + Send + Sync>,
+    process_id: Option<u32>,
     write_tx: mpsc::Sender<Vec<u8>>,
     output_rx: mpsc::Receiver<Vec<u8>>,
     /// Set to true once the reader channel disconnects (child exited).
@@ -37,6 +39,26 @@ impl Pty {
         proxy: winit::event_loop::EventLoopProxy<crate::UserEvent>,
         cwd: Option<&str>,
     ) -> io::Result<Self> {
+        Self::spawn_in_with_proxy(shell, cols, rows, Some(proxy), cwd)
+    }
+
+    #[cfg(test)]
+    fn spawn_in_without_proxy(
+        shell: &str,
+        cols: u16,
+        rows: u16,
+        cwd: Option<&str>,
+    ) -> io::Result<Self> {
+        Self::spawn_in_with_proxy(shell, cols, rows, None, cwd)
+    }
+
+    fn spawn_in_with_proxy(
+        shell: &str,
+        cols: u16,
+        rows: u16,
+        proxy: Option<winit::event_loop::EventLoopProxy<crate::UserEvent>>,
+        cwd: Option<&str>,
+    ) -> io::Result<Self> {
         let pty_system = native_pty_system();
         let size = PtySize {
             rows,
@@ -55,7 +77,8 @@ impl Pty {
             cmd.cwd(dir);
         }
 
-        let _child = pair.slave.spawn_command(cmd).map_err(io::Error::other)?;
+        let child = pair.slave.spawn_command(cmd).map_err(io::Error::other)?;
+        let process_id = child.process_id();
 
         // Close slave in parent process
         drop(pair.slave);
@@ -77,7 +100,9 @@ impl Pty {
                             break;
                         }
                         // Wake the event loop so it processes the output
-                        let _ = proxy.send_event(crate::UserEvent::PtyOutput);
+                        if let Some(proxy) = &proxy {
+                            let _ = proxy.send_event(crate::UserEvent::PtyOutput);
+                        }
                     }
                     Err(_) => break,
                 }
@@ -98,6 +123,8 @@ impl Pty {
 
         Ok(Pty {
             master: pair.master,
+            child,
+            process_id,
             write_tx,
             output_rx: read_rx,
             dead: false,
@@ -108,14 +135,27 @@ impl Pty {
     /// Distinguishes between "no data yet" and "child process exited."
     pub fn try_read(&mut self) -> PtyReadResult {
         if self.dead {
-            return PtyReadResult::Disconnected;
+            return PtyReadResult::Empty;
         }
         match self.output_rx.try_recv() {
             Ok(data) => PtyReadResult::Data(data),
-            Err(mpsc::TryRecvError::Empty) => PtyReadResult::Empty,
+            Err(mpsc::TryRecvError::Empty) => {
+                if let Ok(Some(status)) = self.child.try_wait() {
+                    self.dead = true;
+                    PtyReadResult::Disconnected(Some(status.exit_code() as i32))
+                } else {
+                    PtyReadResult::Empty
+                }
+            }
             Err(mpsc::TryRecvError::Disconnected) => {
                 self.dead = true;
-                PtyReadResult::Disconnected
+                let exit_code = self
+                    .child
+                    .try_wait()
+                    .ok()
+                    .flatten()
+                    .map(|status| status.exit_code() as i32);
+                PtyReadResult::Disconnected(exit_code)
             }
         }
     }
@@ -123,6 +163,14 @@ impl Pty {
     /// Returns true if the reader channel has disconnected (child exited).
     pub fn is_dead(&self) -> bool {
         self.dead
+    }
+
+    pub fn process_id(&self) -> Option<u32> {
+        self.process_id
+    }
+
+    pub fn kill(&mut self) -> io::Result<()> {
+        self.child.kill()
     }
 
     /// Write input bytes to the PTY (non-blocking).
@@ -143,5 +191,53 @@ impl Pty {
             pixel_width: 0,
             pixel_height: 0,
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Pty, PtyReadResult};
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn reports_process_identity_and_exit_once() {
+        let mut pty = Pty::spawn_in_without_proxy("/bin/sh", 80, 24, None).unwrap();
+
+        assert!(pty.process_id().is_some());
+        pty.write(b"exit 7\n");
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let exit_code = loop {
+            match pty.try_read() {
+                PtyReadResult::Data(_) | PtyReadResult::Empty => {}
+                PtyReadResult::Disconnected(code) => break code,
+            }
+            assert!(Instant::now() < deadline, "timed out waiting for PTY exit");
+            std::thread::sleep(Duration::from_millis(10));
+        };
+
+        assert_eq!(exit_code, Some(7));
+        assert!(matches!(pty.try_read(), PtyReadResult::Empty));
+    }
+
+    #[test]
+    fn kill_reports_disconnect() {
+        let mut pty = Pty::spawn_in_without_proxy("/bin/sh", 80, 24, None).unwrap();
+        pty.kill().unwrap();
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match pty.try_read() {
+                PtyReadResult::Data(_) | PtyReadResult::Empty => {}
+                PtyReadResult::Disconnected(_) => break,
+            }
+            assert!(
+                Instant::now() < deadline,
+                "timed out waiting for killed PTY exit"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        assert!(matches!(pty.try_read(), PtyReadResult::Empty));
     }
 }

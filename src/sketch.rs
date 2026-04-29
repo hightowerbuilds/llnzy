@@ -601,7 +601,10 @@ pub fn sketches_dir() -> Option<PathBuf> {
 /// Sanitize a user-provided sketch name into a safe filename stem.
 fn sanitize_sketch_name(name: &str) -> String {
     name.trim()
-        .replace(|c: char| !c.is_alphanumeric() && c != '-' && c != '_' && c != ' ', "")
+        .replace(
+            |c: char| !c.is_alphanumeric() && c != '-' && c != '_' && c != ' ',
+            "",
+        )
         .trim()
         .to_string()
 }

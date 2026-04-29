@@ -47,39 +47,171 @@ pub enum CommandId {
 /// All registered commands.
 pub fn all_commands() -> Vec<Command> {
     vec![
-        Command { name: "Save", keybinding: "Cmd+S", id: CommandId::Save },
-        Command { name: "Undo", keybinding: "Cmd+Z", id: CommandId::Undo },
-        Command { name: "Redo", keybinding: "Cmd+Shift+Z", id: CommandId::Redo },
-        Command { name: "Select All", keybinding: "Cmd+A", id: CommandId::SelectAll },
-        Command { name: "Cut", keybinding: "Cmd+X", id: CommandId::Cut },
-        Command { name: "Copy", keybinding: "Cmd+C", id: CommandId::Copy },
-        Command { name: "Paste", keybinding: "Cmd+V", id: CommandId::Paste },
-        Command { name: "Delete Line", keybinding: "Cmd+Shift+K", id: CommandId::DeleteLine },
-        Command { name: "Duplicate Line", keybinding: "Cmd+Shift+D", id: CommandId::DuplicateLine },
-        Command { name: "Move Line Up", keybinding: "Alt+Up", id: CommandId::MoveLineUp },
-        Command { name: "Move Line Down", keybinding: "Alt+Down", id: CommandId::MoveLineDown },
-        Command { name: "Format Document", keybinding: "Cmd+Shift+F", id: CommandId::FormatDocument },
-        Command { name: "Rename Symbol", keybinding: "F2", id: CommandId::RenameSymbol },
-        Command { name: "Go to Definition", keybinding: "F12", id: CommandId::GoToDefinition },
-        Command { name: "Show Hover Info", keybinding: "F1", id: CommandId::ShowHover },
-        Command { name: "Code Actions", keybinding: "Cmd+.", id: CommandId::CodeActions },
-        Command { name: "Document Symbols", keybinding: "Cmd+Shift+O", id: CommandId::DocumentSymbols },
-        Command { name: "Find", keybinding: "Cmd+F", id: CommandId::Find },
-        Command { name: "Find and Replace", keybinding: "Cmd+H", id: CommandId::FindReplace },
-        Command { name: "Find References", keybinding: "Shift+F12", id: CommandId::FindReferences },
-        Command { name: "Workspace Symbols", keybinding: "Cmd+Shift+T", id: CommandId::WorkspaceSymbols },
-        Command { name: "Search in Project", keybinding: "Cmd+Shift+G", id: CommandId::ProjectSearch },
-        Command { name: "Run Task", keybinding: "Cmd+Shift+B", id: CommandId::RunTask },
-        Command { name: "Open Workspace", keybinding: "", id: CommandId::OpenWorkspace },
-        Command { name: "Find File", keybinding: "Cmd+P", id: CommandId::FindFile },
-        Command { name: "Toggle Terminal", keybinding: "Cmd+`", id: CommandId::ToggleTerminal },
-        Command { name: "Toggle Sidebar", keybinding: "Cmd+B", id: CommandId::ToggleSidebar },
-        Command { name: "New Tab", keybinding: "Cmd+T", id: CommandId::NewTab },
-        Command { name: "Close Tab", keybinding: "Cmd+W", id: CommandId::CloseTab },
-        Command { name: "Next Tab", keybinding: "Cmd+]", id: CommandId::NextTab },
-        Command { name: "Previous Tab", keybinding: "Cmd+[", id: CommandId::PrevTab },
-        Command { name: "Toggle Effects", keybinding: "Cmd+Shift+F", id: CommandId::ToggleEffects },
-        Command { name: "Toggle FPS Overlay", keybinding: "Cmd+Shift+P", id: CommandId::ToggleFps },
+        Command {
+            name: "Save",
+            keybinding: "Cmd+S",
+            id: CommandId::Save,
+        },
+        Command {
+            name: "Undo",
+            keybinding: "Cmd+Z",
+            id: CommandId::Undo,
+        },
+        Command {
+            name: "Redo",
+            keybinding: "Cmd+Shift+Z",
+            id: CommandId::Redo,
+        },
+        Command {
+            name: "Select All",
+            keybinding: "Cmd+A",
+            id: CommandId::SelectAll,
+        },
+        Command {
+            name: "Cut",
+            keybinding: "Cmd+X",
+            id: CommandId::Cut,
+        },
+        Command {
+            name: "Copy",
+            keybinding: "Cmd+C",
+            id: CommandId::Copy,
+        },
+        Command {
+            name: "Paste",
+            keybinding: "Cmd+V",
+            id: CommandId::Paste,
+        },
+        Command {
+            name: "Delete Line",
+            keybinding: "Cmd+Shift+K",
+            id: CommandId::DeleteLine,
+        },
+        Command {
+            name: "Duplicate Line",
+            keybinding: "Cmd+Shift+D",
+            id: CommandId::DuplicateLine,
+        },
+        Command {
+            name: "Move Line Up",
+            keybinding: "Alt+Up",
+            id: CommandId::MoveLineUp,
+        },
+        Command {
+            name: "Move Line Down",
+            keybinding: "Alt+Down",
+            id: CommandId::MoveLineDown,
+        },
+        Command {
+            name: "Format Document",
+            keybinding: "Cmd+Shift+F",
+            id: CommandId::FormatDocument,
+        },
+        Command {
+            name: "Rename Symbol",
+            keybinding: "F2",
+            id: CommandId::RenameSymbol,
+        },
+        Command {
+            name: "Go to Definition",
+            keybinding: "F12",
+            id: CommandId::GoToDefinition,
+        },
+        Command {
+            name: "Show Hover Info",
+            keybinding: "F1",
+            id: CommandId::ShowHover,
+        },
+        Command {
+            name: "Code Actions",
+            keybinding: "Cmd+.",
+            id: CommandId::CodeActions,
+        },
+        Command {
+            name: "Document Symbols",
+            keybinding: "Cmd+Shift+O",
+            id: CommandId::DocumentSymbols,
+        },
+        Command {
+            name: "Find",
+            keybinding: "Cmd+F",
+            id: CommandId::Find,
+        },
+        Command {
+            name: "Find and Replace",
+            keybinding: "Cmd+H",
+            id: CommandId::FindReplace,
+        },
+        Command {
+            name: "Find References",
+            keybinding: "Shift+F12",
+            id: CommandId::FindReferences,
+        },
+        Command {
+            name: "Workspace Symbols",
+            keybinding: "Cmd+Shift+T",
+            id: CommandId::WorkspaceSymbols,
+        },
+        Command {
+            name: "Search in Project",
+            keybinding: "Cmd+Shift+G",
+            id: CommandId::ProjectSearch,
+        },
+        Command {
+            name: "Run Task",
+            keybinding: "Cmd+Shift+B",
+            id: CommandId::RunTask,
+        },
+        Command {
+            name: "Open Workspace",
+            keybinding: "",
+            id: CommandId::OpenWorkspace,
+        },
+        Command {
+            name: "Find File",
+            keybinding: "Cmd+P",
+            id: CommandId::FindFile,
+        },
+        Command {
+            name: "Toggle Terminal",
+            keybinding: "Cmd+`",
+            id: CommandId::ToggleTerminal,
+        },
+        Command {
+            name: "Toggle Sidebar",
+            keybinding: "Cmd+B",
+            id: CommandId::ToggleSidebar,
+        },
+        Command {
+            name: "New Tab",
+            keybinding: "Cmd+T",
+            id: CommandId::NewTab,
+        },
+        Command {
+            name: "Close Tab",
+            keybinding: "Cmd+W",
+            id: CommandId::CloseTab,
+        },
+        Command {
+            name: "Next Tab",
+            keybinding: "Cmd+]",
+            id: CommandId::NextTab,
+        },
+        Command {
+            name: "Previous Tab",
+            keybinding: "Cmd+[",
+            id: CommandId::PrevTab,
+        },
+        Command {
+            name: "Toggle Effects",
+            keybinding: "Cmd+Shift+F",
+            id: CommandId::ToggleEffects,
+        },
+        Command {
+            name: "Toggle FPS Overlay",
+            keybinding: "Cmd+Shift+P",
+            id: CommandId::ToggleFps,
+        },
     ]
 }
 
@@ -157,7 +289,12 @@ pub fn render_palette(ui: &mut egui::Ui, state: &mut PaletteState) -> Option<Com
     let mut result: Option<CommandId> = None;
 
     ui.vertical(|ui| {
-        ui.label(egui::RichText::new("Command Palette").size(16.0).color(egui::Color32::WHITE).strong());
+        ui.label(
+            egui::RichText::new("Command Palette")
+                .size(16.0)
+                .color(egui::Color32::WHITE)
+                .strong(),
+        );
         ui.add_space(4.0);
 
         let mut query = state.query.clone();
@@ -204,21 +341,45 @@ pub fn render_palette(ui: &mut egui::Ui, state: &mut PaletteState) -> Option<Com
         let selected_bg = egui::Color32::from_rgb(50, 80, 130);
         let key_color = egui::Color32::from_rgb(100, 105, 120);
 
-        egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
-            for (i, cmd) in state.filtered.iter().enumerate() {
-                let bg = if i == state.selected { selected_bg } else { egui::Color32::TRANSPARENT };
-                let text_color = if i == state.selected { egui::Color32::WHITE } else { egui::Color32::from_rgb(200, 205, 215) };
+        egui::ScrollArea::vertical()
+            .max_height(300.0)
+            .show(ui, |ui| {
+                for (i, cmd) in state.filtered.iter().enumerate() {
+                    let bg = if i == state.selected {
+                        selected_bg
+                    } else {
+                        egui::Color32::TRANSPARENT
+                    };
+                    let text_color = if i == state.selected {
+                        egui::Color32::WHITE
+                    } else {
+                        egui::Color32::from_rgb(200, 205, 215)
+                    };
 
-                egui::Frame::none().fill(bg).inner_margin(egui::Margin::symmetric(6.0, 3.0)).rounding(2.0).show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new(cmd.name).size(13.0).color(text_color));
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.label(egui::RichText::new(cmd.keybinding).size(11.0).color(key_color).monospace());
+                    egui::Frame::none()
+                        .fill(bg)
+                        .inner_margin(egui::Margin::symmetric(6.0, 3.0))
+                        .rounding(2.0)
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new(cmd.name).size(13.0).color(text_color),
+                                );
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        ui.label(
+                                            egui::RichText::new(cmd.keybinding)
+                                                .size(11.0)
+                                                .color(key_color)
+                                                .monospace(),
+                                        );
+                                    },
+                                );
+                            });
                         });
-                    });
-                });
-            }
-        });
+                }
+            });
     });
 
     result

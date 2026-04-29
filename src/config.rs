@@ -142,7 +142,9 @@ impl EditorConfig {
             rulers: self.rulers.clone(),
             word_wrap: self.word_wrap,
             visible_whitespace: self.visible_whitespace,
-            font_size: self.font_size.unwrap_or((terminal_font_size - 2.0).max(10.0)),
+            font_size: self
+                .font_size
+                .unwrap_or((terminal_font_size - 2.0).max(10.0)),
         };
 
         if let Some(lang) = lang_id.and_then(|id| self.languages.get(id)) {

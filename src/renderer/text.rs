@@ -452,7 +452,6 @@ impl TextSystem {
                 .render(&self.atlas, &self.viewport, &mut pass);
         }
     }
-
 }
 
 /// Build rich text spans for a single terminal line.

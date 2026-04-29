@@ -1,11 +1,14 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStdin, ChildStdout};
+use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout};
 use tokio::sync::{mpsc, oneshot, Mutex};
+
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// A JSON-RPC message from the server.
 #[derive(Debug)]
@@ -32,8 +35,6 @@ pub struct Transport {
     next_id: AtomicI64,
     /// Pending request callbacks: id -> oneshot sender for the response.
     pending: Arc<Mutex<HashMap<i64, oneshot::Sender<ServerMessage>>>>,
-    /// Channel for server-initiated notifications/requests.
-    pub notifications_rx: mpsc::UnboundedReceiver<ServerMessage>,
     _child: Child,
 }
 
@@ -43,17 +44,18 @@ impl Transport {
         command: &str,
         args: &[&str],
         proxy: winit::event_loop::EventLoopProxy<crate::UserEvent>,
-    ) -> std::io::Result<Self> {
+    ) -> std::io::Result<(Self, mpsc::UnboundedReceiver<ServerMessage>)> {
         let mut child = tokio::process::Command::new(command)
             .args(args)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
             .kill_on_drop(true)
             .spawn()?;
 
         let stdin = child.stdin.take().expect("stdin should be piped");
         let stdout = child.stdout.take().expect("stdout should be piped");
+        let stderr = child.stderr.take();
 
         let writer = Arc::new(Mutex::new(stdin));
         let pending: Arc<Mutex<HashMap<i64, oneshot::Sender<ServerMessage>>>> =
@@ -62,19 +64,31 @@ impl Transport {
 
         // Spawn reader task
         let pending_clone = pending.clone();
+        let writer_clone = writer.clone();
         tokio::spawn(async move {
-            if let Err(e) = read_loop(stdout, pending_clone, notif_tx, proxy).await {
+            if let Err(e) = read_loop(stdout, writer_clone, pending_clone, notif_tx, proxy).await {
                 log::warn!("LSP reader exited: {e}");
             }
         });
 
-        Ok(Transport {
-            writer,
-            next_id: AtomicI64::new(1),
-            pending,
-            notifications_rx: notif_rx,
-            _child: child,
-        })
+        if let Some(stderr) = stderr {
+            let command_name = command.to_string();
+            tokio::spawn(async move {
+                if let Err(e) = stderr_log_loop(command_name, stderr).await {
+                    log::debug!("LSP stderr reader exited: {e}");
+                }
+            });
+        }
+
+        Ok((
+            Transport {
+                writer,
+                next_id: AtomicI64::new(1),
+                pending,
+                _child: child,
+            },
+            notif_rx,
+        ))
     }
 
     /// Send a request and wait for the response.
@@ -91,13 +105,24 @@ impl Transport {
             "params": params,
         });
 
-        self.send_raw(&msg).await?;
+        if let Err(e) = self.send_raw(&msg).await {
+            self.pending.lock().await.remove(&id);
+            return Err(e);
+        }
 
-        let response = rx.await.map_err(|_| "response channel closed".to_string())?;
+        let response = match tokio::time::timeout(REQUEST_TIMEOUT, rx).await {
+            Ok(Ok(response)) => response,
+            Ok(Err(_)) => {
+                self.pending.lock().await.remove(&id);
+                return Err("response channel closed".to_string());
+            }
+            Err(_) => {
+                self.pending.lock().await.remove(&id);
+                return Err(format!("LSP request timed out: {method}"));
+            }
+        };
         match response {
-            ServerMessage::Response {
-                result, error, ..
-            } => {
+            ServerMessage::Response { result, error, .. } => {
                 if let Some(err) = error {
                     Err(format!("LSP error: {err}"))
                 } else {
@@ -139,6 +164,7 @@ impl Transport {
 /// Read LSP messages from stdout, dispatching responses and notifications.
 async fn read_loop(
     stdout: ChildStdout,
+    writer: Arc<Mutex<ChildStdin>>,
     pending: Arc<Mutex<HashMap<i64, oneshot::Sender<ServerMessage>>>>,
     notif_tx: mpsc::UnboundedSender<ServerMessage>,
     proxy: winit::event_loop::EventLoopProxy<crate::UserEvent>,
@@ -188,6 +214,10 @@ async fn read_loop(
                 // Server-initiated request
                 let method = msg["method"].as_str().unwrap_or("").to_string();
                 let params = msg.get("params").cloned().unwrap_or(Value::Null);
+                let response = server_request_response(&method, &params);
+                if let Err(e) = send_server_response(&writer, id.clone(), response).await {
+                    log::warn!("Failed to answer LSP server request {method}: {e}");
+                }
                 let _ = notif_tx.send(ServerMessage::Request {
                     id: id.clone(),
                     method,
@@ -215,6 +245,90 @@ async fn read_loop(
             let params = msg.get("params").cloned().unwrap_or(Value::Null);
             let _ = notif_tx.send(ServerMessage::Notification { method, params });
             let _ = proxy.send_event(crate::UserEvent::LspMessage);
+        }
+    }
+}
+
+enum ServerRequestResponse {
+    Result(Value),
+    Error { code: i64, message: String },
+}
+
+fn server_request_response(method: &str, params: &Value) -> ServerRequestResponse {
+    match method {
+        "workspace/configuration" => {
+            let count = params
+                .get("items")
+                .and_then(Value::as_array)
+                .map_or(0, Vec::len);
+            ServerRequestResponse::Result(Value::Array(vec![Value::Null; count]))
+        }
+        "client/registerCapability"
+        | "client/unregisterCapability"
+        | "window/showMessageRequest"
+        | "workspace/workspaceFolders" => ServerRequestResponse::Result(Value::Null),
+        _ => ServerRequestResponse::Error {
+            code: -32601,
+            message: format!("Unsupported server request: {method}"),
+        },
+    }
+}
+
+async fn send_server_response(
+    writer: &Arc<Mutex<ChildStdin>>,
+    id: Value,
+    response: ServerRequestResponse,
+) -> Result<(), String> {
+    let msg = match response {
+        ServerRequestResponse::Result(result) => serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": result,
+        }),
+        ServerRequestResponse::Error { code, message } => serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "error": {
+                "code": code,
+                "message": message,
+            },
+        }),
+    };
+    send_raw_to_writer(writer, &msg).await
+}
+
+async fn send_raw_to_writer(writer: &Arc<Mutex<ChildStdin>>, msg: &Value) -> Result<(), String> {
+    let body = serde_json::to_string(msg).map_err(|e| e.to_string())?;
+    let header = format!("Content-Length: {}\r\n\r\n", body.len());
+
+    let mut writer = writer.lock().await;
+    writer
+        .write_all(header.as_bytes())
+        .await
+        .map_err(|e| e.to_string())?;
+    writer
+        .write_all(body.as_bytes())
+        .await
+        .map_err(|e| e.to_string())?;
+    writer.flush().await.map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+async fn stderr_log_loop(command: String, stderr: ChildStderr) -> Result<(), String> {
+    let mut reader = BufReader::new(stderr);
+    let mut line = String::new();
+    loop {
+        line.clear();
+        let n = reader
+            .read_line(&mut line)
+            .await
+            .map_err(|e| e.to_string())?;
+        if n == 0 {
+            return Ok(());
+        }
+        let trimmed = line.trim_end();
+        if !trimmed.is_empty() {
+            log::warn!("LSP {command} stderr: {trimmed}");
         }
     }
 }

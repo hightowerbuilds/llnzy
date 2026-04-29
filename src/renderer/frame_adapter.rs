@@ -1,7 +1,7 @@
 use crate::config::Config;
 use crate::engine::{
-    Color, EffectPass, EffectStack, EguiLayer, EngineFrame, Layer, LayerKind, Primitive, Rect, Size,
-    TextRun,
+    Color, EffectPass, EffectStack, EguiLayer, EngineFrame, Layer, LayerKind, Primitive, Rect,
+    Size, TextRun,
 };
 
 use super::RenderRequest;
@@ -30,11 +30,7 @@ pub(super) fn engine_frame_from_request(
             });
         }
         if !scene_effects.passes.is_empty() {
-            let mut layer = Layer::new(
-                "scene-effects",
-                900,
-                LayerKind::Primitives(Vec::new()),
-            );
+            let mut layer = Layer::new("scene-effects", 900, LayerKind::Primitives(Vec::new()));
             layer.style.effects = scene_effects;
             frame.push_layer(layer);
         }
@@ -188,11 +184,7 @@ pub(super) fn engine_frame_from_request(
                 })
                 .collect();
             if !runs.is_empty() {
-                frame.push_layer(Layer::new(
-                    "error-panel-text",
-                    861,
-                    LayerKind::Text(runs),
-                ));
+                frame.push_layer(Layer::new("error-panel-text", 861, LayerKind::Text(runs)));
             }
         }
     }
@@ -224,10 +216,12 @@ fn rect_primitives(
     offset_x: f32,
     offset_y: f32,
 ) -> impl Iterator<Item = Primitive> + '_ {
-    rects.iter().map(move |&(x, y, width, height, color)| Primitive::Rect {
-        rect: Rect::new(x + offset_x, y + offset_y, width, height),
-        color: color_from_rgba(color),
-    })
+    rects
+        .iter()
+        .map(move |&(x, y, width, height, color)| Primitive::Rect {
+            rect: Rect::new(x + offset_x, y + offset_y, width, height),
+            color: color_from_rgba(color),
+        })
 }
 
 fn color_from_rgba(color: [f32; 4]) -> Color {
@@ -333,7 +327,10 @@ mod tests {
         let Some(Layer {
             kind: LayerKind::Primitives(primitives),
             ..
-        }) = frame.layers.iter().find(|layer| layer.id.as_str() == "terminal-highlights")
+        }) = frame
+            .layers
+            .iter()
+            .find(|layer| layer.id.as_str() == "terminal-highlights")
         else {
             panic!("missing terminal-highlights layer");
         };
@@ -367,13 +364,8 @@ mod tests {
             effects_mask: None,
         };
 
-        let frame = engine_frame_from_request(
-            &request,
-            &config,
-            Size::new(800.0, 600.0),
-            true,
-            16.0,
-        );
+        let frame =
+            engine_frame_from_request(&request, &config, Size::new(800.0, 600.0), true, 16.0);
 
         assert!(frame
             .layers
@@ -414,7 +406,10 @@ mod tests {
         let Some(Layer {
             kind: LayerKind::Text(runs),
             ..
-        }) = frame.layers.iter().find(|layer| layer.id.as_str() == "search-bar-text")
+        }) = frame
+            .layers
+            .iter()
+            .find(|layer| layer.id.as_str() == "search-bar-text")
         else {
             panic!("missing search-bar-text layer");
         };
@@ -458,7 +453,10 @@ mod tests {
         let Some(Layer {
             kind: LayerKind::Text(runs),
             ..
-        }) = frame.layers.iter().find(|layer| layer.id.as_str() == "error-panel-text")
+        }) = frame
+            .layers
+            .iter()
+            .find(|layer| layer.id.as_str() == "error-panel-text")
         else {
             panic!("missing error-panel-text layer");
         };

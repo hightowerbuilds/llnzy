@@ -113,7 +113,16 @@ pub fn handle_editor_keys(
         // intercept keys before any other processing.
         if keybinding_preset == KeybindingPreset::Vim {
             if let Some(vim) = view.vim_mode {
-                if handle_vim_keys(input, vim, buf, view, status_msg, clipboard_out, clipboard_in, &mut action) {
+                if handle_vim_keys(
+                    input,
+                    vim,
+                    buf,
+                    view,
+                    status_msg,
+                    clipboard_out,
+                    clipboard_in,
+                    &mut action,
+                ) {
                     return;
                 }
             }
@@ -122,7 +131,15 @@ pub fn handle_editor_keys(
         // ── Emacs keybinding overrides ──
         // When Emacs preset is active, Ctrl+key combos map to movement/editing.
         if keybinding_preset == KeybindingPreset::Emacs {
-            if handle_emacs_keys(input, buf, view, status_msg, clipboard_out, clipboard_in, &mut action) {
+            if handle_emacs_keys(
+                input,
+                buf,
+                view,
+                status_msg,
+                clipboard_out,
+                clipboard_in,
+                &mut action,
+            ) {
                 return;
             }
         }
@@ -368,7 +385,11 @@ pub fn handle_editor_keys(
             *status_msg = None;
             if let Some((at, matching)) = buf.matching_bracket(view.cursor.pos) {
                 view.cursor.clear_selection();
-                view.cursor.pos = if view.cursor.pos == matching { at } else { matching };
+                view.cursor.pos = if view.cursor.pos == matching {
+                    at
+                } else {
+                    matching
+                };
                 view.cursor.desired_col = None;
             } else {
                 *status_msg = Some("No matching bracket".to_string());
@@ -485,7 +506,11 @@ pub fn handle_editor_keys(
                 for (pos, anchor, is_primary) in &all_positions {
                     if let Some(anch) = anchor {
                         if anch != pos {
-                            let (start, end) = if anch <= pos { (*anch, *pos) } else { (*pos, *anch) };
+                            let (start, end) = if anch <= pos {
+                                (*anch, *pos)
+                            } else {
+                                (*pos, *anch)
+                            };
                             buf.delete(start, end);
                             new_positions.push((start, *is_primary));
                             continue;
@@ -511,9 +536,12 @@ pub fn handle_editor_keys(
                     if is_primary {
                         view.cursor.pos = new_pos;
                     } else {
-                        view.cursor.extra_cursors.push(
-                            crate::editor::cursor::CursorRange { pos: new_pos, anchor: None },
-                        );
+                        view.cursor
+                            .extra_cursors
+                            .push(crate::editor::cursor::CursorRange {
+                                pos: new_pos,
+                                anchor: None,
+                            });
                     }
                 }
                 view.cursor.desired_col = None;
@@ -643,7 +671,11 @@ pub fn handle_editor_keys(
                             // Delete selection if any
                             if let Some(anch) = anchor {
                                 if anch != pos {
-                                    let (start, end) = if anch <= pos { (*anch, *pos) } else { (*pos, *anch) };
+                                    let (start, end) = if anch <= pos {
+                                        (*anch, *pos)
+                                    } else {
+                                        (*pos, *anch)
+                                    };
                                     buf.delete(start, end);
                                     let insert_pos = start;
                                     let end_pos = buf.compute_end_pos_pub(insert_pos, &text);
@@ -703,7 +735,9 @@ pub fn handle_editor_keys(
                             if let Some(&(_, close)) = PAIRS.iter().find(|&&(o, _)| o == ch) {
                                 let next = buf.char_at(view.cursor.pos);
                                 let should_pair = next.is_none()
-                                    || next.is_some_and(|c| c.is_whitespace() || ")]}\"'`".contains(c));
+                                    || next.is_some_and(|c| {
+                                        c.is_whitespace() || ")]}\"'`".contains(c)
+                                    });
                                 if should_pair {
                                     buf.insert_char(view.cursor.pos, close);
                                 }
@@ -799,8 +833,24 @@ fn handle_vim_keys(
     action: &mut KeyAction,
 ) -> bool {
     match vim {
-        VimMode::Normal => handle_vim_normal(input, buf, view, status_msg, clipboard_out, clipboard_in, action),
-        VimMode::Visual => handle_vim_visual(input, buf, view, status_msg, clipboard_out, clipboard_in, action),
+        VimMode::Normal => handle_vim_normal(
+            input,
+            buf,
+            view,
+            status_msg,
+            clipboard_out,
+            clipboard_in,
+            action,
+        ),
+        VimMode::Visual => handle_vim_visual(
+            input,
+            buf,
+            view,
+            status_msg,
+            clipboard_out,
+            clipboard_in,
+            action,
+        ),
         VimMode::Insert => {
             // In Insert mode, Escape returns to Normal mode.
             // All other keys fall through to the standard VS Code-style handler.
@@ -890,19 +940,40 @@ fn handle_vim_normal(
         if let egui::Event::Text(text) = event {
             let consumed = match text.as_str() {
                 // Movement
-                "h" => { view.cursor.move_left(buf, false); true }
-                "j" => { view.cursor.move_down(buf, false); true }
-                "k" => { view.cursor.move_up(buf, false); true }
-                "l" => { view.cursor.move_right(buf, false); true }
-                "w" => { view.cursor.move_word_right(buf, false); true }
-                "b" => { view.cursor.move_word_left(buf, false); true }
+                "h" => {
+                    view.cursor.move_left(buf, false);
+                    true
+                }
+                "j" => {
+                    view.cursor.move_down(buf, false);
+                    true
+                }
+                "k" => {
+                    view.cursor.move_up(buf, false);
+                    true
+                }
+                "l" => {
+                    view.cursor.move_right(buf, false);
+                    true
+                }
+                "w" => {
+                    view.cursor.move_word_right(buf, false);
+                    true
+                }
+                "b" => {
+                    view.cursor.move_word_left(buf, false);
+                    true
+                }
                 "0" => {
                     view.cursor.pos.col = 0;
                     view.cursor.desired_col = None;
                     view.cursor.clear_selection();
                     true
                 }
-                "$" => { view.cursor.move_end(buf, false); true }
+                "$" => {
+                    view.cursor.move_end(buf, false);
+                    true
+                }
                 "G" => {
                     // G = go to end of file
                     view.cursor.move_to_end(buf, false);
@@ -977,7 +1048,10 @@ fn handle_vim_normal(
                             let insert_pos = Position::new(view.cursor.pos.line + 1, 0);
                             if view.cursor.pos.line + 1 >= buf.line_count() {
                                 buf.insert(
-                                    Position::new(view.cursor.pos.line, buf.line_len(view.cursor.pos.line)),
+                                    Position::new(
+                                        view.cursor.pos.line,
+                                        buf.line_len(view.cursor.pos.line),
+                                    ),
                                     &format!("\n{}", text.trim_end_matches('\n')),
                                 );
                             } else {
@@ -986,7 +1060,8 @@ fn handle_vim_normal(
                             view.cursor.pos = Position::new(view.cursor.pos.line + 1, 0);
                         } else {
                             // Inline paste: insert after cursor
-                            let insert_pos = Position::new(view.cursor.pos.line, view.cursor.pos.col + 1);
+                            let insert_pos =
+                                Position::new(view.cursor.pos.line, view.cursor.pos.col + 1);
                             let end_pos = buf.compute_end_pos_pub(insert_pos, &text);
                             buf.insert(insert_pos, &text);
                             view.cursor.pos = end_pos;
@@ -1005,9 +1080,18 @@ fn handle_vim_normal(
                     true
                 }
                 // Multi-key sequences: set pending
-                "d" => { view.vim_pending = Some('d'); true }
-                "y" => { view.vim_pending = Some('y'); true }
-                "g" => { view.vim_pending = Some('g'); true }
+                "d" => {
+                    view.vim_pending = Some('d');
+                    true
+                }
+                "y" => {
+                    view.vim_pending = Some('y');
+                    true
+                }
+                "g" => {
+                    view.vim_pending = Some('g');
+                    true
+                }
                 // Search
                 "/" => {
                     action.open_find = true;
@@ -1065,20 +1149,44 @@ fn handle_vim_visual(
         if let egui::Event::Text(text) = event {
             let consumed = match text.as_str() {
                 // Movement extends selection (anchor stays)
-                "h" => { view.cursor.move_left(buf, true); true }
-                "j" => { view.cursor.move_down(buf, true); true }
-                "k" => { view.cursor.move_up(buf, true); true }
-                "l" => { view.cursor.move_right(buf, true); true }
-                "w" => { view.cursor.move_word_right(buf, true); true }
-                "b" => { view.cursor.move_word_left(buf, true); true }
+                "h" => {
+                    view.cursor.move_left(buf, true);
+                    true
+                }
+                "j" => {
+                    view.cursor.move_down(buf, true);
+                    true
+                }
+                "k" => {
+                    view.cursor.move_up(buf, true);
+                    true
+                }
+                "l" => {
+                    view.cursor.move_right(buf, true);
+                    true
+                }
+                "w" => {
+                    view.cursor.move_word_right(buf, true);
+                    true
+                }
+                "b" => {
+                    view.cursor.move_word_left(buf, true);
+                    true
+                }
                 "0" => {
                     view.cursor.start_selection();
                     view.cursor.pos.col = 0;
                     view.cursor.desired_col = None;
                     true
                 }
-                "$" => { view.cursor.move_end(buf, true); true }
-                "G" => { view.cursor.move_to_end(buf, true); true }
+                "$" => {
+                    view.cursor.move_end(buf, true);
+                    true
+                }
+                "G" => {
+                    view.cursor.move_to_end(buf, true);
+                    true
+                }
                 // Operators on selection
                 "d" => {
                     if let Some((start, end)) = view.cursor.selection() {
