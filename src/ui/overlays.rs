@@ -45,9 +45,8 @@ pub fn render_drag_drop_overlay(ctx: &egui::Context, drag_drop: &DragDropState) 
     let target = drag_drop.active_target.as_ref();
     let (verb, color) = match target {
         Some(DropTarget::Terminal { .. }) => ("Insert path", egui::Color32::from_rgb(75, 130, 210)),
-        Some(DropTarget::Editor { .. }) | Some(DropTarget::TabBar { .. }) => {
-            ("Open file", egui::Color32::from_rgb(65, 145, 100))
-        }
+        Some(DropTarget::Editor { .. }) => ("Open file", egui::Color32::from_rgb(65, 145, 100)),
+        Some(DropTarget::TabBar { .. }) => ("Open near tab", egui::Color32::from_rgb(65, 145, 100)),
         Some(DropTarget::Home) | Some(DropTarget::ExplorerFolder { .. }) => {
             ("Open project", egui::Color32::from_rgb(70, 120, 95))
         }

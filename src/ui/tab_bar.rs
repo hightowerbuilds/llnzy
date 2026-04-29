@@ -2,7 +2,13 @@ use std::time::Instant;
 
 use super::types::{ActiveView, UiTabInfo, BUMPER_WIDTH, SIDEBAR_WIDTH};
 use crate::app::commands::AppCommand;
+use crate::app::drag_drop::{tab_reorder_destination, DragDropCommand, DragPayload, TabDropZone};
 use crate::workspace::TabKind;
+
+const TAB_BAR_HEIGHT: f32 = 44.0;
+const TAB_TEXT_SIZE: f32 = 16.0;
+const CLOSE_TEXT_SIZE: f32 = 16.0;
+const CLOSE_BUTTON_SIZE: f32 = 24.0;
 
 #[derive(Default)]
 pub struct TabBarAction {
@@ -15,6 +21,7 @@ pub struct TabBarAction {
     pub kill_terminal: Option<usize>,
     pub restart_terminal: Option<usize>,
     pub saved_tab_name: Option<(usize, String)>,
+    pub drag_drop_command: Option<DragDropCommand>,
 }
 
 impl TabBarAction {
@@ -46,6 +53,9 @@ impl TabBarAction {
         if let Some((tab_idx, name)) = self.saved_tab_name {
             commands.push(AppCommand::RenameTab { tab_idx, name });
         }
+        if let Some(command) = self.drag_drop_command {
+            commands.push(AppCommand::DragDrop(command));
+        }
     }
 }
 
@@ -76,15 +86,15 @@ pub fn render_workspace_tab_bar(
     }
 
     egui::TopBottomPanel::top("workspace_tab_bar")
-        .exact_height(30.0)
+        .exact_height(TAB_BAR_HEIGHT)
         .frame(
             egui::Frame::none()
                 .fill(input.bar_bg)
-                .inner_margin(egui::Margin::symmetric(4.0, 0.0)),
+                .inner_margin(egui::Margin::symmetric(6.0, 4.0)),
         )
         .show(ctx, |ui| {
             ui.horizontal_centered(|ui| {
-                ui.spacing_mut().item_spacing.x = 2.0;
+                ui.spacing_mut().item_spacing.x = 4.0;
                 for (i, tab) in input.tabs.iter().enumerate() {
                     let active = i == input.active_tab_index;
                     let tab_bg = if active {
@@ -98,6 +108,7 @@ pub fn render_workspace_tab_bar(
                         egui::Color32::from_rgb(160, 165, 180)
                     };
 
+                    let mut close_clicked = false;
                     let frame_resp = egui::Frame::none()
                         .fill(tab_bg)
                         .rounding(egui::Rounding {
@@ -106,13 +117,13 @@ pub fn render_workspace_tab_bar(
                             sw: 0.0,
                             se: 0.0,
                         })
-                        .inner_margin(egui::Margin::symmetric(10.0, 4.0))
+                        .inner_margin(egui::Margin::symmetric(14.0, 6.0))
                         .show(ui, |ui| {
-                            ui.horizontal(|ui| {
+                            ui.horizontal_centered(|ui| {
                                 let label = ui.add(
                                     egui::Label::new(
                                         egui::RichText::new(&tab.title)
-                                            .size(12.0)
+                                            .size(TAB_TEXT_SIZE)
                                             .color(text_color),
                                     )
                                     .sense(egui::Sense::click()),
@@ -121,20 +132,25 @@ pub fn render_workspace_tab_bar(
                                     action.switch_to = Some(i);
                                 }
 
-                                ui.add_space(6.0);
+                                ui.add_space(8.0);
                                 let x_color = if active {
                                     egui::Color32::from_rgb(200, 200, 210)
                                 } else {
                                     egui::Color32::from_rgb(100, 105, 115)
                                 };
-                                let x_btn = ui.add(
-                                    egui::Label::new(
-                                        egui::RichText::new("x").size(11.0).color(x_color),
+                                let x_btn = ui
+                                    .add_sized(
+                                        egui::vec2(CLOSE_BUTTON_SIZE, CLOSE_BUTTON_SIZE),
+                                        egui::Button::new(
+                                            egui::RichText::new("x")
+                                                .size(CLOSE_TEXT_SIZE)
+                                                .color(x_color),
+                                        )
+                                        .frame(false),
                                     )
-                                    .sense(egui::Sense::click()),
-                                );
+                                    .on_hover_text("Close tab");
                                 if x_btn.clicked() {
-                                    action.close_tab = Some(i);
+                                    close_clicked = true;
                                 }
                                 if x_btn.hovered() {
                                     ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -142,7 +158,36 @@ pub fn render_workspace_tab_bar(
                             });
                         });
 
-                    frame_resp.response.context_menu(|ui| {
+                    let tab_response = frame_resp.response.interact(egui::Sense::click_and_drag());
+                    if tab_response.clicked() && !close_clicked {
+                        action.switch_to = Some(i);
+                    }
+                    if close_clicked {
+                        action.close_tab = Some(i);
+                    }
+                    tab_response.dnd_set_drag_payload(DragPayload::WorkspaceTab { tab_idx: i });
+                    if let Some(payload) = tab_response.dnd_hover_payload::<DragPayload>() {
+                        if matches!(&*payload, DragPayload::WorkspaceTab { .. }) {
+                            ui.painter().rect_stroke(
+                                tab_response.rect.expand(2.0),
+                                egui::Rounding::same(5.0),
+                                egui::Stroke::new(1.0, egui::Color32::from_rgb(120, 170, 255)),
+                            );
+                        }
+                    }
+                    if let Some(payload) = tab_response.dnd_release_payload::<DragPayload>() {
+                        if let DragPayload::WorkspaceTab { tab_idx: from } = *payload {
+                            let zone = tab_drop_zone(&tab_response);
+                            if let Some(to) =
+                                tab_reorder_destination(from, i, zone, input.tabs.len())
+                            {
+                                action.drag_drop_command =
+                                    Some(DragDropCommand::ReorderTab { from, to });
+                            }
+                        }
+                    }
+
+                    tab_response.context_menu(|ui| {
                         if input.split_view.is_some() {
                             if ui.button("Unsplit").clicked() {
                                 action.unsplit = true;
@@ -186,13 +231,24 @@ pub fn render_workspace_tab_bar(
     action
 }
 
+fn tab_drop_zone(response: &egui::Response) -> TabDropZone {
+    let pointer_x = response
+        .ctx
+        .input(|input| input.pointer.interact_pos().map(|pos| pos.x))
+        .unwrap_or(response.rect.center().x);
+    if pointer_x < response.rect.center().x {
+        TabDropZone::Before
+    } else {
+        TabDropZone::After
+    }
+}
+
 fn handle_tab_rename(
     ctx: &egui::Context,
     input: TabBarRenderInput<'_>,
     state: &mut TabBarEditState,
     action: &mut TabBarAction,
 ) {
-    const TAB_BAR_HEIGHT: f32 = 32.0;
     const DOUBLE_CLICK_TIME_MS: u128 = 300;
 
     if input.tabs.is_empty()

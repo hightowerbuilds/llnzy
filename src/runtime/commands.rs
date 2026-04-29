@@ -4,7 +4,10 @@ use std::time::Instant;
 use winit::event_loop::ActiveEventLoop;
 
 use llnzy::app::commands::AppCommand;
-use llnzy::app::drag_drop::{terminal_paths_text, DragDropCommand};
+use llnzy::app::drag_drop::{
+    remap_index_after_insert, remap_index_after_reorder, tab_insert_index, terminal_paths_text,
+    DragDropCommand,
+};
 use llnzy::session::Session;
 use llnzy::ui::{ActiveView, PendingClose, SavePromptResponse, UiFrameOutput};
 use llnzy::workspace::{find_singleton, TabContent, TabKind, WorkspaceTab};
@@ -52,6 +55,43 @@ impl App {
         if let Some(ui) = &mut self.ui {
             ui.active_view = ActiveView::Shells;
         }
+    }
+
+    fn open_code_file_tab_at(
+        &mut self,
+        path: PathBuf,
+        buffer_idx: usize,
+        insert_at: usize,
+    ) -> bool {
+        let existing = self
+            .tabs
+            .iter()
+            .position(|t| matches!(&t.content, TabContent::CodeFile { path: p, .. } if *p == path));
+        let inserted = existing.is_none();
+        if let Some(idx) = existing {
+            self.active_tab = idx;
+        } else {
+            let id = self.alloc_tab_id();
+            let insert_at = insert_at.min(self.tabs.len());
+            self.tabs.insert(
+                insert_at,
+                WorkspaceTab {
+                    content: TabContent::CodeFile { path, buffer_idx },
+                    name: None,
+                    id,
+                },
+            );
+            if let Some(ui) = &mut self.ui {
+                if let Some((right_idx, ratio)) = ui.split_view {
+                    ui.split_view = Some((remap_index_after_insert(right_idx, insert_at), ratio));
+                }
+            }
+            self.active_tab = insert_at;
+        }
+        if let Some(ui) = &mut self.ui {
+            ui.active_view = ActiveView::Shells;
+        }
+        inserted
     }
 
     pub(crate) fn open_workspace_tab_entry(&mut self, entry: llnzy::workspace_store::TabEntry) {
@@ -302,6 +342,36 @@ impl App {
                 }
                 opened_any
             }
+            DragDropCommand::OpenFilesNearTab {
+                paths,
+                tab_idx,
+                zone,
+            } => {
+                let Some(ui) = &mut self.ui else { return false };
+                let mut opened = Vec::new();
+                let mut errors = Vec::new();
+                let mut opened_any = false;
+                for path in paths {
+                    match ui.editor_view.open_file(path.clone()) {
+                        Ok(idx) => {
+                            opened.push((path, idx));
+                            opened_any = true;
+                        }
+                        Err(e) => errors.push(format!("Drop: {e}")),
+                    }
+                }
+                for error in errors {
+                    self.error_log.error(error);
+                }
+
+                let mut insert_at = tab_insert_index(tab_idx, zone, self.tabs.len());
+                for (path, idx) in opened {
+                    if self.open_code_file_tab_at(path, idx, insert_at) {
+                        insert_at = self.active_tab + 1;
+                    }
+                }
+                opened_any
+            }
             DragDropCommand::OpenProject(project_path) => {
                 let mut sidebar_changed = false;
                 let handled = self.handle_app_command(
@@ -320,15 +390,13 @@ impl App {
                 }
                 let tab = self.tabs.remove(from);
                 self.tabs.insert(to, tab);
-                self.active_tab = if self.active_tab == from {
-                    to
-                } else if from < self.active_tab && self.active_tab <= to {
-                    self.active_tab - 1
-                } else if to <= self.active_tab && self.active_tab < from {
-                    self.active_tab + 1
-                } else {
-                    self.active_tab
-                };
+                self.active_tab = remap_index_after_reorder(self.active_tab, from, to);
+                if let Some(ui) = &mut self.ui {
+                    if let Some((right_idx, ratio)) = ui.split_view {
+                        ui.split_view =
+                            Some((remap_index_after_reorder(right_idx, from, to), ratio));
+                    }
+                }
                 true
             }
         }

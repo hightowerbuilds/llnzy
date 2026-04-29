@@ -186,6 +186,9 @@ This matches the current command-bus direction in `src/app/commands.rs` and avoi
 - [x] Added unit coverage for shell-safe path escaping, multi-file terminal insertion text, and external-file-to-terminal command emission.
 - [x] Added a lightweight global native-file hover preview with target-specific action text.
 - [x] Added first-pass target resolution for terminal/editor/sidebar/home/tab bar based on the current cursor position.
+- [x] Wired tab drag/reorder through the shared payload and `DragDropCommand::ReorderTab` path.
+- [x] Added tested tab reorder index math, including active/split tab remapping after a move.
+- [x] Added tab-bar native-file drop targeting so dropped files open next to the tab under the pointer.
 - [ ] Replace first-pass geometry checks with per-surface target registration.
 
 ### Phase 1: DnD State Spine
@@ -225,7 +228,7 @@ Target behavior:
 - Drop on terminal: insert shell-escaped paths, preserving current behavior.
 - Drop on editor area: open text files as code tabs.
 - Drop on sidebar/home: if folder, open project; if file, open file.
-- Drop on tab bar: open dropped file next to target tab.
+- [x] Drop on tab bar: open dropped file next to target tab.
 - Multi-file drops: open multiple files or insert all paths as one operation.
 
 Rules:
@@ -285,10 +288,10 @@ Important design detail:
 
 Acceptance criteria:
 
-- Tabs reorder without changing unrelated tab state.
-- Active tab updates predictably after reorder.
-- Split state is fixed up when dragged tabs move.
-- Unsaved code tabs are not accidentally closed or duplicated.
+- [x] Tabs reorder without changing unrelated tab state.
+- [x] Active tab updates predictably after reorder.
+- [x] Split state is fixed up when dragged tabs move.
+- [ ] Unsaved code tabs are not accidentally closed or duplicated.
 
 ### Phase 5: Editor Text Drag and Drop
 

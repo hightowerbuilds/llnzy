@@ -1,6 +1,9 @@
 use super::types::ActiveView;
 use crate::workspace::TabKind;
 
+const FOOTER_TEXT_SIZE: f32 = 16.0;
+const FOOTER_BUTTON_HEIGHT: f32 = 36.0;
+
 /// Action returned by the footer when a button is clicked.
 pub enum FooterAction {
     /// Show an overlay view (Home, Appearances, Settings).
@@ -29,7 +32,7 @@ pub fn render_footer(
         .frame(
             egui::Frame::none()
                 .fill(chrome_bg)
-                .inner_margin(egui::Margin::symmetric(8.0, 2.0)),
+                .inner_margin(egui::Margin::symmetric(10.0, 6.0)),
         )
         .show(ctx, |ui| {
             ui.horizontal_centered(|ui| {
@@ -90,10 +93,14 @@ fn render_button(
         text_color
     };
     let btn = ui.add(
-        egui::Button::new(egui::RichText::new(name).size(12.0).color(btn_text))
-            .fill(btn_fill)
-            .rounding(egui::Rounding::same(4.0))
-            .min_size(egui::Vec2::new(0.0, 28.0)),
+        egui::Button::new(
+            egui::RichText::new(name)
+                .size(FOOTER_TEXT_SIZE)
+                .color(btn_text),
+        )
+        .fill(btn_fill)
+        .rounding(egui::Rounding::same(4.0))
+        .min_size(egui::Vec2::new(0.0, FOOTER_BUTTON_HEIGHT)),
     );
     if btn.clicked() {
         on_click();

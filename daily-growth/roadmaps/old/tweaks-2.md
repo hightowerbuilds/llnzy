@@ -1,8 +1,12 @@
 - [ ] word wrap in the sidebar
-- [ ] x buttons dont work
-- [ ] tab bar needs to be taller/bigger
-- [ ] tab buttons dont do anything
-- [ ] footer is too small, bigger/bigger font
+- [x] x buttons dont work
+  - Tab close control is now a real 24px button that emits `CloseTab` without also switching tabs.
+- [x] tab bar needs to be taller/bigger
+  - Workspace tab bar and layout constant are now 44px tall; tab title font is 16px.
+- [x] tab buttons dont do anything
+  - Full tab pills are clickable now, not only the tab title label.
+- [x] footer is too small, bigger/bigger font
+  - Footer height is now 48px; footer button text is 16px with taller button hit targets.
 - [ ] finish set up with appearance
 - [x] wisp flow 2 second latency, 6 seconds
   - App-side mitigation added: IME commit now updates keypress/redraw state immediately, clears stale terminal selection, and keeps the macOS IME cursor area anchored to the active terminal cursor.

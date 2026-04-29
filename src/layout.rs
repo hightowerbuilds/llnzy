@@ -33,8 +33,8 @@ impl Zone {
 
 // ── Layout constants ──
 
-pub const TAB_BAR_HEIGHT: f32 = 28.0;
-pub const FOOTER_HEIGHT: f32 = 36.0;
+pub const TAB_BAR_HEIGHT: f32 = 44.0;
+pub const FOOTER_HEIGHT: f32 = 48.0;
 
 pub struct LayoutInputs {
     pub window_w: f32,

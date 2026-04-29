@@ -126,7 +126,7 @@ impl UiState {
             wgpu_renderer,
             active_view: ActiveView::Home,
             settings: settings_state::SettingsUiState::default(),
-            footer_height: 36.0,
+            footer_height: crate::layout::FOOTER_HEIGHT,
             sidebar: sidebar_state::SidebarUiState::default(),
             show_fps: false,
             frame_times: std::collections::VecDeque::with_capacity(120),

@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use llnzy::app::drag_drop::{DropTarget, TabDropZone, TerminalDropMode};
+use llnzy::app::drag_drop::{tab_drop_zone_at_x, tab_index_at_x, DropTarget, TerminalDropMode};
 use llnzy::layout::{LayoutInputs, ScreenLayout};
 use llnzy::session::Rect as PaneRect;
 use llnzy::ui::ActiveView;
@@ -101,10 +101,9 @@ impl App {
         };
 
         if layout.tab_bar.contains(x, y) {
-            return Some(DropTarget::TabBar {
-                index: self.active_tab.min(self.tabs.len().saturating_sub(1)),
-                zone: TabDropZone::Center,
-            });
+            let index = tab_index_at_x(x, layout.tab_bar.x, layout.tab_bar.w, self.tabs.len())?;
+            let zone = tab_drop_zone_at_x(x, layout.tab_bar.x, layout.tab_bar.w, self.tabs.len())?;
+            return Some(DropTarget::TabBar { index, zone });
         }
 
         if layout.content.contains(x, y) {
