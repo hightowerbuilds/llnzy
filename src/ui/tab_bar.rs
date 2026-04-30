@@ -1,10 +1,10 @@
-use super::types::{ActiveView, UiTabInfo};
+use super::types::UiTabInfo;
 use crate::app::commands::AppCommand;
 use crate::app::drag_drop::{tab_reorder_destination, DragDropCommand, DragPayload, TabDropZone};
 use crate::workspace::TabKind;
 
 const TAB_BAR_HEIGHT: f32 = 44.0;
-const TAB_TEXT_SIZE: f32 = 16.0;
+const TAB_TEXT_SIZE: f32 = 14.0;
 const CLOSE_TEXT_SIZE: f32 = 16.0;
 const CLOSE_BUTTON_SIZE: f32 = 24.0;
 const TAB_HEIGHT: f32 = 32.0;
@@ -69,7 +69,6 @@ pub struct TabBarEditState {
 pub struct TabBarRenderInput<'a> {
     pub tabs: &'a [UiTabInfo],
     pub active_tab_index: usize,
-    pub current_view: ActiveView,
     pub split_view: Option<(usize, f32)>,
     pub bar_bg: egui::Color32,
 }
@@ -81,7 +80,7 @@ pub fn render_workspace_tab_bar(
 ) -> TabBarAction {
     let mut action = TabBarAction::default();
 
-    if input.tabs.is_empty() || input.current_view == ActiveView::Home {
+    if input.tabs.is_empty() {
         return action;
     }
 
@@ -290,7 +289,7 @@ fn render_tab_name_editor(
             .id(editor_id)
             .frame(false)
             .desired_width(edit_rect.width())
-            .font(egui::TextStyle::Button),
+            .font(egui::FontId::proportional(TAB_TEXT_SIZE)),
     );
     response.request_focus();
 

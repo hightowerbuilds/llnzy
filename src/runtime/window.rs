@@ -42,6 +42,7 @@ impl App {
             .tabs
             .iter()
             .filter_map(|tab| match &tab.content {
+                TabContent::Home => Some(llnzy::workspace_store::TabEntry::Home),
                 TabContent::Terminal(_) => Some(llnzy::workspace_store::TabEntry::Terminal),
                 TabContent::CodeFile { path, .. } => {
                     Some(llnzy::workspace_store::TabEntry::CodeFile { path: path.clone() })

@@ -21,7 +21,7 @@ pub fn render_home_view(ctx: &egui::Context, recent_projects: &[PathBuf]) -> Hom
     egui::CentralPanel::default()
         .frame(
             egui::Frame::none()
-                .fill(egui::Color32::from_rgb(22, 24, 30))
+                .fill(egui::Color32::from_rgb(36, 36, 36))
                 .inner_margin(egui::Margin::same(0.0)),
         )
         .show(ctx, |ui| {

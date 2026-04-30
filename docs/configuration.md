@@ -44,7 +44,7 @@ All color values are hex strings in `"#RRGGBB"` format.
 | Key | Type | Default (no scheme) | Description |
 |---|---|---|---|
 | `foreground` | string | `"#CCCCCC"` | Default text color. |
-| `background` | string | `"#1E1E24"` | Window background color. |
+| `background` | string | `"#242424"` | Window background color. |
 | `cursor` | string | `"#CCCCCC"` | Cursor color. |
 | `selection` | string | `"#4D78CC"` | Selection highlight color. |
 | `selection_alpha` | float | `0.35` | Selection highlight opacity (0.0 transparent, 1.0 opaque). |
@@ -100,8 +100,8 @@ blink_rate = 600
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `padding_x` | float | `2.0` | Horizontal padding in pixels between the window edge and the terminal grid. |
-| `padding_y` | float | `2.0` | Vertical padding in pixels between the window edge (or tab bar) and the terminal grid. |
+| `padding_x` | float | `20.0` | Horizontal padding in pixels between the window edge and the terminal grid. |
+| `padding_y` | float | `25.0` | Vertical padding in pixels between the window edge (or tab bar) and the terminal grid. |
 | `opacity` | float | `1.0` | Window background opacity. `1.0` is fully opaque, `0.0` is fully transparent. Clamped to the range 0.0–1.0. Requires compositor support for transparency. |
 
 ```toml
@@ -109,6 +109,28 @@ blink_rate = 600
 padding_x = 8
 padding_y = 8
 opacity = 0.95
+```
+
+---
+
+## `[effects]`
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | boolean | `true` | Enables visual effects. |
+| `background` | string | `"none"` | Background mode. Built-ins are `"none"`, `"smoke"`, `"aurora"`, and `"image"`. Custom `.wgsl` shader files in the app shader folder can also be selected by file stem. |
+| `background_intensity` | float | `0.3` | Background shader opacity/intensity. |
+| `background_speed` | float | `1.0` | Background shader animation speed. |
+| `background_color` | string | _(none)_ | Optional `"#RRGGBB"` color seed for shader backgrounds. |
+| `background_image` | string | _(none)_ | Path to an image used when `background = "image"`. |
+| `effects_on_ui` | boolean | `true` | Applies post-processing effects to UI views that opt in. |
+
+```toml
+[effects]
+background = "smoke"
+background_intensity = 0.4
+background_speed = 1.0
+background_color = "#242424"
 ```
 
 ---
@@ -167,7 +189,7 @@ Configure code editor behavior. Language-specific overrides use the tree-sitter 
 | `word_wrap` | boolean | `false` | Stores the preferred wrap mode and shows it in editor status. |
 | `visible_whitespace` | boolean | `false` | Render visible markers for spaces and tabs. |
 | `font_size` | float | terminal font minus `2.0` | Code editor font size. |
-| `sidebar_font_size` | float | `13.0` | Font size for the sidebar file tree text. Clamped to 8.0-24.0. |
+| `sidebar_font_size` | float | `14.0` | Font size for the sidebar file tree text. Clamped to 8.0-24.0. |
 | `keybinding_preset` | string | `"vscode"` | Editor keybinding preset: `"vscode"`, `"vim"`, or `"emacs"`. |
 
 ```toml
@@ -178,7 +200,7 @@ rulers = [80, 100]
 word_wrap = false
 visible_whitespace = true
 font_size = 14.0
-sidebar_font_size = 13.0
+sidebar_font_size = 14.0
 keybinding_preset = "vscode"
 
 [editor.languages.rust]

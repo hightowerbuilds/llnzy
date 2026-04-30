@@ -1,5 +1,6 @@
 use super::{
-    explorer_view, settings_state, sketch_state, sketch_view, stacker_state, stacker_view,
+    explorer_view, home_view, settings_state, sketch_state, sketch_view, stacker_state,
+    stacker_view,
 };
 use crate::app::commands::AppCommand;
 use crate::config::Config;
@@ -18,6 +19,7 @@ pub(super) struct TabContentState<'a> {
     pub sketch: &'a mut sketch_state::SketchUiState,
     pub explorer: &'a mut ExplorerState,
     pub editor_view: &'a mut explorer_view::EditorViewState,
+    pub recent_projects: &'a [std::path::PathBuf],
     pub saved_edit_idx: &'a mut Option<usize>,
     pub clipboard_copy: &'a mut Option<String>,
     pub commands: &'a mut Vec<AppCommand>,
@@ -31,6 +33,7 @@ pub(super) fn render_tab_content(
     state: TabContentState<'_>,
 ) {
     match active_tab_kind {
+        Some(TabKind::Home) => render_home(ctx, state),
         Some(TabKind::Stacker) => render_stacker(ctx, state),
         Some(TabKind::CodeFile) => render_code_file(ctx, config, &appearance, state),
         Some(TabKind::Sketch) => render_sketch(ctx, &appearance, state),
@@ -50,9 +53,19 @@ pub(super) fn render_tab_content(
     }
 }
 
+fn render_home(ctx: &egui::Context, state: TabContentState<'_>) {
+    let action = home_view::render_home_view(ctx, state.recent_projects);
+    if let Some(project_path) = action.open_project {
+        state.commands.push(AppCommand::OpenProject(project_path));
+    }
+    if let Some(workspace) = action.launch_workspace {
+        state.commands.push(AppCommand::LaunchWorkspace(workspace));
+    }
+}
+
 fn render_stacker(ctx: &egui::Context, state: TabContentState<'_>) {
     egui::CentralPanel::default()
-        .frame(content_frame(egui::Color32::from_rgb(20, 20, 26), 20.0))
+        .frame(content_frame(egui::Color32::from_rgb(36, 36, 36), 20.0))
         .show(ctx, |ui| {
             stacker_view::render_stacker_view(
                 ui,
@@ -119,10 +132,21 @@ fn render_sketch(
     }
 }
 
-fn render_empty(ctx: &egui::Context, bg: [u8; 3]) {
+fn render_empty(ctx: &egui::Context, _bg: [u8; 3]) {
     egui::CentralPanel::default()
-        .frame(egui::Frame::none().fill(color_from_rgb(bg)))
-        .show(ctx, |_ui| {});
+        .frame(egui::Frame::none().fill(egui::Color32::from_rgb(36, 36, 36)))
+        .show(ctx, |ui| {
+            let rect = ui.max_rect();
+            let painter = ui.painter();
+            let center = rect.center();
+            painter.text(
+                center,
+                egui::Align2::CENTER_CENTER,
+                "llnzy",
+                egui::FontId::proportional(56.0),
+                egui::Color32::from_rgb(235, 235, 235),
+            );
+        });
 }
 
 fn content_frame(fill: egui::Color32, margin: f32) -> egui::Frame {

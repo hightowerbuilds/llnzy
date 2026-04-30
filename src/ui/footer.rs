@@ -1,12 +1,12 @@
 use super::types::ActiveView;
 use crate::workspace::TabKind;
 
-const FOOTER_TEXT_SIZE: f32 = 16.0;
+const FOOTER_TEXT_SIZE: f32 = 14.0;
 const FOOTER_BUTTON_HEIGHT: f32 = 36.0;
 
 /// Action returned by the footer when a button is clicked.
 pub enum FooterAction {
-    /// Show an overlay view (Home, Appearances, Settings).
+    /// Show an overlay view.
     ShowOverlay(ActiveView),
     /// Open or focus a singleton tab (Stacker, Sketch).
     OpenSingletonTab(TabKind),
@@ -18,7 +18,6 @@ pub enum FooterAction {
 pub fn render_footer(
     ctx: &egui::Context,
     footer_height: f32,
-    current_view: ActiveView,
     _active_singleton: Option<TabKind>,
     active_tab_kind: Option<TabKind>,
     chrome_bg: egui::Color32,
@@ -36,13 +35,13 @@ pub fn render_footer(
         )
         .show(ctx, |ui| {
             ui.horizontal_centered(|ui| {
-                // Home button (overlay)
-                let home_active = current_view == ActiveView::Home;
+                // Home button opens/focuses the Home singleton tab.
+                let home_active = active_tab_kind == Some(TabKind::Home);
                 render_button(ui, "Home", home_active, active_btn, text_color, || {
-                    result = Some(FooterAction::ShowOverlay(ActiveView::Home));
+                    result = Some(FooterAction::OpenSingletonTab(TabKind::Home));
                 });
 
-                // Terminal button — creates a new terminal tab
+                // Terminal button creates a new terminal tab.
                 let terminal_active = matches!(active_tab_kind, Some(TabKind::Terminal));
                 render_button(
                     ui,

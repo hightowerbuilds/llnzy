@@ -37,6 +37,43 @@ impl App {
         }
     }
 
+    pub(crate) fn split_terminal_right(&mut self, idx: usize) -> bool {
+        let Some(TabContent::Terminal(existing)) = self.tabs.get(idx).map(|tab| &tab.content)
+        else {
+            return false;
+        };
+        let (cols, rows) = self.split_terminal_grid_size(0.5);
+        let cwd = existing.cwd.clone();
+        match Session::new_in_dir(cols, rows, &self.config, self.proxy.clone(), cwd.as_deref()) {
+            Ok(session) => {
+                let id = self.alloc_tab_id();
+                let insert_at = (idx + 1).min(self.tabs.len());
+                self.tabs.insert(
+                    insert_at,
+                    WorkspaceTab {
+                        content: TabContent::Terminal(Box::new(session)),
+                        name: Some("Split".to_string()),
+                        id,
+                    },
+                );
+                self.active_tab = idx;
+                if let Some(ui) = &mut self.ui {
+                    ui.active_view = ActiveView::Shells;
+                    ui.split_view = Some((insert_at, 0.5));
+                }
+                self.resize_terminal_tabs();
+                self.selection.clear();
+                self.request_redraw();
+                true
+            }
+            Err(e) => {
+                self.error_log
+                    .error(format!("Failed to split terminal: {e}"));
+                false
+            }
+        }
+    }
+
     pub(crate) fn close_tab(&mut self) {
         if self.tabs.is_empty() {
             return;
@@ -128,7 +165,7 @@ impl App {
         if self.tabs.is_empty() {
             self.active_tab = 0;
             if let Some(ui) = &mut self.ui {
-                ui.active_view = ActiveView::Home;
+                ui.active_view = ActiveView::Shells;
             }
         } else if self.active_tab >= self.tabs.len() {
             self.active_tab = self.tabs.len() - 1;

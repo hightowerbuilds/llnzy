@@ -3,6 +3,7 @@ use super::types::{BUMPER_WIDTH, SIDEBAR_WIDTH};
 pub struct SidebarUiState {
     pub open: bool,
     pub actual_width: f32,
+    pub recent_open: bool,
 }
 
 impl Default for SidebarUiState {
@@ -10,6 +11,7 @@ impl Default for SidebarUiState {
         Self {
             open: false,
             actual_width: SIDEBAR_WIDTH,
+            recent_open: false,
         }
     }
 }

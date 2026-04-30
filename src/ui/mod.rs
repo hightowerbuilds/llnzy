@@ -122,7 +122,7 @@ impl UiState {
             ctx,
             winit_state,
             wgpu_renderer,
-            active_view: ActiveView::Home,
+            active_view: ActiveView::Shells,
             settings: settings_state::SettingsUiState::default(),
             footer_height: crate::layout::FOOTER_HEIGHT,
             sidebar: sidebar_state::SidebarUiState::default(),
@@ -164,7 +164,7 @@ impl UiState {
         // Overlay views always cover the terminal
         if matches!(
             self.active_view,
-            ActiveView::Home | ActiveView::Appearances | ActiveView::Settings
+            ActiveView::Appearances | ActiveView::Settings
         ) {
             return true;
         }
@@ -292,11 +292,7 @@ impl UiState {
             let bg = config_clone.colors.background;
             let fg = config_clone.colors.foreground;
             let cursor_c = config_clone.colors.cursor;
-            let chrome_bg = egui::Color32::from_rgb(
-                (bg[0] as f32 * 0.65) as u8,
-                (bg[1] as f32 * 0.65) as u8,
-                (bg[2] as f32 * 0.65) as u8,
-            );
+            let chrome_bg = egui::Color32::from_rgb(36, 36, 36);
             let active_btn = egui::Color32::from_rgb(
                 (cursor_c[0] as f32 * 0.4) as u8,
                 (cursor_c[1] as f32 * 0.4) as u8,
@@ -308,7 +304,6 @@ impl UiState {
             if let Some(action) = footer::render_footer(
                 ctx,
                 footer_height,
-                current_view,
                 active_singleton_tab(active_tab_kind),
                 active_tab_kind,
                 chrome_bg,
@@ -329,13 +324,8 @@ impl UiState {
                 tab_bar::TabBarRenderInput {
                     tabs: &tab_names,
                     active_tab_index,
-                    current_view,
                     split_view,
-                    bar_bg: egui::Color32::from_rgb(
-                        (bg[0] as f32 * 0.4) as u8,
-                        (bg[1] as f32 * 0.4) as u8,
-                        (bg[2] as f32 * 0.4) as u8,
-                    ),
+                    bar_bg: egui::Color32::from_rgb(36, 36, 36),
                 },
                 &mut tab_bar_state,
             );
@@ -344,58 +334,48 @@ impl UiState {
             let sidebar_result = sidebar::render_sidebar(
                 ctx,
                 sidebar_state.open,
+                sidebar_state.recent_open,
                 chrome_bg,
                 bg,
                 text_color,
                 &mut explorer,
                 &mut editor_view,
+                &recent_projects,
                 &config_clone,
             );
             sidebar_state.open = sidebar_result.open;
+            sidebar_state.recent_open = sidebar_result.recent_open;
             sidebar_state.actual_width = sidebar_result.panel_width;
             if sidebar_result.close_folder {
                 explorer.clear();
-                sidebar_state.open = false;
-                nav_target = Some(ActiveView::Home);
+                sidebar_state.recent_open = false;
+            }
+            if let Some(project_path) = sidebar_result.open_project {
+                commands_out.push(AppCommand::OpenProject(project_path));
             }
 
-            // ── Home view ──
-            if current_view == ActiveView::Home {
-                let action = home_view::render_home_view(ctx, &recent_projects);
-                if action.nav_target.is_some() {
-                    nav_target = action.nav_target;
-                }
-                if let Some(project_path) = action.open_project {
-                    commands_out.push(AppCommand::OpenProject(project_path));
-                }
-                if let Some(workspace) = action.launch_workspace {
-                    commands_out.push(AppCommand::LaunchWorkspace(workspace));
-                }
-            }
-
-            // ── Tab content views (rendered when Home overlay is not active) ──
-            if current_view != ActiveView::Home {
-                tab_content::render_tab_content(
-                    ctx,
-                    active_tab_kind,
-                    &mut config_clone,
-                    tab_content::TabContentAppearance {
-                        bg,
-                        text_color,
-                        active_btn,
-                    },
-                    tab_content::TabContentState {
-                        settings: &mut settings,
-                        stacker: &mut stacker,
-                        sketch: &mut sketch,
-                        explorer: &mut explorer,
-                        editor_view: &mut editor_view,
-                        saved_edit_idx: &mut saved_edit_idx,
-                        clipboard_copy: &mut clipboard_copy,
-                        commands: &mut commands_out,
-                    },
-                );
-            }
+            // ── Tab content views ──
+            tab_content::render_tab_content(
+                ctx,
+                active_tab_kind,
+                &mut config_clone,
+                tab_content::TabContentAppearance {
+                    bg,
+                    text_color,
+                    active_btn,
+                },
+                tab_content::TabContentState {
+                    settings: &mut settings,
+                    stacker: &mut stacker,
+                    sketch: &mut sketch,
+                    explorer: &mut explorer,
+                    editor_view: &mut editor_view,
+                    recent_projects: &recent_projects,
+                    saved_edit_idx: &mut saved_edit_idx,
+                    clipboard_copy: &mut clipboard_copy,
+                    commands: &mut commands_out,
+                },
+            );
 
             // ── Overlays ──
             overlays::render_drag_drop_overlay(ctx, &drag_drop);

@@ -15,7 +15,7 @@ use winit::window::Window;
 use crate::config::{Config, CursorStyle};
 use crate::engine::{Color, EngineFrame, LayerKind, Primitive, Size, TextRun};
 use crate::error_log::{ErrorLog, ErrorPanel};
-use crate::layout::ScreenLayout;
+use crate::layout::{ScreenLayout, FOOTER_HEIGHT};
 use crate::session::{Rect as PaneRect, Session};
 use background::BackgroundRenderer;
 use blit::BlitPipeline;
@@ -30,11 +30,19 @@ use text::{TextCacheKey, TextSystem};
 pub type EguiRenderCallback<'a> =
     &'a mut dyn FnMut(&wgpu::Device, &wgpu::Queue, &wgpu::TextureView, egui_wgpu::ScreenDescriptor);
 
+pub struct SplitTerminalPane<'a> {
+    pub terminal: &'a Session,
+    pub tab_id: u64,
+    pub ratio: f32,
+}
+
 pub struct RenderRequest<'a> {
     /// The terminal session to render, if the active tab is a terminal.
     pub terminal: Option<&'a Session>,
     /// Unique ID for the active tab (used for text cache management).
     pub tab_id: u64,
+    /// Optional right-hand terminal pane for split terminal view.
+    pub split_terminal: Option<SplitTerminalPane<'a>>,
     pub tab_titles: &'a [(String, bool)],
     pub selection_rects: &'a [(f32, f32, f32, f32, [f32; 4])],
     pub search_rects: &'a [(f32, f32, f32, f32, [f32; 4])],
@@ -54,9 +62,9 @@ pub struct RenderRequest<'a> {
 struct ContentPass<'a> {
     terminal: Option<&'a Session>,
     tab_id: u64,
-    terminal_backgrounds: &'a [Primitive],
-    terminal_decorations: &'a [Primitive],
-    terminal_highlights: &'a [Primitive],
+    split_terminal: Option<SplitTerminalPane<'a>>,
+    selection_rects: &'a [(f32, f32, f32, f32, [f32; 4])],
+    search_rects: &'a [(f32, f32, f32, f32, [f32; 4])],
     screen_layout: &'a ScreenLayout,
 }
 
@@ -225,9 +233,9 @@ impl Renderer {
             ContentPass {
                 terminal: request.terminal,
                 tab_id: request.tab_id,
-                terminal_backgrounds: primitive_layer(&engine_frame, "terminal-cell-backgrounds"),
-                terminal_decorations: primitive_layer(&engine_frame, "terminal-decorations"),
-                terminal_highlights: primitive_layer(&engine_frame, "terminal-highlights"),
+                split_terminal: request.split_terminal,
+                selection_rects: request.selection_rects,
+                search_rects: request.search_rects,
                 screen_layout: request.screen_layout,
             },
         );
@@ -400,42 +408,163 @@ impl Renderer {
             return;
         };
 
-        let target = Self::target_view(&self.gpu, swapchain_view, use_scene);
         let cw = pass.screen_layout.cell_w;
         let ch = pass.screen_layout.cell_h;
-        let rect = PaneRect {
+        if self.config.effects.background == "none" {
+            let terminal_bg = [0.0, 0.0, 0.0, 1.0];
+            let terminal_area = PaneRect {
+                x: pass.screen_layout.sidebar_w,
+                y: pass.screen_layout.tab_bar.y + pass.screen_layout.tab_bar.h,
+                w: (pass.screen_layout.window_w - pass.screen_layout.sidebar_w).max(0.0),
+                h: (pass.screen_layout.window_h
+                    - (pass.screen_layout.tab_bar.y + pass.screen_layout.tab_bar.h)
+                    - FOOTER_HEIGHT)
+                    .max(0.0),
+            };
+            let target = Self::target_view(&self.gpu, swapchain_view, use_scene);
+            self.rects.draw_rects(
+                &self.gpu,
+                target,
+                encoder,
+                &[(
+                    terminal_area.x,
+                    terminal_area.y,
+                    terminal_area.w,
+                    terminal_area.h,
+                    terminal_bg,
+                )],
+            );
+        }
+        let content_rect = PaneRect {
             x: pass.screen_layout.content.x,
             y: pass.screen_layout.content.y,
             w: pass.screen_layout.content.w,
             h: pass.screen_layout.content.h,
         };
+        let (left_rect, right_rect) = if let Some(split) = &pass.split_terminal {
+            split_terminal_rects(content_rect, split.ratio)
+        } else {
+            (content_rect, None)
+        };
 
-        // Cache management — only keep the active tab's text cache
-        let cache_key = pass.tab_id as TextCacheKey;
-        self.text
-            .retain_caches(&std::collections::HashSet::from([cache_key]));
+        let mut cache_keys = std::collections::HashSet::from([pass.tab_id as TextCacheKey]);
+        if let Some(split) = &pass.split_terminal {
+            cache_keys.insert(split.tab_id as TextCacheKey);
+        }
+        self.text.retain_caches(&cache_keys);
 
+        if let Some((right_rect, split)) = right_rect.zip(pass.split_terminal.as_ref()) {
+            let divider_color = [
+                self.config.colors.foreground[0] as f32 / 255.0,
+                self.config.colors.foreground[1] as f32 / 255.0,
+                self.config.colors.foreground[2] as f32 / 255.0,
+                0.18,
+            ];
+            {
+                let target = Self::target_view(&self.gpu, swapchain_view, use_scene);
+                self.rects.draw_rects(
+                    &self.gpu,
+                    target,
+                    encoder,
+                    &[(
+                        left_rect.x + left_rect.w + 3.0,
+                        content_rect.y,
+                        2.0,
+                        content_rect.h,
+                        divider_color,
+                    )],
+                );
+            }
+            self.render_terminal_pane(
+                encoder,
+                swapchain_view,
+                session,
+                pass.tab_id as TextCacheKey,
+                left_rect,
+                true,
+                pass.selection_rects,
+                pass.search_rects,
+                cw,
+                ch,
+                use_scene,
+            );
+            self.render_terminal_pane(
+                encoder,
+                swapchain_view,
+                split.terminal,
+                split.tab_id as TextCacheKey,
+                right_rect,
+                false,
+                &[],
+                &[],
+                cw,
+                ch,
+                use_scene,
+            );
+        } else {
+            self.render_terminal_pane(
+                encoder,
+                swapchain_view,
+                session,
+                pass.tab_id as TextCacheKey,
+                left_rect,
+                true,
+                pass.selection_rects,
+                pass.search_rects,
+                cw,
+                ch,
+                use_scene,
+            );
+        }
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "terminal pane rendering needs GPU target, pane geometry, and terminal context"
+    )]
+    fn render_terminal_pane(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        swapchain_view: &wgpu::TextureView,
+        session: &Session,
+        cache_key: TextCacheKey,
+        rect: PaneRect,
+        active: bool,
+        selection_rects: &[(f32, f32, f32, f32, [f32; 4])],
+        search_rects: &[(f32, f32, f32, f32, [f32; 4])],
+        cw: f32,
+        ch: f32,
+        use_scene: bool,
+    ) {
+        let target = Self::target_view(&self.gpu, swapchain_view, use_scene);
         let terminal = &session.terminal;
+        let terminal_config = terminal_render_config(&self.config);
 
-        let bg_rects = primitive_rects(pass.terminal_backgrounds, 1.0);
+        let mut bg_rects = terminal.background_rects(&terminal_config, cw, ch);
+        offset_rects(&mut bg_rects, rect.x, rect.y);
         if !bg_rects.is_empty() {
             self.rects.draw_rects(&self.gpu, target, encoder, &bg_rects);
         }
 
-        let deco_rects = primitive_rects(pass.terminal_decorations, 1.0);
+        let mut deco_rects = terminal.decoration_rects(&terminal_config, cw, ch);
+        deco_rects.extend(terminal.url_decoration_rects(cw, ch));
+        offset_rects(&mut deco_rects, rect.x, rect.y);
         if !deco_rects.is_empty() {
             self.rects
                 .draw_rects(&self.gpu, target, encoder, &deco_rects);
         }
 
-        let highlight_rects = primitive_rects(pass.terminal_highlights, 1.0);
+        let mut highlight_rects = Vec::new();
+        highlight_rects.extend_from_slice(search_rects);
+        highlight_rects.extend_from_slice(selection_rects);
+        offset_rects(&mut highlight_rects, rect.x, rect.y);
         if !highlight_rects.is_empty() {
             self.rects
                 .draw_rects(&self.gpu, target, encoder, &highlight_rects);
         }
 
         // Cursor
-        if self.cursor_visible {
+        if active && self.cursor_visible {
             if let Some((cr, cc)) = terminal.cursor_point() {
                 if use_scene && self.config.effects.cursor_glow {
                     self.cursor_renderer.draw(CursorDrawRequest {
@@ -449,12 +578,12 @@ impl Renderer {
                         offset_x: rect.x,
                         offset_y: rect.y,
                         cursor_style: self.config.cursor_style,
-                        cursor_color: self.config.cursor_color(),
+                        cursor_color: terminal_config.cursor_color(),
                         time: self.gpu.current_time,
                         trail_enabled: self.config.effects.cursor_trail,
                     });
                 } else {
-                    let cc_color = self.config.cursor_color();
+                    let cc_color = terminal_config.cursor_color();
                     let color = [
                         cc_color[0] as f32 / 255.0,
                         cc_color[1] as f32 / 255.0,
@@ -486,7 +615,9 @@ impl Renderer {
         }
 
         // Text
-        let block_cursor = if self.cursor_visible && self.config.cursor_style == CursorStyle::Block
+        let block_cursor = if active
+            && self.cursor_visible
+            && self.config.cursor_style == CursorStyle::Block
         {
             terminal.cursor_point()
         } else {
@@ -497,7 +628,7 @@ impl Renderer {
         self.text.render_grid_at(
             cache_key,
             terminal,
-            &self.config,
+            &terminal_config,
             &self.gpu,
             target,
             encoder,
@@ -744,6 +875,47 @@ fn primitive_rects(
     rects
 }
 
+fn offset_rects(rects: &mut [(f32, f32, f32, f32, [f32; 4])], offset_x: f32, offset_y: f32) {
+    for rect in rects {
+        rect.0 += offset_x;
+        rect.1 += offset_y;
+    }
+}
+
+fn terminal_render_config(config: &Config) -> Config {
+    let mut terminal_config = config.clone();
+    terminal_config.colors.background = [0, 0, 0];
+    terminal_config.colors.ansi[0] = [0, 0, 0];
+    terminal_config
+}
+
+fn split_terminal_rects(content: PaneRect, ratio: f32) -> (PaneRect, Option<PaneRect>) {
+    const DIVIDER_GAP: f32 = 8.0;
+    if content.w <= DIVIDER_GAP + 2.0 {
+        return (content, None);
+    }
+
+    let ratio = ratio.clamp(0.2, 0.8);
+    let usable_w = content.w - DIVIDER_GAP;
+    let left_w = (usable_w * ratio).max(1.0);
+    let right_w = (usable_w - left_w).max(1.0);
+    (
+        PaneRect {
+            x: content.x,
+            y: content.y,
+            w: left_w,
+            h: content.h,
+        },
+        Some(PaneRect {
+            x: content.x + left_w + DIVIDER_GAP,
+            y: content.y,
+            w: right_w,
+            h: content.h,
+        }),
+    )
+}
+
+#[cfg(test)]
 fn primitive_layer<'a>(frame: &'a EngineFrame, layer_id: &str) -> &'a [Primitive] {
     frame
         .layers

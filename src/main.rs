@@ -20,7 +20,7 @@ use llnzy::error_log::{ErrorLog, ErrorPanel};
 use llnzy::input;
 use llnzy::keybindings::Action;
 use llnzy::layout::{LayoutInputs, ScreenLayout};
-use llnzy::renderer::{RenderRequest, Renderer};
+use llnzy::renderer::{RenderRequest, Renderer, SplitTerminalPane};
 use llnzy::search::Search;
 use llnzy::selection::Selection;
 use llnzy::ui::{ActiveView, PendingClose, UiFrameOutput, UiState, BUMPER_WIDTH};
@@ -103,7 +103,7 @@ impl ApplicationHandler<UserEvent> for App {
             .unwrap_or(winit::dpi::PhysicalSize::new(900, 600));
 
         let mut attrs = WindowAttributes::default()
-            .with_title("llnzy")
+            .with_title("LLNZY")
             .with_inner_size(inner_size);
 
         if let Ok(image) = image::load_from_memory(include_bytes!("../llnzy.jpg")) {
@@ -149,6 +149,9 @@ impl ApplicationHandler<UserEvent> for App {
         self.renderer = Some(renderer);
         self.ui = Some(ui_state);
         self.restore_last_session();
+        if self.tabs.is_empty() {
+            self.open_singleton_tab(llnzy::workspace::TabKind::Home);
+        }
 
         // Set up native macOS menu bar
         #[cfg(target_os = "macos")]
@@ -342,6 +345,19 @@ impl ApplicationHandler<UserEvent> for App {
                         let active_tab = self.tabs.get(self.active_tab);
                         let terminal_session = active_tab.and_then(|t| t.content.as_terminal());
                         let tab_id = active_tab.map(|t| t.id).unwrap_or(0);
+                        let split_terminal = self
+                            .ui
+                            .as_ref()
+                            .and_then(|ui| ui.split_view)
+                            .and_then(|(right_idx, ratio)| {
+                                self.tabs.get(right_idx).and_then(|tab| {
+                                    tab.content.as_terminal().map(|terminal| SplitTerminalPane {
+                                        terminal,
+                                        tab_id: tab.id,
+                                        ratio,
+                                    })
+                                })
+                            });
 
                         let ui_state = &mut self.ui;
                         let window_ref = &self.window;
@@ -362,6 +378,7 @@ impl ApplicationHandler<UserEvent> for App {
                         renderer.render(RenderRequest {
                             terminal: terminal_session,
                             tab_id,
+                            split_terminal,
                             tab_titles: &render_titles,
                             selection_rects: &sel_info,
                             search_rects: &search_rects,
@@ -923,11 +940,8 @@ impl ApplicationHandler<UserEvent> for App {
                         if let Some(ui) = &mut self.ui {
                             ui.explorer.clear();
                             ui.sidebar.open = false;
-                            ui.active_view = ActiveView::Home;
+                            ui.active_view = ActiveView::Shells;
                         }
-                        // Close all tabs
-                        self.tabs.clear();
-                        self.active_tab = 0;
                         self.recompute_layout();
                         self.request_redraw();
                     }

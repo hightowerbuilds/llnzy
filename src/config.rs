@@ -46,7 +46,7 @@ impl Default for ColorScheme {
                 [255, 255, 255], // 15 bright white
             ],
             foreground: [171, 178, 191],
-            background: [40, 44, 52],
+            background: [36, 36, 36],
             cursor: [82, 139, 255],
             selection: [62, 68, 81],
             selection_alpha: 0.35,
@@ -123,7 +123,7 @@ impl Default for EditorConfig {
             word_wrap: false,
             visible_whitespace: false,
             font_size: None,
-            sidebar_font_size: 13.0,
+            sidebar_font_size: 14.0,
             keybinding_preset: KeybindingPreset::VsCode,
             languages: HashMap::new(),
         }
@@ -351,7 +351,7 @@ impl Default for Config {
             cursor_style: CursorStyle::Block,
             cursor_blink_ms: 0,
             padding_x: 20.0,
-            padding_y: 70.0,
+            padding_y: 25.0,
             opacity: 1.0,
             scroll_lines: 3,
             effects: EffectsConfig::default(),
@@ -561,6 +561,9 @@ impl Config {
             if let Some(s) = effects.background_speed {
                 self.effects.background_speed = s.clamp(0.0, 10.0);
             }
+            if let Some(c) = effects.background_color.and_then(|s| parse_hex(&s)) {
+                self.effects.background_color = Some(c);
+            }
             if let Some(p) = effects.background_image {
                 self.effects.background_image = Some(p);
             }
@@ -611,6 +614,9 @@ impl Config {
             }
             if let Some(g) = effects.grain_intensity {
                 self.effects.grain_intensity = g.clamp(0.0, 0.5);
+            }
+            if let Some(ui) = effects.effects_on_ui {
+                self.effects.effects_on_ui = ui;
             }
         }
 
@@ -800,6 +806,7 @@ struct EffectsFileConfig {
     background: Option<String>,
     background_intensity: Option<f32>,
     background_speed: Option<f32>,
+    background_color: Option<String>,
     background_image: Option<String>,
     bloom_enabled: Option<bool>,
     bloom_threshold: Option<f32>,
@@ -817,6 +824,7 @@ struct EffectsFileConfig {
     vignette_strength: Option<f32>,
     chromatic_aberration: Option<f32>,
     grain_intensity: Option<f32>,
+    effects_on_ui: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -1191,7 +1199,7 @@ mod tests {
         assert_eq!(config.cursor_style, CursorStyle::Block);
         assert_eq!(config.cursor_blink_ms, 0);
         assert_eq!(config.padding_x, 20.0);
-        assert_eq!(config.padding_y, 70.0);
+        assert_eq!(config.padding_y, 25.0);
         assert_eq!(config.opacity, 1.0);
         assert_eq!(config.scroll_lines, 3);
     }
@@ -1200,7 +1208,7 @@ mod tests {
     fn default_color_scheme() {
         let scheme = ColorScheme::default();
         assert_eq!(scheme.foreground, [171, 178, 191]);
-        assert_eq!(scheme.background, [40, 44, 52]);
+        assert_eq!(scheme.background, [36, 36, 36]);
         assert_eq!(scheme.selection_alpha, 0.35);
         assert_eq!(scheme.ansi.len(), 16);
     }
@@ -1350,6 +1358,27 @@ mod tests {
         let file: ConfigFile = toml::from_str(toml_str).unwrap();
         config.apply(file);
         assert_eq!(config.shell, "/bin/bash");
+    }
+
+    #[test]
+    fn apply_background_effect_options() {
+        let mut config = Config::default();
+        let toml_str = r##"
+            [effects]
+            background = "smoke"
+            background_color = "#112233"
+            background_image = "/tmp/background.png"
+            effects_on_ui = false
+        "##;
+        let file: ConfigFile = toml::from_str(toml_str).unwrap();
+        config.apply(file);
+        assert_eq!(config.effects.background, "smoke");
+        assert_eq!(config.effects.background_color, Some([0x11, 0x22, 0x33]));
+        assert_eq!(
+            config.effects.background_image,
+            Some("/tmp/background.png".to_string())
+        );
+        assert!(!config.effects.effects_on_ui);
     }
 
     #[test]

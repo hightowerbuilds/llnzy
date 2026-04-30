@@ -22,6 +22,7 @@ impl App {
         }
         let id = self.alloc_tab_id();
         let content = match kind {
+            TabKind::Home => TabContent::Home,
             TabKind::Stacker => TabContent::Stacker,
             TabKind::Sketch => TabContent::Sketch,
             TabKind::Appearances => TabContent::Appearances,
@@ -97,6 +98,7 @@ impl App {
     pub(crate) fn open_workspace_tab_entry(&mut self, entry: llnzy::workspace_store::TabEntry) {
         match entry {
             llnzy::workspace_store::TabEntry::Terminal => self.new_tab(),
+            llnzy::workspace_store::TabEntry::Home => self.open_singleton_tab(TabKind::Home),
             llnzy::workspace_store::TabEntry::CodeFile { path } => {
                 let Some(ui) = &mut self.ui else { return };
                 match ui.editor_view.open_file(path.clone()) {
@@ -142,7 +144,13 @@ impl App {
                 true
             }
             AppCommand::SplitRight(idx) => {
-                if idx != self.active_tab && idx < self.tabs.len() {
+                if idx >= self.tabs.len() {
+                    return false;
+                }
+                if matches!(self.tabs[idx].content, TabContent::Terminal(_)) {
+                    return self.split_terminal_right(idx);
+                }
+                if idx != self.active_tab {
                     if let Some(ui) = &mut self.ui {
                         ui.split_view = Some((idx, 0.5));
                     }

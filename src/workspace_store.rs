@@ -15,6 +15,8 @@ pub struct SavedWorkspace {
 /// A tab descriptor for workspace serialization.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum TabEntry {
+    /// The Home launch screen.
+    Home,
     /// A terminal shell.
     Terminal,
     /// A code file to open.
@@ -28,6 +30,7 @@ pub enum TabEntry {
 impl TabEntry {
     pub fn display_name(&self) -> String {
         match self {
+            TabEntry::Home => "Home".to_string(),
             TabEntry::Terminal => "Terminal".to_string(),
             TabEntry::CodeFile { path } => path
                 .file_name()
@@ -41,6 +44,7 @@ impl TabEntry {
 
     pub fn kind_label(&self) -> &'static str {
         match self {
+            TabEntry::Home => "Home",
             TabEntry::Terminal => "Terminal",
             TabEntry::CodeFile { .. } => "Code File",
             TabEntry::Stacker => "Stacker",

@@ -4,6 +4,8 @@ use crate::session::Session;
 
 /// What kind of content a workspace tab holds.
 pub enum TabContent {
+    /// The Home screen with project/workspace launch actions.
+    Home,
     /// A terminal shell session.
     Terminal(Box<Session>),
     /// A source code file open in the editor.
@@ -21,6 +23,7 @@ pub enum TabContent {
 /// Discriminant-only version of TabContent for matching without borrowing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TabKind {
+    Home,
     Terminal,
     CodeFile,
     Stacker,
@@ -32,6 +35,7 @@ pub enum TabKind {
 impl TabContent {
     pub fn kind(&self) -> TabKind {
         match self {
+            TabContent::Home => TabKind::Home,
             TabContent::Terminal(_) => TabKind::Terminal,
             TabContent::CodeFile { .. } => TabKind::CodeFile,
             TabContent::Stacker => TabKind::Stacker,
@@ -48,7 +52,8 @@ impl TabContent {
     pub fn is_singleton(&self) -> bool {
         matches!(
             self,
-            TabContent::Stacker
+            TabContent::Home
+                | TabContent::Stacker
                 | TabContent::Sketch
                 | TabContent::Appearances
                 | TabContent::Settings
@@ -77,6 +82,7 @@ impl WorkspaceTab {
             return name.clone();
         }
         match &self.content {
+            TabContent::Home => "Home".to_string(),
             TabContent::Terminal(session) => {
                 let sname = session.display_name();
                 if sname != "shell" {

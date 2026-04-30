@@ -64,13 +64,8 @@ impl App {
         }
 
         if any_changed {
-            if let (Some(window), Some(session)) = (&self.window, self.active_session()) {
-                let title = if session.title.is_empty() {
-                    "llnzy".to_string()
-                } else {
-                    format!("{} — llnzy", session.title)
-                };
-                window.set_title(&title);
+            if let Some(window) = &self.window {
+                window.set_title("LLNZY");
             }
             self.request_redraw();
         }

@@ -10,6 +10,58 @@ fn label(text: &str) -> egui::RichText {
     egui::RichText::new(text).size(S)
 }
 
+fn available_background_modes(config: &Config, saved_bgs: &[std::path::PathBuf]) -> Vec<String> {
+    let mut modes = Vec::new();
+    push_mode(&mut modes, "none");
+    push_mode(&mut modes, "smoke");
+    push_mode(&mut modes, "aurora");
+    for name in custom_shader_names() {
+        push_mode(&mut modes, &name);
+    }
+
+    if config.effects.background_image.is_some() || !saved_bgs.is_empty() {
+        push_mode(&mut modes, "image");
+    }
+    if !modes.contains(&config.effects.background) {
+        modes.push(config.effects.background.clone());
+    }
+    modes
+}
+
+fn push_mode(modes: &mut Vec<String>, name: &str) {
+    if !modes.iter().any(|mode| mode == name) {
+        modes.push(name.to_string());
+    }
+}
+
+fn custom_shader_names() -> Vec<String> {
+    let Some(config_dir) = dirs::config_dir() else {
+        return Vec::new();
+    };
+    let shader_dir = config_dir.join("llnzy").join("shaders");
+    let Ok(entries) = std::fs::read_dir(shader_dir) else {
+        return Vec::new();
+    };
+
+    entries
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            let is_wgsl = path.extension().and_then(|ext| ext.to_str()) == Some("wgsl");
+            if !is_wgsl {
+                return None;
+            }
+            path.file_stem()
+                .and_then(|stem| stem.to_str())
+                .map(str::to_string)
+        })
+        .collect()
+}
+
+fn shader_supports_custom_color(name: &str) -> bool {
+    name != "none" && name != "image"
+}
+
 pub(crate) fn render_background_tab(ui: &mut egui::Ui, config: &mut Config) {
     ui.label(
         egui::RichText::new("Background Effects")
@@ -17,21 +69,25 @@ pub(crate) fn render_background_tab(ui: &mut egui::Ui, config: &mut Config) {
             .color(egui::Color32::WHITE),
     );
     ui.add_space(12.0);
+    let saved_bgs = theme_store::list_backgrounds();
 
     egui::Grid::new("bg_settings")
         .num_columns(2)
         .spacing([24.0, 10.0])
         .show(ui, |ui| {
-            // Background type (shader effects only)
+            ui.label(label("Effects"));
+            ui.add(egui::Checkbox::without_text(&mut config.effects.enabled));
+            ui.end_row();
+
             ui.label(label("Background"));
             egui::ComboBox::from_id_salt("bg_type")
                 .selected_text(label(&config.effects.background))
                 .show_ui(ui, |ui| {
-                    for name in &["none", "smoke", "aurora"] {
+                    for name in available_background_modes(config, &saved_bgs) {
                         ui.selectable_value(
                             &mut config.effects.background,
-                            name.to_string(),
-                            *name,
+                            name.clone(),
+                            name.as_str(),
                         );
                     }
                 });
@@ -47,8 +103,14 @@ pub(crate) fn render_background_tab(ui: &mut egui::Ui, config: &mut Config) {
             ui.add(egui::Slider::new(&mut config.effects.background_speed, 0.1..=5.0).text(""));
             ui.end_row();
 
+            ui.label(label("Apply to UI"));
+            ui.add(egui::Checkbox::without_text(
+                &mut config.effects.effects_on_ui,
+            ));
+            ui.end_row();
+
             // Color picker — only for smoke/aurora
-            if config.effects.background == "smoke" || config.effects.background == "aurora" {
+            if shader_supports_custom_color(&config.effects.background) {
                 let mut use_custom = config.effects.background_color.is_some();
                 ui.label(label("Custom Color"));
                 if ui
@@ -107,10 +169,9 @@ pub(crate) fn render_background_tab(ui: &mut egui::Ui, config: &mut Config) {
                 }
             });
             ui.end_row();
-        });
+    });
 
     // Saved backgrounds gallery
-    let saved_bgs = theme_store::list_backgrounds();
     if !saved_bgs.is_empty() {
         ui.add_space(8.0);
         ui.label(

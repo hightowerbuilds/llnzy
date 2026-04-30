@@ -3,9 +3,9 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>llnzy</string>
+    <string>LLNZY</string>
     <key>CFBundleDisplayName</key>
-    <string>llnzy</string>
+    <string>LLNZY</string>
     <key>CFBundleIdentifier</key>
     <string>com.llnzy.terminal</string>
     <key>CFBundleVersion</key>

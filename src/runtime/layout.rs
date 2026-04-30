@@ -45,6 +45,21 @@ impl App {
         }
     }
 
+    pub(crate) fn split_terminal_grid_size(&self, ratio: f32) -> (u16, u16) {
+        const DIVIDER_GAP: f32 = 8.0;
+        if let Some(layout) = &self.screen_layout {
+            let ratio = ratio.clamp(0.2, 0.8);
+            let pane_w = ((layout.content.w - DIVIDER_GAP).max(layout.cell_w) * ratio)
+                .max(layout.cell_w);
+            (
+                (pane_w / layout.cell_w).max(1.0) as u16,
+                layout.grid_rows,
+            )
+        } else {
+            (40, 24)
+        }
+    }
+
     pub(crate) fn pixel_to_grid(&self, pos: winit::dpi::PhysicalPosition<f64>) -> (usize, usize) {
         if let Some(layout) = &self.screen_layout {
             layout.pixel_to_grid(pos.x as f32, pos.y as f32)
@@ -139,8 +154,17 @@ impl App {
     pub(crate) fn resize_terminal_tabs(&mut self) {
         if let Some(layout) = &self.screen_layout {
             let (cols, rows) = (layout.grid_cols, layout.grid_rows);
-            for tab in &mut self.tabs {
+            let split = self.ui.as_ref().and_then(|ui| ui.split_view);
+            let split_cols_rows = split.map(|(_, ratio)| self.split_terminal_grid_size(ratio));
+            for (idx, tab) in self.tabs.iter_mut().enumerate() {
                 if let TabContent::Terminal(ref mut session) = tab.content {
+                    if let Some((right_idx, _)) = split {
+                        if idx == self.active_tab || idx == right_idx {
+                            let (split_cols, split_rows) = split_cols_rows.unwrap_or((cols, rows));
+                            session.resize(split_cols, split_rows);
+                            continue;
+                        }
+                    }
                     session.resize(cols, rows);
                 }
             }

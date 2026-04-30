@@ -273,6 +273,7 @@ mod tests {
         let request = RenderRequest {
             terminal: None,
             tab_id: 1,
+            split_terminal: None,
             tab_titles: &[],
             selection_rects: &[],
             search_rects: &[],
@@ -304,6 +305,7 @@ mod tests {
         let request = RenderRequest {
             terminal: None,
             tab_id: 1,
+            split_terminal: None,
             tab_titles: &[],
             selection_rects: &[],
             search_rects: &search_rects,
@@ -352,6 +354,7 @@ mod tests {
         let request = RenderRequest {
             terminal: None,
             tab_id: 1,
+            split_terminal: None,
             tab_titles: &[],
             selection_rects: &[],
             search_rects: &[],
@@ -379,6 +382,7 @@ mod tests {
         let request = RenderRequest {
             terminal: None,
             tab_id: 1,
+            split_terminal: None,
             tab_titles: &[],
             selection_rects: &[],
             search_rects: &[],
@@ -426,6 +430,7 @@ mod tests {
         let request = RenderRequest {
             terminal: None,
             tab_id: 1,
+            split_terminal: None,
             tab_titles: &[],
             selection_rects: &[],
             search_rects: &[],
