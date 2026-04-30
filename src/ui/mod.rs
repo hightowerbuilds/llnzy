@@ -30,6 +30,8 @@ pub use types::{
     BUMPER_WIDTH, SIDEBAR_WIDTH,
 };
 
+pub const STACKER_PROMPT_EDITOR_ID: &str = "stacker_prompt_editor";
+
 /// State for the egui-driven UI overlay.
 pub struct UiState {
     pub ctx: egui::Context,

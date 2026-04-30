@@ -1,7 +1,9 @@
 use std::time::{Duration, Instant};
 
+use egui::TextBuffer;
 use llnzy::input::text_should_use_paste_path;
 use llnzy::session::Session;
+use llnzy::ui::STACKER_PROMPT_EDITOR_ID;
 use llnzy::workspace::{TabContent, WorkspaceTab};
 
 use crate::App;
@@ -127,12 +129,90 @@ impl App {
             return false;
         };
 
-        if text.contains('\r') {
-            let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
-            ui.stacker.input.push_str(&normalized);
+        let text = if text.contains('\r') {
+            text.replace("\r\n", "\n").replace('\r', "\n")
         } else {
-            ui.stacker.input.push_str(text);
+            text.to_string()
+        };
+        let editor_id = egui::Id::new(STACKER_PROMPT_EDITOR_ID);
+        let char_count = ui.stacker.input.chars().count();
+        let mut state =
+            egui::text_edit::TextEditState::load(&ui.ctx, editor_id).unwrap_or_default();
+        let range = state.cursor.char_range().unwrap_or_else(|| {
+            let cursor = egui::text::CCursor::new(char_count);
+            egui::text::CCursorRange::one(cursor)
+        });
+        let [start, end] = range.sorted();
+        let start = start.index.min(char_count);
+        let end = end.index.min(char_count);
+
+        if start < end {
+            ui.stacker.input.delete_char_range(start..end);
         }
+        let inserted = ui.stacker.input.insert_text(&text, start);
+        let cursor = egui::text::CCursor::new(start + inserted);
+        state
+            .cursor
+            .set_char_range(Some(egui::text::CCursorRange::one(cursor)));
+        state.store(&ui.ctx, editor_id);
+        ui.ctx.memory_mut(|memory| memory.request_focus(editor_id));
+        self.request_redraw();
+        true
+    }
+
+    pub(crate) fn copy_stacker_editor_selection(&mut self) -> bool {
+        let Some(tab) = self.active_tab() else {
+            return false;
+        };
+        if !matches!(tab.content, TabContent::Stacker) {
+            return false;
+        }
+
+        let selected = self.ui.as_ref().and_then(|ui| {
+            let editor_id = egui::Id::new(STACKER_PROMPT_EDITOR_ID);
+            let state = egui::text_edit::TextEditState::load(&ui.ctx, editor_id)?;
+            let range = state.cursor.char_range()?;
+            let [start, end] = range.sorted();
+            let char_count = ui.stacker.input.chars().count();
+            let start = start.index.min(char_count);
+            let end = end.index.min(char_count);
+            if start == end {
+                return None;
+            }
+            Some(ui.stacker.input.char_range(start..end).to_string())
+        });
+
+        if let Some(text) = selected {
+            if let Some(clipboard) = &mut self.clipboard {
+                let _ = clipboard.set_text(text);
+            }
+        }
+        true
+    }
+
+    pub(crate) fn select_all_stacker_editor(&mut self) -> bool {
+        let Some(tab) = self.active_tab() else {
+            return false;
+        };
+        if !matches!(tab.content, TabContent::Stacker) {
+            return false;
+        }
+
+        let Some(ui) = &mut self.ui else {
+            return false;
+        };
+
+        let editor_id = egui::Id::new(STACKER_PROMPT_EDITOR_ID);
+        let end = ui.stacker.input.chars().count();
+        let range = egui::text::CCursorRange::two(
+            egui::text::CCursor::new(0),
+            egui::text::CCursor::new(end),
+        );
+        let mut state =
+            egui::text_edit::TextEditState::load(&ui.ctx, editor_id).unwrap_or_default();
+        state.cursor.set_char_range(Some(range));
+        state.store(&ui.ctx, editor_id);
+        ui.ctx.memory_mut(|memory| memory.request_focus(editor_id));
         self.request_redraw();
         true
     }

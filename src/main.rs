@@ -186,13 +186,24 @@ impl ApplicationHandler<UserEvent> for App {
             let active_stacker = self
                 .active_tab()
                 .is_some_and(|tab| matches!(tab.content, TabContent::Stacker));
-            if active_stacker
-                && key_event.state == ElementState::Pressed
-                && self.config.keybindings.match_key(key_event, self.modifiers)
-                    == Some(Action::Paste)
-            {
-                self.do_paste();
-                return;
+            if active_stacker && key_event.state == ElementState::Pressed {
+                if let Some(action) = self.config.keybindings.match_key(key_event, self.modifiers) {
+                    match action {
+                        Action::Copy => {
+                            self.copy_stacker_editor_selection();
+                            return;
+                        }
+                        Action::Paste => {
+                            self.do_paste();
+                            return;
+                        }
+                        Action::SelectAll => {
+                            self.select_all_stacker_editor();
+                            return;
+                        }
+                        _ => {}
+                    }
+                }
             }
         }
 
@@ -734,9 +745,17 @@ impl ApplicationHandler<UserEvent> for App {
                                 self.request_redraw();
                             }
                         }
-                        Action::Copy => self.copy_selection(),
+                        Action::Copy => {
+                            if !self.copy_stacker_editor_selection() {
+                                self.copy_selection();
+                            }
+                        }
                         Action::Paste => self.do_paste(),
-                        Action::SelectAll => self.do_select_all(),
+                        Action::SelectAll => {
+                            if !self.select_all_stacker_editor() {
+                                self.do_select_all();
+                            }
+                        }
                         Action::NewTab => self.new_tab(),
                         Action::CloseTab => self.close_tab(),
                         Action::NextTab => {
@@ -951,9 +970,17 @@ impl ApplicationHandler<UserEvent> for App {
                 match action {
                     MenuAction::NewTab => self.new_tab(),
                     MenuAction::CloseTab => self.close_tab(),
-                    MenuAction::Copy => self.copy_selection(),
+                    MenuAction::Copy => {
+                        if !self.copy_stacker_editor_selection() {
+                            self.copy_selection();
+                        }
+                    }
                     MenuAction::Paste => self.do_paste(),
-                    MenuAction::SelectAll => self.do_select_all(),
+                    MenuAction::SelectAll => {
+                        if !self.select_all_stacker_editor() {
+                            self.do_select_all();
+                        }
+                    }
                     MenuAction::Find => {
                         self.search.open();
                         self.request_redraw();

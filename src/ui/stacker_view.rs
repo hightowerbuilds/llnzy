@@ -3,6 +3,8 @@ use crate::stacker::{
     StackerPrompt,
 };
 
+use super::STACKER_PROMPT_EDITOR_ID;
+
 const S: f32 = 14.0;
 const MUTED: egui::Color32 = egui::Color32::from_rgb(130, 130, 145);
 const HEADING_COLOR: egui::Color32 = egui::Color32::from_rgb(200, 200, 210);
@@ -14,7 +16,6 @@ const NOTE_BG: egui::Color32 = PANEL_BG;
 const NOTE_TEXT: egui::Color32 = egui::Color32::from_rgb(240, 248, 255);
 const NOTE_PADDING: f32 = 34.0;
 const EDITOR_BOTTOM_GAP: f32 = 20.0;
-const PROMPT_EDITOR_ID: &str = "stacker_prompt_editor";
 
 /// Prompt bar visibility bit flags.
 pub(crate) const BAR_VIEW_SHELL: u8 = 0b01;
@@ -231,7 +232,7 @@ fn render_prompt_editor_panel(
     editing: &mut Option<usize>,
     dirty: &mut bool,
 ) {
-    let editor_id = ui.make_persistent_id(PROMPT_EDITOR_ID);
+    let editor_id = egui::Id::new(STACKER_PROMPT_EDITOR_ID);
 
     ui.allocate_ui_with_layout(
         egui::vec2(ui.available_width(), height),
