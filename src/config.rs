@@ -266,8 +266,10 @@ pub struct EffectsConfig {
     pub background: String,
     pub background_intensity: f32,
     pub background_speed: f32,
-    /// Custom color for smoke/aurora backgrounds. None = derive from terminal bg.
+    /// Custom colors for smoke/aurora backgrounds. None = derive from terminal bg/cursor.
     pub background_color: Option<[u8; 3]>,
+    pub background_color2: Option<[u8; 3]>,
+    pub background_color3: Option<[u8; 3]>,
     /// File path for custom background image (when background == "image").
     pub background_image: Option<String>,
     pub bloom_enabled: bool,
@@ -314,6 +316,8 @@ impl Default for EffectsConfig {
             background_intensity: 0.3,
             background_speed: 1.0,
             background_color: None,
+            background_color2: None,
+            background_color3: None,
             background_image: None,
             bloom_enabled: false,
             bloom_threshold: 0.35,
@@ -564,6 +568,12 @@ impl Config {
             if let Some(c) = effects.background_color.and_then(|s| parse_hex(&s)) {
                 self.effects.background_color = Some(c);
             }
+            if let Some(c) = effects.background_color2.and_then(|s| parse_hex(&s)) {
+                self.effects.background_color2 = Some(c);
+            }
+            if let Some(c) = effects.background_color3.and_then(|s| parse_hex(&s)) {
+                self.effects.background_color3 = Some(c);
+            }
             if let Some(p) = effects.background_image {
                 self.effects.background_image = Some(p);
             }
@@ -807,6 +817,8 @@ struct EffectsFileConfig {
     background_intensity: Option<f32>,
     background_speed: Option<f32>,
     background_color: Option<String>,
+    background_color2: Option<String>,
+    background_color3: Option<String>,
     background_image: Option<String>,
     bloom_enabled: Option<bool>,
     bloom_threshold: Option<f32>,
@@ -1367,6 +1379,8 @@ mod tests {
             [effects]
             background = "smoke"
             background_color = "#112233"
+            background_color2 = "#445566"
+            background_color3 = "#778899"
             background_image = "/tmp/background.png"
             effects_on_ui = false
         "##;
@@ -1374,6 +1388,8 @@ mod tests {
         config.apply(file);
         assert_eq!(config.effects.background, "smoke");
         assert_eq!(config.effects.background_color, Some([0x11, 0x22, 0x33]));
+        assert_eq!(config.effects.background_color2, Some([0x44, 0x55, 0x66]));
+        assert_eq!(config.effects.background_color3, Some([0x77, 0x88, 0x99]));
         assert_eq!(
             config.effects.background_image,
             Some("/tmp/background.png".to_string())

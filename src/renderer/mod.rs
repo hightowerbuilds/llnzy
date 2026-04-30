@@ -53,6 +53,8 @@ pub struct RenderRequest<'a> {
     pub visual_bell: bool,
     pub screen_layout: &'a ScreenLayout,
     pub egui_render: Option<EguiRenderCallback<'a>>,
+    /// When false, saved effect settings remain intact but the frame renders clean.
+    pub effects_enabled: bool,
     /// When true, egui renders to the scene texture so post-processing
     /// shaders (bloom, CRT) affect the active UI view.
     pub apply_effects_to_ui: bool,
@@ -185,7 +187,11 @@ impl Renderer {
             self.config.effects.background_intensity,
             self.config.effects.background_speed,
             self.config.bg(),
-            self.config.effects.background_color,
+            [
+                self.config.effects.background_color,
+                self.config.effects.background_color2,
+                self.config.effects.background_color3,
+            ],
         );
     }
 
@@ -199,7 +205,7 @@ impl Renderer {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
         let mut encoder = self.create_render_encoder();
-        let use_scene = self.config.effects.any_active();
+        let use_scene = request.effects_enabled && self.config.effects.any_active();
         let engine_frame = frame_adapter::engine_frame_from_request(
             &request,
             &self.config,
@@ -372,7 +378,11 @@ impl Renderer {
                     self.config.effects.background_intensity,
                     self.config.effects.background_speed,
                     self.config.bg(),
-                    self.config.effects.background_color,
+                    [
+                        self.config.effects.background_color,
+                        self.config.effects.background_color2,
+                        self.config.effects.background_color3,
+                    ],
                 );
                 self.background.draw(
                     &self.gpu,

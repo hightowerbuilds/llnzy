@@ -402,33 +402,52 @@ impl BackgroundRenderer {
     }
 
     /// Update uniforms from config.
-    /// If `custom_color` is set, derive the three shader layers from it;
-    /// otherwise fall back to the terminal background color.
+    /// If custom colors are set, use them as the three shader layers;
+    /// otherwise fall back to layers derived from the terminal background color.
     pub fn update_uniforms(
         &self,
         gpu: &GpuState,
         intensity: f32,
         speed: f32,
         bg_color: [f32; 4],
-        custom_color: Option<[u8; 3]>,
+        custom_colors: [Option<[u8; 3]>; 3],
     ) {
-        let (r, g, b) = if let Some(c) = custom_color {
-            (
-                c[0] as f32 / 255.0,
-                c[1] as f32 / 255.0,
-                c[2] as f32 / 255.0,
-            )
-        } else {
-            (bg_color[0], bg_color[1], bg_color[2])
+        let rgb = |color: [u8; 3]| {
+            [
+                color[0] as f32 / 255.0,
+                color[1] as f32 / 255.0,
+                color[2] as f32 / 255.0,
+                1.0,
+            ]
         };
+        let derived = |mult: [f32; 3], add: [f32; 3]| {
+            [
+                bg_color[0] * mult[0] + add[0],
+                bg_color[1] * mult[1] + add[1],
+                bg_color[2] * mult[2] + add[2],
+                1.0,
+            ]
+        };
+        let primary = custom_colors[0];
+        let color1 = primary
+            .map(rgb)
+            .unwrap_or_else(|| derived([0.15, 0.15, 0.25], [0.0, 0.0, 0.02]));
+        let color2 = custom_colors[1]
+            .or(primary.map(|c| brighten_rgb(c, [18, 32, 18])))
+            .map(rgb)
+            .unwrap_or_else(|| derived([0.2, 0.18, 0.3], [0.01, 0.01, 0.03]));
+        let color3 = custom_colors[2]
+            .or(primary.map(|c| brighten_rgb(c, [42, 28, 48])))
+            .map(rgb)
+            .unwrap_or_else(|| derived([0.25, 0.22, 0.35], [0.02, 0.02, 0.05]));
 
         let uniforms = BackgroundUniforms {
             intensity,
             speed,
             _padding: [0.0; 2],
-            color1: [r * 0.15, g * 0.15, b * 0.25 + 0.02, 1.0],
-            color2: [r * 0.2 + 0.01, g * 0.18 + 0.01, b * 0.3 + 0.03, 1.0],
-            color3: [r * 0.25 + 0.02, g * 0.22 + 0.02, b * 0.35 + 0.05, 1.0],
+            color1,
+            color2,
+            color3,
         };
 
         gpu.queue
@@ -573,4 +592,12 @@ impl BackgroundRenderer {
         pass.set_bind_group(0, bind_group, &[]);
         pass.draw(0..3, 0..1);
     }
+}
+
+fn brighten_rgb(color: [u8; 3], add: [u8; 3]) -> [u8; 3] {
+    [
+        color[0].saturating_add(add[0]),
+        color[1].saturating_add(add[1]),
+        color[2].saturating_add(add[2]),
+    ]
 }

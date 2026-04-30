@@ -130,18 +130,7 @@ pub fn render_home_view(ctx: &egui::Context, recent_projects: &[PathBuf]) -> Hom
                     for project in recent_projects {
                         let name = crate::explorer::project_name(project);
                         let path_str = project.to_string_lossy().to_string();
-                        let btn = ui
-                            .add_sized(
-                                [btn_width, 36.0],
-                                egui::Button::new(
-                                    egui::RichText::new(format!("{name}  "))
-                                        .size(14.0)
-                                        .color(egui::Color32::from_rgb(180, 185, 200)),
-                                )
-                                .fill(egui::Color32::from_rgb(32, 35, 44))
-                                .rounding(egui::Rounding::same(6.0)),
-                            )
-                            .on_hover_text(&path_str);
+                        let btn = render_recent_project_row(ui, btn_width, &name, &path_str);
                         if btn.clicked() {
                             action.open_project = Some(project.clone());
                             action.nav_target = Some(ActiveView::Shells);
@@ -152,4 +141,33 @@ pub fn render_home_view(ctx: &egui::Context, recent_projects: &[PathBuf]) -> Hom
         });
 
     action
+}
+
+fn render_recent_project_row(
+    ui: &mut egui::Ui,
+    width: f32,
+    name: &str,
+    hover_text: &str,
+) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 36.0), egui::Sense::click());
+    let response = response.on_hover_text(hover_text);
+    let painter = ui.painter_at(rect);
+
+    if response.hovered() {
+        painter.rect_stroke(
+            rect.shrink(0.5),
+            egui::Rounding::same(6.0),
+            egui::Stroke::new(1.0, egui::Color32::from_rgb(120, 125, 140)),
+        );
+    }
+
+    painter.text(
+        rect.left_center() + egui::vec2(14.0, 0.0),
+        egui::Align2::LEFT_CENTER,
+        name,
+        egui::FontId::proportional(14.0),
+        egui::Color32::from_rgb(180, 185, 200),
+    );
+
+    response
 }

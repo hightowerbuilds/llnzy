@@ -62,6 +62,21 @@ fn shader_supports_custom_color(name: &str) -> bool {
     name != "none" && name != "image"
 }
 
+fn ensure_background_palette(config: &mut Config) {
+    config
+        .effects
+        .background_color
+        .get_or_insert(config.colors.cursor);
+    config
+        .effects
+        .background_color2
+        .get_or_insert(config.colors.selection);
+    config
+        .effects
+        .background_color3
+        .get_or_insert(config.colors.foreground);
+}
+
 pub(crate) fn render_background_tab(ui: &mut egui::Ui, config: &mut Config) {
     ui.label(
         egui::RichText::new("Background Effects")
@@ -103,31 +118,48 @@ pub(crate) fn render_background_tab(ui: &mut egui::Ui, config: &mut Config) {
             ui.add(egui::Slider::new(&mut config.effects.background_speed, 0.1..=5.0).text(""));
             ui.end_row();
 
-            ui.label(label("Apply to UI"));
-            ui.add(egui::Checkbox::without_text(
-                &mut config.effects.effects_on_ui,
-            ));
-            ui.end_row();
-
             // Color picker — only for smoke/aurora
             if shader_supports_custom_color(&config.effects.background) {
-                let mut use_custom = config.effects.background_color.is_some();
-                ui.label(label("Custom Color"));
+                let mut use_custom = config.effects.background_color.is_some()
+                    || config.effects.background_color2.is_some()
+                    || config.effects.background_color3.is_some();
+                ui.label(label("Custom Colors"));
                 if ui
                     .add(egui::Checkbox::without_text(&mut use_custom))
                     .changed()
                 {
                     if use_custom {
-                        let bg = config.colors.background;
-                        config.effects.background_color = Some(bg);
+                        ensure_background_palette(config);
                     } else {
                         config.effects.background_color = None;
+                        config.effects.background_color2 = None;
+                        config.effects.background_color3 = None;
                     }
                 }
                 ui.end_row();
 
+                if use_custom {
+                    ensure_background_palette(config);
+                }
+
                 if let Some(ref mut color) = config.effects.background_color {
-                    ui.label(label("Color"));
+                    ui.label(label("Color 1"));
+                    let mut c = [color[0], color[1], color[2]];
+                    if ui.color_edit_button_srgb(&mut c).changed() {
+                        *color = c;
+                    }
+                    ui.end_row();
+                }
+                if let Some(ref mut color) = config.effects.background_color2 {
+                    ui.label(label("Color 2"));
+                    let mut c = [color[0], color[1], color[2]];
+                    if ui.color_edit_button_srgb(&mut c).changed() {
+                        *color = c;
+                    }
+                    ui.end_row();
+                }
+                if let Some(ref mut color) = config.effects.background_color3 {
+                    ui.label(label("Color 3"));
                     let mut c = [color[0], color[1], color[2]];
                     if ui.color_edit_button_srgb(&mut c).changed() {
                         *color = c;
@@ -180,12 +212,13 @@ pub(crate) fn render_background_tab(ui: &mut egui::Ui, config: &mut Config) {
                 .color(egui::Color32::from_rgb(180, 185, 200)),
         );
         ui.add_space(4.0);
-        ui.horizontal_wrapped(|ui| {
+        ui.vertical(|ui| {
             let mut to_delete: Option<std::path::PathBuf> = None;
             for bg_path in &saved_bgs {
                 let name = bg_path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
                 let is_active = config.effects.background_image.as_deref()
                     == Some(&bg_path.display().to_string());
+                let row_w = ui.available_width();
                 let bg_color = if is_active {
                     egui::Color32::from_rgb(40, 80, 160)
                 } else {
@@ -194,11 +227,15 @@ pub(crate) fn render_background_tab(ui: &mut egui::Ui, config: &mut Config) {
                 egui::Frame::none()
                     .fill(bg_color)
                     .rounding(egui::Rounding::same(4.0))
-                    .inner_margin(egui::Margin::symmetric(8.0, 4.0))
+                    .inner_margin(egui::Margin::symmetric(8.0, 5.0))
                     .show(ui, |ui| {
+                        ui.set_min_width((row_w - 16.0).max(64.0));
                         ui.horizontal(|ui| {
+                            let delete_w = 18.0;
+                            let label_w = (ui.available_width() - delete_w - 6.0).max(48.0);
                             if ui
-                                .add(
+                                .add_sized(
+                                    [label_w, 18.0],
                                     egui::Label::new(
                                         egui::RichText::new(name)
                                             .size(12.0)
@@ -213,7 +250,8 @@ pub(crate) fn render_background_tab(ui: &mut egui::Ui, config: &mut Config) {
                                 config.effects.background = "image".to_string();
                             }
                             if ui
-                                .add(
+                                .add_sized(
+                                    [delete_w, 18.0],
                                     egui::Label::new(
                                         egui::RichText::new("x")
                                             .size(10.0)

@@ -336,28 +336,23 @@ impl ApplicationHandler<UserEvent> for App {
                 if let Some(renderer) = &mut self.renderer {
                     if let Some(layout) = &self.screen_layout {
                         let active_kind = self.tabs.get(self.active_tab).map(|t| t.content.kind());
-                        let effects_on_ui = match active_kind {
-                            Some(llnzy::workspace::TabKind::Terminal) => {
-                                self.config.effects.effects_on_ui
-                            }
-                            Some(llnzy::workspace::TabKind::Sketch) => true,
-                            Some(llnzy::workspace::TabKind::CodeFile) => {
-                                self.config.effects.effects_on_ui
-                            }
-                            _ => false,
-                        };
-                        let effects_mask = self.ui.as_ref().and_then(|u| {
-                            u.sketch.canvas_px.and_then(|px| {
-                                if matches!(active_kind, Some(llnzy::workspace::TabKind::Sketch)) {
-                                    let size = self.window.as_ref()?.inner_size();
-                                    let w = size.width as f32;
-                                    let h = size.height as f32;
-                                    Some([px[0] / w, px[1] / h, px[2] / w, px[3] / h])
-                                } else {
-                                    None
-                                }
+                        let terminal_effects_enabled =
+                            matches!(active_kind, Some(llnzy::workspace::TabKind::Terminal));
+                        let effects_mask = if terminal_effects_enabled {
+                            let size = self.window.as_ref().map(|window| window.inner_size());
+                            size.map(|size| {
+                                let w = size.width.max(1) as f32;
+                                let h = size.height.max(1) as f32;
+                                [
+                                    layout.content.x / w,
+                                    layout.content.y / h,
+                                    (layout.content.x + layout.content.w) / w,
+                                    (layout.content.y + layout.content.h) / h,
+                                ]
                             })
-                        });
+                        } else {
+                            None
+                        };
                         // Supply clipboard content to editor for paste + init LSP
                         if let Some(ui) = self.ui.as_mut() {
                             if let Some(cb) = &mut self.clipboard {
@@ -421,7 +416,8 @@ impl ApplicationHandler<UserEvent> for App {
                             visual_bell: bell_active,
                             screen_layout: layout,
                             egui_render: Some(&mut egui_cb),
-                            apply_effects_to_ui: effects_on_ui,
+                            effects_enabled: terminal_effects_enabled,
+                            apply_effects_to_ui: false,
                             effects_mask,
                         });
                         self.handle_ui_frame_output(ui_frame_output, event_loop);
@@ -1088,8 +1084,12 @@ impl ApplicationHandler<UserEvent> for App {
         }
 
         // Continuous animation mode — only when effects actually need it
+        let terminal_active = self
+            .tabs
+            .get(self.active_tab)
+            .is_some_and(|tab| matches!(tab.content.kind(), llnzy::workspace::TabKind::Terminal));
         let ui_active = self.ui.as_ref().is_some_and(|u| u.settings_open());
-        if self.config.effects.any_active() || ui_active {
+        if (terminal_active && self.config.effects.any_active()) || ui_active {
             event_loop.set_control_flow(ControlFlow::Poll);
             self.request_redraw();
         }

@@ -285,6 +285,7 @@ mod tests {
             visual_bell: false,
             screen_layout: &layout,
             egui_render: None,
+            effects_enabled: false,
             apply_effects_to_ui: false,
             effects_mask: None,
         };
@@ -317,6 +318,7 @@ mod tests {
             visual_bell: false,
             screen_layout: &layout,
             egui_render: None,
+            effects_enabled: false,
             apply_effects_to_ui: false,
             effects_mask: None,
         };
@@ -366,6 +368,7 @@ mod tests {
             visual_bell: false,
             screen_layout: &layout,
             egui_render: None,
+            effects_enabled: true,
             apply_effects_to_ui: false,
             effects_mask: None,
         };
@@ -394,6 +397,7 @@ mod tests {
             visual_bell: false,
             screen_layout: &layout,
             egui_render: None,
+            effects_enabled: false,
             apply_effects_to_ui: false,
             effects_mask: None,
         };
@@ -442,6 +446,7 @@ mod tests {
             visual_bell: false,
             screen_layout: &layout,
             egui_render: None,
+            effects_enabled: false,
             apply_effects_to_ui: false,
             effects_mask: None,
         };
