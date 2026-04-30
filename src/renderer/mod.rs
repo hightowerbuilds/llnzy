@@ -30,6 +30,8 @@ use text::{TextCacheKey, TextSystem};
 pub type EguiRenderCallback<'a> =
     &'a mut dyn FnMut(&wgpu::Device, &wgpu::Queue, &wgpu::TextureView, egui_wgpu::ScreenDescriptor);
 
+const TERMINAL_MINIMAL_BG: [u8; 3] = [8, 8, 8];
+
 pub struct SplitTerminalPane<'a> {
     pub terminal: &'a Session,
     pub tab_id: u64,
@@ -411,7 +413,12 @@ impl Renderer {
         let cw = pass.screen_layout.cell_w;
         let ch = pass.screen_layout.cell_h;
         if self.config.effects.background == "none" {
-            let terminal_bg = [0.0, 0.0, 0.0, 1.0];
+            let terminal_bg = [
+                TERMINAL_MINIMAL_BG[0] as f32 / 255.0,
+                TERMINAL_MINIMAL_BG[1] as f32 / 255.0,
+                TERMINAL_MINIMAL_BG[2] as f32 / 255.0,
+                1.0,
+            ];
             let terminal_area = PaneRect {
                 x: pass.screen_layout.sidebar_w,
                 y: pass.screen_layout.tab_bar.y + pass.screen_layout.tab_bar.h,
@@ -541,6 +548,10 @@ impl Renderer {
         let terminal_config = terminal_render_config(&self.config);
 
         let mut bg_rects = terminal.background_rects(&terminal_config, cw, ch);
+        if self.config.effects.background == "none" {
+            let legacy_bg = rgba_from_rgb(self.config.colors.background);
+            bg_rects.retain(|rect| !same_rgb(rect.4, legacy_bg));
+        }
         offset_rects(&mut bg_rects, rect.x, rect.y);
         if !bg_rects.is_empty() {
             self.rects.draw_rects(&self.gpu, target, encoder, &bg_rects);
@@ -882,9 +893,25 @@ fn offset_rects(rects: &mut [(f32, f32, f32, f32, [f32; 4])], offset_x: f32, off
 
 fn terminal_render_config(config: &Config) -> Config {
     let mut terminal_config = config.clone();
-    terminal_config.colors.background = [0, 0, 0];
-    terminal_config.colors.ansi[0] = [0, 0, 0];
+    terminal_config.colors.background = TERMINAL_MINIMAL_BG;
+    terminal_config.colors.ansi[0] = TERMINAL_MINIMAL_BG;
     terminal_config
+}
+
+fn rgba_from_rgb(color: [u8; 3]) -> [f32; 4] {
+    [
+        color[0] as f32 / 255.0,
+        color[1] as f32 / 255.0,
+        color[2] as f32 / 255.0,
+        1.0,
+    ]
+}
+
+fn same_rgb(left: [f32; 4], right: [f32; 4]) -> bool {
+    const EPSILON: f32 = 0.001;
+    (left[0] - right[0]).abs() < EPSILON
+        && (left[1] - right[1]).abs() < EPSILON
+        && (left[2] - right[2]).abs() < EPSILON
 }
 
 fn split_terminal_rects(content: PaneRect, ratio: f32) -> (PaneRect, Option<PaneRect>) {

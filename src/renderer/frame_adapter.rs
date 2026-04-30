@@ -15,6 +15,9 @@ pub(super) fn engine_frame_from_request(
 ) -> EngineFrame {
     let mut frame = EngineFrame::new(viewport);
     frame.clear_color = color_from_rgba(config.bg());
+    if request.terminal.is_some() && config.effects.background == "none" {
+        frame.clear_color = color_from_rgb_u8(super::TERMINAL_MINIMAL_BG);
+    }
 
     if use_scene {
         let mut scene_effects = EffectStack::default();
