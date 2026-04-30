@@ -111,6 +111,32 @@ impl App {
         }
     }
 
+    pub(crate) fn append_text_to_stacker_editor(&mut self, text: &str) -> bool {
+        if text.is_empty() {
+            return false;
+        }
+
+        let Some(tab) = self.active_tab() else {
+            return false;
+        };
+        if !matches!(tab.content, TabContent::Stacker) {
+            return false;
+        }
+
+        let Some(ui) = &mut self.ui else {
+            return false;
+        };
+
+        if text.contains('\r') {
+            let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
+            ui.stacker.input.push_str(&normalized);
+        } else {
+            ui.stacker.input.push_str(text);
+        }
+        self.request_redraw();
+        true
+    }
+
     pub(crate) fn copy_selection(&mut self) {
         if self.selection.is_active() {
             if let Some(session) = self.active_session() {
@@ -140,10 +166,15 @@ impl App {
     }
 
     pub(crate) fn do_paste(&mut self) {
-        if let Some(cb) = &mut self.clipboard {
-            if let Ok(text) = cb.get_text() {
-                self.paste_text(&text);
+        let text = self
+            .clipboard
+            .as_mut()
+            .and_then(|clipboard| clipboard.get_text().ok());
+        if let Some(text) = text {
+            if self.append_text_to_stacker_editor(&text) {
+                return;
             }
+            self.paste_text(&text);
         }
     }
 

@@ -65,7 +65,7 @@ fn render_home(ctx: &egui::Context, state: TabContentState<'_>) {
 
 fn render_stacker(ctx: &egui::Context, state: TabContentState<'_>) {
     egui::CentralPanel::default()
-        .frame(content_frame(egui::Color32::from_rgb(36, 36, 36), 20.0))
+        .frame(content_frame(egui::Color32::from_rgb(36, 36, 36), 0.0))
         .show(ctx, |ui| {
             stacker_view::render_stacker_view(
                 ui,

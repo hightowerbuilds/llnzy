@@ -49,12 +49,9 @@ impl App {
         const DIVIDER_GAP: f32 = 8.0;
         if let Some(layout) = &self.screen_layout {
             let ratio = ratio.clamp(0.2, 0.8);
-            let pane_w = ((layout.content.w - DIVIDER_GAP).max(layout.cell_w) * ratio)
-                .max(layout.cell_w);
-            (
-                (pane_w / layout.cell_w).max(1.0) as u16,
-                layout.grid_rows,
-            )
+            let pane_w =
+                ((layout.content.w - DIVIDER_GAP).max(layout.cell_w) * ratio).max(layout.cell_w);
+            ((pane_w / layout.cell_w).max(1.0) as u16, layout.grid_rows)
         } else {
             (40, 24)
         }

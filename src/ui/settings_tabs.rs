@@ -169,7 +169,7 @@ pub(crate) fn render_background_tab(ui: &mut egui::Ui, config: &mut Config) {
                 }
             });
             ui.end_row();
-    });
+        });
 
     // Saved backgrounds gallery
     if !saved_bgs.is_empty() {

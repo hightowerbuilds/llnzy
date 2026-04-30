@@ -98,9 +98,9 @@ pub fn render_workspace_tab_bar(
                     let active = i == input.active_tab_index;
                     let editing = edit_state.editing_tab == Some(i);
                     let tab_bg = if active {
-                        egui::Color32::from_rgb(50, 80, 140)
+                        egui::Color32::from_rgb(22, 22, 22)
                     } else {
-                        egui::Color32::from_rgb(30, 32, 40)
+                        egui::Color32::from_rgb(14, 14, 14)
                     };
                     let text_color = if active {
                         egui::Color32::WHITE

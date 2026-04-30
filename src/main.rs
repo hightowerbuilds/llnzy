@@ -24,7 +24,7 @@ use llnzy::renderer::{RenderRequest, Renderer, SplitTerminalPane};
 use llnzy::search::Search;
 use llnzy::selection::Selection;
 use llnzy::ui::{ActiveView, PendingClose, UiFrameOutput, UiState, BUMPER_WIDTH};
-use llnzy::workspace::WorkspaceTab;
+use llnzy::workspace::{TabContent, WorkspaceTab};
 use llnzy::UserEvent;
 
 struct App {
@@ -172,6 +172,29 @@ impl ApplicationHandler<UserEvent> for App {
         };
         let terminal_ime_commit =
             matches!(&event, WindowEvent::Ime(Ime::Commit(_))) && self.active_session().is_some();
+
+        if let WindowEvent::Ime(Ime::Commit(text)) = &event {
+            if input::text_should_use_paste_path(text) && self.append_text_to_stacker_editor(text) {
+                return;
+            }
+        }
+
+        if let WindowEvent::KeyboardInput {
+            event: key_event, ..
+        } = &event
+        {
+            let active_stacker = self
+                .active_tab()
+                .is_some_and(|tab| matches!(tab.content, TabContent::Stacker));
+            if active_stacker
+                && key_event.state == ElementState::Pressed
+                && self.config.keybindings.match_key(key_event, self.modifiers)
+                    == Some(Action::Paste)
+            {
+                self.do_paste();
+                return;
+            }
+        }
 
         // Route events to egui first
         if let (Some(window), Some(ui)) = (&self.window, &mut self.ui) {
@@ -812,6 +835,18 @@ impl ApplicationHandler<UserEvent> for App {
                     return;
                 }
 
+                if let Some(ref text) = key_event.text {
+                    let s = text.as_str();
+                    if !s.is_empty()
+                        && !self.modifiers.control_key()
+                        && !self.modifiers.alt_key()
+                        && !self.modifiers.super_key()
+                        && self.append_text_to_stacker_editor(s)
+                    {
+                        return;
+                    }
+                }
+
                 // Only send raw keys to PTY if active tab is a terminal
                 if self.active_session().is_some() {
                     if self.selection.is_active() {
@@ -842,6 +877,12 @@ impl ApplicationHandler<UserEvent> for App {
             // IME (input method) events — handles composed text from
             // non-US keyboards, dead keys, and CJK input methods.
             WindowEvent::Ime(ime) => {
+                if let Ime::Commit(text) = &ime {
+                    if self.append_text_to_stacker_editor(text) {
+                        return;
+                    }
+                }
+
                 if self.active_session().is_some() {
                     match ime {
                         Ime::Commit(text) => {

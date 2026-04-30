@@ -615,14 +615,12 @@ impl Renderer {
         }
 
         // Text
-        let block_cursor = if active
-            && self.cursor_visible
-            && self.config.cursor_style == CursorStyle::Block
-        {
-            terminal.cursor_point()
-        } else {
-            None
-        };
+        let block_cursor =
+            if active && self.cursor_visible && self.config.cursor_style == CursorStyle::Block {
+                terminal.cursor_point()
+            } else {
+                None
+            };
 
         let text_anim = use_scene && self.config.effects.text_animation;
         self.text.render_grid_at(

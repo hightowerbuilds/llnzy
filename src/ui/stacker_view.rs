@@ -1,13 +1,20 @@
 use crate::stacker::{
-    export_prompts, import_prompts, merge_unique_prompts, new_prompt, stacker_path, StackerPrompt,
+    export_prompts, import_prompts, merge_unique_prompts, new_prompt, prompt_label, stacker_path,
+    StackerPrompt,
 };
 
 const S: f32 = 14.0;
 const MUTED: egui::Color32 = egui::Color32::from_rgb(130, 130, 145);
-const TAG_COLOR: egui::Color32 = egui::Color32::from_rgb(100, 155, 220);
 const HEADING_COLOR: egui::Color32 = egui::Color32::from_rgb(200, 200, 210);
 const DIM: egui::Color32 = egui::Color32::from_rgb(90, 92, 105);
-const ROW_HOVER: egui::Color32 = egui::Color32::from_rgb(32, 34, 44);
+const ROW_BG: egui::Color32 = egui::Color32::from_rgb(30, 30, 30);
+const ROW_HOVER: egui::Color32 = egui::Color32::from_rgb(42, 42, 42);
+const PANEL_BG: egui::Color32 = egui::Color32::from_rgb(28, 28, 28);
+const NOTE_BG: egui::Color32 = PANEL_BG;
+const NOTE_TEXT: egui::Color32 = egui::Color32::from_rgb(240, 248, 255);
+const NOTE_PADDING: f32 = 34.0;
+const EDITOR_BOTTOM_GAP: f32 = 20.0;
+const PROMPT_EDITOR_ID: &str = "stacker_prompt_editor";
 
 /// Prompt bar visibility bit flags.
 pub(crate) const BAR_VIEW_SHELL: u8 = 0b01;
@@ -32,107 +39,33 @@ pub(crate) fn render_stacker_view(
     editing: &mut Option<usize>,
     edit_text: &mut String,
     dirty: &mut bool,
-    saved_edit_idx: &mut Option<usize>,
+    _saved_edit_idx: &mut Option<usize>,
     clipboard_copy: &mut Option<String>,
-    prompt_bar_visible: &mut bool,
-    prompt_bar_views: &mut u8,
+    _prompt_bar_visible: &mut bool,
+    _prompt_bar_views: &mut u8,
 ) {
-    // ── Title ──
-    ui.label(
-        egui::RichText::new("Stacker")
-            .size(20.0)
-            .color(HEADING_COLOR),
-    );
-    ui.add_space(4.0);
-    ui.label(
-        egui::RichText::new("Prompt queue manager")
-            .size(12.0)
-            .color(DIM),
-    );
-    ui.add_space(16.0);
-
-    // ── Compact input area (no group/border) ──
-    ui.add(
-        egui::TextEdit::multiline(input)
-            .desired_rows(3)
-            .desired_width(f32::INFINITY)
-            .hint_text("Type or paste a prompt...")
-            .font(egui::TextStyle::Monospace)
-            .text_color(egui::Color32::from_rgb(200, 200, 210)),
-    );
-    ui.add_space(6.0);
-
-    ui.horizontal(|ui| {
-        ui.label(small("Category:").color(MUTED));
-        ui.add(
-            egui::TextEdit::singleline(category_input)
-                .desired_width(120.0)
-                .hint_text("optional"),
-        );
-        ui.add_space(12.0);
-        if ui
-            .add_enabled(
-                !input.trim().is_empty(),
-                egui::Button::new(small("Add").color(egui::Color32::WHITE)),
-            )
-            .clicked()
-        {
-            if let Some(prompt) = new_prompt(input, category_input) {
-                prompts.push(prompt);
-                input.clear();
-                category_input.clear();
-                *dirty = true;
-            }
+    if let Some(idx) = *editing {
+        if idx >= prompts.len() {
+            *editing = None;
+            edit_text.clear();
         }
-    });
+    }
+    category_input.clear();
+    filter_category.clear();
 
-    ui.add_space(14.0);
-
-    // ── Search + filter + import/export ──
-    let mut filter_cat = std::mem::take(filter_category);
+    // ── Header actions ──
     ui.horizontal(|ui| {
-        ui.add(
-            egui::TextEdit::singleline(search)
-                .desired_width(180.0)
-                .hint_text("Search..."),
+        ui.label(
+            egui::RichText::new("Stacker")
+                .size(20.0)
+                .color(HEADING_COLOR),
         );
-        ui.add_space(10.0);
-
-        let categories: Vec<String> = {
-            let mut cats: Vec<String> = prompts
-                .iter()
-                .map(|p| p.category.clone())
-                .filter(|c| !c.is_empty())
-                .collect();
-            cats.sort();
-            cats.dedup();
-            cats
-        };
-        if !categories.is_empty() {
-            let display = if filter_cat.is_empty() {
-                "All"
-            } else {
-                &filter_cat
-            };
-            egui::ComboBox::from_id_salt("stacker_cat_filter")
-                .selected_text(display)
-                .width(100.0)
-                .show_ui(ui, |ui| {
-                    if ui.selectable_label(filter_cat.is_empty(), "All").clicked() {
-                        filter_cat.clear();
-                    }
-                    for cat in &categories {
-                        if ui.selectable_label(filter_cat == *cat, cat).clicked() {
-                            filter_cat = cat.clone();
-                        }
-                    }
-                });
-        }
+        ui.label(egui::RichText::new("Prompt editor").size(12.0).color(DIM));
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui
                 .add(
-                    egui::Button::new(egui::RichText::new("Export").size(11.0).color(DIM))
+                    egui::Button::new(egui::RichText::new("Export").size(12.0).color(DIM))
                         .frame(false),
                 )
                 .clicked()
@@ -142,10 +75,9 @@ pub(crate) fn render_stacker_view(
                     let _ = export_prompts(prompts, &export_path);
                 }
             }
-            ui.label(egui::RichText::new("|").size(11.0).color(DIM));
             if ui
                 .add(
-                    egui::Button::new(egui::RichText::new("Import").size(11.0).color(DIM))
+                    egui::Button::new(egui::RichText::new("Import").size(12.0).color(DIM))
                         .frame(false),
                 )
                 .clicked()
@@ -162,204 +94,236 @@ pub(crate) fn render_stacker_view(
         });
     });
 
-    ui.add_space(6.0);
+    ui.add_space(10.0);
 
-    // Thin separator
-    ui.scope(|ui| {
-        ui.visuals_mut().widgets.noninteractive.bg_stroke =
-            egui::Stroke::new(0.5, egui::Color32::from_rgb(50, 52, 65));
-        ui.separator();
-    });
+    let available_h = ui.available_height();
+    let list_h = (available_h * 0.24).clamp(120.0, 220.0);
 
-    ui.add_space(6.0);
+    render_prompt_list_panel(
+        ui,
+        list_h,
+        prompts,
+        search,
+        editing,
+        input,
+        dirty,
+        clipboard_copy,
+    );
 
-    // ── Prompt bar toggle ──
-    ui.horizontal(|ui| {
-        ui.label(
-            egui::RichText::new(format!("{} prompts", prompts.len()))
-                .size(12.0)
-                .color(DIM),
-        );
+    ui.add_space(12.0);
 
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let mut editor_on = *prompt_bar_views & BAR_VIEW_EDITOR != 0;
-            let mut shell_on = *prompt_bar_views & BAR_VIEW_SHELL != 0;
+    let editor_h = (ui.available_height() - EDITOR_BOTTOM_GAP).max(1.0);
+    render_prompt_editor_panel(ui, editor_h, prompts, input, editing, dirty);
+}
 
-            if ui.add(egui::Checkbox::new(&mut editor_on, "")).changed() {
-                if editor_on {
-                    *prompt_bar_views |= BAR_VIEW_EDITOR;
-                } else {
-                    *prompt_bar_views &= !BAR_VIEW_EDITOR;
-                }
-            }
-            ui.label(egui::RichText::new("Editor").size(11.0).color(DIM));
-
-            if ui.add(egui::Checkbox::new(&mut shell_on, "")).changed() {
-                if shell_on {
-                    *prompt_bar_views |= BAR_VIEW_SHELL;
-                } else {
-                    *prompt_bar_views &= !BAR_VIEW_SHELL;
-                }
-            }
-            ui.label(egui::RichText::new("Shell").size(11.0).color(DIM));
-
-            if ui
-                .add(egui::Checkbox::new(prompt_bar_visible, ""))
-                .changed()
-            {}
-            ui.label(egui::RichText::new("Prompt bar:").size(11.0).color(DIM));
-        });
-    });
-
-    ui.add_space(8.0);
-
-    // ── Filtered prompt list ──
+#[allow(clippy::too_many_arguments)]
+fn render_prompt_list_panel(
+    ui: &mut egui::Ui,
+    height: f32,
+    prompts: &mut Vec<StackerPrompt>,
+    search: &mut String,
+    editing: &mut Option<usize>,
+    input: &mut String,
+    dirty: &mut bool,
+    _clipboard_copy: &mut Option<String>,
+) {
     let search_lower = search.to_lowercase();
     let visible: Vec<usize> = (0..prompts.len())
         .filter(|&i| {
             let p = &prompts[i];
-            let cat_ok = filter_cat.is_empty() || p.category == filter_cat;
             let search_ok = search.is_empty()
                 || p.text.to_lowercase().contains(&search_lower)
-                || p.label.to_lowercase().contains(&search_lower)
-                || p.category.to_lowercase().contains(&search_lower);
-            cat_ok && search_ok
+                || p.label.to_lowercase().contains(&search_lower);
+            search_ok
         })
         .collect();
 
-    if prompts.is_empty() {
-        ui.add_space(20.0);
-        ui.label(small("No prompts yet.").color(DIM));
-    } else if visible.is_empty() {
-        ui.add_space(20.0);
-        ui.label(small("No prompts match the current filter.").color(DIM));
-    }
-
-    let mut remove_idx: Option<usize> = None;
-
-    egui::ScrollArea::vertical()
-        .auto_shrink([false; 2])
+    egui::Frame::none()
+        .fill(PANEL_BG)
+        .rounding(egui::Rounding::same(4.0))
+        .inner_margin(egui::Margin::same(10.0))
         .show(ui, |ui| {
-            ui.spacing_mut().item_spacing.y = 2.0;
+            ui.set_height(height);
 
-            for &i in &visible {
-                let prompt = &prompts[i];
-                let is_editing = *editing == Some(i);
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(format!("Prompts ({})", prompts.len()))
+                        .size(13.0)
+                        .color(HEADING_COLOR),
+                );
+                ui.add_space(16.0);
+                ui.add(
+                    egui::TextEdit::singleline(search)
+                        .desired_width(190.0)
+                        .hint_text("Search"),
+                );
+            });
+            ui.add_space(8.0);
 
-                // Each prompt is a flat row with hover highlight
-                let row_frame = egui::Frame::none()
-                    .inner_margin(egui::Margin::symmetric(10.0, 7.0))
-                    .rounding(egui::Rounding::same(3.0));
+            ui.horizontal(|ui| {
+                ui.add_sized([ui.available_width() - 72.0, 18.0], header_label("Prompt"));
+                ui.add_sized([54.0, 18.0], header_label("Chars"));
+            });
+            ui.separator();
 
-                let resp = row_frame.show(ui, |ui| {
-                    if is_editing {
-                        // Inline edit mode
-                        ui.add(
-                            egui::TextEdit::multiline(edit_text)
-                                .desired_rows(3)
-                                .desired_width(f32::INFINITY)
-                                .font(egui::TextStyle::Monospace)
-                                .text_color(egui::Color32::from_rgb(200, 200, 210)),
-                        );
-                        ui.add_space(4.0);
-                        ui.horizontal(|ui| {
-                            if ui.button(small("Save")).clicked() {
-                                *saved_edit_idx = *editing;
-                                *editing = None;
-                            }
-                            if ui.button(small("Cancel")).clicked() {
-                                *editing = None;
-                                edit_text.clear();
-                            }
-                        });
-                    } else {
-                        ui.horizontal(|ui| {
-                            // Truncated text preview
-                            let preview = truncate_line(&prompt.text, 80);
-                            ui.label(
-                                egui::RichText::new(preview)
-                                    .size(13.0)
-                                    .color(egui::Color32::from_rgb(190, 190, 200))
-                                    .monospace(),
-                            );
+            if prompts.is_empty() {
+                ui.add_space(20.0);
+                ui.label(small("No prompts yet.").color(DIM));
+            } else if visible.is_empty() {
+                ui.add_space(20.0);
+                ui.label(small("No prompts match the current filter.").color(DIM));
+            }
 
-                            // Category tag on the right
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    // Action buttons (dimmed, appear on row)
-                                    if ui
-                                        .add(
-                                            egui::Button::new(
-                                                egui::RichText::new("x").size(11.0).color(DIM),
-                                            )
-                                            .frame(false),
+            egui::ScrollArea::vertical()
+                .id_salt("stacker_prompt_list")
+                .auto_shrink([false; 2])
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 3.0;
+
+                    for &i in &visible {
+                        let prompt = &prompts[i];
+                        let selected = *editing == Some(i);
+                        let row_resp = egui::Frame::none()
+                            .fill(if selected { ROW_HOVER } else { ROW_BG })
+                            .rounding(egui::Rounding::same(3.0))
+                            .inner_margin(egui::Margin::symmetric(8.0, 5.0))
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    let title_w = (ui.available_width() - 70.0).max(220.0);
+                                    ui.add_sized(
+                                        [title_w, 20.0],
+                                        egui::Label::new(
+                                            egui::RichText::new(truncate_line(&prompt.label, 70))
+                                                .size(13.0)
+                                                .color(egui::Color32::from_rgb(210, 210, 216)),
                                         )
-                                        .on_hover_text("Delete")
-                                        .clicked()
-                                    {
-                                        remove_idx = Some(i);
-                                    }
-
-                                    if ui
-                                        .add(
-                                            egui::Button::new(
-                                                egui::RichText::new("edit").size(11.0).color(DIM),
+                                        .sense(egui::Sense::click()),
+                                    );
+                                    ui.add_sized(
+                                        [54.0, 20.0],
+                                        egui::Label::new(
+                                            egui::RichText::new(
+                                                prompt.text.chars().count().to_string(),
                                             )
-                                            .frame(false),
-                                        )
-                                        .clicked()
-                                    {
-                                        *editing = Some(i);
-                                        *edit_text = prompt.text.clone();
-                                    }
+                                            .size(12.0)
+                                            .color(MUTED),
+                                        ),
+                                    );
+                                });
+                            })
+                            .response;
 
-                                    if ui
-                                        .add(
-                                            egui::Button::new(
-                                                egui::RichText::new("copy").size(11.0).color(DIM),
-                                            )
-                                            .frame(false),
-                                        )
-                                        .clicked()
-                                    {
-                                        *clipboard_copy = Some(prompt.text.clone());
-                                    }
-
-                                    if !prompt.category.is_empty() {
-                                        ui.label(
-                                            egui::RichText::new(&prompt.category)
-                                                .size(11.0)
-                                                .color(TAG_COLOR),
-                                        );
-                                    }
-                                },
-                            );
-                        });
+                        if row_resp.clicked() {
+                            *editing = Some(i);
+                            *input = prompt.text.clone();
+                        }
                     }
                 });
-
-                // Hover highlight on the row
-                if resp.response.hovered() {
-                    ui.painter().rect_filled(
-                        resp.response.rect,
-                        egui::Rounding::same(3.0),
-                        ROW_HOVER,
-                    );
-                }
-            }
         });
+    let _ = dirty;
+}
 
-    if let Some(idx) = remove_idx {
-        prompts.remove(idx);
-        *dirty = true;
-        if *editing == Some(idx) {
-            *editing = None;
-        }
-    }
+fn render_prompt_editor_panel(
+    ui: &mut egui::Ui,
+    height: f32,
+    prompts: &mut Vec<StackerPrompt>,
+    input: &mut String,
+    editing: &mut Option<usize>,
+    dirty: &mut bool,
+) {
+    let editor_id = ui.make_persistent_id(PROMPT_EDITOR_ID);
 
-    // Write back the filter category
-    *filter_category = filter_cat;
+    ui.allocate_ui_with_layout(
+        egui::vec2(ui.available_width(), height),
+        egui::Layout::top_down(egui::Align::Min),
+        |ui| {
+            ui.horizontal(|ui| {
+                let title = if let Some(idx) = *editing {
+                    prompts
+                        .get(idx)
+                        .map(|prompt| prompt.label.as_str())
+                        .unwrap_or("Selected prompt")
+                } else {
+                    "New prompt"
+                };
+                ui.label(egui::RichText::new(title).size(15.0).color(HEADING_COLOR));
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button(small("New")).clicked() {
+                        *editing = None;
+                        input.clear();
+                    }
+                    if ui.button(small("Reset Cache")).clicked() {
+                        reset_prompt_editor_cache(ui.ctx(), editor_id);
+                    }
+                    let save_label = if editing.is_some() {
+                        "Save"
+                    } else {
+                        "Save Prompt"
+                    };
+                    if ui
+                        .add_enabled(
+                            !input.trim().is_empty(),
+                            egui::Button::new(small(save_label)),
+                        )
+                        .clicked()
+                    {
+                        if let Some(idx) = *editing {
+                            if let Some(prompt) = prompts.get_mut(idx) {
+                                prompt.text = input.trim().to_string();
+                                prompt.label = prompt_label(&prompt.text);
+                                prompt.category.clear();
+                                *dirty = true;
+                            }
+                        } else if let Some(prompt) = new_prompt(input, "") {
+                            prompts.push(prompt);
+                            *editing = Some(prompts.len() - 1);
+                            *dirty = true;
+                        }
+                    }
+                });
+            });
+
+            ui.add_space(10.0);
+            let note_h = ui.available_height().max(1.0);
+            egui::Frame::none()
+                .fill(NOTE_BG)
+                .rounding(egui::Rounding::same(3.0))
+                .inner_margin(egui::Margin::same(NOTE_PADDING))
+                .show(ui, |ui| {
+                    ui.set_height(note_h);
+                    ui.scope(|ui| {
+                        ui.visuals_mut().extreme_bg_color = egui::Color32::TRANSPARENT;
+                        ui.visuals_mut().widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
+                        ui.visuals_mut().widgets.hovered.bg_fill = egui::Color32::TRANSPARENT;
+                        ui.visuals_mut().widgets.active.bg_fill = egui::Color32::TRANSPARENT;
+                        ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::NONE;
+                        ui.visuals_mut().widgets.hovered.bg_stroke = egui::Stroke::NONE;
+                        ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::NONE;
+                        ui.add_sized(
+                            [ui.available_width(), ui.available_height()],
+                            egui::TextEdit::multiline(input)
+                                .id(editor_id)
+                                .desired_rows(32)
+                                .desired_width(f32::INFINITY)
+                                .hint_text("Write your prompt here...")
+                                .font(egui::FontId::monospace(S))
+                                .text_color(NOTE_TEXT),
+                        );
+                    });
+                });
+        },
+    );
+}
+
+fn reset_prompt_editor_cache(ctx: &egui::Context, editor_id: egui::Id) {
+    egui::text_edit::TextEditState::default().store(ctx, editor_id);
+    ctx.memory_mut(|memory| memory.request_focus(editor_id));
+    ctx.request_repaint();
+}
+
+fn header_label(text: &str) -> egui::Label {
+    egui::Label::new(egui::RichText::new(text).size(11.0).color(DIM).strong())
 }
 
 /// Render the prompt queue bar (thin horizontal strip above footer).
@@ -382,14 +346,9 @@ pub(crate) fn render_prompt_bar(ctx: &egui::Context, prompts: &[StackerPrompt]) 
                         ui.spacing_mut().item_spacing.x = 12.0;
                         for prompt in prompts {
                             let preview = truncate_line(&prompt.text, 40);
-                            let label_text = if prompt.category.is_empty() {
-                                preview.clone()
-                            } else {
-                                format!("{} [{}]", preview, prompt.category)
-                            };
                             let btn = ui.add(
                                 egui::Button::new(
-                                    egui::RichText::new(label_text)
+                                    egui::RichText::new(preview)
                                         .size(11.0)
                                         .color(egui::Color32::from_rgb(140, 142, 155)),
                                 )
