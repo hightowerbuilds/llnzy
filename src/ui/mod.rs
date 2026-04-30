@@ -16,7 +16,6 @@ pub mod tab_bar;
 mod tab_content;
 pub mod types;
 
-use std::time::Instant;
 use winit::window::Window;
 
 use crate::app::commands::AppCommand;
@@ -57,7 +56,6 @@ pub struct UiState {
     pub editing_tab: Option<usize>,
     pub editing_tab_text: String,
     pub saved_tab_name: Option<(usize, String)>, // (tab_index, new_name) to apply after render
-    pub last_tab_click: Option<(usize, Instant)>, // (tab_index, time) for double-click detection
     // Tab context for rendering interaction
     pub tab_count: usize,
     pub active_tab_index: usize,
@@ -138,7 +136,6 @@ impl UiState {
             editing_tab: None,
             editing_tab_text: String::new(),
             saved_tab_name: None,
-            last_tab_click: None,
             tab_count: 0,
             active_tab_index: 0,
             terminal_panel_open: false,
@@ -282,11 +279,9 @@ impl UiState {
         let _tab_count = self.tab_count;
         let active_tab_index = self.active_tab_index;
         let tab_names = std::mem::take(&mut self.tab_names);
-        let last_tab_click = self.last_tab_click.take();
         let mut tab_bar_state = tab_bar::TabBarEditState {
             editing_tab,
             editing_tab_text: editing_tab_text.clone(),
-            last_tab_click,
         };
         let mut tab_bar_action = tab_bar::TabBarAction::default();
         let split_view = self.split_view;
@@ -335,7 +330,6 @@ impl UiState {
                     tabs: &tab_names,
                     active_tab_index,
                     current_view,
-                    sidebar_open: sidebar_state.open,
                     split_view,
                     bar_bg: egui::Color32::from_rgb(
                         (bg[0] as f32 * 0.4) as u8,
@@ -451,7 +445,6 @@ impl UiState {
         self.editing_tab = tab_bar_state.editing_tab;
         self.editing_tab_text = tab_bar_state.editing_tab_text;
         self.saved_tab_name = None;
-        self.last_tab_click = tab_bar_state.last_tab_click;
 
         self.pending_close = pending_close;
 

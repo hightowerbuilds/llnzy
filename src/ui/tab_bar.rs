@@ -1,6 +1,4 @@
-use std::time::Instant;
-
-use super::types::{ActiveView, UiTabInfo, BUMPER_WIDTH, SIDEBAR_WIDTH};
+use super::types::{ActiveView, UiTabInfo};
 use crate::app::commands::AppCommand;
 use crate::app::drag_drop::{tab_reorder_destination, DragDropCommand, DragPayload, TabDropZone};
 use crate::workspace::TabKind;
@@ -12,6 +10,7 @@ const CLOSE_BUTTON_SIZE: f32 = 24.0;
 const TAB_HEIGHT: f32 = 32.0;
 const TAB_MIN_WIDTH: f32 = 104.0;
 const TAB_MAX_WIDTH: f32 = 220.0;
+const TAB_GHOST_ALPHA: u8 = 210;
 
 #[derive(Default)]
 pub struct TabBarAction {
@@ -65,14 +64,12 @@ impl TabBarAction {
 pub struct TabBarEditState {
     pub editing_tab: Option<usize>,
     pub editing_tab_text: String,
-    pub last_tab_click: Option<(usize, Instant)>,
 }
 
 pub struct TabBarRenderInput<'a> {
     pub tabs: &'a [UiTabInfo],
     pub active_tab_index: usize,
     pub current_view: ActiveView,
-    pub sidebar_open: bool,
     pub split_view: Option<(usize, f32)>,
     pub bar_bg: egui::Color32,
 }
@@ -100,6 +97,7 @@ pub fn render_workspace_tab_bar(
                 ui.spacing_mut().item_spacing.x = 4.0;
                 for (i, tab) in input.tabs.iter().enumerate() {
                     let active = i == input.active_tab_index;
+                    let editing = edit_state.editing_tab == Some(i);
                     let tab_bg = if active {
                         egui::Color32::from_rgb(50, 80, 140)
                     } else {
@@ -116,13 +114,24 @@ pub fn render_workspace_tab_bar(
                         egui::vec2(width, TAB_HEIGHT),
                         egui::Sense::click_and_drag(),
                     );
+                    let dragging = tab_response.dragged();
                     let rounding = egui::Rounding {
                         nw: 4.0,
                         ne: 4.0,
                         sw: 0.0,
                         se: 0.0,
                     };
-                    ui.painter().rect_filled(rect, rounding, tab_bg);
+                    let painted_bg = if dragging {
+                        egui::Color32::from_rgba_unmultiplied(
+                            tab_bg.r(),
+                            tab_bg.g(),
+                            tab_bg.b(),
+                            120,
+                        )
+                    } else {
+                        tab_bg
+                    };
+                    ui.painter().rect_filled(rect, rounding, painted_bg);
 
                     let close_rect = egui::Rect::from_center_size(
                         egui::pos2(rect.right() - 16.0, rect.center().y),
@@ -145,14 +154,18 @@ pub fn render_workspace_tab_bar(
                         );
                     }
 
-                    let label = truncated_title(&tab.title, rect.width() - 56.0);
-                    ui.painter().text(
-                        egui::pos2(rect.left() + 14.0, rect.center().y),
-                        egui::Align2::LEFT_CENTER,
-                        label,
-                        egui::FontId::proportional(TAB_TEXT_SIZE),
-                        text_color,
-                    );
+                    if editing {
+                        render_tab_name_editor(ui, rect, close_rect, i, edit_state, &mut action);
+                    } else {
+                        let label = truncated_title(&tab.title, rect.width() - 56.0);
+                        ui.painter().text(
+                            egui::pos2(rect.left() + 14.0, rect.center().y),
+                            egui::Align2::LEFT_CENTER,
+                            label,
+                            egui::FontId::proportional(TAB_TEXT_SIZE),
+                            text_color,
+                        );
+                    }
 
                     let x_color = if active {
                         egui::Color32::from_rgb(200, 200, 210)
@@ -169,16 +182,34 @@ pub fn render_workspace_tab_bar(
 
                     if close_response.clicked() {
                         action.close_tab = Some(i);
-                    } else if tab_response.clicked() {
+                    } else if tab_response.double_clicked() {
+                        edit_state.editing_tab = Some(i);
+                        edit_state.editing_tab_text = tab.title.clone();
+                    } else if tab_response.clicked() && !editing {
                         action.switch_to = Some(i);
                     }
                     tab_response.dnd_set_drag_payload(DragPayload::WorkspaceTab { tab_idx: i });
                     if let Some(payload) = tab_response.dnd_hover_payload::<DragPayload>() {
                         if matches!(&*payload, DragPayload::WorkspaceTab { .. }) {
+                            let zone = tab_drop_zone(&tab_response);
+                            let marker_x = match zone {
+                                TabDropZone::Before => tab_response.rect.left(),
+                                TabDropZone::After => tab_response.rect.right(),
+                                TabDropZone::Center | TabDropZone::SplitRight => {
+                                    tab_response.rect.center().x
+                                }
+                            };
                             ui.painter().rect_stroke(
                                 tab_response.rect.expand(2.0),
                                 egui::Rounding::same(5.0),
                                 egui::Stroke::new(1.0, egui::Color32::from_rgb(120, 170, 255)),
+                            );
+                            ui.painter().line_segment(
+                                [
+                                    egui::pos2(marker_x, tab_response.rect.top() - 2.0),
+                                    egui::pos2(marker_x, tab_response.rect.bottom() + 2.0),
+                                ],
+                                egui::Stroke::new(2.0, egui::Color32::from_rgb(145, 190, 255)),
                             );
                         }
                     }
@@ -192,6 +223,9 @@ pub fn render_workspace_tab_bar(
                                     Some(DragDropCommand::ReorderTab { from, to });
                             }
                         }
+                    }
+                    if dragging {
+                        paint_drag_ghost(ctx, &tab.title, active, rect);
                     }
 
                     tab_response.context_menu(|ui| {
@@ -234,8 +268,85 @@ pub fn render_workspace_tab_bar(
             });
         });
 
-    handle_tab_rename(ctx, input, edit_state, &mut action);
     action
+}
+
+fn render_tab_name_editor(
+    ui: &mut egui::Ui,
+    tab_rect: egui::Rect,
+    close_rect: egui::Rect,
+    tab_idx: usize,
+    state: &mut TabBarEditState,
+    action: &mut TabBarAction,
+) {
+    let edit_rect = egui::Rect::from_min_max(
+        egui::pos2(tab_rect.left() + 10.0, tab_rect.top() + 5.0),
+        egui::pos2(close_rect.left() - 6.0, tab_rect.bottom() - 5.0),
+    );
+    let editor_id = ui.id().with(("tab_name_editor", tab_idx));
+    let response = ui.put(
+        edit_rect,
+        egui::TextEdit::singleline(&mut state.editing_tab_text)
+            .id(editor_id)
+            .frame(false)
+            .desired_width(edit_rect.width())
+            .font(egui::TextStyle::Button),
+    );
+    response.request_focus();
+
+    let enter_pressed = ui.input(|input| input.key_pressed(egui::Key::Enter));
+    let escape_pressed = ui.input(|input| input.key_pressed(egui::Key::Escape));
+    let clicked_elsewhere = ui.input(|input| input.pointer.any_pressed())
+        && !response.hovered()
+        && !tab_rect.contains(
+            ui.input(|input| input.pointer.latest_pos())
+                .unwrap_or(tab_rect.center()),
+        );
+
+    if enter_pressed || response.lost_focus() && clicked_elsewhere {
+        action.saved_tab_name = Some((tab_idx, state.editing_tab_text.clone()));
+        state.editing_tab = None;
+        state.editing_tab_text.clear();
+    } else if escape_pressed {
+        state.editing_tab = None;
+        state.editing_tab_text.clear();
+    }
+}
+
+fn paint_drag_ghost(ctx: &egui::Context, title: &str, active: bool, source_rect: egui::Rect) {
+    let Some(pointer_pos) = ctx.input(|input| input.pointer.interact_pos()) else {
+        return;
+    };
+
+    let ghost_rect = egui::Rect::from_center_size(
+        egui::pos2(pointer_pos.x, source_rect.center().y),
+        source_rect.size(),
+    );
+    let bg = if active {
+        egui::Color32::from_rgba_unmultiplied(60, 100, 175, TAB_GHOST_ALPHA)
+    } else {
+        egui::Color32::from_rgba_unmultiplied(42, 45, 56, TAB_GHOST_ALPHA)
+    };
+    let stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(145, 190, 255));
+    let painter = ctx.layer_painter(egui::LayerId::new(
+        egui::Order::Tooltip,
+        egui::Id::new("workspace_tab_drag_ghost"),
+    ));
+    let rounding = egui::Rounding {
+        nw: 4.0,
+        ne: 4.0,
+        sw: 0.0,
+        se: 0.0,
+    };
+    painter.rect_filled(ghost_rect, rounding, bg);
+    painter.rect_stroke(ghost_rect.expand(1.0), rounding, stroke);
+    painter.text(
+        egui::pos2(ghost_rect.left() + 14.0, ghost_rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        truncated_title(title, ghost_rect.width() - 56.0),
+        egui::FontId::proportional(TAB_TEXT_SIZE),
+        egui::Color32::WHITE,
+    );
 }
 
 fn tab_width(title: &str) -> f32 {
@@ -262,94 +373,5 @@ fn tab_drop_zone(response: &egui::Response) -> TabDropZone {
         TabDropZone::Before
     } else {
         TabDropZone::After
-    }
-}
-
-fn handle_tab_rename(
-    ctx: &egui::Context,
-    input: TabBarRenderInput<'_>,
-    state: &mut TabBarEditState,
-    action: &mut TabBarAction,
-) {
-    const DOUBLE_CLICK_TIME_MS: u128 = 300;
-
-    if input.tabs.is_empty()
-        || matches!(
-            input.current_view,
-            ActiveView::Home | ActiveView::Appearances | ActiveView::Settings
-        )
-    {
-        return;
-    }
-
-    let viewport_rect = ctx.screen_rect();
-    let tab_w = (viewport_rect.width() / input.tabs.len() as f32).min(200.0);
-    let sidebar_offset = if input.sidebar_open {
-        SIDEBAR_WIDTH
-    } else {
-        BUMPER_WIDTH
-    };
-
-    let mut tab_clicked: Option<usize> = None;
-    ctx.input(|input_state| {
-        if input_state
-            .pointer
-            .button_pressed(egui::PointerButton::Primary)
-        {
-            if let Some(pos) = input_state.pointer.latest_pos() {
-                if pos.y >= viewport_rect.top() && pos.y < viewport_rect.top() + TAB_BAR_HEIGHT {
-                    let rel_x = pos.x - viewport_rect.left() - sidebar_offset;
-                    if rel_x >= 0.0 && rel_x < viewport_rect.width() - sidebar_offset {
-                        let tab_idx = (rel_x / tab_w).floor() as usize;
-                        if tab_idx < input.tabs.len() {
-                            tab_clicked = Some(tab_idx);
-                        }
-                    }
-                }
-            }
-        }
-    });
-
-    if let Some(tab_idx) = tab_clicked {
-        if let Some((last_idx, last_time)) = state.last_tab_click {
-            if last_idx == tab_idx && last_time.elapsed().as_millis() < DOUBLE_CLICK_TIME_MS {
-                state.editing_tab = Some(tab_idx);
-                state.editing_tab_text.clear();
-                state.last_tab_click = None;
-            } else {
-                state.last_tab_click = Some((tab_idx, Instant::now()));
-            }
-        } else {
-            state.last_tab_click = Some((tab_idx, Instant::now()));
-        }
-    }
-
-    if let Some(edit_idx) = state.editing_tab {
-        let tab_x = sidebar_offset + edit_idx as f32 * tab_w;
-
-        egui::Area::new(egui::Id::new(("tab_edit", edit_idx)))
-            .fixed_pos(egui::pos2(tab_x + 4.0, viewport_rect.top() + 4.0))
-            .show(ctx, |ui| {
-                ui.set_max_width(tab_w - 8.0);
-                let mut text = state.editing_tab_text.clone();
-                let response = ui.text_edit_singleline(&mut text);
-                state.editing_tab_text = text;
-
-                response.request_focus();
-
-                let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter));
-                let escape_pressed = ui.input(|i| i.key_pressed(egui::Key::Escape));
-
-                if enter_pressed {
-                    action.saved_tab_name = Some((edit_idx, state.editing_tab_text.clone()));
-                    state.editing_tab = None;
-                    state.editing_tab_text.clear();
-                    state.last_tab_click = None;
-                } else if escape_pressed {
-                    state.editing_tab = None;
-                    state.editing_tab_text.clear();
-                    state.last_tab_click = None;
-                }
-            });
     }
 }
