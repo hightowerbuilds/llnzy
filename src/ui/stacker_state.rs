@@ -1,21 +1,35 @@
 use super::stacker_view;
-use super::types::{ActiveView, CopyGhost};
-use crate::stacker::{load_stacker_prompts, save_stacker_prompts, StackerPrompt};
-use crate::workspace::TabKind;
+use super::types::CopyGhost;
+use crate::stacker::{
+    load_stacker_prompts,
+    queue::{self, QueuedPrompt},
+    save_stacker_prompts, StackerPrompt,
+};
 
-#[derive(Default)]
 pub struct StackerUiState {
     pub prompts: Vec<StackerPrompt>,
     pub input: String,
-    pub category_input: String,
-    pub search: String,
-    pub filter_category: String,
     pub editing: Option<usize>,
     pub edit_text: String,
     pub dirty: bool,
-    pub prompt_bar_visible: bool,
-    pub prompt_bar_views: u8,
     pub copy_ghosts: Vec<CopyGhost>,
+    pub editor_font_size: f32,
+    pub queued_prompts: Vec<QueuedPrompt>,
+}
+
+impl Default for StackerUiState {
+    fn default() -> Self {
+        Self {
+            prompts: Vec::new(),
+            input: String::new(),
+            editing: None,
+            edit_text: String::new(),
+            dirty: false,
+            copy_ghosts: Vec::new(),
+            editor_font_size: stacker_view::DEFAULT_EDITOR_FONT_SIZE,
+            queued_prompts: Vec::new(),
+        }
+    }
 }
 
 impl StackerUiState {
@@ -31,27 +45,6 @@ impl StackerUiState {
             save_stacker_prompts(&self.prompts);
             self.dirty = false;
         }
-    }
-
-    pub fn render_prompt_bar(
-        &self,
-        ctx: &egui::Context,
-        current_view: ActiveView,
-        active_tab_kind: Option<TabKind>,
-    ) -> Option<String> {
-        if !self.prompt_bar_visible || self.prompts.is_empty() || current_view == ActiveView::Home {
-            return None;
-        }
-
-        let show_bar = match active_tab_kind {
-            Some(TabKind::Terminal) => self.prompt_bar_views & stacker_view::BAR_VIEW_SHELL != 0,
-            Some(TabKind::CodeFile) => self.prompt_bar_views & stacker_view::BAR_VIEW_EDITOR != 0,
-            _ => false,
-        };
-        if show_bar {
-            stacker_view::render_prompt_bar(ctx, &self.prompts)
-        } else {
-            None
-        }
+        queue::sanitize_prompt_queue(&mut self.queued_prompts);
     }
 }

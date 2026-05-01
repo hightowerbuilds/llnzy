@@ -21,7 +21,6 @@ pub(super) struct TabContentState<'a> {
     pub editor_view: &'a mut explorer_view::EditorViewState,
     pub recent_projects: &'a [std::path::PathBuf],
     pub saved_edit_idx: &'a mut Option<usize>,
-    pub clipboard_copy: &'a mut Option<String>,
     pub commands: &'a mut Vec<AppCommand>,
 }
 
@@ -71,16 +70,12 @@ fn render_stacker(ctx: &egui::Context, state: TabContentState<'_>) {
                 ui,
                 &mut state.stacker.prompts,
                 &mut state.stacker.input,
-                &mut state.stacker.category_input,
-                &mut state.stacker.search,
-                &mut state.stacker.filter_category,
                 &mut state.stacker.editing,
                 &mut state.stacker.edit_text,
                 &mut state.stacker.dirty,
                 state.saved_edit_idx,
-                state.clipboard_copy,
-                &mut state.stacker.prompt_bar_visible,
-                &mut state.stacker.prompt_bar_views,
+                &mut state.stacker.editor_font_size,
+                &mut state.stacker.queued_prompts,
             );
         });
 }

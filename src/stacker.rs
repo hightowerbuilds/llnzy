@@ -1,5 +1,8 @@
 use std::path::{Path, PathBuf};
 
+pub mod formatting;
+pub mod queue;
+
 /// A saved prompt in the Stacker queue.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct StackerPrompt {
@@ -94,11 +97,6 @@ pub fn save_stacker_prompts(prompts: &[StackerPrompt]) {
     let _ = save_prompts_to_path(prompts, &path);
 }
 
-/// Export prompts to a JSON file at the given path.
-pub fn export_prompts(prompts: &[StackerPrompt], path: &Path) -> Result<(), String> {
-    save_prompts_to_path(prompts, path)
-}
-
 /// Import prompts from a JSON file, returning the loaded prompts.
 pub fn import_prompts(path: &Path) -> Result<Vec<StackerPrompt>, String> {
     load_prompts_from_path(path)
@@ -176,21 +174,6 @@ mod tests {
         assert_eq!(added, 1);
         assert_eq!(existing.len(), 2);
         assert_eq!(existing[1].text, "add this");
-    }
-
-    #[test]
-    fn export_and_import_round_trip_prompts() {
-        let path = temp_path("roundtrip");
-        let prompts = vec![
-            prompt("ship the feature", "dev"),
-            prompt("write docs", "docs"),
-        ];
-
-        export_prompts(&prompts, &path).unwrap();
-        let loaded = import_prompts(&path).unwrap();
-        let _ = std::fs::remove_file(&path);
-
-        assert_eq!(loaded, prompts);
     }
 
     #[test]

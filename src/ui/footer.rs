@@ -3,6 +3,13 @@ use crate::workspace::TabKind;
 
 const FOOTER_TEXT_SIZE: f32 = 14.0;
 const FOOTER_BUTTON_HEIGHT: f32 = 36.0;
+const QUEUE_CHIP_GREEN: egui::Color32 = egui::Color32::from_rgb(106, 255, 144);
+
+pub struct FooterQueuePrompt {
+    pub letter: char,
+    pub preview: String,
+    pub clipboard_text: String,
+}
 
 /// Action returned by the footer when a button is clicked.
 pub enum FooterAction {
@@ -12,6 +19,8 @@ pub enum FooterAction {
     OpenSingletonTab(TabKind),
     /// Create a new terminal tab.
     NewTerminalTab,
+    /// Copy a queued prompt into the clipboard.
+    CopyQueuedPrompt(String),
 }
 
 /// Render the footer navigation bar. Returns the action if a button was clicked.
@@ -23,6 +32,7 @@ pub fn render_footer(
     chrome_bg: egui::Color32,
     active_btn: egui::Color32,
     text_color: egui::Color32,
+    queued_prompts: &[FooterQueuePrompt],
 ) -> Option<FooterAction> {
     let mut result: Option<FooterAction> = None;
 
@@ -67,10 +77,39 @@ pub fn render_footer(
                         result = Some(FooterAction::OpenSingletonTab(kind));
                     });
                 }
+
+                if matches!(active_tab_kind, Some(TabKind::Terminal)) && !queued_prompts.is_empty()
+                {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        for prompt in queued_prompts.iter().rev() {
+                            if render_queue_chip(ui, prompt).clicked() {
+                                result = Some(FooterAction::CopyQueuedPrompt(
+                                    prompt.clipboard_text.clone(),
+                                ));
+                            }
+                        }
+                    });
+                }
             });
         });
 
     result
+}
+
+fn render_queue_chip(ui: &mut egui::Ui, prompt: &FooterQueuePrompt) -> egui::Response {
+    let label = format!("{}: {}", prompt.letter, prompt.preview);
+    ui.add(
+        egui::Button::new(
+            egui::RichText::new(label)
+                .size(12.0)
+                .strong()
+                .color(QUEUE_CHIP_GREEN),
+        )
+        .fill(egui::Color32::BLACK)
+        .rounding(egui::Rounding::same(3.0))
+        .min_size(egui::vec2(70.0, 28.0)),
+    )
+    .on_hover_text("Copy queued prompt")
 }
 
 fn render_button(

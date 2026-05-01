@@ -92,6 +92,18 @@ impl UiState {
         surface_format: wgpu::TextureFormat,
     ) -> Self {
         let ctx = egui::Context::default();
+        let mut fonts = egui::FontDefinitions::default();
+        fonts.font_data.insert(
+            "Atkinson Hyperlegible".to_string(),
+            egui::FontData::from_static(include_bytes!(
+                "../../assets/fonts/AtkinsonHyperlegible-Regular.ttf"
+            )),
+        );
+        fonts.families.insert(
+            egui::FontFamily::Name("Atkinson Hyperlegible".into()),
+            vec!["Atkinson Hyperlegible".to_string()],
+        );
+        ctx.set_fonts(fonts);
 
         // Style: dark theme with our terminal aesthetic
         let mut style = egui::Style {
@@ -236,13 +248,11 @@ impl UiState {
         let raw_input = self.winit_state.take_egui_input(window);
 
         // Extract state to avoid borrowing self inside the closure
-        let current_view = self.active_view;
         let footer_height = self.footer_height;
         let mut nav_target: Option<ActiveView> = None;
         let mut commands_out: Vec<AppCommand> = Vec::new();
         let active_tab_kind = self.active_tab_kind;
         let mut config_clone = config.clone();
-        let mut clipboard_copy: Option<String> = None;
         let mut settings = std::mem::take(&mut self.settings);
 
         // Stacker state — extract for closure
@@ -301,6 +311,12 @@ impl UiState {
                 (cursor_c[2] as f32 * 0.4) as u8,
             );
             let text_color = egui::Color32::from_rgb(fg[0], fg[1], fg[2]);
+            let footer_queue_prompts =
+                if matches!(active_tab_kind, Some(crate::workspace::TabKind::Terminal)) {
+                    footer_queue_prompts(&stacker)
+                } else {
+                    Vec::new()
+                };
 
             // ── Footer ──
             if let Some(action) = footer::render_footer(
@@ -311,13 +327,9 @@ impl UiState {
                 chrome_bg,
                 active_btn,
                 text_color,
+                &footer_queue_prompts,
             ) {
                 apply_footer_action(action, &mut nav_target, &mut commands_out);
-            }
-
-            // ── Prompt queue bar (above footer, below content) ──
-            if let Some(text) = stacker.render_prompt_bar(ctx, current_view, active_tab_kind) {
-                clipboard_copy = Some(text);
             }
 
             // ── Tab bar (egui) ──
@@ -374,7 +386,6 @@ impl UiState {
                     editor_view: &mut editor_view,
                     recent_projects: &recent_projects,
                     saved_edit_idx: &mut saved_edit_idx,
-                    clipboard_copy: &mut clipboard_copy,
                     commands: &mut commands_out,
                 },
             );
@@ -432,9 +443,6 @@ impl UiState {
 
         if let Some(view) = nav_target {
             self.active_view = view;
-        }
-        if let Some(text) = clipboard_copy {
-            commands_out.push(AppCommand::CopyToClipboard(text));
         }
         // Editor clipboard: copy/cut puts text here for the main loop
         if let Some(text) = self.editor_view.clipboard_out.take() {
@@ -537,5 +545,22 @@ fn apply_footer_action(
         footer::FooterAction::NewTerminalTab => {
             commands.push(AppCommand::NewTerminalTab);
         }
+        footer::FooterAction::CopyQueuedPrompt(text) => {
+            commands.push(AppCommand::CopyToClipboard(text));
+        }
     }
+}
+
+fn footer_queue_prompts(stacker: &stacker_state::StackerUiState) -> Vec<footer::FooterQueuePrompt> {
+    stacker
+        .queued_prompts
+        .iter()
+        .take(5)
+        .enumerate()
+        .map(|(slot, prompt)| footer::FooterQueuePrompt {
+            letter: (b'A' + slot as u8) as char,
+            preview: crate::stacker::queue::footer_preview(&prompt.text),
+            clipboard_text: crate::stacker::queue::clipboard_markdown(prompt),
+        })
+        .collect()
 }
