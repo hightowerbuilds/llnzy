@@ -25,6 +25,7 @@ impl App {
             TabKind::Home => TabContent::Home,
             TabKind::Stacker => TabContent::Stacker,
             TabKind::Sketch => TabContent::Sketch,
+            TabKind::Git => TabContent::Git,
             TabKind::Appearances => TabContent::Appearances,
             TabKind::Settings => TabContent::Settings,
             _ => return,
@@ -104,6 +105,7 @@ impl App {
             }
             llnzy::workspace_store::TabEntry::Stacker => self.open_singleton_tab(TabKind::Stacker),
             llnzy::workspace_store::TabEntry::Sketch => self.open_singleton_tab(TabKind::Sketch),
+            llnzy::workspace_store::TabEntry::Git => self.open_singleton_tab(TabKind::Git),
         }
     }
 

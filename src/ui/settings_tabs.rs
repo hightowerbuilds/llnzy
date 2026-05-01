@@ -1012,7 +1012,7 @@ pub(crate) fn render_workspace_tab(ui: &mut egui::Ui) -> Option<WorkspaceAction>
                 .selected_text(tab_type.as_str())
                 .width(120.0)
                 .show_ui(ui, |ui| {
-                    for kind in &["Terminal", "Sketch", "Stacker"] {
+                    for kind in &["Terminal", "Sketch", "Stacker", "Git"] {
                         ui.selectable_value(tab_type, kind.to_string(), *kind);
                     }
                 });
@@ -1066,6 +1066,7 @@ pub(crate) fn render_workspace_tab(ui: &mut egui::Ui) -> Option<WorkspaceAction>
                 .map(|t| match t.as_str() {
                     "Stacker" => TabEntry::Stacker,
                     "Sketch" => TabEntry::Sketch,
+                    "Git" => TabEntry::Git,
                     _ => TabEntry::Terminal,
                 })
                 .collect();

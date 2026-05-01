@@ -2,6 +2,8 @@ pub mod command_palette;
 mod editor_view;
 mod explorer_view;
 mod footer;
+mod git_state;
+mod git_view;
 mod home_view;
 mod overlays;
 mod settings_state;
@@ -54,6 +56,8 @@ pub struct UiState {
     pub sketch: sketch_state::SketchUiState,
     // Explorer state
     pub explorer: ExplorerState,
+    // Git dashboard state
+    pub git: git_state::GitUiState,
     // Editor view state (cursor, scroll, etc.)
     pub editor_view: explorer_view::EditorViewState,
     // Tab renaming
@@ -152,6 +156,7 @@ impl UiState {
             stacker: stacker_state::StackerUiState::load(),
             sketch: sketch_state::SketchUiState::default(),
             explorer: ExplorerState::new(),
+            git: git_state::GitUiState::default(),
             editor_view: explorer_view::EditorViewState::default(),
             editing_tab: None,
             editing_tab_text: String::new(),
@@ -270,6 +275,7 @@ impl UiState {
         let mut sketch = std::mem::take(&mut self.sketch);
         sketch.canvas_px = None;
         let mut explorer = std::mem::take(&mut self.explorer);
+        let mut git = std::mem::take(&mut self.git);
         let mut editor_view = std::mem::take(&mut self.editor_view);
         let _terminal_panel_open = self.terminal_panel_open;
         let _terminal_panel_ratio = self.terminal_panel_ratio;
@@ -398,6 +404,7 @@ impl UiState {
                     settings: &mut settings,
                     stacker: &mut stacker,
                     sketch: &mut sketch,
+                    git: &mut git,
                     explorer: &mut explorer,
                     editor_view: &mut editor_view,
                     recent_projects: &recent_projects,
@@ -438,6 +445,7 @@ impl UiState {
         self.sketch = sketch;
         self.sidebar = sidebar_state;
         self.explorer = explorer;
+        self.git = git;
         self.tab_panes = tab_panes;
         self.joined_tabs = joined_tabs;
         self.wispr_flow_mode = wispr_flow_mode;
@@ -544,7 +552,9 @@ fn active_singleton_tab(
     active_tab_kind.filter(|kind| {
         matches!(
             kind,
-            crate::workspace::TabKind::Stacker | crate::workspace::TabKind::Sketch
+            crate::workspace::TabKind::Stacker
+                | crate::workspace::TabKind::Sketch
+                | crate::workspace::TabKind::Git
         )
     })
 }

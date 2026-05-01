@@ -73,6 +73,7 @@ pub fn render_footer(
                 let singletons: &[(&str, TabKind)] = &[
                     ("Stacker", TabKind::Stacker),
                     ("Sketch", TabKind::Sketch),
+                    ("Git", TabKind::Git),
                     ("Appearances", TabKind::Appearances),
                     ("Settings", TabKind::Settings),
                 ];

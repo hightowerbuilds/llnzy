@@ -5,6 +5,7 @@ pub mod editor;
 pub mod engine;
 pub mod error_log;
 pub mod explorer;
+pub mod git;
 pub mod input;
 pub mod keybindings;
 pub mod layout;

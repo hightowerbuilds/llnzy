@@ -14,6 +14,8 @@ pub enum TabContent {
     Stacker,
     /// The drawing canvas (singleton).
     Sketch,
+    /// Local Git repository dashboard (singleton).
+    Git,
     /// Theme/effects configuration (singleton).
     Appearances,
     /// App settings (singleton).
@@ -28,6 +30,7 @@ pub enum TabKind {
     CodeFile,
     Stacker,
     Sketch,
+    Git,
     Appearances,
     Settings,
 }
@@ -40,6 +43,7 @@ impl TabContent {
             TabContent::CodeFile { .. } => TabKind::CodeFile,
             TabContent::Stacker => TabKind::Stacker,
             TabContent::Sketch => TabKind::Sketch,
+            TabContent::Git => TabKind::Git,
             TabContent::Appearances => TabKind::Appearances,
             TabContent::Settings => TabKind::Settings,
         }
@@ -55,6 +59,7 @@ impl TabContent {
             TabContent::Home
                 | TabContent::Stacker
                 | TabContent::Sketch
+                | TabContent::Git
                 | TabContent::Appearances
                 | TabContent::Settings
         )
@@ -98,6 +103,7 @@ impl WorkspaceTab {
                 .to_string(),
             TabContent::Stacker => "Stacker".to_string(),
             TabContent::Sketch => "Sketch".to_string(),
+            TabContent::Git => "Git".to_string(),
             TabContent::Appearances => "Appearances".to_string(),
             TabContent::Settings => "Settings".to_string(),
         }

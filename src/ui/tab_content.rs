@@ -1,6 +1,6 @@
 use super::{
-    explorer_view, home_view, settings_state, sketch_state, sketch_view, stacker_state,
-    stacker_view,
+    explorer_view, git_state, git_view, home_view, settings_state, sketch_state, sketch_view,
+    stacker_state, stacker_view,
 };
 use crate::app::commands::AppCommand;
 use crate::config::Config;
@@ -19,6 +19,7 @@ pub(super) struct TabContentState<'a> {
     pub settings: &'a mut settings_state::SettingsUiState,
     pub stacker: &'a mut stacker_state::StackerUiState,
     pub sketch: &'a mut sketch_state::SketchUiState,
+    pub git: &'a mut git_state::GitUiState,
     pub explorer: &'a mut ExplorerState,
     pub editor_view: &'a mut explorer_view::EditorViewState,
     pub recent_projects: &'a [std::path::PathBuf],
@@ -55,6 +56,7 @@ pub(super) fn render_tab_content(
         Some(TabKind::Stacker) => render_stacker(ctx, state),
         Some(TabKind::CodeFile) => render_code_file(ctx, config, &appearance, state),
         Some(TabKind::Sketch) => render_sketch(ctx, &appearance, state),
+        Some(TabKind::Git) => render_git(ctx, state),
         Some(TabKind::Appearances) => {
             state.settings.render_appearances(ctx, config);
         }
@@ -270,6 +272,16 @@ fn render_joined_pane(
                 ]);
             });
         }
+        TabKind::Git => {
+            render_pane_frame(
+                &mut pane_ui,
+                egui::Color32::from_rgb(30, 31, 32),
+                10.0,
+                |ui| {
+                    git_view::render_git_view_ui(ui, state.git, &state.explorer.root);
+                },
+            );
+        }
         TabKind::Appearances => {
             render_pane_frame(
                 &mut pane_ui,
@@ -390,6 +402,10 @@ fn render_sketch(
             rect.bottom() * ppp,
         ]);
     }
+}
+
+fn render_git(ctx: &egui::Context, state: TabContentState<'_>) {
+    git_view::render_git_view(ctx, state.git, &state.explorer.root);
 }
 
 fn render_empty(ctx: &egui::Context, _bg: [u8; 3]) {

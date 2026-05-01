@@ -49,6 +49,7 @@ impl App {
                 }
                 TabContent::Stacker => Some(llnzy::workspace_store::TabEntry::Stacker),
                 TabContent::Sketch => Some(llnzy::workspace_store::TabEntry::Sketch),
+                TabContent::Git => Some(llnzy::workspace_store::TabEntry::Git),
                 _ => None,
             })
             .collect();

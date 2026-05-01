@@ -25,6 +25,8 @@ pub enum TabEntry {
     Stacker,
     /// The Sketch singleton.
     Sketch,
+    /// The local Git dashboard singleton.
+    Git,
 }
 
 impl TabEntry {
@@ -39,6 +41,7 @@ impl TabEntry {
                 .to_string(),
             TabEntry::Stacker => "Stacker".to_string(),
             TabEntry::Sketch => "Sketch".to_string(),
+            TabEntry::Git => "Git".to_string(),
         }
     }
 
@@ -49,6 +52,7 @@ impl TabEntry {
             TabEntry::CodeFile { .. } => "Code File",
             TabEntry::Stacker => "Stacker",
             TabEntry::Sketch => "Sketch",
+            TabEntry::Git => "Git",
         }
     }
 }
@@ -213,6 +217,7 @@ mod tests {
     fn tab_entry_display_names() {
         assert_eq!(TabEntry::Terminal.display_name(), "Terminal");
         assert_eq!(TabEntry::Stacker.display_name(), "Stacker");
+        assert_eq!(TabEntry::Git.display_name(), "Git");
         assert_eq!(
             TabEntry::CodeFile {
                 path: PathBuf::from("/foo/bar.rs")
