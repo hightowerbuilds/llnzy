@@ -4,6 +4,7 @@ use crate::workspace::TabKind;
 const FOOTER_TEXT_SIZE: f32 = 14.0;
 const FOOTER_BUTTON_HEIGHT: f32 = 36.0;
 const QUEUE_CHIP_GREEN: egui::Color32 = egui::Color32::from_rgb(106, 255, 144);
+const WISPR_GREEN: egui::Color32 = egui::Color32::from_rgb(106, 255, 144);
 
 pub struct FooterQueuePrompt {
     pub letter: char,
@@ -33,6 +34,7 @@ pub fn render_footer(
     active_btn: egui::Color32,
     text_color: egui::Color32,
     queued_prompts: &[FooterQueuePrompt],
+    wispr_flow_mode: &mut bool,
 ) -> Option<FooterAction> {
     let mut result: Option<FooterAction> = None;
 
@@ -63,6 +65,9 @@ pub fn render_footer(
                         result = Some(FooterAction::NewTerminalTab);
                     },
                 );
+                if terminal_active {
+                    render_wispr_toggle(ui, wispr_flow_mode, text_color);
+                }
 
                 // All singleton tab buttons
                 let singletons: &[(&str, TabKind)] = &[
@@ -94,6 +99,47 @@ pub fn render_footer(
         });
 
     result
+}
+
+fn render_wispr_toggle(ui: &mut egui::Ui, wispr_flow_mode: &mut bool, text_color: egui::Color32) {
+    let label = if *wispr_flow_mode {
+        "Wispr Flow On"
+    } else {
+        "Wispr Flow"
+    };
+    let fill = if *wispr_flow_mode {
+        egui::Color32::BLACK
+    } else {
+        egui::Color32::TRANSPARENT
+    };
+    let text = if *wispr_flow_mode {
+        WISPR_GREEN
+    } else {
+        text_color
+    };
+    let stroke = if *wispr_flow_mode {
+        egui::Stroke::new(1.0, WISPR_GREEN)
+    } else {
+        egui::Stroke::new(1.0, egui::Color32::from_white_alpha(28))
+    };
+
+    let response = ui
+        .add(
+            egui::Button::new(
+                egui::RichText::new(label)
+                    .size(FOOTER_TEXT_SIZE)
+                    .strong()
+                    .color(text),
+            )
+            .fill(fill)
+            .stroke(stroke)
+            .rounding(egui::Rounding::same(4.0))
+            .min_size(egui::Vec2::new(0.0, FOOTER_BUTTON_HEIGHT)),
+        )
+        .on_hover_text("Route Wispr Flow voice text directly into the active terminal");
+    if response.clicked() {
+        *wispr_flow_mode = !*wispr_flow_mode;
+    }
 }
 
 fn render_queue_chip(ui: &mut egui::Ui, prompt: &FooterQueuePrompt) -> egui::Response {

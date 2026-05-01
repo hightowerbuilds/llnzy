@@ -24,6 +24,7 @@ pub mod theme;
 pub mod theme_store;
 pub mod ui;
 pub mod workspace;
+pub mod workspace_layout;
 pub mod workspace_store;
 
 #[derive(Debug)]

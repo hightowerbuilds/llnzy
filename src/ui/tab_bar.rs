@@ -1,16 +1,17 @@
+use super::tab_bar_joined::render_joined_tab;
 use super::types::UiTabInfo;
-use super::JoinedTabs;
 use crate::app::commands::AppCommand;
 use crate::app::drag_drop::{tab_reorder_destination, DragDropCommand, DragPayload, TabDropZone};
 use crate::workspace::TabKind;
+use crate::workspace_layout::{JoinedTabs, TabBarEntry};
 
 const TAB_BAR_HEIGHT: f32 = 44.0;
-const TAB_TEXT_SIZE: f32 = 14.0;
-const CLOSE_TEXT_SIZE: f32 = 16.0;
-const CLOSE_BUTTON_SIZE: f32 = 24.0;
-const TAB_HEIGHT: f32 = 32.0;
-const TAB_MIN_WIDTH: f32 = 104.0;
-const TAB_MAX_WIDTH: f32 = 220.0;
+pub(super) const TAB_TEXT_SIZE: f32 = 14.0;
+pub(super) const CLOSE_TEXT_SIZE: f32 = 16.0;
+pub(super) const CLOSE_BUTTON_SIZE: f32 = 24.0;
+pub(super) const TAB_HEIGHT: f32 = 32.0;
+pub(super) const TAB_MIN_WIDTH: f32 = 104.0;
+pub(super) const TAB_MAX_WIDTH: f32 = 220.0;
 const TAB_GHOST_ALPHA: u8 = 210;
 
 #[derive(Default)]
@@ -69,6 +70,7 @@ pub struct TabBarEditState {
 
 pub struct TabBarRenderInput<'a> {
     pub tabs: &'a [UiTabInfo],
+    pub entries: &'a [TabBarEntry],
     pub active_tab_index: usize,
     pub joined_tabs: Option<JoinedTabs>,
     pub bar_bg: egui::Color32,
@@ -95,7 +97,30 @@ pub fn render_workspace_tab_bar(
         .show(ctx, |ui| {
             ui.horizontal_centered(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
-                for (i, tab) in input.tabs.iter().enumerate() {
+                for entry in input.entries {
+                    let i = match *entry {
+                        TabBarEntry::Single { tab_idx } => tab_idx,
+                        TabBarEntry::Joined { primary, secondary } => {
+                            render_joined_tab(
+                                ui,
+                                ctx,
+                                input.tabs,
+                                input.active_tab_index,
+                                JoinedTabs {
+                                    primary,
+                                    secondary,
+                                    ratio: input.joined_tabs.map_or(0.5, |joined| joined.ratio),
+                                }
+                                .clamped(),
+                                edit_state,
+                                &mut action,
+                            );
+                            continue;
+                        }
+                    };
+                    let Some(tab) = input.tabs.get(i) else {
+                        continue;
+                    };
                     let active = i == input.active_tab_index;
                     let joined = input.joined_tabs.is_some_and(|joined| joined.contains(i));
                     let editing = edit_state.editing_tab == Some(i);
@@ -230,43 +255,14 @@ pub fn render_workspace_tab_bar(
                     }
 
                     tab_response.context_menu(|ui| {
-                        if input.joined_tabs.is_some_and(|joined| joined.contains(i)) {
-                            if ui.button("Separate Tabs").clicked() {
-                                action.separate_tabs = true;
-                                ui.close_menu();
-                            }
-                        } else if i != input.active_tab_index
-                            && input.joined_tabs.is_none()
-                            && ui.button("Create Double Tab").clicked()
-                        {
-                            action.join_tab = Some(i);
-                            ui.close_menu();
-                        }
-
-                        ui.separator();
-                        if tab.kind == TabKind::Terminal {
-                            if !tab.exited && ui.button("Kill Process").clicked() {
-                                action.kill_terminal = Some(i);
-                                ui.close_menu();
-                            }
-                            if ui.button("Restart Terminal").clicked() {
-                                action.restart_terminal = Some(i);
-                                ui.close_menu();
-                            }
-                            ui.separator();
-                        }
-                        if ui.button("Close").clicked() {
-                            action.close_tab = Some(i);
-                            ui.close_menu();
-                        }
-                        if ui.button("Close Others").clicked() {
-                            action.close_others = Some(i);
-                            ui.close_menu();
-                        }
-                        if ui.button("Close to the Right").clicked() {
-                            action.close_to_right = Some(i);
-                            ui.close_menu();
-                        }
+                        render_tab_context_menu(
+                            ui,
+                            tab,
+                            i,
+                            input.active_tab_index,
+                            input.joined_tabs,
+                            &mut action,
+                        );
                     });
                 }
             });
@@ -275,7 +271,54 @@ pub fn render_workspace_tab_bar(
     action
 }
 
-fn render_tab_name_editor(
+pub(super) fn render_tab_context_menu(
+    ui: &mut egui::Ui,
+    tab: &UiTabInfo,
+    tab_idx: usize,
+    active_tab_index: usize,
+    joined_tabs: Option<JoinedTabs>,
+    action: &mut TabBarAction,
+) {
+    if joined_tabs.is_some_and(|joined| joined.contains(tab_idx)) {
+        if ui.button("Separate Tabs").clicked() {
+            action.separate_tabs = true;
+            ui.close_menu();
+        }
+    } else if tab_idx != active_tab_index
+        && joined_tabs.is_none()
+        && ui.button("Create Double Tab").clicked()
+    {
+        action.join_tab = Some(tab_idx);
+        ui.close_menu();
+    }
+
+    ui.separator();
+    if tab.kind == TabKind::Terminal {
+        if !tab.exited && ui.button("Kill Process").clicked() {
+            action.kill_terminal = Some(tab_idx);
+            ui.close_menu();
+        }
+        if ui.button("Restart Terminal").clicked() {
+            action.restart_terminal = Some(tab_idx);
+            ui.close_menu();
+        }
+        ui.separator();
+    }
+    if ui.button("Close").clicked() {
+        action.close_tab = Some(tab_idx);
+        ui.close_menu();
+    }
+    if ui.button("Close Others").clicked() {
+        action.close_others = Some(tab_idx);
+        ui.close_menu();
+    }
+    if ui.button("Close to the Right").clicked() {
+        action.close_to_right = Some(tab_idx);
+        ui.close_menu();
+    }
+}
+
+pub(super) fn render_tab_name_editor(
     ui: &mut egui::Ui,
     tab_rect: egui::Rect,
     close_rect: egui::Rect,
@@ -317,7 +360,12 @@ fn render_tab_name_editor(
     }
 }
 
-fn paint_drag_ghost(ctx: &egui::Context, title: &str, active: bool, source_rect: egui::Rect) {
+pub(super) fn paint_drag_ghost(
+    ctx: &egui::Context,
+    title: &str,
+    active: bool,
+    source_rect: egui::Rect,
+) {
     let Some(pointer_pos) = ctx.input(|input| input.pointer.interact_pos()) else {
         return;
     };
@@ -358,7 +406,7 @@ fn tab_width(title: &str) -> f32 {
     (estimated_text_w + CLOSE_BUTTON_SIZE + 42.0).clamp(TAB_MIN_WIDTH, TAB_MAX_WIDTH)
 }
 
-fn truncated_title(title: &str, available_w: f32) -> String {
+pub(super) fn truncated_title(title: &str, available_w: f32) -> String {
     let max_chars = (available_w / 8.5).floor().max(4.0) as usize;
     let char_count = title.chars().count();
     if char_count <= max_chars {
@@ -368,7 +416,7 @@ fn truncated_title(title: &str, available_w: f32) -> String {
     format!("{}...", title.chars().take(keep).collect::<String>())
 }
 
-fn tab_drop_zone(response: &egui::Response) -> TabDropZone {
+pub(super) fn tab_drop_zone(response: &egui::Response) -> TabDropZone {
     let pointer_x = response
         .ctx
         .input(|input| input.pointer.interact_pos().map(|pos| pos.x))

@@ -13,6 +13,7 @@ mod sketch_view;
 mod stacker_state;
 mod stacker_view;
 pub mod tab_bar;
+mod tab_bar_joined;
 mod tab_content;
 pub mod types;
 
@@ -23,10 +24,11 @@ use crate::app::drag_drop::DragDropState;
 use crate::config::Config;
 use crate::explorer::ExplorerState;
 use crate::stacker::apply_prompt_edit;
+use crate::workspace_layout::{tab_bar_entries, JoinedTabs};
 
 pub use footer::FooterAction;
 pub use types::{
-    ActiveView, CopyGhost, JoinedTabs, PendingClose, SavePromptResponse, UiFrameOutput, UiTabInfo,
+    ActiveView, CopyGhost, PendingClose, SavePromptResponse, UiFrameOutput, UiTabInfo,
     UiTabPaneInfo, BUMPER_WIDTH, SIDEBAR_WIDTH,
 };
 
@@ -71,6 +73,9 @@ pub struct UiState {
     pub recent_projects: Vec<std::path::PathBuf>,
     /// Active tab kind (set by main loop before render, used by footer highlighting)
     pub active_tab_kind: Option<crate::workspace::TabKind>,
+    /// Terminal voice input mode. When enabled, multi-character macOS text commits
+    /// are routed straight to the active PTY before egui handles them.
+    pub wispr_flow_mode: bool,
     /// Workspace tabs reference for egui tab bar rendering (set by main loop before render)
     pub tab_names: Vec<UiTabInfo>,
     /// Lightweight tab content metadata for joined-tab rendering.
@@ -159,6 +164,7 @@ impl UiState {
             palette_command: None,
             recent_projects: crate::explorer::load_recent_projects(),
             active_tab_kind: None,
+            wispr_flow_mode: false,
             tab_names: Vec::new(),
             tab_panes: Vec::new(),
             joined_tabs: None,
@@ -254,6 +260,7 @@ impl UiState {
         let mut nav_target: Option<ActiveView> = None;
         let mut commands_out: Vec<AppCommand> = Vec::new();
         let active_tab_kind = self.active_tab_kind;
+        let mut wispr_flow_mode = self.wispr_flow_mode;
         let mut config_clone = config.clone();
         let mut settings = std::mem::take(&mut self.settings);
 
@@ -299,6 +306,7 @@ impl UiState {
         };
         let mut tab_bar_action = tab_bar::TabBarAction::default();
         let mut joined_tabs = self.joined_tabs.map(JoinedTabs::clamped);
+        let tab_bar_entries = tab_bar_entries(tab_names.len(), joined_tabs);
         let tab_panes = std::mem::take(&mut self.tab_panes);
         let drag_drop = self.drag_drop.clone();
 
@@ -331,6 +339,7 @@ impl UiState {
                 active_btn,
                 text_color,
                 &footer_queue_prompts,
+                &mut wispr_flow_mode,
             ) {
                 apply_footer_action(action, &mut nav_target, &mut commands_out);
             }
@@ -340,6 +349,7 @@ impl UiState {
                 ctx,
                 tab_bar::TabBarRenderInput {
                     tabs: &tab_names,
+                    entries: &tab_bar_entries,
                     active_tab_index,
                     joined_tabs,
                     bar_bg: egui::Color32::from_rgb(36, 36, 36),
@@ -430,6 +440,7 @@ impl UiState {
         self.explorer = explorer;
         self.tab_panes = tab_panes;
         self.joined_tabs = joined_tabs;
+        self.wispr_flow_mode = wispr_flow_mode;
         if let Some((path, buffer_idx)) = editor_view.pending_file_tab.take() {
             commands_out.push(AppCommand::OpenCodeFile { path, buffer_idx });
         }

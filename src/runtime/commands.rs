@@ -144,7 +144,10 @@ impl App {
                     return false;
                 }
                 if let Some(ui) = &mut self.ui {
-                    ui.joined_tabs = Some(llnzy::ui::JoinedTabs::new(self.active_tab, idx));
+                    ui.joined_tabs = Some(llnzy::workspace_layout::JoinedTabs::new(
+                        self.active_tab,
+                        idx,
+                    ));
                 }
                 self.resize_terminal_tabs();
                 self.request_redraw();
@@ -518,7 +521,7 @@ fn clear_joined_tabs(ui: Option<&mut llnzy::ui::UiState>) {
 
 fn clear_joined_tabs_if(
     ui: Option<&mut llnzy::ui::UiState>,
-    predicate: impl FnOnce(llnzy::ui::JoinedTabs) -> bool,
+    predicate: impl FnOnce(llnzy::workspace_layout::JoinedTabs) -> bool,
 ) {
     if let Some(ui) = ui {
         if ui.joined_tabs.is_some_and(predicate) {
@@ -530,7 +533,7 @@ fn clear_joined_tabs_if(
 fn remap_joined_tabs_after_insert(ui: Option<&mut llnzy::ui::UiState>, insert_at: usize) {
     if let Some(ui) = ui {
         if let Some(joined) = ui.joined_tabs {
-            ui.joined_tabs = Some(llnzy::ui::JoinedTabs {
+            ui.joined_tabs = Some(llnzy::workspace_layout::JoinedTabs {
                 primary: remap_index_after_insert(joined.primary, insert_at),
                 secondary: remap_index_after_insert(joined.secondary, insert_at),
                 ratio: joined.ratio,
@@ -542,7 +545,7 @@ fn remap_joined_tabs_after_insert(ui: Option<&mut llnzy::ui::UiState>, insert_at
 fn remap_joined_tabs_after_reorder(ui: Option<&mut llnzy::ui::UiState>, from: usize, to: usize) {
     if let Some(ui) = ui {
         if let Some(joined) = ui.joined_tabs {
-            ui.joined_tabs = Some(llnzy::ui::JoinedTabs {
+            ui.joined_tabs = Some(llnzy::workspace_layout::JoinedTabs {
                 primary: remap_index_after_reorder(joined.primary, from, to),
                 secondary: remap_index_after_reorder(joined.secondary, from, to),
                 ratio: joined.ratio,

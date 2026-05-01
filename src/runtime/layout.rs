@@ -3,8 +3,9 @@ use std::path::Path;
 use llnzy::app::drag_drop::{tab_drop_zone_at_x, tab_index_at_x, DropTarget, TerminalDropMode};
 use llnzy::layout::{LayoutInputs, ScreenLayout};
 use llnzy::session::Rect as PaneRect;
-use llnzy::ui::{ActiveView, JoinedTabs};
+use llnzy::ui::ActiveView;
 use llnzy::workspace::TabContent;
+use llnzy::workspace_layout::joined_terminal_content_rects;
 
 use crate::App;
 
@@ -224,34 +225,4 @@ impl App {
         }
         self.request_redraw();
     }
-}
-
-fn joined_content_rects(layout: &ScreenLayout, ratio: f32) -> (PaneRect, PaneRect) {
-    const DIVIDER_GAP: f32 = 8.0;
-    let content = &layout.content;
-    let usable_w = (content.w - DIVIDER_GAP).max(2.0);
-    let ratio = ratio.clamp(JoinedTabs::MIN_RATIO, JoinedTabs::MAX_RATIO);
-    let left_w = (usable_w * ratio).max(1.0);
-    let right_w = (usable_w - left_w).max(1.0);
-    let left = PaneRect {
-        x: content.x,
-        y: content.y,
-        w: left_w,
-        h: content.h,
-    };
-    let right = PaneRect {
-        x: content.x + left_w + DIVIDER_GAP,
-        y: content.y,
-        w: right_w,
-        h: content.h,
-    };
-    (left, right)
-}
-
-fn joined_terminal_content_rects(layout: &ScreenLayout, ratio: f32) -> (PaneRect, PaneRect) {
-    let (left, mut right) = joined_content_rects(layout, ratio);
-    let inset = layout.content_padding_x.min((right.w - 1.0).max(0.0));
-    right.x += inset;
-    right.w = (right.w - inset).max(1.0);
-    (left, right)
 }

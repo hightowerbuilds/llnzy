@@ -5,8 +5,9 @@ use super::{
 use crate::app::commands::AppCommand;
 use crate::config::Config;
 use crate::explorer::ExplorerState;
-use crate::ui::{JoinedTabs, UiTabPaneInfo};
+use crate::ui::UiTabPaneInfo;
 use crate::workspace::TabKind;
+use crate::workspace_layout::{joined_split_widths, JoinedTabs, JOINED_DIVIDER_GAP};
 
 pub(super) struct TabContentAppearance {
     pub bg: [u8; 3],
@@ -75,15 +76,7 @@ fn valid_joined_tabs(
     active_tab_index: usize,
     tab_panes: &[UiTabPaneInfo],
 ) -> Option<JoinedTabs> {
-    let joined = joined_tabs?;
-    if joined.primary >= tab_panes.len()
-        || joined.secondary >= tab_panes.len()
-        || joined.primary == joined.secondary
-        || !joined.contains(active_tab_index)
-    {
-        return None;
-    }
-    Some(joined)
+    crate::workspace_layout::valid_joined_tabs(joined_tabs, active_tab_index, tab_panes.len())
 }
 
 fn render_joined_tabs(
@@ -100,16 +93,14 @@ fn render_joined_tabs(
         .frame(egui::Frame::none().fill(egui::Color32::TRANSPARENT))
         .show(ctx, |ui| {
             let rect = ui.max_rect();
-            let gap = 8.0;
-            let usable_w = (rect.width() - gap).max(2.0);
             let ratio = joined
                 .ratio
                 .clamp(JoinedTabs::MIN_RATIO, JoinedTabs::MAX_RATIO);
-            let left_w = (usable_w * ratio).max(1.0);
-            let right_w = (usable_w - left_w).max(1.0);
+            let usable_w = (rect.width() - JOINED_DIVIDER_GAP).max(2.0);
+            let (left_w, right_w) = joined_split_widths(rect.width(), ratio);
             let left_rect = egui::Rect::from_min_size(rect.min, egui::vec2(left_w, rect.height()));
             let right_rect = egui::Rect::from_min_size(
-                egui::pos2(left_rect.right() + gap, rect.top()),
+                egui::pos2(left_rect.right() + JOINED_DIVIDER_GAP, rect.top()),
                 egui::vec2(right_w, rect.height()),
             );
             let divider = egui::Rect::from_min_max(

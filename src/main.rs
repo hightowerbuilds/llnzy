@@ -23,8 +23,12 @@ use llnzy::layout::{LayoutInputs, ScreenLayout};
 use llnzy::renderer::{RenderRequest, Renderer, TerminalPane};
 use llnzy::search::Search;
 use llnzy::selection::Selection;
-use llnzy::ui::{ActiveView, JoinedTabs, PendingClose, UiFrameOutput, UiState, BUMPER_WIDTH};
+use llnzy::ui::{ActiveView, PendingClose, UiFrameOutput, UiState, BUMPER_WIDTH};
 use llnzy::workspace::{TabContent, WorkspaceTab};
+use llnzy::workspace_layout::{
+    joined_content_rects, joined_terminal_content_rects, terminal_effect_rect, valid_joined_tabs,
+    JoinedTabs,
+};
 use llnzy::UserEvent;
 
 struct App {
@@ -89,13 +93,61 @@ impl App {
         id
     }
 
+    fn wispr_flow_mode(&self) -> bool {
+        self.ui.as_ref().is_some_and(|ui| ui.wispr_flow_mode)
+    }
+
+    fn route_wispr_flow_text(&mut self, text: &str) -> bool {
+        if !self.wispr_flow_mode()
+            || !input::text_should_use_paste_path(text)
+            || self.active_session().is_none()
+            || self.search.active
+        {
+            return false;
+        }
+
+        self.last_keypress = Instant::now();
+        if self.selection.is_active() {
+            self.selection.clear();
+        }
+        self.paste_text(text);
+        self.request_redraw();
+        true
+    }
+
+    fn route_wispr_flow_paste_command(&mut self, key_event: &winit::event::KeyEvent) -> bool {
+        if !self.wispr_flow_mode()
+            || key_event.state != ElementState::Pressed
+            || self.active_session().is_none()
+            || self.search.active
+        {
+            return false;
+        }
+
+        let is_paste = matches!(
+            self.config.keybindings.match_key(key_event, self.modifiers),
+            Some(Action::Paste)
+        );
+        if !is_paste {
+            return false;
+        }
+
+        self.last_keypress = Instant::now();
+        if self.selection.is_active() {
+            self.selection.clear();
+        }
+        self.do_paste();
+        self.request_redraw();
+        true
+    }
+
     fn joined_terminal_tab_at_cursor(&self) -> Option<usize> {
         let layout = self.screen_layout.as_ref()?;
         let joined = self
             .ui
             .as_ref()
             .and_then(|ui| ui.joined_tabs)
-            .filter(|joined| valid_joined_tabs(*joined, self.active_tab, self.tabs.len()))?;
+            .and_then(|joined| valid_joined_tabs(Some(joined), self.active_tab, self.tabs.len()))?;
         let x = self.cursor_pos.x as f32;
         let y = self.cursor_pos.y as f32;
         let (left_rect, right_rect) = joined_content_rects(layout, joined.ratio);
@@ -205,6 +257,33 @@ impl ApplicationHandler<UserEvent> for App {
         if let WindowEvent::Ime(Ime::Commit(text)) = &event {
             if input::text_should_use_paste_path(text) && self.append_text_to_stacker_editor(text) {
                 return;
+            }
+        }
+
+        if let WindowEvent::Ime(Ime::Commit(text)) = &event {
+            if self.route_wispr_flow_text(text) {
+                return;
+            }
+        }
+
+        if let WindowEvent::KeyboardInput {
+            event: key_event, ..
+        } = &event
+        {
+            if self.route_wispr_flow_paste_command(key_event) {
+                return;
+            }
+
+            if key_event.state == ElementState::Pressed
+                && !self.modifiers.control_key()
+                && !self.modifiers.alt_key()
+                && !self.modifiers.super_key()
+            {
+                if let Some(text) = &key_event.text {
+                    if self.route_wispr_flow_text(text.as_str()) {
+                        return;
+                    }
+                }
             }
         }
 
@@ -405,8 +484,8 @@ impl ApplicationHandler<UserEvent> for App {
                             .as_ref()
                             .and_then(|ui| ui.joined_tabs)
                             .map(JoinedTabs::clamped)
-                            .filter(|joined| {
-                                valid_joined_tabs(*joined, self.active_tab, self.tabs.len())
+                            .and_then(|joined| {
+                                valid_joined_tabs(Some(joined), self.active_tab, self.tabs.len())
                             });
                         let terminal_panes = joined_tabs
                             .map(|joined| {
@@ -1140,13 +1219,6 @@ impl ApplicationHandler<UserEvent> for App {
     }
 }
 
-fn valid_joined_tabs(joined: JoinedTabs, active_tab: usize, tab_count: usize) -> bool {
-    joined.primary < tab_count
-        && joined.secondary < tab_count
-        && joined.primary != joined.secondary
-        && joined.contains(active_tab)
-}
-
 fn joined_terminal_panes<'a>(
     tabs: &'a [llnzy::workspace::WorkspaceTab],
     active_tab: usize,
@@ -1169,46 +1241,6 @@ fn joined_terminal_panes<'a>(
         .collect()
 }
 
-fn terminal_effect_rect(
-    tabs: &[WorkspaceTab],
-    layout: &ScreenLayout,
-    joined: Option<JoinedTabs>,
-    active_tab: usize,
-) -> Option<llnzy::session::Rect> {
-    if let Some(joined) = joined.filter(|joined| valid_joined_tabs(*joined, active_tab, tabs.len()))
-    {
-        let joined = joined.clamped();
-        let (left, right) = joined_content_rects(layout, joined.ratio);
-        let primary_terminal = tabs
-            .get(joined.primary)
-            .is_some_and(|tab| tab.content.as_terminal().is_some());
-        let secondary_terminal = tabs
-            .get(joined.secondary)
-            .is_some_and(|tab| tab.content.as_terminal().is_some());
-
-        return match (primary_terminal, secondary_terminal) {
-            (true, true) => Some(llnzy::session::Rect {
-                x: layout.content.x,
-                y: layout.content.y,
-                w: layout.content.w,
-                h: layout.content.h,
-            }),
-            (true, false) => Some(left),
-            (false, true) => Some(right),
-            (false, false) => None,
-        };
-    }
-
-    tabs.get(active_tab)
-        .filter(|tab| tab.content.as_terminal().is_some())
-        .map(|_| llnzy::session::Rect {
-            x: layout.content.x,
-            y: layout.content.y,
-            w: layout.content.w,
-            h: layout.content.h,
-        })
-}
-
 fn rect_to_uv(rect: llnzy::session::Rect, size: winit::dpi::PhysicalSize<u32>) -> [f32; 4] {
     let w = size.width.max(1) as f32;
     let h = size.height.max(1) as f32;
@@ -1218,42 +1250,6 @@ fn rect_to_uv(rect: llnzy::session::Rect, size: winit::dpi::PhysicalSize<u32>) -
         (rect.x + rect.w) / w,
         (rect.y + rect.h) / h,
     ]
-}
-
-fn joined_content_rects(
-    layout: &ScreenLayout,
-    ratio: f32,
-) -> (llnzy::session::Rect, llnzy::session::Rect) {
-    const DIVIDER_GAP: f32 = 8.0;
-    let content = &layout.content;
-    let usable_w = (content.w - DIVIDER_GAP).max(2.0);
-    let ratio = ratio.clamp(JoinedTabs::MIN_RATIO, JoinedTabs::MAX_RATIO);
-    let left_w = (usable_w * ratio).max(1.0);
-    let right_w = (usable_w - left_w).max(1.0);
-    let left = llnzy::session::Rect {
-        x: content.x,
-        y: content.y,
-        w: left_w,
-        h: content.h,
-    };
-    let right = llnzy::session::Rect {
-        x: content.x + left_w + DIVIDER_GAP,
-        y: content.y,
-        w: right_w,
-        h: content.h,
-    };
-    (left, right)
-}
-
-fn joined_terminal_content_rects(
-    layout: &ScreenLayout,
-    ratio: f32,
-) -> (llnzy::session::Rect, llnzy::session::Rect) {
-    let (left, mut right) = joined_content_rects(layout, ratio);
-    let inset = layout.content_padding_x.min((right.w - 1.0).max(0.0));
-    right.x += inset;
-    right.w = (right.w - inset).max(1.0);
-    (left, right)
 }
 
 fn main() {
