@@ -441,7 +441,8 @@ impl App {
 
         self.remap_moved_open_files(&moved);
         if let Some(ui) = &mut self.ui {
-            ui.explorer.set_root(ui.explorer.root.clone());
+            ui.explorer
+                .refresh_preserving_expansion(&[folder.to_path_buf()]);
             let moved_count = moved.len();
             ui.editor_view.status_msg = Some(if moved_count == 1 {
                 "Moved file".to_string()

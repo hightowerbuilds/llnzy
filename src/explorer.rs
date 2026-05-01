@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
@@ -148,6 +149,37 @@ fn read_dir_sorted(path: &Path) -> Vec<TreeNode> {
     result
 }
 
+fn collect_expanded_paths(nodes: &[TreeNode], expanded: &mut HashSet<PathBuf>) {
+    for node in nodes {
+        if !node.is_dir {
+            continue;
+        }
+        if node.expanded {
+            expanded.insert(comparable_path(&node.path));
+        }
+        if let Some(children) = &node.children {
+            collect_expanded_paths(children, expanded);
+        }
+    }
+}
+
+fn apply_expanded_paths(nodes: &mut [TreeNode], expanded: &HashSet<PathBuf>) {
+    for node in nodes {
+        if !node.is_dir || !expanded.contains(&comparable_path(&node.path)) {
+            continue;
+        }
+        node.expanded = true;
+        node.ensure_children();
+        if let Some(children) = &mut node.children {
+            apply_expanded_paths(children, expanded);
+        }
+    }
+}
+
+fn comparable_path(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+}
+
 pub struct ExplorerState {
     /// Project root directory.
     pub root: PathBuf,
@@ -210,6 +242,21 @@ impl ExplorerState {
     pub fn set_root(&mut self, path: PathBuf) {
         self.root = path;
         self.tree = read_dir_sorted(&self.root);
+        self.clear_file_index();
+    }
+
+    /// Rebuild the current tree while keeping expanded folders open.
+    pub fn refresh_preserving_expansion(&mut self, additionally_expand: &[PathBuf]) {
+        let mut expanded = HashSet::new();
+        collect_expanded_paths(&self.tree, &mut expanded);
+        expanded.extend(additionally_expand.iter().map(|path| comparable_path(path)));
+
+        self.tree = read_dir_sorted(&self.root);
+        apply_expanded_paths(&mut self.tree, &expanded);
+        self.clear_file_index();
+    }
+
+    fn clear_file_index(&mut self) {
         self.file_index = None;
         self.file_index_rx = None;
         self.indexing_root = None;
@@ -488,6 +535,57 @@ mod tests {
             .iter()
             .any(|path| path.file_name().is_some_and(|name| name == "main.rs")));
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn refresh_preserving_expansion_updates_open_source_and_destination_folders() {
+        let root = std::env::temp_dir().join(format!(
+            "llnzy_explorer_refresh_{}_{}",
+            std::process::id(),
+            1
+        ));
+        let source = root.join("source");
+        let destination = root.join("destination");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::create_dir_all(&destination).unwrap();
+        let moved_file = source.join("note.md");
+        std::fs::write(&moved_file, "hello").unwrap();
+        std::fs::write(source.join("zeta.md"), "keep").unwrap();
+
+        let mut explorer = ExplorerState::new();
+        explorer.set_root(root.clone());
+        expand_top_level_dir(&mut explorer.tree, "source");
+        expand_top_level_dir(&mut explorer.tree, "destination");
+
+        std::fs::rename(&moved_file, destination.join("note.md")).unwrap();
+        explorer.refresh_preserving_expansion(std::slice::from_ref(&destination));
+
+        let source_node = find_top_level_dir(&explorer.tree, "source").unwrap();
+        let destination_node = find_top_level_dir(&explorer.tree, "destination").unwrap();
+        assert!(source_node.expanded);
+        assert!(destination_node.expanded);
+        assert!(dir_contains_file(source_node, "zeta.md"));
+        assert!(!dir_contains_file(source_node, "note.md"));
+        assert!(dir_contains_file(destination_node, "note.md"));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    fn expand_top_level_dir(tree: &mut [TreeNode], name: &str) {
+        let node = tree.iter_mut().find(|node| node.name == name).unwrap();
+        node.toggle();
+    }
+
+    fn find_top_level_dir<'a>(tree: &'a [TreeNode], name: &str) -> Option<&'a TreeNode> {
+        tree.iter().find(|node| node.is_dir && node.name == name)
+    }
+
+    fn dir_contains_file(node: &TreeNode, name: &str) -> bool {
+        node.children.as_ref().is_some_and(|children| {
+            children
+                .iter()
+                .any(|child| !child.is_dir && child.name == name)
+        })
     }
 }
 

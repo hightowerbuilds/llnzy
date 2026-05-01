@@ -2197,23 +2197,6 @@ fn handle_folder_drop(
     folder: &std::path::Path,
     action: &mut Option<TreeAction>,
 ) {
-    if let Some(payload) = response.dnd_hover_payload::<DragPayload>() {
-        if let DragPayload::ExplorerItems(paths) = &*payload {
-            if paths.iter().all(|path| path.is_file()) {
-                response.ctx.set_cursor_icon(egui::CursorIcon::Grab);
-                let painter = response.ctx.layer_painter(egui::LayerId::new(
-                    egui::Order::Foreground,
-                    egui::Id::new(("sidebar_folder_drop_target", folder)),
-                ));
-                painter.rect_stroke(
-                    response.rect.expand(2.0),
-                    egui::Rounding::same(4.0),
-                    egui::Stroke::new(1.0, egui::Color32::from_rgb(95, 215, 130)),
-                );
-            }
-        }
-    }
-
     if action.is_none() {
         if let Some(payload) = response.dnd_release_payload::<DragPayload>() {
             if let DragPayload::ExplorerItems(paths) = (*payload).clone() {
