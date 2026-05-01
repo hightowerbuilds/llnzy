@@ -37,43 +37,6 @@ impl App {
         }
     }
 
-    pub(crate) fn split_terminal_right(&mut self, idx: usize) -> bool {
-        let Some(TabContent::Terminal(existing)) = self.tabs.get(idx).map(|tab| &tab.content)
-        else {
-            return false;
-        };
-        let (cols, rows) = self.split_terminal_grid_size(0.5);
-        let cwd = existing.cwd.clone();
-        match Session::new_in_dir(cols, rows, &self.config, self.proxy.clone(), cwd.as_deref()) {
-            Ok(session) => {
-                let id = self.alloc_tab_id();
-                let insert_at = (idx + 1).min(self.tabs.len());
-                self.tabs.insert(
-                    insert_at,
-                    WorkspaceTab {
-                        content: TabContent::Terminal(Box::new(session)),
-                        name: Some("Split".to_string()),
-                        id,
-                    },
-                );
-                self.active_tab = idx;
-                if let Some(ui) = &mut self.ui {
-                    ui.active_view = ActiveView::Shells;
-                    ui.split_view = Some((insert_at, 0.5));
-                }
-                self.resize_terminal_tabs();
-                self.selection.clear();
-                self.request_redraw();
-                true
-            }
-            Err(e) => {
-                self.error_log
-                    .error(format!("Failed to split terminal: {e}"));
-                false
-            }
-        }
-    }
-
     pub(crate) fn close_tab(&mut self) {
         if self.tabs.is_empty() {
             return;
@@ -161,7 +124,20 @@ impl App {
         if self.tabs.is_empty() {
             return;
         }
-        self.tabs.remove(self.active_tab);
+        let removed_idx = self.active_tab;
+        self.tabs.remove(removed_idx);
+        if let Some(ui) = &mut self.ui {
+            if let Some(joined) = ui.joined_tabs {
+                if joined.contains(removed_idx) {
+                    ui.joined_tabs = None;
+                } else {
+                    ui.joined_tabs = Some(llnzy::ui::JoinedTabs {
+                        primary: remap_index_after_remove(joined.primary, removed_idx),
+                        secondary: remap_index_after_remove(joined.secondary, removed_idx),
+                    });
+                }
+            }
+        }
         if self.tabs.is_empty() {
             self.active_tab = 0;
             if let Some(ui) = &mut self.ui {
@@ -245,6 +221,11 @@ impl App {
         if idx < self.tabs.len() {
             let changed = idx != self.active_tab;
             self.active_tab = idx;
+            if let Some(ui) = &mut self.ui {
+                if ui.joined_tabs.is_some_and(|joined| !joined.contains(idx)) {
+                    ui.joined_tabs = None;
+                }
+            }
             self.sync_active_tab_content();
             if changed {
                 self.selection.clear();
@@ -267,5 +248,13 @@ impl App {
             ui.editor_view.editor.switch_to(*buffer_idx);
             ui.editor_view.request_hints_and_lenses();
         }
+    }
+}
+
+fn remap_index_after_remove(index: usize, removed_idx: usize) -> usize {
+    if index > removed_idx {
+        index - 1
+    } else {
+        index
     }
 }

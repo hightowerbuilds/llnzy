@@ -67,3 +67,21 @@ pub struct UiTabInfo {
     pub kind: TabKind,
     pub exited: bool,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UiTabPaneInfo {
+    pub kind: TabKind,
+    pub buffer_idx: Option<usize>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct JoinedTabs {
+    pub primary: usize,
+    pub secondary: usize,
+}
+
+impl JoinedTabs {
+    pub fn contains(self, idx: usize) -> bool {
+        self.primary == idx || self.secondary == idx
+    }
+}

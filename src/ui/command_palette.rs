@@ -301,7 +301,7 @@ pub fn render_palette(ui: &mut egui::Ui, state: &mut PaletteState) -> Option<Com
         let resp = ui.add(
             egui::TextEdit::singleline(&mut query)
                 .hint_text("Type a command...")
-                .desired_width(ui.available_width() - 20.0)
+                .desired_width((ui.available_width() - 20.0).max(80.0))
                 .text_color(egui::Color32::WHITE)
                 .font(egui::TextStyle::Monospace),
         );

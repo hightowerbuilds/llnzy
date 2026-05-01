@@ -26,8 +26,8 @@ use crate::stacker::apply_prompt_edit;
 
 pub use footer::FooterAction;
 pub use types::{
-    ActiveView, CopyGhost, PendingClose, SavePromptResponse, UiFrameOutput, UiTabInfo,
-    BUMPER_WIDTH, SIDEBAR_WIDTH,
+    ActiveView, CopyGhost, JoinedTabs, PendingClose, SavePromptResponse, UiFrameOutput, UiTabInfo,
+    UiTabPaneInfo, BUMPER_WIDTH, SIDEBAR_WIDTH,
 };
 
 pub const STACKER_PROMPT_EDITOR_ID: &str = "stacker_prompt_editor";
@@ -73,9 +73,10 @@ pub struct UiState {
     pub active_tab_kind: Option<crate::workspace::TabKind>,
     /// Workspace tabs reference for egui tab bar rendering (set by main loop before render)
     pub tab_names: Vec<UiTabInfo>,
-    /// Split view state: (right_tab_index, divider_ratio 0.0-1.0).
-    /// When Some, the active tab renders on the left, the split tab on the right.
-    pub split_view: Option<(usize, f32)>,
+    /// Lightweight tab content metadata for joined-tab rendering.
+    pub tab_panes: Vec<UiTabPaneInfo>,
+    /// Joined-tab pair rendered side by side.
+    pub joined_tabs: Option<JoinedTabs>,
     /// App-wide drag and drop state. Phase 1 uses this for native file drops;
     /// later phases will let each surface register typed payloads and targets.
     pub drag_drop: DragDropState,
@@ -159,7 +160,8 @@ impl UiState {
             recent_projects: crate::explorer::load_recent_projects(),
             active_tab_kind: None,
             tab_names: Vec::new(),
-            split_view: None,
+            tab_panes: Vec::new(),
+            joined_tabs: None,
             drag_drop: DragDropState::default(),
             pending_close: None,
             save_prompt_error: None,
@@ -296,7 +298,8 @@ impl UiState {
             editing_tab_text: editing_tab_text.clone(),
         };
         let mut tab_bar_action = tab_bar::TabBarAction::default();
-        let split_view = self.split_view;
+        let joined_tabs = self.joined_tabs;
+        let tab_panes = std::mem::take(&mut self.tab_panes);
         let drag_drop = self.drag_drop.clone();
 
         let full_output = self.ctx.run(raw_input, |ctx| {
@@ -338,7 +341,7 @@ impl UiState {
                 tab_bar::TabBarRenderInput {
                     tabs: &tab_names,
                     active_tab_index,
-                    split_view,
+                    joined_tabs,
                     bar_bg: egui::Color32::from_rgb(36, 36, 36),
                 },
                 &mut tab_bar_state,
@@ -372,6 +375,9 @@ impl UiState {
             tab_content::render_tab_content(
                 ctx,
                 active_tab_kind,
+                active_tab_index,
+                joined_tabs,
+                &tab_panes,
                 &mut config_clone,
                 tab_content::TabContentAppearance {
                     bg,
@@ -422,6 +428,7 @@ impl UiState {
         self.sketch = sketch;
         self.sidebar = sidebar_state;
         self.explorer = explorer;
+        self.tab_panes = tab_panes;
         if let Some((path, buffer_idx)) = editor_view.pending_file_tab.take() {
             commands_out.push(AppCommand::OpenCodeFile { path, buffer_idx });
         }

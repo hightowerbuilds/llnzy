@@ -20,10 +20,10 @@ use llnzy::error_log::{ErrorLog, ErrorPanel};
 use llnzy::input;
 use llnzy::keybindings::Action;
 use llnzy::layout::{LayoutInputs, ScreenLayout};
-use llnzy::renderer::{RenderRequest, Renderer, SplitTerminalPane};
+use llnzy::renderer::{RenderRequest, Renderer, TerminalPane};
 use llnzy::search::Search;
 use llnzy::selection::Selection;
-use llnzy::ui::{ActiveView, PendingClose, UiFrameOutput, UiState, BUMPER_WIDTH};
+use llnzy::ui::{ActiveView, JoinedTabs, PendingClose, UiFrameOutput, UiState, BUMPER_WIDTH};
 use llnzy::workspace::{TabContent, WorkspaceTab};
 use llnzy::UserEvent;
 
@@ -87,6 +87,35 @@ impl App {
         let id = self.next_tab_id;
         self.next_tab_id += 1;
         id
+    }
+
+    fn joined_terminal_tab_at_cursor(&self) -> Option<usize> {
+        let layout = self.screen_layout.as_ref()?;
+        let joined = self
+            .ui
+            .as_ref()
+            .and_then(|ui| ui.joined_tabs)
+            .filter(|joined| valid_joined_tabs(*joined, self.active_tab, self.tabs.len()))?;
+        let x = self.cursor_pos.x as f32;
+        let y = self.cursor_pos.y as f32;
+        let (left_rect, right_rect) = joined_content_rects(layout);
+
+        for (idx, rect) in [(joined.primary, left_rect), (joined.secondary, right_rect)] {
+            let is_terminal = self
+                .tabs
+                .get(idx)
+                .is_some_and(|tab| tab.content.as_terminal().is_some());
+            if is_terminal
+                && x >= rect.x
+                && x < rect.x + rect.w
+                && y >= rect.y
+                && y < rect.y + rect.h
+            {
+                return Some(idx);
+            }
+        }
+
+        None
     }
 }
 
@@ -207,6 +236,20 @@ impl ApplicationHandler<UserEvent> for App {
             }
         }
 
+        if let WindowEvent::MouseInput {
+            state: ElementState::Pressed,
+            button: MouseButton::Left,
+            ..
+        } = &event
+        {
+            if let Some(tab_idx) = self.joined_terminal_tab_at_cursor() {
+                if tab_idx != self.active_tab {
+                    self.switch_tab(tab_idx);
+                    return;
+                }
+            }
+        }
+
         // Route events to egui first
         if let (Some(window), Some(ui)) = (&self.window, &mut self.ui) {
             let response = ui.handle_event(window, &event);
@@ -293,6 +336,7 @@ impl ApplicationHandler<UserEvent> for App {
                 }
 
                 let tab_info = self.tab_titles();
+                let tab_pane_info = self.tab_panes();
                 let render_titles: Vec<(String, bool)> = tab_info
                     .iter()
                     .enumerate()
@@ -368,25 +412,29 @@ impl ApplicationHandler<UserEvent> for App {
                                 self.tabs.get(self.active_tab).map(|t| t.content.kind());
                             // Populate tab names for egui tab bar
                             ui.tab_names = tab_info.clone();
+                            ui.tab_panes = tab_pane_info.clone();
                         }
 
                         // Get the active terminal session (if any) for the renderer
                         let active_tab = self.tabs.get(self.active_tab);
-                        let terminal_session = active_tab.and_then(|t| t.content.as_terminal());
                         let tab_id = active_tab.map(|t| t.id).unwrap_or(0);
-                        let split_terminal = self
-                            .ui
-                            .as_ref()
-                            .and_then(|ui| ui.split_view)
-                            .and_then(|(right_idx, ratio)| {
-                                self.tabs.get(right_idx).and_then(|tab| {
-                                    tab.content.as_terminal().map(|terminal| SplitTerminalPane {
-                                        terminal,
-                                        tab_id: tab.id,
-                                        ratio,
-                                    })
-                                })
-                            });
+                        let joined_tabs =
+                            self.ui
+                                .as_ref()
+                                .and_then(|ui| ui.joined_tabs)
+                                .filter(|joined| {
+                                    valid_joined_tabs(*joined, self.active_tab, self.tabs.len())
+                                });
+                        let terminal_panes = joined_tabs
+                            .map(|joined| {
+                                joined_terminal_panes(&self.tabs, self.active_tab, layout, joined)
+                            })
+                            .unwrap_or_default();
+                        let terminal_session = if terminal_panes.is_empty() {
+                            active_tab.and_then(|t| t.content.as_terminal())
+                        } else {
+                            None
+                        };
 
                         let ui_state = &mut self.ui;
                         let window_ref = &self.window;
@@ -407,7 +455,7 @@ impl ApplicationHandler<UserEvent> for App {
                         renderer.render(RenderRequest {
                             terminal: terminal_session,
                             tab_id,
-                            split_terminal,
+                            terminal_panes: &terminal_panes,
                             tab_titles: &render_titles,
                             selection_rects: &sel_info,
                             search_rects: &search_rects,
@@ -767,7 +815,7 @@ impl ApplicationHandler<UserEvent> for App {
                             self.switch_tab(prev);
                         }
                         Action::SplitVertical | Action::SplitHorizontal => {
-                            // Split panes removed — open a new terminal tab instead
+                            // Legacy shortcuts now open a normal terminal tab.
                             self.new_tab();
                         }
                         Action::ToggleFullscreen => self.toggle_fullscreen(),
@@ -1094,6 +1142,54 @@ impl ApplicationHandler<UserEvent> for App {
             self.request_redraw();
         }
     }
+}
+
+fn valid_joined_tabs(joined: JoinedTabs, active_tab: usize, tab_count: usize) -> bool {
+    joined.primary < tab_count
+        && joined.secondary < tab_count
+        && joined.primary != joined.secondary
+        && joined.contains(active_tab)
+}
+
+fn joined_terminal_panes<'a>(
+    tabs: &'a [llnzy::workspace::WorkspaceTab],
+    active_tab: usize,
+    layout: &ScreenLayout,
+    joined: JoinedTabs,
+) -> Vec<TerminalPane<'a>> {
+    let (left_rect, right_rect) = joined_content_rects(layout);
+    [(joined.primary, left_rect), (joined.secondary, right_rect)]
+        .into_iter()
+        .filter_map(|(idx, rect)| {
+            tabs.get(idx)
+                .and_then(|tab| tab.content.as_terminal().map(|terminal| (tab, terminal)))
+                .map(|(tab, terminal)| TerminalPane {
+                    terminal,
+                    tab_id: tab.id,
+                    rect,
+                    active: idx == active_tab,
+                })
+        })
+        .collect()
+}
+
+fn joined_content_rects(layout: &ScreenLayout) -> (llnzy::session::Rect, llnzy::session::Rect) {
+    const DIVIDER_GAP: f32 = 8.0;
+    let content = &layout.content;
+    let pane_w = ((content.w - DIVIDER_GAP).max(2.0) / 2.0).max(1.0);
+    let left = llnzy::session::Rect {
+        x: content.x,
+        y: content.y,
+        w: pane_w,
+        h: content.h,
+    };
+    let right = llnzy::session::Rect {
+        x: content.x + pane_w + DIVIDER_GAP,
+        y: content.y,
+        w: pane_w,
+        h: content.h,
+    };
+    (left, right)
 }
 
 fn main() {

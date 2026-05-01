@@ -1,7 +1,7 @@
 use winit::window::Fullscreen;
 
 use llnzy::app::window_state;
-use llnzy::ui::UiTabInfo;
+use llnzy::ui::{UiTabInfo, UiTabPaneInfo};
 use llnzy::workspace::TabContent;
 
 use crate::App;
@@ -75,6 +75,19 @@ impl App {
                     kind: tab.content.kind(),
                     exited,
                 }
+            })
+            .collect()
+    }
+
+    pub(crate) fn tab_panes(&self) -> Vec<UiTabPaneInfo> {
+        self.tabs
+            .iter()
+            .map(|tab| UiTabPaneInfo {
+                kind: tab.content.kind(),
+                buffer_idx: match &tab.content {
+                    TabContent::CodeFile { buffer_idx, .. } => Some(*buffer_idx),
+                    _ => None,
+                },
             })
             .collect()
     }

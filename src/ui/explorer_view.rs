@@ -1306,7 +1306,7 @@ pub(crate) fn render_explorer_view(
                         let resp = ui.add(
                             egui::TextEdit::singleline(&mut query)
                                 .hint_text("Search in project...")
-                                .desired_width(ui.available_width() - 100.0)
+                                .desired_width((ui.available_width() - 100.0).max(80.0))
                                 .text_color(egui::Color32::WHITE)
                                 .font(egui::TextStyle::Monospace),
                         );
@@ -1555,7 +1555,7 @@ pub(crate) fn render_explorer_view(
                     let resp = ui.add(
                         egui::TextEdit::singleline(&mut query)
                             .hint_text("Search symbols...")
-                            .desired_width(ui.available_width() - 10.0)
+                            .desired_width((ui.available_width() - 10.0).max(80.0))
                             .text_color(egui::Color32::WHITE)
                             .font(egui::TextStyle::Monospace),
                     );
@@ -2237,7 +2237,7 @@ fn render_finder(
         let response = ui.add(
             egui::TextEdit::singleline(&mut query)
                 .hint_text("Type to search...")
-                .desired_width(ui.available_width() - 20.0)
+                .desired_width((ui.available_width() - 20.0).max(80.0))
                 .text_color(egui::Color32::WHITE)
                 .font(egui::TextStyle::Monospace),
         );

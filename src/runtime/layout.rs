@@ -45,12 +45,11 @@ impl App {
         }
     }
 
-    pub(crate) fn split_terminal_grid_size(&self, ratio: f32) -> (u16, u16) {
+    pub(crate) fn joined_terminal_grid_size(&self) -> (u16, u16) {
         const DIVIDER_GAP: f32 = 8.0;
         if let Some(layout) = &self.screen_layout {
-            let ratio = ratio.clamp(0.2, 0.8);
             let pane_w =
-                ((layout.content.w - DIVIDER_GAP).max(layout.cell_w) * ratio).max(layout.cell_w);
+                ((layout.content.w - DIVIDER_GAP).max(layout.cell_w) * 0.5).max(layout.cell_w);
             ((pane_w / layout.cell_w).max(1.0) as u16, layout.grid_rows)
         } else {
             (40, 24)
@@ -59,9 +58,55 @@ impl App {
 
     pub(crate) fn pixel_to_grid(&self, pos: winit::dpi::PhysicalPosition<f64>) -> (usize, usize) {
         if let Some(layout) = &self.screen_layout {
-            layout.pixel_to_grid(pos.x as f32, pos.y as f32)
+            let rect = self
+                .active_joined_terminal_rect(layout)
+                .unwrap_or(PaneRect {
+                    x: layout.content.x,
+                    y: layout.content.y,
+                    w: layout.content.w,
+                    h: layout.content.h,
+                });
+            let (cols, rows) = self
+                .active_session()
+                .map(|session| session.terminal.size())
+                .unwrap_or((layout.grid_cols as usize, layout.grid_rows as usize));
+            let col = ((pos.x as f32 - rect.x) / layout.cell_w).max(0.0) as usize;
+            let row = ((pos.y as f32 - rect.y) / layout.cell_h).max(0.0) as usize;
+            let col = col.min(cols.saturating_sub(1));
+            let row = row.min(rows.saturating_sub(1));
+            (row, col)
         } else {
             (0, 0)
+        }
+    }
+
+    fn active_joined_terminal_rect(&self, layout: &ScreenLayout) -> Option<PaneRect> {
+        const DIVIDER_GAP: f32 = 8.0;
+        let joined = self
+            .ui
+            .as_ref()
+            .and_then(|ui| ui.joined_tabs)
+            .filter(|joined| joined.contains(self.active_tab))?;
+        let pane_w = ((layout.content.w - DIVIDER_GAP).max(2.0) / 2.0).max(1.0);
+        let left = PaneRect {
+            x: layout.content.x,
+            y: layout.content.y,
+            w: pane_w,
+            h: layout.content.h,
+        };
+        let right = PaneRect {
+            x: layout.content.x + pane_w + DIVIDER_GAP,
+            y: layout.content.y,
+            w: pane_w,
+            h: layout.content.h,
+        };
+
+        if joined.primary == self.active_tab {
+            Some(left)
+        } else if joined.secondary == self.active_tab {
+            Some(right)
+        } else {
+            None
         }
     }
 
@@ -151,14 +196,15 @@ impl App {
     pub(crate) fn resize_terminal_tabs(&mut self) {
         if let Some(layout) = &self.screen_layout {
             let (cols, rows) = (layout.grid_cols, layout.grid_rows);
-            let split = self.ui.as_ref().and_then(|ui| ui.split_view);
-            let split_cols_rows = split.map(|(_, ratio)| self.split_terminal_grid_size(ratio));
+            let joined = self.ui.as_ref().and_then(|ui| ui.joined_tabs);
+            let joined_cols_rows = joined.map(|_| self.joined_terminal_grid_size());
             for (idx, tab) in self.tabs.iter_mut().enumerate() {
                 if let TabContent::Terminal(ref mut session) = tab.content {
-                    if let Some((right_idx, _)) = split {
-                        if idx == self.active_tab || idx == right_idx {
-                            let (split_cols, split_rows) = split_cols_rows.unwrap_or((cols, rows));
-                            session.resize(split_cols, split_rows);
+                    if let Some(joined) = joined {
+                        if joined.contains(idx) {
+                            let (joined_cols, joined_rows) =
+                                joined_cols_rows.unwrap_or((cols, rows));
+                            session.resize(joined_cols, joined_rows);
                             continue;
                         }
                     }

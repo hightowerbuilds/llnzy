@@ -192,7 +192,8 @@ fn render_saved_prompt_list(
     ui.add_space(8.0);
 
     ui.horizontal(|ui| {
-        ui.add_sized([ui.available_width() - 178.0, 18.0], header_label("Prompt"));
+        let prompt_w = (ui.available_width() - 178.0).max(40.0);
+        ui.add_sized([prompt_w, 18.0], header_label("Prompt"));
         ui.add_sized([48.0, 18.0], header_label("Chars"));
         ui.add_sized([104.0, 18.0], header_label("Queue"));
     });
@@ -218,7 +219,7 @@ fn render_saved_prompt_list(
                     .inner_margin(egui::Margin::symmetric(8.0, 5.0))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            let title_w = (ui.available_width() - 170.0).max(160.0);
+                            let title_w = (ui.available_width() - 170.0).max(40.0);
                             ui.add_sized(
                                 [title_w, 20.0],
                                 egui::Label::new(

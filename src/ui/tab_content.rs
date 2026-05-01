@@ -5,6 +5,7 @@ use super::{
 use crate::app::commands::AppCommand;
 use crate::config::Config;
 use crate::explorer::ExplorerState;
+use crate::ui::{JoinedTabs, UiTabPaneInfo};
 use crate::workspace::TabKind;
 
 pub(super) struct TabContentAppearance {
@@ -27,10 +28,26 @@ pub(super) struct TabContentState<'a> {
 pub(super) fn render_tab_content(
     ctx: &egui::Context,
     active_tab_kind: Option<TabKind>,
+    active_tab_index: usize,
+    joined_tabs: Option<JoinedTabs>,
+    tab_panes: &[UiTabPaneInfo],
     config: &mut Config,
     appearance: TabContentAppearance,
-    state: TabContentState<'_>,
+    mut state: TabContentState<'_>,
 ) {
+    if let Some(joined) = valid_joined_tabs(joined_tabs, active_tab_index, tab_panes) {
+        render_joined_tabs(
+            ctx,
+            joined,
+            active_tab_index,
+            tab_panes,
+            config,
+            &appearance,
+            &mut state,
+        );
+        return;
+    }
+
     match active_tab_kind {
         Some(TabKind::Home) => render_home(ctx, state),
         Some(TabKind::Stacker) => render_stacker(ctx, state),
@@ -49,6 +66,228 @@ pub(super) fn render_tab_content(
             // Terminal content is rendered by wgpu, not egui.
         }
         None => render_empty(ctx, appearance.bg),
+    }
+}
+
+fn valid_joined_tabs(
+    joined_tabs: Option<JoinedTabs>,
+    active_tab_index: usize,
+    tab_panes: &[UiTabPaneInfo],
+) -> Option<JoinedTabs> {
+    let joined = joined_tabs?;
+    if joined.primary >= tab_panes.len()
+        || joined.secondary >= tab_panes.len()
+        || joined.primary == joined.secondary
+        || !joined.contains(active_tab_index)
+    {
+        return None;
+    }
+    Some(joined)
+}
+
+fn render_joined_tabs(
+    ctx: &egui::Context,
+    joined: JoinedTabs,
+    active_tab_index: usize,
+    tab_panes: &[UiTabPaneInfo],
+    config: &mut Config,
+    appearance: &TabContentAppearance,
+    state: &mut TabContentState<'_>,
+) {
+    egui::CentralPanel::default()
+        .frame(egui::Frame::none().fill(egui::Color32::TRANSPARENT))
+        .show(ctx, |ui| {
+            let rect = ui.max_rect();
+            let gap = 8.0;
+            let pane_w = ((rect.width() - gap).max(2.0) / 2.0).max(1.0);
+            let left_rect = egui::Rect::from_min_size(rect.min, egui::vec2(pane_w, rect.height()));
+            let right_rect = egui::Rect::from_min_size(
+                egui::pos2(left_rect.right() + gap, rect.top()),
+                egui::vec2(pane_w, rect.height()),
+            );
+            let divider = egui::Rect::from_min_max(
+                egui::pos2(left_rect.right(), rect.top()),
+                egui::pos2(right_rect.left(), rect.bottom()),
+            );
+            ui.painter().rect_filled(
+                divider,
+                egui::Rounding::ZERO,
+                egui::Color32::from_rgb(24, 24, 24),
+            );
+            ui.painter().line_segment(
+                [
+                    egui::pos2(divider.center().x, divider.top()),
+                    egui::pos2(divider.center().x, divider.bottom()),
+                ],
+                egui::Stroke::new(1.0, egui::Color32::from_rgb(76, 82, 90)),
+            );
+
+            render_joined_pane(
+                ui,
+                ctx,
+                left_rect,
+                tab_panes[joined.primary],
+                joined.primary == active_tab_index,
+                config,
+                appearance,
+                state,
+            );
+            render_joined_pane(
+                ui,
+                ctx,
+                right_rect,
+                tab_panes[joined.secondary],
+                joined.secondary == active_tab_index,
+                config,
+                appearance,
+                state,
+            );
+        });
+
+    if let Some(active_buffer_idx) = tab_panes
+        .get(active_tab_index)
+        .and_then(|pane| pane.buffer_idx)
+    {
+        state.editor_view.editor.switch_to(active_buffer_idx);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_joined_pane(
+    ui: &mut egui::Ui,
+    ctx: &egui::Context,
+    rect: egui::Rect,
+    pane: UiTabPaneInfo,
+    active: bool,
+    config: &mut Config,
+    appearance: &TabContentAppearance,
+    state: &mut TabContentState<'_>,
+) {
+    let mut pane_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(rect)
+            .layout(egui::Layout::top_down(egui::Align::Min)),
+    );
+    pane_ui.set_clip_rect(rect);
+
+    match pane.kind {
+        TabKind::Terminal => {
+            if active {
+                pane_ui.painter().rect_stroke(
+                    rect.shrink(1.0),
+                    egui::Rounding::same(2.0),
+                    egui::Stroke::new(1.0, egui::Color32::from_rgb(82, 96, 108)),
+                );
+            }
+        }
+        TabKind::Home => {
+            render_pane_frame(
+                &mut pane_ui,
+                egui::Color32::from_rgb(36, 36, 36),
+                0.0,
+                |ui| {
+                    apply_home_action(
+                        home_view::render_home_view_ui(ui, state.recent_projects),
+                        state,
+                    );
+                },
+            );
+        }
+        TabKind::Stacker => {
+            render_pane_frame(
+                &mut pane_ui,
+                egui::Color32::from_rgb(36, 36, 36),
+                0.0,
+                |ui| {
+                    stacker_view::render_stacker_view(
+                        ui,
+                        &mut state.stacker.prompts,
+                        &mut state.stacker.input,
+                        &mut state.stacker.editing,
+                        &mut state.stacker.edit_text,
+                        &mut state.stacker.dirty,
+                        state.saved_edit_idx,
+                        &mut state.stacker.editor_font_size,
+                        &mut state.stacker.queued_prompts,
+                    );
+                },
+            );
+        }
+        TabKind::CodeFile => {
+            if let Some(buffer_idx) = pane.buffer_idx {
+                state.editor_view.editor.switch_to(buffer_idx);
+            }
+            render_pane_frame(&mut pane_ui, color_from_rgb(appearance.bg), 12.0, |ui| {
+                explorer_view::render_explorer_view(ui, state.explorer, state.editor_view, config);
+            });
+        }
+        TabKind::Sketch => {
+            let sketch_bg = color_from_rgb(appearance.bg);
+            let sketch_appearance = sketch_view::SketchAppearance {
+                canvas_bg: sketch_bg,
+                text_color: appearance.text_color,
+                active_btn: appearance.active_btn,
+            };
+            render_pane_frame(&mut pane_ui, sketch_bg, 12.0, |ui| {
+                let canvas_rect = sketch_view::render_sketch_view(
+                    ctx,
+                    ui,
+                    &mut state.sketch.state,
+                    &sketch_appearance,
+                );
+                let ppp = ctx.pixels_per_point();
+                state.sketch.canvas_px = Some([
+                    canvas_rect.left() * ppp,
+                    canvas_rect.top() * ppp,
+                    canvas_rect.right() * ppp,
+                    canvas_rect.bottom() * ppp,
+                ]);
+            });
+        }
+        TabKind::Appearances => {
+            render_pane_frame(
+                &mut pane_ui,
+                egui::Color32::from_rgb(36, 36, 36),
+                18.0,
+                |ui| {
+                    state.settings.render_appearances_ui(ui, config);
+                },
+            );
+        }
+        TabKind::Settings => {
+            render_pane_frame(
+                &mut pane_ui,
+                egui::Color32::from_rgb(36, 36, 36),
+                20.0,
+                |ui| {
+                    let output = state.settings.render_settings_ui(ui, config);
+                    if let Some(workspace) = output.launch_workspace {
+                        state.commands.push(AppCommand::LaunchWorkspace(workspace));
+                    }
+                },
+            );
+        }
+    }
+}
+
+fn render_pane_frame(
+    ui: &mut egui::Ui,
+    fill: egui::Color32,
+    margin: f32,
+    add_contents: impl FnOnce(&mut egui::Ui),
+) {
+    egui::Frame::none()
+        .fill(fill)
+        .inner_margin(egui::Margin::same(margin))
+        .show(ui, add_contents);
+}
+
+fn apply_home_action(action: home_view::HomeAction, state: &mut TabContentState<'_>) {
+    if let Some(project_path) = action.open_project {
+        state.commands.push(AppCommand::OpenProject(project_path));
+    }
+    if let Some(workspace) = action.launch_workspace {
+        state.commands.push(AppCommand::LaunchWorkspace(workspace));
     }
 }
 

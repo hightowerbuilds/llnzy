@@ -82,11 +82,7 @@ impl App {
                     id,
                 },
             );
-            if let Some(ui) = &mut self.ui {
-                if let Some((right_idx, ratio)) = ui.split_view {
-                    ui.split_view = Some((remap_index_after_insert(right_idx, insert_at), ratio));
-                }
-            }
+            remap_joined_tabs_after_insert(self.ui.as_mut(), insert_at);
             self.active_tab = insert_at;
         }
         if let Some(ui) = &mut self.ui {
@@ -143,26 +139,26 @@ impl App {
                 self.close_tab();
                 true
             }
-            AppCommand::SplitRight(idx) => {
-                if idx >= self.tabs.len() {
+            AppCommand::JoinTab(idx) => {
+                if idx >= self.tabs.len() || idx == self.active_tab {
                     return false;
                 }
-                if matches!(self.tabs[idx].content, TabContent::Terminal(_)) {
-                    return self.split_terminal_right(idx);
-                }
-                if idx != self.active_tab {
-                    if let Some(ui) = &mut self.ui {
-                        ui.split_view = Some((idx, 0.5));
-                    }
-                    true
-                } else {
-                    false
-                }
-            }
-            AppCommand::Unsplit => {
                 if let Some(ui) = &mut self.ui {
-                    ui.split_view = None;
+                    ui.joined_tabs = Some(llnzy::ui::JoinedTabs {
+                        primary: self.active_tab,
+                        secondary: idx,
+                    });
                 }
+                self.resize_terminal_tabs();
+                self.request_redraw();
+                true
+            }
+            AppCommand::SeparateTabs => {
+                if let Some(ui) = &mut self.ui {
+                    ui.joined_tabs = None;
+                }
+                self.resize_terminal_tabs();
+                self.request_redraw();
                 true
             }
             AppCommand::CloseOtherTabs(keep_idx) => {
@@ -173,9 +169,7 @@ impl App {
                 self.tabs.clear();
                 self.tabs.push(kept);
                 self.active_tab = 0;
-                if let Some(ui) = &mut self.ui {
-                    ui.split_view = None;
-                }
+                clear_joined_tabs(self.ui.as_mut());
                 self.sync_active_tab_content();
                 self.selection.clear();
                 true
@@ -188,13 +182,9 @@ impl App {
                 if self.active_tab > idx {
                     self.active_tab = idx;
                 }
-                if let Some(ui) = &mut self.ui {
-                    if let Some((right_idx, _)) = ui.split_view {
-                        if right_idx > idx {
-                            ui.split_view = None;
-                        }
-                    }
-                }
+                clear_joined_tabs_if(self.ui.as_mut(), |joined| {
+                    joined.primary > idx || joined.secondary > idx
+                });
                 self.sync_active_tab_content();
                 self.selection.clear();
                 true
@@ -404,12 +394,7 @@ impl App {
                 let tab = self.tabs.remove(from);
                 self.tabs.insert(to, tab);
                 self.active_tab = remap_index_after_reorder(self.active_tab, from, to);
-                if let Some(ui) = &mut self.ui {
-                    if let Some((right_idx, ratio)) = ui.split_view {
-                        ui.split_view =
-                            Some((remap_index_after_reorder(right_idx, from, to), ratio));
-                    }
-                }
+                remap_joined_tabs_after_reorder(self.ui.as_mut(), from, to);
                 true
             }
         }
@@ -519,6 +504,45 @@ impl App {
                 true
             }
             _ => false,
+        }
+    }
+}
+
+fn clear_joined_tabs(ui: Option<&mut llnzy::ui::UiState>) {
+    if let Some(ui) = ui {
+        ui.joined_tabs = None;
+    }
+}
+
+fn clear_joined_tabs_if(
+    ui: Option<&mut llnzy::ui::UiState>,
+    predicate: impl FnOnce(llnzy::ui::JoinedTabs) -> bool,
+) {
+    if let Some(ui) = ui {
+        if ui.joined_tabs.is_some_and(predicate) {
+            ui.joined_tabs = None;
+        }
+    }
+}
+
+fn remap_joined_tabs_after_insert(ui: Option<&mut llnzy::ui::UiState>, insert_at: usize) {
+    if let Some(ui) = ui {
+        if let Some(joined) = ui.joined_tabs {
+            ui.joined_tabs = Some(llnzy::ui::JoinedTabs {
+                primary: remap_index_after_insert(joined.primary, insert_at),
+                secondary: remap_index_after_insert(joined.secondary, insert_at),
+            });
+        }
+    }
+}
+
+fn remap_joined_tabs_after_reorder(ui: Option<&mut llnzy::ui::UiState>, from: usize, to: usize) {
+    if let Some(ui) = ui {
+        if let Some(joined) = ui.joined_tabs {
+            ui.joined_tabs = Some(llnzy::ui::JoinedTabs {
+                primary: remap_index_after_reorder(joined.primary, from, to),
+                secondary: remap_index_after_reorder(joined.secondary, from, to),
+            });
         }
     }
 }

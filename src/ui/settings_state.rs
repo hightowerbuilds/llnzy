@@ -35,7 +35,15 @@ impl Default for SettingsUiState {
 
 impl SettingsUiState {
     pub fn render_appearances(&mut self, ctx: &egui::Context, config: &mut Config) {
-        render_appearance_panel(ctx, self, config);
+        egui::CentralPanel::default()
+            .frame(
+                egui::Frame::none()
+                    .fill(egui::Color32::from_rgb(36, 36, 36))
+                    .inner_margin(egui::Margin::same(18.0)),
+            )
+            .show(ctx, |ui| {
+                self.render_appearances_ui(ui, config);
+            });
     }
 
     pub fn render_settings(
@@ -51,7 +59,35 @@ impl SettingsUiState {
         }
 
         let mut output = SettingsRenderOutput::default();
-        render_settings_panel(ctx, |ui| {
+        egui::CentralPanel::default()
+            .frame(
+                egui::Frame::none()
+                    .fill(egui::Color32::from_rgb(36, 36, 36))
+                    .inner_margin(egui::Margin::same(20.0)),
+            )
+            .show(ctx, |ui| {
+                output = self.render_settings_ui(ui, config);
+            });
+        output
+    }
+
+    pub(crate) fn render_appearances_ui(&mut self, ui: &mut egui::Ui, config: &mut Config) {
+        render_appearance_panel(ui, self, config);
+    }
+
+    pub(crate) fn render_settings_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        config: &mut Config,
+    ) -> SettingsRenderOutput {
+        if !matches!(
+            self.active_tab,
+            SettingsTab::Editor | SettingsTab::Workspace
+        ) {
+            self.active_tab = SettingsTab::Editor;
+        }
+        let mut output = SettingsRenderOutput::default();
+        render_settings_panel(ui, |ui| {
             settings_tabs::render_editor_tab(ui, config);
             ui.add_space(24.0);
             ui.separator();
@@ -69,71 +105,63 @@ impl SettingsUiState {
     }
 }
 
-fn render_appearance_panel(ctx: &egui::Context, state: &mut SettingsUiState, config: &mut Config) {
+fn render_appearance_panel(ui: &mut egui::Ui, state: &mut SettingsUiState, config: &mut Config) {
     let _appearance_settings_renderers = (
         settings_tabs::render_themes_tab as fn(&mut egui::Ui, &mut Config),
         settings_tabs::render_text_tab as fn(&mut egui::Ui, &mut Config),
     );
 
-    egui::CentralPanel::default()
-        .frame(
-            egui::Frame::none()
-                .fill(egui::Color32::from_rgb(36, 36, 36))
-                .inner_margin(egui::Margin::same(18.0)),
-        )
-        .show(ctx, |ui| {
-            let full = ui.available_size();
-            let nav_h = 44.0;
-            let nav_gap = 18.0;
-            let footer_clearance = 46.0;
-            let content_h = (full.y - nav_h - nav_gap - footer_clearance).max(160.0);
-            let content_size = egui::vec2(full.x, content_h);
+    let full = ui.available_size();
+    let nav_h = 44.0;
+    let nav_gap = 18.0;
+    let footer_clearance = 46.0;
+    let content_h = (full.y - nav_h - nav_gap - footer_clearance).max(160.0);
+    let content_size = egui::vec2(full.x, content_h);
 
-            let gap = if content_size.x < 560.0 { 10.0 } else { 18.0 };
-            let column_w = ((content_size.x - gap).max(0.0) / 2.0).max(120.0);
-            let (content_rect, _) = ui.allocate_exact_size(content_size, egui::Sense::hover());
-            let left_rect =
-                egui::Rect::from_min_size(content_rect.min, egui::vec2(column_w, content_size.y));
-            let right_rect = egui::Rect::from_min_size(
-                egui::pos2(content_rect.min.x + column_w + gap, content_rect.min.y),
-                egui::vec2(column_w, content_size.y),
+    let gap = if content_size.x < 560.0 { 10.0 } else { 18.0 };
+    let column_w = ((content_size.x - gap).max(0.0) / 2.0).max(120.0);
+    let (content_rect, _) = ui.allocate_exact_size(content_size, egui::Sense::hover());
+    let left_rect =
+        egui::Rect::from_min_size(content_rect.min, egui::vec2(column_w, content_size.y));
+    let right_rect = egui::Rect::from_min_size(
+        egui::pos2(content_rect.min.x + column_w + gap, content_rect.min.y),
+        egui::vec2(column_w, content_size.y),
+    );
+
+    let mut effects_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(left_rect)
+            .layout(egui::Layout::top_down(egui::Align::Min)),
+    );
+    effects_ui.set_clip_rect(left_rect);
+    if matches!(state.active_appearance, AppearancePage::Terminal) {
+        render_terminal_effects_column(&mut effects_ui, config, column_w, content_size.y);
+    } else {
+        render_placeholder_column(&mut effects_ui, "Effects", column_w, content_size.y);
+    }
+
+    let mut preview_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(right_rect)
+            .layout(egui::Layout::top_down(egui::Align::Min)),
+    );
+    preview_ui.set_clip_rect(right_rect);
+    render_preview_column(&mut preview_ui, state, config, column_w, content_size.y);
+
+    ui.add_space(nav_gap);
+    egui::Frame::none()
+        .fill(egui::Color32::from_rgb(30, 30, 30))
+        .rounding(egui::Rounding::same(4.0))
+        .inner_margin(egui::Margin::symmetric(12.0, 6.0))
+        .show(ui, |ui| {
+            ui.set_width((full.x - 24.0).max(120.0));
+            ui.set_height(nav_h - 2.0);
+            ui.with_layout(
+                egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+                |ui| render_appearance_nav(ui, &mut state.active_appearance),
             );
-
-            let mut effects_ui = ui.new_child(
-                egui::UiBuilder::new()
-                    .max_rect(left_rect)
-                    .layout(egui::Layout::top_down(egui::Align::Min)),
-            );
-            effects_ui.set_clip_rect(left_rect);
-            if matches!(state.active_appearance, AppearancePage::Terminal) {
-                render_terminal_effects_column(&mut effects_ui, config, column_w, content_size.y);
-            } else {
-                render_placeholder_column(&mut effects_ui, "Effects", column_w, content_size.y);
-            }
-
-            let mut preview_ui = ui.new_child(
-                egui::UiBuilder::new()
-                    .max_rect(right_rect)
-                    .layout(egui::Layout::top_down(egui::Align::Min)),
-            );
-            preview_ui.set_clip_rect(right_rect);
-            render_preview_column(&mut preview_ui, state, config, column_w, content_size.y);
-
-            ui.add_space(nav_gap);
-            egui::Frame::none()
-                .fill(egui::Color32::from_rgb(30, 30, 30))
-                .rounding(egui::Rounding::same(4.0))
-                .inner_margin(egui::Margin::symmetric(12.0, 6.0))
-                .show(ui, |ui| {
-                    ui.set_width((full.x - 24.0).max(120.0));
-                    ui.set_height(nav_h - 2.0);
-                    ui.with_layout(
-                        egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
-                        |ui| render_appearance_nav(ui, &mut state.active_appearance),
-                    );
-                });
-            ui.add_space(footer_clearance);
         });
+    ui.add_space(footer_clearance);
 }
 
 fn render_terminal_effects_column(ui: &mut egui::Ui, config: &mut Config, width: f32, height: f32) {
@@ -671,16 +699,8 @@ fn nav_button(
     }
 }
 
-fn render_settings_panel(ctx: &egui::Context, add_contents: impl FnOnce(&mut egui::Ui)) {
-    egui::CentralPanel::default()
-        .frame(
-            egui::Frame::none()
-                .fill(egui::Color32::from_rgb(36, 36, 36))
-                .inner_margin(egui::Margin::same(20.0)),
-        )
-        .show(ctx, |ui| {
-            egui::ScrollArea::vertical()
-                .auto_shrink([false; 2])
-                .show(ui, add_contents);
-        });
+fn render_settings_panel(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
+    egui::ScrollArea::vertical()
+        .auto_shrink([false; 2])
+        .show(ui, add_contents);
 }

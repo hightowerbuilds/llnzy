@@ -15,7 +15,8 @@ pub(super) fn engine_frame_from_request(
 ) -> EngineFrame {
     let mut frame = EngineFrame::new(viewport);
     frame.clear_color = color_from_rgba(config.bg());
-    if request.terminal.is_some() && config.effects.background == "none" {
+    let has_terminal_content = request.terminal.is_some() || !request.terminal_panes.is_empty();
+    if has_terminal_content && config.effects.background == "none" {
         frame.clear_color = color_from_rgb_u8(super::TERMINAL_MINIMAL_BG);
     }
 
@@ -39,7 +40,7 @@ pub(super) fn engine_frame_from_request(
         }
     }
 
-    if request.terminal.is_some() {
+    if has_terminal_content {
         frame.push_layer(Layer::new(
             "terminal-content",
             100,
@@ -276,7 +277,7 @@ mod tests {
         let request = RenderRequest {
             terminal: None,
             tab_id: 1,
-            split_terminal: None,
+            terminal_panes: &[],
             tab_titles: &[],
             selection_rects: &[],
             search_rects: &[],
@@ -309,7 +310,7 @@ mod tests {
         let request = RenderRequest {
             terminal: None,
             tab_id: 1,
-            split_terminal: None,
+            terminal_panes: &[],
             tab_titles: &[],
             selection_rects: &[],
             search_rects: &search_rects,
@@ -359,7 +360,7 @@ mod tests {
         let request = RenderRequest {
             terminal: None,
             tab_id: 1,
-            split_terminal: None,
+            terminal_panes: &[],
             tab_titles: &[],
             selection_rects: &[],
             search_rects: &[],
@@ -388,7 +389,7 @@ mod tests {
         let request = RenderRequest {
             terminal: None,
             tab_id: 1,
-            split_terminal: None,
+            terminal_panes: &[],
             tab_titles: &[],
             selection_rects: &[],
             search_rects: &[],
@@ -437,7 +438,7 @@ mod tests {
         let request = RenderRequest {
             terminal: None,
             tab_id: 1,
-            split_terminal: None,
+            terminal_panes: &[],
             tab_titles: &[],
             selection_rects: &[],
             search_rects: &[],

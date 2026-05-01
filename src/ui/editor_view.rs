@@ -113,7 +113,7 @@ pub(crate) fn render_text_editor(
     let visible_line_count = visible_doc_lines.len().max(1);
 
     // Word wrap: compute wrap rows for all visible doc lines
-    let text_area_w_for_wrap = ui.available_width() - gutter_width - text_margin;
+    let text_area_w_for_wrap = (ui.available_width() - gutter_width - text_margin).max(char_width);
     let wrap_cols = (text_area_w_for_wrap / char_width).max(10.0) as usize;
     let word_wrap = editor_config.word_wrap;
     let wrap_rows = if word_wrap {
@@ -129,7 +129,7 @@ pub(crate) fn render_text_editor(
     };
 
     // Vertical scroll -- smooth lerp toward target.
-    let available_h = ui.available_height() - 20.0;
+    let available_h = (ui.available_height() - 20.0).max(line_height);
     let visible_lines = (available_h / line_height).max(1.0) as usize;
     let max_scroll = effective_line_count.saturating_sub(1);
     view.scroll_line = view.scroll_line.min(max_scroll);
@@ -166,7 +166,7 @@ pub(crate) fn render_text_editor(
     }
 
     // Horizontal scroll (disabled in word-wrap mode)
-    let text_area_w = ui.available_width() - gutter_width - text_margin;
+    let text_area_w = (ui.available_width() - gutter_width - text_margin).max(char_width);
     let visible_cols = (text_area_w / char_width).max(1.0) as usize;
     if word_wrap {
         view.scroll_col = 0;
@@ -1996,7 +1996,7 @@ fn render_search_bar(
                 let mut query = search.query.clone();
                 let response = ui.add(
                     egui::TextEdit::singleline(&mut query)
-                        .desired_width(ui.available_width() - 280.0)
+                        .desired_width((ui.available_width() - 280.0).max(80.0))
                         .hint_text("Search...")
                         .text_color(egui::Color32::WHITE)
                         .font(egui::TextStyle::Monospace),
@@ -2154,7 +2154,7 @@ fn render_search_bar(
                     let mut replacement = search.replacement.clone();
                     ui.add(
                         egui::TextEdit::singleline(&mut replacement)
-                            .desired_width(ui.available_width() - 180.0)
+                            .desired_width((ui.available_width() - 180.0).max(80.0))
                             .hint_text("Replace with...")
                             .text_color(egui::Color32::WHITE)
                             .font(egui::TextStyle::Monospace),

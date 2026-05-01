@@ -14,6 +14,16 @@ use crate::terminal::Terminal;
 
 pub type TextCacheKey = usize;
 
+pub struct GridTextPane<'a> {
+    pub cache_key: TextCacheKey,
+    pub terminal: &'a Terminal,
+    pub config: &'a Config,
+    pub block_cursor: Option<(usize, usize)>,
+    pub offset_x: f32,
+    pub offset_y: f32,
+    pub text_animation: bool,
+}
+
 struct LineCache {
     buffers: Vec<Buffer>,
     hashes: Vec<u64>,
@@ -36,13 +46,16 @@ pub struct TextSystem {
     font_system: FontSystem,
     swash_cache: SwashCache,
     atlas: TextAtlas,
-    renderer: GlyphonRenderer,
     // Separate renderer for overlay text (tab labels, search bar, error panel).
     // Each GlyphonRenderer owns an internal vertex buffer; calling prepare()
     // on one can reallocate (destroy) its buffer without affecting the other.
     // This prevents a wgpu validation error when both grid text and overlay
     // text are recorded into the same command encoder.
     overlay_renderer: GlyphonRenderer,
+    // One grid renderer per terminal pane/tab. Each GlyphonRenderer owns
+    // an internal vertex buffer; preparing one pane must not invalidate
+    // another pane's recorded draw commands before queue submission.
+    grid_renderers: HashMap<TextCacheKey, GlyphonRenderer>,
     viewport: Viewport,
     pub cell_width: f32,
     pub cell_height: f32,
@@ -71,12 +84,6 @@ impl TextSystem {
         let swash_cache = SwashCache::new();
         let cache = Cache::new(&gpu.device);
         let mut atlas = TextAtlas::new(&gpu.device, &gpu.queue, &cache, gpu.surface_config.format);
-        let renderer = GlyphonRenderer::new(
-            &mut atlas,
-            &gpu.device,
-            wgpu::MultisampleState::default(),
-            None,
-        );
         let overlay_renderer = GlyphonRenderer::new(
             &mut atlas,
             &gpu.device,
@@ -135,8 +142,8 @@ impl TextSystem {
             font_system,
             swash_cache,
             atlas,
-            renderer,
             overlay_renderer,
+            grid_renderers: HashMap::new(),
             viewport,
             cell_width,
             cell_height,
@@ -169,6 +176,8 @@ impl TextSystem {
     pub fn retain_caches(&mut self, active_keys: &HashSet<TextCacheKey>) {
         self.line_caches
             .retain(|cache_key, _| active_keys.contains(cache_key));
+        self.grid_renderers
+            .retain(|cache_key, _| active_keys.contains(cache_key));
     }
 
     #[expect(
@@ -188,9 +197,50 @@ impl TextSystem {
         offset_y: f32,
         text_animation: bool,
     ) {
-        let (cols, rows) = terminal.size();
-        let width = gpu.surface_config.width as f32;
-        let cache = self.line_caches.entry(cache_key).or_default();
+        let pane = GridTextPane {
+            cache_key,
+            terminal,
+            config,
+            block_cursor,
+            offset_x,
+            offset_y,
+            text_animation,
+        };
+        self.refresh_grid_cache(&pane);
+        self.render_cached_grid(&pane, gpu, view, encoder);
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "glyphon render calls need GPU, target, cache, and terminal context together"
+    )]
+    pub fn render_grids_at(
+        &mut self,
+        panes: &[GridTextPane<'_>],
+        gpu: &GpuState,
+        view: &wgpu::TextureView,
+        encoder: &mut wgpu::CommandEncoder,
+    ) {
+        for pane in panes {
+            self.render_grid_at(
+                pane.cache_key,
+                pane.terminal,
+                pane.config,
+                gpu,
+                view,
+                encoder,
+                pane.block_cursor,
+                pane.offset_x,
+                pane.offset_y,
+                pane.text_animation,
+            );
+        }
+    }
+
+    fn refresh_grid_cache(&mut self, pane: &GridTextPane<'_>) {
+        let (cols, rows) = pane.terminal.size();
+        let width = (cols as f32 * self.cell_width).max(self.cell_width);
+        let cache = self.line_caches.entry(pane.cache_key).or_default();
 
         // Invalidate this pane only if its render width changed.
         if (width - cache.width).abs() > 0.5 {
@@ -200,17 +250,9 @@ impl TextSystem {
 
         let metrics = Metrics::new(self.font_size, self.cell_height);
 
-        self.viewport.update(
-            &gpu.queue,
-            Resolution {
-                width: gpu.surface_config.width,
-                height: gpu.surface_config.height,
-            },
-        );
-
         // Compute hashes for each line to detect changes
         let new_hashes: Vec<u64> = (0..rows)
-            .map(|row| hash_line(terminal, config, row, cols, block_cursor))
+            .map(|row| hash_line(pane.terminal, pane.config, row, cols, pane.block_cursor))
             .collect();
 
         // Ensure we have enough buffers
@@ -239,13 +281,24 @@ impl TextSystem {
             buffer.set_size(font_system, Some(width), Some(cell_height));
 
             // Build spans for this line
-            let spans = build_line_spans(terminal, config, row, cols, block_cursor, font_family);
+            let spans = build_line_spans(
+                pane.terminal,
+                pane.config,
+                row,
+                cols,
+                pane.block_cursor,
+                font_family,
+            );
             let span_refs: Vec<(&str, Attrs)> =
                 spans.iter().map(|(s, a)| (s.as_str(), *a)).collect();
 
             let default_attrs = Attrs::new()
                 .family(Family::Name(font_family))
-                .color(Color::rgb(config.fg()[0], config.fg()[1], config.fg()[2]));
+                .color(Color::rgb(
+                    pane.config.fg()[0],
+                    pane.config.fg()[1],
+                    pane.config.fg()[2],
+                ));
 
             buffer.set_rich_text(font_system, span_refs, default_attrs, shaping);
             buffer.shape_until_scroll(font_system, false);
@@ -263,43 +316,70 @@ impl TextSystem {
         }
 
         cache.hashes = new_hashes;
+    }
 
-        // Animation duration in frames (~12 frames at 60fps = 200ms)
+    fn render_cached_grid(
+        &mut self,
+        pane: &GridTextPane<'_>,
+        gpu: &GpuState,
+        view: &wgpu::TextureView,
+        encoder: &mut wgpu::CommandEncoder,
+    ) {
+        self.viewport.update(
+            &gpu.queue,
+            Resolution {
+                width: gpu.surface_config.width,
+                height: gpu.surface_config.height,
+            },
+        );
+
+        if !self.grid_renderers.contains_key(&pane.cache_key) {
+            let renderer = GlyphonRenderer::new(
+                &mut self.atlas,
+                &gpu.device,
+                wgpu::MultisampleState::default(),
+                None,
+            );
+            self.grid_renderers.insert(pane.cache_key, renderer);
+        }
+
+        let Some(cache) = self.line_caches.get(&pane.cache_key) else {
+            return;
+        };
+        let (cols, rows) = pane.terminal.size();
+        let right = (pane.offset_x + cols as f32 * self.cell_width).ceil() as i32;
+        let bottom = (pane.offset_y + rows as f32 * self.cell_height).ceil() as i32;
         let anim_frames = 12.0_f32;
 
-        // Build text areas from cached buffers
         let text_areas: Vec<TextArea> = cache
             .buffers
             .iter()
             .enumerate()
             .map(|(row, buffer)| {
-                let base_top = row as f32 * self.cell_height + offset_y;
+                let base_top = row as f32 * self.cell_height + pane.offset_y;
+                let (top_offset, alpha) =
+                    if pane.text_animation && cache.ages[row] < anim_frames as u32 {
+                        let t = cache.ages[row] as f32 / anim_frames;
+                        let ease = t * t * (3.0 - 2.0 * t);
+                        let slide = (1.0 - ease) * self.cell_height * 0.3;
+                        (slide, ease)
+                    } else {
+                        (0.0, 1.0)
+                    };
 
-                // Entrance animation: fade-in + slide-up
-                let (top_offset, alpha) = if text_animation && cache.ages[row] < anim_frames as u32
-                {
-                    let t = cache.ages[row] as f32 / anim_frames;
-                    let ease = t * t * (3.0 - 2.0 * t); // smoothstep
-                    let slide = (1.0 - ease) * self.cell_height * 0.3; // slide up from 30% below
-                    let alpha_val = ease;
-                    (slide, alpha_val)
-                } else {
-                    (0.0, 1.0)
-                };
-
-                let fg = config.fg();
+                let fg = pane.config.fg();
                 let a = (alpha * 255.0) as u8;
 
                 TextArea {
                     buffer,
-                    left: offset_x,
+                    left: pane.offset_x,
                     top: base_top + top_offset,
                     scale: 1.0,
                     bounds: TextBounds {
-                        left: 0,
-                        top: 0,
-                        right: gpu.surface_config.width as i32,
-                        bottom: gpu.surface_config.height as i32,
+                        left: pane.offset_x.floor() as i32,
+                        top: pane.offset_y.floor() as i32,
+                        right,
+                        bottom,
                     },
                     default_color: Color::rgba(fg[0], fg[1], fg[2], a),
                     custom_glyphs: &[],
@@ -307,8 +387,11 @@ impl TextSystem {
             })
             .collect();
 
-        if self
-            .renderer
+        let renderer = self
+            .grid_renderers
+            .get_mut(&pane.cache_key)
+            .expect("grid renderer should exist for cache key");
+        if renderer
             .prepare(
                 &gpu.device,
                 &gpu.queue,
@@ -337,7 +420,7 @@ impl TextSystem {
                 depth_stencil_attachment: None,
                 ..Default::default()
             });
-            let _ = self.renderer.render(&self.atlas, &self.viewport, &mut pass);
+            let _ = renderer.render(&self.atlas, &self.viewport, &mut pass);
         }
     }
 

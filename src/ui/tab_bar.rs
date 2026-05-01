@@ -1,4 +1,5 @@
 use super::types::UiTabInfo;
+use super::JoinedTabs;
 use crate::app::commands::AppCommand;
 use crate::app::drag_drop::{tab_reorder_destination, DragDropCommand, DragPayload, TabDropZone};
 use crate::workspace::TabKind;
@@ -16,8 +17,8 @@ const TAB_GHOST_ALPHA: u8 = 210;
 pub struct TabBarAction {
     pub switch_to: Option<usize>,
     pub close_tab: Option<usize>,
-    pub split_right: Option<usize>,
-    pub unsplit: bool,
+    pub join_tab: Option<usize>,
+    pub separate_tabs: bool,
     pub close_others: Option<usize>,
     pub close_to_right: Option<usize>,
     pub kill_terminal: Option<usize>,
@@ -34,11 +35,11 @@ impl TabBarAction {
         if let Some(idx) = self.close_tab {
             commands.push(AppCommand::CloseTab(idx));
         }
-        if let Some(idx) = self.split_right {
-            commands.push(AppCommand::SplitRight(idx));
+        if let Some(idx) = self.join_tab {
+            commands.push(AppCommand::JoinTab(idx));
         }
-        if self.unsplit {
-            commands.push(AppCommand::Unsplit);
+        if self.separate_tabs {
+            commands.push(AppCommand::SeparateTabs);
         }
         if let Some(idx) = self.close_others {
             commands.push(AppCommand::CloseOtherTabs(idx));
@@ -69,7 +70,7 @@ pub struct TabBarEditState {
 pub struct TabBarRenderInput<'a> {
     pub tabs: &'a [UiTabInfo],
     pub active_tab_index: usize,
-    pub split_view: Option<(usize, f32)>,
+    pub joined_tabs: Option<JoinedTabs>,
     pub bar_bg: egui::Color32,
 }
 
@@ -96,9 +97,12 @@ pub fn render_workspace_tab_bar(
                 ui.spacing_mut().item_spacing.x = 4.0;
                 for (i, tab) in input.tabs.iter().enumerate() {
                     let active = i == input.active_tab_index;
+                    let joined = input.joined_tabs.is_some_and(|joined| joined.contains(i));
                     let editing = edit_state.editing_tab == Some(i);
                     let tab_bg = if active {
                         egui::Color32::from_rgb(22, 22, 22)
+                    } else if joined {
+                        egui::Color32::from_rgb(20, 34, 28)
                     } else {
                         egui::Color32::from_rgb(14, 14, 14)
                     };
@@ -194,9 +198,7 @@ pub fn render_workspace_tab_bar(
                             let marker_x = match zone {
                                 TabDropZone::Before => tab_response.rect.left(),
                                 TabDropZone::After => tab_response.rect.right(),
-                                TabDropZone::Center | TabDropZone::SplitRight => {
-                                    tab_response.rect.center().x
-                                }
+                                TabDropZone::Center => tab_response.rect.center().x,
                             };
                             ui.painter().rect_stroke(
                                 tab_response.rect.expand(2.0),
@@ -228,13 +230,16 @@ pub fn render_workspace_tab_bar(
                     }
 
                     tab_response.context_menu(|ui| {
-                        if input.split_view.is_some() {
-                            if ui.button("Unsplit").clicked() {
-                                action.unsplit = true;
+                        if input.joined_tabs.is_some_and(|joined| joined.contains(i)) {
+                            if ui.button("Separate Tabs").clicked() {
+                                action.separate_tabs = true;
                                 ui.close_menu();
                             }
-                        } else if ui.button("Split Right").clicked() {
-                            action.split_right = Some(i);
+                        } else if i != input.active_tab_index
+                            && input.joined_tabs.is_none()
+                            && ui.button("Create Double Tab").clicked()
+                        {
+                            action.join_tab = Some(i);
                             ui.close_menu();
                         }
 

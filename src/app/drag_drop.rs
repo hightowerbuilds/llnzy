@@ -22,7 +22,6 @@ pub enum TabDropZone {
     Before,
     After,
     Center,
-    SplitRight,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -53,7 +52,6 @@ pub enum DragOperation {
     Copy,
     Open,
     Insert,
-    Split,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -194,7 +192,7 @@ pub fn tab_insert_index(target: usize, zone: TabDropZone, tab_count: usize) -> u
     let target = target.min(tab_count - 1);
     match zone {
         TabDropZone::Before => target,
-        TabDropZone::After | TabDropZone::Center | TabDropZone::SplitRight => target + 1,
+        TabDropZone::After | TabDropZone::Center => target + 1,
     }
     .min(tab_count)
 }
@@ -211,7 +209,7 @@ pub fn tab_reorder_destination(
 
     let insertion_idx = match zone {
         TabDropZone::Before => target,
-        TabDropZone::After | TabDropZone::Center | TabDropZone::SplitRight => target + 1,
+        TabDropZone::After | TabDropZone::Center => target + 1,
     };
     let to = if from < insertion_idx {
         insertion_idx.saturating_sub(1)
@@ -365,7 +363,7 @@ mod tests {
     }
 
     #[test]
-    fn tab_drop_zone_at_x_splits_tab_region() {
+    fn tab_drop_zone_at_x_partitions_tab_region() {
         assert_eq!(
             tab_drop_zone_at_x(120.0, 100.0, 500.0, 5),
             Some(TabDropZone::Before)
