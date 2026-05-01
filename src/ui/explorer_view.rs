@@ -2044,16 +2044,17 @@ fn render_tree_nodes(
             }
         });
 
+        let item_response = resp.inner;
         if node.is_dir {
-            handle_folder_drop(&resp.response, &node.path, action);
+            handle_folder_drop(&item_response, &node.path, action);
         } else {
-            handle_file_drag(ui.ctx(), &resp.response, &node.path, &node.name);
+            handle_file_drag(ui.ctx(), &item_response, &node.path, &node.name);
         }
 
         // Context menu
         let node_path = node.path.clone();
         let is_dir = node.is_dir;
-        resp.response.context_menu(|ui| {
+        item_response.context_menu(|ui| {
             render_tree_context_menu(ui, &node_path, is_dir, action);
         });
 
@@ -2151,16 +2152,17 @@ fn render_tree_children(
             }
         });
 
+        let item_response = resp.inner;
         if node.is_dir {
-            handle_folder_drop(&resp.response, &node.path, action);
+            handle_folder_drop(&item_response, &node.path, action);
         } else {
-            handle_file_drag(ui.ctx(), &resp.response, &node.path, &node.name);
+            handle_file_drag(ui.ctx(), &item_response, &node.path, &node.name);
         }
 
         // Context menu
         let node_path = node.path.clone();
         let is_dir = node.is_dir;
-        resp.response.context_menu(|ui| {
+        item_response.context_menu(|ui| {
             render_tree_context_menu(ui, &node_path, is_dir, action);
         });
 
@@ -2181,7 +2183,11 @@ fn handle_file_drag(
     name: &str,
 ) {
     response.dnd_set_drag_payload(DragPayload::ExplorerItems(vec![path.to_path_buf()]));
+    if response.hovered() {
+        response.ctx.set_cursor_icon(egui::CursorIcon::Grab);
+    }
     if response.dragged() {
+        response.ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
         paint_file_drag_ghost(ctx, name, response.rect);
     }
 }
