@@ -375,6 +375,7 @@ impl UiState {
                 &mut editor_view,
                 &recent_projects,
                 &config_clone,
+                &mut commands_out,
             );
             sidebar_state.open = sidebar_result.open;
             sidebar_state.recent_open = sidebar_result.recent_open;

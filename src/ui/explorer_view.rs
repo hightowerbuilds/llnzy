@@ -3,6 +3,8 @@ use std::time::Instant;
 
 use tokio::sync::oneshot;
 
+use crate::app::commands::AppCommand;
+use crate::app::drag_drop::{DragDropCommand, DragPayload};
 use crate::editor::file_watcher::{FileChange, FileWatcher};
 use crate::editor::perf;
 use crate::editor::project_search::ProjectSearch;
@@ -1962,6 +1964,11 @@ enum TreeAction {
     NewFile(std::path::PathBuf),
     /// Create new folder inside the given directory.
     NewFolder(std::path::PathBuf),
+    /// Move one or more files into a folder.
+    MoveFilesToFolder {
+        files: Vec<std::path::PathBuf>,
+        folder: std::path::PathBuf,
+    },
 }
 
 /// Recursively render tree nodes.
@@ -1984,6 +1991,7 @@ fn render_tree_nodes(
         } // Only one action per frame
 
         let resp = ui.horizontal(|ui| {
+            ui.set_min_width(ui.available_width());
             ui.add_space(indent);
 
             if node.is_dir {
@@ -2020,7 +2028,7 @@ fn render_tree_nodes(
                             .size(font_size)
                             .color(file_color),
                     )
-                    .sense(egui::Sense::click()),
+                    .sense(egui::Sense::click_and_drag()),
                 );
                 if node.size > 0 {
                     ui.label(
@@ -2035,6 +2043,12 @@ fn render_tree_nodes(
                 resp
             }
         });
+
+        if node.is_dir {
+            handle_folder_drop(&resp.response, &node.path, action);
+        } else {
+            handle_file_drag(ui.ctx(), &resp.response, &node.path, &node.name);
+        }
 
         // Context menu
         let node_path = node.path.clone();
@@ -2085,6 +2099,7 @@ fn render_tree_children(
         }
 
         let resp = ui.horizontal(|ui| {
+            ui.set_min_width(ui.available_width());
             ui.add_space(indent);
             if node.is_dir {
                 let folder_icon = if node.expanded { "v " } else { "> " };
@@ -2120,7 +2135,7 @@ fn render_tree_children(
                             .size(font_size)
                             .color(file_color),
                     )
-                    .sense(egui::Sense::click()),
+                    .sense(egui::Sense::click_and_drag()),
                 );
                 if node.size > 0 {
                     ui.label(
@@ -2135,6 +2150,12 @@ fn render_tree_children(
                 resp
             }
         });
+
+        if node.is_dir {
+            handle_folder_drop(&resp.response, &node.path, action);
+        } else {
+            handle_file_drag(ui.ctx(), &resp.response, &node.path, &node.name);
+        }
 
         // Context menu
         let node_path = node.path.clone();
@@ -2151,6 +2172,96 @@ fn render_tree_children(
             }
         }
     }
+}
+
+fn handle_file_drag(
+    ctx: &egui::Context,
+    response: &egui::Response,
+    path: &std::path::Path,
+    name: &str,
+) {
+    response.dnd_set_drag_payload(DragPayload::ExplorerItems(vec![path.to_path_buf()]));
+    if response.dragged() {
+        paint_file_drag_ghost(ctx, name, response.rect);
+    }
+}
+
+fn handle_folder_drop(
+    response: &egui::Response,
+    folder: &std::path::Path,
+    action: &mut Option<TreeAction>,
+) {
+    if let Some(payload) = response.dnd_hover_payload::<DragPayload>() {
+        if let DragPayload::ExplorerItems(paths) = &*payload {
+            if paths.iter().all(|path| path.is_file()) {
+                response.ctx.set_cursor_icon(egui::CursorIcon::Grab);
+                let painter = response.ctx.layer_painter(egui::LayerId::new(
+                    egui::Order::Foreground,
+                    egui::Id::new(("sidebar_folder_drop_target", folder)),
+                ));
+                painter.rect_stroke(
+                    response.rect.expand(2.0),
+                    egui::Rounding::same(4.0),
+                    egui::Stroke::new(1.0, egui::Color32::from_rgb(95, 215, 130)),
+                );
+            }
+        }
+    }
+
+    if action.is_none() {
+        if let Some(payload) = response.dnd_release_payload::<DragPayload>() {
+            if let DragPayload::ExplorerItems(paths) = (*payload).clone() {
+                if paths.iter().all(|path| path.is_file()) {
+                    *action = Some(TreeAction::MoveFilesToFolder {
+                        files: paths,
+                        folder: folder.to_path_buf(),
+                    });
+                }
+            }
+        }
+    }
+}
+
+fn paint_file_drag_ghost(ctx: &egui::Context, title: &str, source_rect: egui::Rect) {
+    let Some(pointer_pos) = ctx.input(|input| input.pointer.interact_pos()) else {
+        return;
+    };
+    let width = (title.chars().count() as f32 * 7.5 + 30.0).clamp(90.0, 220.0);
+    let ghost_rect = egui::Rect::from_min_size(
+        egui::pos2(pointer_pos.x + 12.0, pointer_pos.y + 10.0),
+        egui::vec2(width, source_rect.height().max(24.0)),
+    );
+    let painter = ctx.layer_painter(egui::LayerId::new(
+        egui::Order::Tooltip,
+        egui::Id::new("sidebar_file_drag_ghost"),
+    ));
+    let rounding = egui::Rounding::same(4.0);
+    painter.rect_filled(
+        ghost_rect,
+        rounding,
+        egui::Color32::from_rgba_unmultiplied(28, 34, 30, 220),
+    );
+    painter.rect_stroke(
+        ghost_rect.expand(1.0),
+        rounding,
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(95, 215, 130)),
+    );
+    painter.text(
+        egui::pos2(ghost_rect.left() + 12.0, ghost_rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        truncate_drag_title(title, ghost_rect.width() - 24.0),
+        egui::FontId::proportional(12.0),
+        egui::Color32::from_rgb(210, 245, 220),
+    );
+}
+
+fn truncate_drag_title(title: &str, available_w: f32) -> String {
+    let max_chars = (available_w / 7.5).floor().max(4.0) as usize;
+    if title.chars().count() <= max_chars {
+        return title.to_string();
+    }
+    let keep = max_chars.saturating_sub(3);
+    format!("{}...", title.chars().take(keep).collect::<String>())
 }
 
 /// Render context menu items for a file or folder node.
@@ -2397,6 +2508,7 @@ pub(crate) fn render_sidebar_tree(
     explorer: &mut ExplorerState,
     editor_state: &mut EditorViewState,
     sidebar_font_size: f32,
+    commands: &mut Vec<AppCommand>,
 ) {
     // ── Render rename input modal ──
     if editor_state.sidebar_rename.is_some() {
@@ -2713,6 +2825,12 @@ pub(crate) fn render_sidebar_tree(
         }
         Some(TreeAction::NewFolder(parent_dir)) => {
             editor_state.sidebar_new_entry = Some((parent_dir, String::new(), true));
+        }
+        Some(TreeAction::MoveFilesToFolder { files, folder }) => {
+            commands.push(AppCommand::DragDrop(DragDropCommand::MoveFilesToFolder {
+                files,
+                folder,
+            }));
         }
         None => {}
     }

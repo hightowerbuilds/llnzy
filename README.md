@@ -6,7 +6,7 @@ A GPU-accelerated terminal emulator and source code editor built from scratch in
 
 ## What it does
 
-llnzy is a single native app that combines a terminal, a code editor, a drawing canvas, and a prompt manager. The terminal and visual effects render through wgpu, while the app chrome and editor views are drawn with egui. It runs your shell, edits your code with tree-sitter and LSP support when language servers are installed, and lets you customize the look of the workspace.
+llnzy is a single native app that combines a terminal, a code editor, a local Git dashboard, a drawing canvas, and a prompt manager. The terminal and visual effects render through wgpu, while the app chrome and editor views are drawn with egui. It runs your shell, edits your code with tree-sitter and LSP support when language servers are installed, shows local repository state, and lets you customize the look of the workspace.
 
 ## Status
 
@@ -32,6 +32,8 @@ Requires Rust 1.75+ and a GPU that supports wgpu (Metal on macOS, Vulkan/DX12 el
 **Terminal** -- ANSI/VT emulation via alacritty_terminal. GPU text rendering, true color, tabbed shells, scrollback, regex search, mouse reporting, OSC title/CWD tracking, URL detection, and Cmd-click file/URL opening.
 
 **Code Editor** -- Multi-buffer tabbed editor with rope-backed editing, undo/redo, tree-sitter syntax highlighting for Rust, JavaScript, TypeScript, TSX, Python, Go, C, JSON, HTML, CSS, and Bash. TOML files open as plain text. LSP integration covers diagnostics, hover, completions, go-to-definition, find references, signature help, rename, code actions, formatting, inlay hints, code lens, document symbols, and workspace symbols when the matching language server is available on PATH. Find & replace, project search, multi-cursor (Cmd+D), code folding, bracket matching, comment toggle, git gutter indicators, minimap, word wrap, snippets, fuzzy file finding, file watching, and build task detection are included.
+
+**Git** -- Local-only Git dashboard for the active project repository. Shows branch and dirty/clean state, staged/unstaged/untracked files, recent commits with inline graph markers, stash and reflog activity, and lazy-loaded commit details with changed files and patch previews. This is Git integration, not GitHub integration: it does not use GitHub/GitLab APIs, OAuth, pull requests, issues, or network fetch/push/pull.
 
 **Sketch** -- Drawing canvas with marker, rectangle, and text tools. Save and recall named sketches.
 

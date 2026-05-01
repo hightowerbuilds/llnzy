@@ -1,5 +1,6 @@
 use super::explorer_view;
 use super::types::{BUMPER_WIDTH, SIDEBAR_WIDTH};
+use crate::app::commands::AppCommand;
 use crate::config::Config;
 use crate::explorer::ExplorerState;
 use std::path::PathBuf;
@@ -28,6 +29,7 @@ pub fn render_sidebar(
     editor_view: &mut explorer_view::EditorViewState,
     recent_projects: &[PathBuf],
     config: &Config,
+    commands: &mut Vec<AppCommand>,
 ) -> SidebarResult {
     let mut open = sidebar_open;
     let mut recent_open = recent_open;
@@ -47,6 +49,7 @@ pub fn render_sidebar(
             recent_projects,
             &mut recent_open,
             config,
+            commands,
         );
         panel_width = width;
         close_folder = close_req;
@@ -78,6 +81,7 @@ fn render_file_tree(
     recent_projects: &[PathBuf],
     recent_open: &mut bool,
     config: &Config,
+    commands: &mut Vec<AppCommand>,
 ) -> (f32, bool, Option<PathBuf>) {
     let default_width = SIDEBAR_WIDTH - BUMPER_WIDTH;
     let min_width = 140.0;
@@ -219,6 +223,7 @@ fn render_file_tree(
                             explorer,
                             editor_view,
                             sidebar_font_size,
+                            commands,
                         );
                     });
             }

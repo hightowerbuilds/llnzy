@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use crate::editor::buffer::Position;
@@ -73,6 +74,16 @@ pub enum DragDropCommand {
         from: usize,
         to: usize,
     },
+    MoveFilesToFolder {
+        files: Vec<PathBuf>,
+        folder: PathBuf,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileMovePlan {
+    pub source: PathBuf,
+    pub destination: PathBuf,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -147,6 +158,63 @@ pub fn terminal_paths_text(paths: &[PathBuf]) -> String {
         .join(" ");
     text.push(' ');
     text
+}
+
+pub fn plan_file_moves(files: &[PathBuf], folder: &Path) -> Result<Vec<FileMovePlan>, String> {
+    if files.is_empty() {
+        return Err("No files selected to move".to_string());
+    }
+    if !folder.is_dir() {
+        return Err(format!("Drop target is not a folder: {}", folder.display()));
+    }
+
+    let folder_key = comparable_path(folder);
+    let mut destinations = HashSet::new();
+    let mut plan = Vec::with_capacity(files.len());
+    for source in files {
+        if !source.is_file() {
+            return Err(format!("Only files can be moved: {}", source.display()));
+        }
+        if source.parent().map(comparable_path) == Some(folder_key.clone()) {
+            return Err(format!(
+                "{} is already in {}",
+                source
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("File"),
+                folder.display()
+            ));
+        }
+
+        let Some(file_name) = source.file_name() else {
+            return Err(format!("File has no name: {}", source.display()));
+        };
+        let destination = folder.join(file_name);
+        if destination.exists() {
+            return Err(format!(
+                "A file named {} already exists in {}",
+                file_name.to_string_lossy(),
+                folder.display()
+            ));
+        }
+        if !destinations.insert(destination.clone()) {
+            return Err(format!(
+                "Multiple moved files would land at {}",
+                destination.display()
+            ));
+        }
+
+        plan.push(FileMovePlan {
+            source: source.clone(),
+            destination,
+        });
+    }
+
+    Ok(plan)
+}
+
+pub fn comparable_path(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
 }
 
 pub fn tab_index_at_x(
@@ -418,5 +486,76 @@ mod tests {
         assert_eq!(remap_index_after_insert(0, 1), 0);
         assert_eq!(remap_index_after_insert(1, 1), 2);
         assert_eq!(remap_index_after_insert(3, 1), 4);
+    }
+
+    #[test]
+    fn plan_file_moves_moves_file_to_destination_folder() {
+        let root =
+            std::env::temp_dir().join(format!("llnzy-file-move-plan-{}-a", std::process::id()));
+        let source_dir = root.join("source");
+        let destination_dir = root.join("destination");
+        std::fs::create_dir_all(&source_dir).unwrap();
+        std::fs::create_dir_all(&destination_dir).unwrap();
+        let source = source_dir.join("note.md");
+        std::fs::write(&source, "hello").unwrap();
+
+        let plan = plan_file_moves(std::slice::from_ref(&source), &destination_dir).unwrap();
+
+        assert_eq!(
+            plan,
+            vec![FileMovePlan {
+                source: source.clone(),
+                destination: destination_dir.join("note.md")
+            }]
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn plan_file_moves_rejects_folder_sources() {
+        let root =
+            std::env::temp_dir().join(format!("llnzy-file-move-plan-{}-b", std::process::id()));
+        let source_dir = root.join("source-folder");
+        let destination_dir = root.join("destination");
+        std::fs::create_dir_all(&source_dir).unwrap();
+        std::fs::create_dir_all(&destination_dir).unwrap();
+
+        let error =
+            plan_file_moves(std::slice::from_ref(&source_dir), &destination_dir).unwrap_err();
+
+        assert!(error.contains("Only files can be moved"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn plan_file_moves_rejects_existing_destination() {
+        let root =
+            std::env::temp_dir().join(format!("llnzy-file-move-plan-{}-c", std::process::id()));
+        let source_dir = root.join("source");
+        let destination_dir = root.join("destination");
+        std::fs::create_dir_all(&source_dir).unwrap();
+        std::fs::create_dir_all(&destination_dir).unwrap();
+        let source = source_dir.join("note.md");
+        std::fs::write(&source, "hello").unwrap();
+        std::fs::write(destination_dir.join("note.md"), "existing").unwrap();
+
+        let error = plan_file_moves(std::slice::from_ref(&source), &destination_dir).unwrap_err();
+
+        assert!(error.contains("already exists"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn plan_file_moves_rejects_same_parent_folder() {
+        let root =
+            std::env::temp_dir().join(format!("llnzy-file-move-plan-{}-d", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let source = root.join("note.md");
+        std::fs::write(&source, "hello").unwrap();
+
+        let error = plan_file_moves(std::slice::from_ref(&source), &root).unwrap_err();
+
+        assert!(error.contains("already in"));
+        let _ = std::fs::remove_dir_all(root);
     }
 }

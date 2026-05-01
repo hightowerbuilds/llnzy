@@ -5,9 +5,10 @@ use winit::event_loop::ActiveEventLoop;
 
 use llnzy::app::commands::AppCommand;
 use llnzy::app::drag_drop::{
-    remap_index_after_insert, remap_index_after_reorder, tab_insert_index, terminal_paths_text,
-    DragDropCommand,
+    comparable_path, plan_file_moves, remap_index_after_insert, remap_index_after_reorder,
+    tab_insert_index, terminal_paths_text, DragDropCommand, FileMovePlan,
 };
+use llnzy::editor::git_gutter::GitGutter;
 use llnzy::session::Session;
 use llnzy::ui::{ActiveView, PendingClose, SavePromptResponse, UiFrameOutput};
 use llnzy::workspace::{find_singleton, TabContent, TabKind, WorkspaceTab};
@@ -404,6 +405,119 @@ impl App {
                 remap_joined_tabs_after_reorder(self.ui.as_mut(), from, to);
                 true
             }
+            DragDropCommand::MoveFilesToFolder { files, folder } => {
+                self.move_files_to_folder(&files, &folder)
+            }
+        }
+    }
+
+    fn move_files_to_folder(&mut self, files: &[PathBuf], folder: &std::path::Path) -> bool {
+        let plan = match plan_file_moves(files, folder) {
+            Ok(plan) => plan,
+            Err(message) => {
+                self.report_file_move_status(message.clone());
+                self.error_log.error(message);
+                return false;
+            }
+        };
+
+        if let Some(message) = self.modified_open_file_move_error(&plan) {
+            self.report_file_move_status(message.clone());
+            self.error_log.error(message);
+            return false;
+        }
+
+        let mut moved = Vec::with_capacity(plan.len());
+        for item in &plan {
+            let source_key = comparable_path(&item.source);
+            if let Err(error) = std::fs::rename(&item.source, &item.destination) {
+                let message = format!("Move failed: {error}");
+                self.report_file_move_status(message.clone());
+                self.error_log.error(message);
+                return false;
+            }
+            moved.push((source_key, item.clone()));
+        }
+
+        self.remap_moved_open_files(&moved);
+        if let Some(ui) = &mut self.ui {
+            ui.explorer.set_root(ui.explorer.root.clone());
+            let moved_count = moved.len();
+            ui.editor_view.status_msg = Some(if moved_count == 1 {
+                "Moved file".to_string()
+            } else {
+                format!("Moved {moved_count} files")
+            });
+        }
+        true
+    }
+
+    fn modified_open_file_move_error(&self, plan: &[FileMovePlan]) -> Option<String> {
+        let ui = self.ui.as_ref()?;
+        for item in plan {
+            let source_key = comparable_path(&item.source);
+            let Some(buffer) = ui.editor_view.editor.buffers.iter().find(|buffer| {
+                buffer
+                    .path()
+                    .is_some_and(|path| comparable_path(path) == source_key)
+            }) else {
+                continue;
+            };
+            if buffer.is_modified() {
+                return Some(format!(
+                    "Save or close {} before moving it.",
+                    buffer.file_name()
+                ));
+            }
+        }
+        None
+    }
+
+    fn remap_moved_open_files(&mut self, moved: &[(PathBuf, FileMovePlan)]) {
+        let Some(ui) = &mut self.ui else { return };
+        for (source_key, item) in moved {
+            let mut remapped_buffer_indexes = Vec::new();
+            for (idx, buffer) in ui.editor_view.editor.buffers.iter_mut().enumerate() {
+                let Some(old_path) = buffer.path().map(PathBuf::from) else {
+                    continue;
+                };
+                if comparable_path(&old_path) != *source_key {
+                    continue;
+                }
+
+                let lang_id = ui.editor_view.editor.views[idx].lang_id;
+                let text = buffer.text();
+                buffer.set_path(item.destination.clone());
+                if let Some(view) = ui.editor_view.editor.views.get_mut(idx) {
+                    view.tree_dirty = true;
+                    view.git_gutter = GitGutter::load(&item.destination);
+                }
+                if let Some(watcher) = &mut ui.editor_view.file_watcher {
+                    watcher.unwatch(&old_path);
+                    watcher.watch(&item.destination);
+                }
+                if let (Some(lsp), Some(lang_id)) = (&mut ui.editor_view.lsp, lang_id) {
+                    lsp.did_close(&old_path, lang_id);
+                    lsp.open_document(&item.destination, lang_id, &text);
+                }
+                remapped_buffer_indexes.push(idx);
+            }
+
+            for tab in &mut self.tabs {
+                if let TabContent::CodeFile { path, buffer_idx } = &mut tab.content {
+                    if comparable_path(path) == *source_key
+                        || remapped_buffer_indexes.contains(buffer_idx)
+                    {
+                        *path = item.destination.clone();
+                    }
+                }
+            }
+        }
+    }
+
+    fn report_file_move_status(&mut self, message: String) {
+        if let Some(ui) = &mut self.ui {
+            ui.editor_view.status_msg = Some(message);
         }
     }
 
