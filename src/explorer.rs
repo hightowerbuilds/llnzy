@@ -5,6 +5,7 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::thread;
 
 use crate::editor::buffer::Buffer;
+use crate::path_utils::comparable_path;
 
 const MAX_IMAGE_SIZE: u64 = 20_971_520; // 20 MB
 /// Maximum number of files to index for the fuzzy finder.
@@ -174,10 +175,6 @@ fn apply_expanded_paths(nodes: &mut [TreeNode], expanded: &HashSet<PathBuf>) {
             apply_expanded_paths(children, expanded);
         }
     }
-}
-
-fn comparable_path(path: &Path) -> PathBuf {
-    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
 }
 
 pub struct ExplorerState {

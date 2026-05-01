@@ -2199,13 +2199,11 @@ fn handle_folder_drop(
 ) {
     if action.is_none() {
         if let Some(payload) = response.dnd_release_payload::<DragPayload>() {
-            if let DragPayload::ExplorerItems(paths) = (*payload).clone() {
-                if paths.iter().all(|path| path.is_file()) {
-                    *action = Some(TreeAction::MoveFilesToFolder {
-                        files: paths,
-                        folder: folder.to_path_buf(),
-                    });
-                }
+            if let Some(paths) = payload.explorer_file_paths() {
+                *action = Some(TreeAction::MoveFilesToFolder {
+                    files: paths.to_vec(),
+                    folder: folder.to_path_buf(),
+                });
             }
         }
     }

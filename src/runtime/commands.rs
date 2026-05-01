@@ -5,10 +5,11 @@ use winit::event_loop::ActiveEventLoop;
 
 use llnzy::app::commands::AppCommand;
 use llnzy::app::drag_drop::{
-    comparable_path, plan_file_moves, remap_index_after_insert, remap_index_after_reorder,
-    tab_insert_index, terminal_paths_text, DragDropCommand, FileMovePlan,
+    plan_file_moves, remap_index_after_insert, remap_index_after_reorder, tab_insert_index,
+    terminal_paths_text, DragDropCommand, FileMovePlan,
 };
 use llnzy::editor::git_gutter::GitGutter;
+use llnzy::path_utils::comparable_path;
 use llnzy::session::Session;
 use llnzy::ui::{ActiveView, PendingClose, SavePromptResponse, UiFrameOutput};
 use llnzy::workspace::{find_singleton, TabContent, TabKind, WorkspaceTab};

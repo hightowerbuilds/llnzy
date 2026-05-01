@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use crate::editor::buffer::Position;
+use crate::path_utils::comparable_path;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DragPayload {
@@ -11,6 +12,17 @@ pub enum DragPayload {
     WorkspaceTab { tab_idx: usize },
     StackerPrompt { prompt_idx: usize, text: String },
     SketchElements { element_ids: Vec<usize> },
+}
+
+impl DragPayload {
+    pub fn explorer_file_paths(&self) -> Option<&[PathBuf]> {
+        match self {
+            DragPayload::ExplorerItems(paths) if paths.iter().all(|path| path.is_file()) => {
+                Some(paths)
+            }
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -211,10 +223,6 @@ pub fn plan_file_moves(files: &[PathBuf], folder: &Path) -> Result<Vec<FileMoveP
     }
 
     Ok(plan)
-}
-
-pub fn comparable_path(path: &Path) -> PathBuf {
-    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
 }
 
 pub fn tab_index_at_x(

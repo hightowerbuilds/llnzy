@@ -12,6 +12,7 @@ pub mod layout;
 pub mod lsp;
 #[cfg(target_os = "macos")]
 pub mod menu;
+pub mod path_utils;
 pub mod pty;
 pub mod renderer;
 pub mod search;
