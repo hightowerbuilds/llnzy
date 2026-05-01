@@ -298,7 +298,7 @@ impl UiState {
             editing_tab_text: editing_tab_text.clone(),
         };
         let mut tab_bar_action = tab_bar::TabBarAction::default();
-        let joined_tabs = self.joined_tabs;
+        let mut joined_tabs = self.joined_tabs.map(JoinedTabs::clamped);
         let tab_panes = std::mem::take(&mut self.tab_panes);
         let drag_drop = self.drag_drop.clone();
 
@@ -376,7 +376,7 @@ impl UiState {
                 ctx,
                 active_tab_kind,
                 active_tab_index,
-                joined_tabs,
+                &mut joined_tabs,
                 &tab_panes,
                 &mut config_clone,
                 tab_content::TabContentAppearance {
@@ -429,6 +429,7 @@ impl UiState {
         self.sidebar = sidebar_state;
         self.explorer = explorer;
         self.tab_panes = tab_panes;
+        self.joined_tabs = joined_tabs;
         if let Some((path, buffer_idx)) = editor_view.pending_file_tab.take() {
             commands_out.push(AppCommand::OpenCodeFile { path, buffer_idx });
         }

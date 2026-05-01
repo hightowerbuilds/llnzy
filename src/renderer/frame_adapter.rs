@@ -263,6 +263,8 @@ mod tests {
                 w: 780.0,
                 h: 520.0,
             },
+            content_padding_x: 10.0,
+            content_padding_y: 12.0,
             cell_w: 8.0,
             cell_h: 16.0,
             grid_cols: 97,

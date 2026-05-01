@@ -98,7 +98,7 @@ impl App {
             .filter(|joined| valid_joined_tabs(*joined, self.active_tab, self.tabs.len()))?;
         let x = self.cursor_pos.x as f32;
         let y = self.cursor_pos.y as f32;
-        let (left_rect, right_rect) = joined_content_rects(layout);
+        let (left_rect, right_rect) = joined_content_rects(layout, joined.ratio);
 
         for (idx, rect) in [(joined.primary, left_rect), (joined.secondary, right_rect)] {
             let is_terminal = self
@@ -379,24 +379,6 @@ impl ApplicationHandler<UserEvent> for App {
 
                 if let Some(renderer) = &mut self.renderer {
                     if let Some(layout) = &self.screen_layout {
-                        let active_kind = self.tabs.get(self.active_tab).map(|t| t.content.kind());
-                        let terminal_effects_enabled =
-                            matches!(active_kind, Some(llnzy::workspace::TabKind::Terminal));
-                        let effects_mask = if terminal_effects_enabled {
-                            let size = self.window.as_ref().map(|window| window.inner_size());
-                            size.map(|size| {
-                                let w = size.width.max(1) as f32;
-                                let h = size.height.max(1) as f32;
-                                [
-                                    layout.content.x / w,
-                                    layout.content.y / h,
-                                    (layout.content.x + layout.content.w) / w,
-                                    (layout.content.y + layout.content.h) / h,
-                                ]
-                            })
-                        } else {
-                            None
-                        };
                         // Supply clipboard content to editor for paste + init LSP
                         if let Some(ui) = self.ui.as_mut() {
                             if let Some(cb) = &mut self.clipboard {
@@ -418,13 +400,14 @@ impl ApplicationHandler<UserEvent> for App {
                         // Get the active terminal session (if any) for the renderer
                         let active_tab = self.tabs.get(self.active_tab);
                         let tab_id = active_tab.map(|t| t.id).unwrap_or(0);
-                        let joined_tabs =
-                            self.ui
-                                .as_ref()
-                                .and_then(|ui| ui.joined_tabs)
-                                .filter(|joined| {
-                                    valid_joined_tabs(*joined, self.active_tab, self.tabs.len())
-                                });
+                        let joined_tabs = self
+                            .ui
+                            .as_ref()
+                            .and_then(|ui| ui.joined_tabs)
+                            .map(JoinedTabs::clamped)
+                            .filter(|joined| {
+                                valid_joined_tabs(*joined, self.active_tab, self.tabs.len())
+                            });
                         let terminal_panes = joined_tabs
                             .map(|joined| {
                                 joined_terminal_panes(&self.tabs, self.active_tab, layout, joined)
@@ -435,6 +418,14 @@ impl ApplicationHandler<UserEvent> for App {
                         } else {
                             None
                         };
+                        let terminal_effect_rect =
+                            terminal_effect_rect(&self.tabs, layout, joined_tabs, self.active_tab);
+                        let terminal_effects_enabled = terminal_effect_rect.is_some();
+                        let effects_mask = terminal_effect_rect.and_then(|rect| {
+                            self.window
+                                .as_ref()
+                                .map(|window| rect_to_uv(rect, window.inner_size()))
+                        });
 
                         let ui_state = &mut self.ui;
                         let window_ref = &self.window;
@@ -1132,10 +1123,15 @@ impl ApplicationHandler<UserEvent> for App {
         }
 
         // Continuous animation mode — only when effects actually need it
-        let terminal_active = self
-            .tabs
-            .get(self.active_tab)
-            .is_some_and(|tab| matches!(tab.content.kind(), llnzy::workspace::TabKind::Terminal));
+        let terminal_active = self.screen_layout.as_ref().is_some_and(|layout| {
+            terminal_effect_rect(
+                &self.tabs,
+                layout,
+                self.ui.as_ref().and_then(|ui| ui.joined_tabs),
+                self.active_tab,
+            )
+            .is_some()
+        });
         let ui_active = self.ui.as_ref().is_some_and(|u| u.settings_open());
         if (terminal_active && self.config.effects.any_active()) || ui_active {
             event_loop.set_control_flow(ControlFlow::Poll);
@@ -1157,7 +1153,7 @@ fn joined_terminal_panes<'a>(
     layout: &ScreenLayout,
     joined: JoinedTabs,
 ) -> Vec<TerminalPane<'a>> {
-    let (left_rect, right_rect) = joined_content_rects(layout);
+    let (left_rect, right_rect) = joined_terminal_content_rects(layout, joined.ratio);
     [(joined.primary, left_rect), (joined.secondary, right_rect)]
         .into_iter()
         .filter_map(|(idx, rect)| {
@@ -1173,22 +1169,90 @@ fn joined_terminal_panes<'a>(
         .collect()
 }
 
-fn joined_content_rects(layout: &ScreenLayout) -> (llnzy::session::Rect, llnzy::session::Rect) {
+fn terminal_effect_rect(
+    tabs: &[WorkspaceTab],
+    layout: &ScreenLayout,
+    joined: Option<JoinedTabs>,
+    active_tab: usize,
+) -> Option<llnzy::session::Rect> {
+    if let Some(joined) = joined.filter(|joined| valid_joined_tabs(*joined, active_tab, tabs.len()))
+    {
+        let joined = joined.clamped();
+        let (left, right) = joined_content_rects(layout, joined.ratio);
+        let primary_terminal = tabs
+            .get(joined.primary)
+            .is_some_and(|tab| tab.content.as_terminal().is_some());
+        let secondary_terminal = tabs
+            .get(joined.secondary)
+            .is_some_and(|tab| tab.content.as_terminal().is_some());
+
+        return match (primary_terminal, secondary_terminal) {
+            (true, true) => Some(llnzy::session::Rect {
+                x: layout.content.x,
+                y: layout.content.y,
+                w: layout.content.w,
+                h: layout.content.h,
+            }),
+            (true, false) => Some(left),
+            (false, true) => Some(right),
+            (false, false) => None,
+        };
+    }
+
+    tabs.get(active_tab)
+        .filter(|tab| tab.content.as_terminal().is_some())
+        .map(|_| llnzy::session::Rect {
+            x: layout.content.x,
+            y: layout.content.y,
+            w: layout.content.w,
+            h: layout.content.h,
+        })
+}
+
+fn rect_to_uv(rect: llnzy::session::Rect, size: winit::dpi::PhysicalSize<u32>) -> [f32; 4] {
+    let w = size.width.max(1) as f32;
+    let h = size.height.max(1) as f32;
+    [
+        rect.x / w,
+        rect.y / h,
+        (rect.x + rect.w) / w,
+        (rect.y + rect.h) / h,
+    ]
+}
+
+fn joined_content_rects(
+    layout: &ScreenLayout,
+    ratio: f32,
+) -> (llnzy::session::Rect, llnzy::session::Rect) {
     const DIVIDER_GAP: f32 = 8.0;
     let content = &layout.content;
-    let pane_w = ((content.w - DIVIDER_GAP).max(2.0) / 2.0).max(1.0);
+    let usable_w = (content.w - DIVIDER_GAP).max(2.0);
+    let ratio = ratio.clamp(JoinedTabs::MIN_RATIO, JoinedTabs::MAX_RATIO);
+    let left_w = (usable_w * ratio).max(1.0);
+    let right_w = (usable_w - left_w).max(1.0);
     let left = llnzy::session::Rect {
         x: content.x,
         y: content.y,
-        w: pane_w,
+        w: left_w,
         h: content.h,
     };
     let right = llnzy::session::Rect {
-        x: content.x + pane_w + DIVIDER_GAP,
+        x: content.x + left_w + DIVIDER_GAP,
         y: content.y,
-        w: pane_w,
+        w: right_w,
         h: content.h,
     };
+    (left, right)
+}
+
+fn joined_terminal_content_rects(
+    layout: &ScreenLayout,
+    ratio: f32,
+) -> (llnzy::session::Rect, llnzy::session::Rect) {
+    let (left, mut right) = joined_content_rects(layout, ratio);
+    let inset = layout.content_padding_x.min((right.w - 1.0).max(0.0));
+    right.x += inset;
+    right.w = (right.w - inset).max(1.0);
     (left, right)
 }
 

@@ -8,6 +8,8 @@ pub struct ScreenLayout {
     pub sidebar_w: f32,
     pub tab_bar: Zone,
     pub content: Zone,
+    pub content_padding_x: f32,
+    pub content_padding_y: f32,
     // Cell metrics
     pub cell_w: f32,
     pub cell_h: f32,
@@ -149,6 +151,8 @@ impl ScreenLayout {
             sidebar_w: input.sidebar_w,
             tab_bar,
             content,
+            content_padding_x: padding_x,
+            content_padding_y: input.padding_y,
             cell_w: input.cell_w,
             cell_h: input.cell_h,
             grid_cols,

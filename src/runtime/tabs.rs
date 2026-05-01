@@ -134,6 +134,7 @@ impl App {
                     ui.joined_tabs = Some(llnzy::ui::JoinedTabs {
                         primary: remap_index_after_remove(joined.primary, removed_idx),
                         secondary: remap_index_after_remove(joined.secondary, removed_idx),
+                        ratio: joined.ratio,
                     });
                 }
             }

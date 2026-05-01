@@ -3,7 +3,7 @@ use std::path::Path;
 use llnzy::app::drag_drop::{tab_drop_zone_at_x, tab_index_at_x, DropTarget, TerminalDropMode};
 use llnzy::layout::{LayoutInputs, ScreenLayout};
 use llnzy::session::Rect as PaneRect;
-use llnzy::ui::ActiveView;
+use llnzy::ui::{ActiveView, JoinedTabs};
 use llnzy::workspace::TabContent;
 
 use crate::App;
@@ -45,14 +45,15 @@ impl App {
         }
     }
 
-    pub(crate) fn joined_terminal_grid_size(&self) -> (u16, u16) {
-        const DIVIDER_GAP: f32 = 8.0;
+    pub(crate) fn joined_terminal_grid_sizes(&self, ratio: f32) -> ((u16, u16), (u16, u16)) {
         if let Some(layout) = &self.screen_layout {
-            let pane_w =
-                ((layout.content.w - DIVIDER_GAP).max(layout.cell_w) * 0.5).max(layout.cell_w);
-            ((pane_w / layout.cell_w).max(1.0) as u16, layout.grid_rows)
+            let (left, right) = joined_terminal_content_rects(layout, ratio);
+            (
+                ((left.w / layout.cell_w).max(1.0) as u16, layout.grid_rows),
+                ((right.w / layout.cell_w).max(1.0) as u16, layout.grid_rows),
+            )
         } else {
-            (40, 24)
+            ((40, 24), (40, 24))
         }
     }
 
@@ -81,25 +82,12 @@ impl App {
     }
 
     fn active_joined_terminal_rect(&self, layout: &ScreenLayout) -> Option<PaneRect> {
-        const DIVIDER_GAP: f32 = 8.0;
         let joined = self
             .ui
             .as_ref()
             .and_then(|ui| ui.joined_tabs)
             .filter(|joined| joined.contains(self.active_tab))?;
-        let pane_w = ((layout.content.w - DIVIDER_GAP).max(2.0) / 2.0).max(1.0);
-        let left = PaneRect {
-            x: layout.content.x,
-            y: layout.content.y,
-            w: pane_w,
-            h: layout.content.h,
-        };
-        let right = PaneRect {
-            x: layout.content.x + pane_w + DIVIDER_GAP,
-            y: layout.content.y,
-            w: pane_w,
-            h: layout.content.h,
-        };
+        let (left, right) = joined_terminal_content_rects(layout, joined.ratio);
 
         if joined.primary == self.active_tab {
             Some(left)
@@ -197,13 +185,19 @@ impl App {
         if let Some(layout) = &self.screen_layout {
             let (cols, rows) = (layout.grid_cols, layout.grid_rows);
             let joined = self.ui.as_ref().and_then(|ui| ui.joined_tabs);
-            let joined_cols_rows = joined.map(|_| self.joined_terminal_grid_size());
+            let joined_sizes = joined.map(|joined| self.joined_terminal_grid_sizes(joined.ratio));
             for (idx, tab) in self.tabs.iter_mut().enumerate() {
                 if let TabContent::Terminal(ref mut session) = tab.content {
                     if let Some(joined) = joined {
-                        if joined.contains(idx) {
-                            let (joined_cols, joined_rows) =
-                                joined_cols_rows.unwrap_or((cols, rows));
+                        if idx == joined.primary {
+                            let ((joined_cols, joined_rows), _) =
+                                joined_sizes.unwrap_or(((cols, rows), (cols, rows)));
+                            session.resize(joined_cols, joined_rows);
+                            continue;
+                        }
+                        if idx == joined.secondary {
+                            let (_, (joined_cols, joined_rows)) =
+                                joined_sizes.unwrap_or(((cols, rows), (cols, rows)));
                             session.resize(joined_cols, joined_rows);
                             continue;
                         }
@@ -230,4 +224,34 @@ impl App {
         }
         self.request_redraw();
     }
+}
+
+fn joined_content_rects(layout: &ScreenLayout, ratio: f32) -> (PaneRect, PaneRect) {
+    const DIVIDER_GAP: f32 = 8.0;
+    let content = &layout.content;
+    let usable_w = (content.w - DIVIDER_GAP).max(2.0);
+    let ratio = ratio.clamp(JoinedTabs::MIN_RATIO, JoinedTabs::MAX_RATIO);
+    let left_w = (usable_w * ratio).max(1.0);
+    let right_w = (usable_w - left_w).max(1.0);
+    let left = PaneRect {
+        x: content.x,
+        y: content.y,
+        w: left_w,
+        h: content.h,
+    };
+    let right = PaneRect {
+        x: content.x + left_w + DIVIDER_GAP,
+        y: content.y,
+        w: right_w,
+        h: content.h,
+    };
+    (left, right)
+}
+
+fn joined_terminal_content_rects(layout: &ScreenLayout, ratio: f32) -> (PaneRect, PaneRect) {
+    let (left, mut right) = joined_content_rects(layout, ratio);
+    let inset = layout.content_padding_x.min((right.w - 1.0).max(0.0));
+    right.x += inset;
+    right.w = (right.w - inset).max(1.0);
+    (left, right)
 }

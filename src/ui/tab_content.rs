@@ -29,16 +29,17 @@ pub(super) fn render_tab_content(
     ctx: &egui::Context,
     active_tab_kind: Option<TabKind>,
     active_tab_index: usize,
-    joined_tabs: Option<JoinedTabs>,
+    joined_tabs: &mut Option<JoinedTabs>,
     tab_panes: &[UiTabPaneInfo],
     config: &mut Config,
     appearance: TabContentAppearance,
     mut state: TabContentState<'_>,
 ) {
-    if let Some(joined) = valid_joined_tabs(joined_tabs, active_tab_index, tab_panes) {
+    if let Some(joined) = valid_joined_tabs(*joined_tabs, active_tab_index, tab_panes) {
         render_joined_tabs(
             ctx,
             joined,
+            joined_tabs,
             active_tab_index,
             tab_panes,
             config,
@@ -88,6 +89,7 @@ fn valid_joined_tabs(
 fn render_joined_tabs(
     ctx: &egui::Context,
     joined: JoinedTabs,
+    joined_tabs: &mut Option<JoinedTabs>,
     active_tab_index: usize,
     tab_panes: &[UiTabPaneInfo],
     config: &mut Config,
@@ -99,20 +101,53 @@ fn render_joined_tabs(
         .show(ctx, |ui| {
             let rect = ui.max_rect();
             let gap = 8.0;
-            let pane_w = ((rect.width() - gap).max(2.0) / 2.0).max(1.0);
-            let left_rect = egui::Rect::from_min_size(rect.min, egui::vec2(pane_w, rect.height()));
+            let usable_w = (rect.width() - gap).max(2.0);
+            let ratio = joined
+                .ratio
+                .clamp(JoinedTabs::MIN_RATIO, JoinedTabs::MAX_RATIO);
+            let left_w = (usable_w * ratio).max(1.0);
+            let right_w = (usable_w - left_w).max(1.0);
+            let left_rect = egui::Rect::from_min_size(rect.min, egui::vec2(left_w, rect.height()));
             let right_rect = egui::Rect::from_min_size(
                 egui::pos2(left_rect.right() + gap, rect.top()),
-                egui::vec2(pane_w, rect.height()),
+                egui::vec2(right_w, rect.height()),
             );
             let divider = egui::Rect::from_min_max(
                 egui::pos2(left_rect.right(), rect.top()),
                 egui::pos2(right_rect.left(), rect.bottom()),
             );
+            let divider_response = ui
+                .interact(
+                    divider.expand(3.0),
+                    ui.id().with("joined_tab_divider"),
+                    egui::Sense::click_and_drag(),
+                )
+                .on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
+            if divider_response.dragged() {
+                if let Some(pointer_pos) = divider_response.interact_pointer_pos() {
+                    let new_ratio = ((pointer_pos.x - rect.left()) / usable_w)
+                        .clamp(JoinedTabs::MIN_RATIO, JoinedTabs::MAX_RATIO);
+                    if (new_ratio - ratio).abs() > f32::EPSILON {
+                        *joined_tabs = Some(
+                            JoinedTabs {
+                                ratio: new_ratio,
+                                ..joined
+                            }
+                            .clamped(),
+                        );
+                        state.commands.push(AppCommand::ResizeTerminalTabs);
+                        ui.ctx().request_repaint();
+                    }
+                }
+            }
             ui.painter().rect_filled(
                 divider,
                 egui::Rounding::ZERO,
-                egui::Color32::from_rgb(24, 24, 24),
+                if divider_response.hovered() || divider_response.dragged() {
+                    egui::Color32::from_rgb(40, 48, 54)
+                } else {
+                    egui::Color32::from_rgb(24, 24, 24)
+                },
             );
             ui.painter().line_segment(
                 [

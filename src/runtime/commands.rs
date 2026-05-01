@@ -144,10 +144,7 @@ impl App {
                     return false;
                 }
                 if let Some(ui) = &mut self.ui {
-                    ui.joined_tabs = Some(llnzy::ui::JoinedTabs {
-                        primary: self.active_tab,
-                        secondary: idx,
-                    });
+                    ui.joined_tabs = Some(llnzy::ui::JoinedTabs::new(self.active_tab, idx));
                 }
                 self.resize_terminal_tabs();
                 self.request_redraw();
@@ -157,6 +154,11 @@ impl App {
                 if let Some(ui) = &mut self.ui {
                     ui.joined_tabs = None;
                 }
+                self.resize_terminal_tabs();
+                self.request_redraw();
+                true
+            }
+            AppCommand::ResizeTerminalTabs => {
                 self.resize_terminal_tabs();
                 self.request_redraw();
                 true
@@ -531,6 +533,7 @@ fn remap_joined_tabs_after_insert(ui: Option<&mut llnzy::ui::UiState>, insert_at
             ui.joined_tabs = Some(llnzy::ui::JoinedTabs {
                 primary: remap_index_after_insert(joined.primary, insert_at),
                 secondary: remap_index_after_insert(joined.secondary, insert_at),
+                ratio: joined.ratio,
             });
         }
     }
@@ -542,6 +545,7 @@ fn remap_joined_tabs_after_reorder(ui: Option<&mut llnzy::ui::UiState>, from: us
             ui.joined_tabs = Some(llnzy::ui::JoinedTabs {
                 primary: remap_index_after_reorder(joined.primary, from, to),
                 secondary: remap_index_after_reorder(joined.secondary, from, to),
+                ratio: joined.ratio,
             });
         }
     }

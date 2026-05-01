@@ -74,14 +74,33 @@ pub struct UiTabPaneInfo {
     pub buffer_idx: Option<usize>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct JoinedTabs {
     pub primary: usize,
     pub secondary: usize,
+    pub ratio: f32,
 }
 
 impl JoinedTabs {
+    pub const MIN_RATIO: f32 = 0.18;
+    pub const MAX_RATIO: f32 = 0.82;
+
+    pub fn new(primary: usize, secondary: usize) -> Self {
+        Self {
+            primary,
+            secondary,
+            ratio: 0.5,
+        }
+    }
+
     pub fn contains(self, idx: usize) -> bool {
         self.primary == idx || self.secondary == idx
+    }
+
+    pub fn clamped(self) -> Self {
+        Self {
+            ratio: self.ratio.clamp(Self::MIN_RATIO, Self::MAX_RATIO),
+            ..self
+        }
     }
 }

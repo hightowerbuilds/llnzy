@@ -18,6 +18,7 @@ pub enum AppCommand {
     CloseTab(usize),
     JoinTab(usize),
     SeparateTabs,
+    ResizeTerminalTabs,
     CloseOtherTabs(usize),
     CloseTabsToRight(usize),
     KillTerminalTab(usize),

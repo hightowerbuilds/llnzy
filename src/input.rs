@@ -18,12 +18,13 @@ pub fn encode_key(
     modifiers: ModifiersState,
     app_cursor: bool,
 ) -> Option<Vec<u8>> {
-    // Never send anything to the PTY when Cmd/Super is held.
+    // Never send anything to the PTY when Cmd/Super is held, except for
+    // terminal-native editing gestures that should work in every shell tab.
     // Recognized Cmd shortcuts are handled before this function is called;
     // anything that reaches here is an unrecognized combo (e.g. Cmd+Z)
     // and should be silently dropped.
     if modifiers.super_key() {
-        return None;
+        return encode_super_key(&event.logical_key);
     }
 
     // Ctrl+letter / Ctrl+symbol combinations → control codes
@@ -98,6 +99,15 @@ fn ctrl_code(event: &KeyEvent) -> Option<u8> {
     }
 
     None
+}
+
+fn encode_super_key(key: &Key) -> Option<Vec<u8>> {
+    match key {
+        // Cmd+Backspace mirrors the common "clear current input line" gesture.
+        // Ctrl+A moves to the line start; Ctrl+K kills through the line end.
+        Key::Named(NamedKey::Backspace) => Some(b"\x01\x0b".to_vec()),
+        _ => None,
+    }
 }
 
 fn encode_named_key(
@@ -541,6 +551,14 @@ mod tests {
         assert_eq!(
             encode_named_key(&NamedKey::Backspace, &mods, false),
             Some(b"\x7f".to_vec())
+        );
+    }
+
+    #[test]
+    fn super_backspace_clears_current_line() {
+        assert_eq!(
+            encode_super_key(&Key::Named(NamedKey::Backspace)),
+            Some(b"\x01\x0b".to_vec())
         );
     }
 
