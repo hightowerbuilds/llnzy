@@ -6,11 +6,11 @@ A GPU-accelerated terminal emulator and source code editor built from scratch in
 
 ## What it does
 
-llnzy is a single native app that combines a terminal, a code editor, a drawing canvas, and a prompt manager. Everything renders through the GPU via wgpu with optional visual effects (bloom, CRT scanlines, animated backgrounds, particles). It runs your shell, edits your code with LSP support, and lets you customize the look of all of it.
+llnzy is a single native app that combines a terminal, a code editor, a drawing canvas, and a prompt manager. The terminal and visual effects render through wgpu, while the app chrome and editor views are drawn with egui. It runs your shell, edits your code with tree-sitter and LSP support when language servers are installed, and lets you customize the look of the workspace.
 
 ## Status
 
-Active personal project. Works as a daily driver on macOS. No prebuilt binaries for Linux/Windows yet. Things may break.
+Active personal project. Works as a daily driver on macOS. Linux and Windows are not packaged or tested as supported targets yet. Things may break.
 
 ## Building
 
@@ -29,17 +29,17 @@ Requires Rust 1.75+ and a GPU that supports wgpu (Metal on macOS, Vulkan/DX12 el
 
 ## Features
 
-**Terminal** -- Full ANSI/VT100 emulation via alacritty_terminal. GPU text rendering, true color, tabs, scrollback, regex search, URL detection and click-to-open.
+**Terminal** -- ANSI/VT emulation via alacritty_terminal. GPU text rendering, true color, tabbed shells, scrollback, regex search, mouse reporting, OSC title/CWD tracking, URL detection, and Cmd-click file/URL opening.
 
-**Code Editor** -- Multi-buffer tabbed editor with tree-sitter syntax highlighting for 11 languages. LSP integration (hover, completions, go-to-definition, find references, signature help, rename, code actions, formatting, inlay hints, code lens, diagnostics). Find & replace, multi-cursor (Cmd+D), code folding, bracket matching, comment toggle, git gutter indicators, minimap, word wrap, snippets.
+**Code Editor** -- Multi-buffer tabbed editor with rope-backed editing, undo/redo, tree-sitter syntax highlighting for Rust, JavaScript, TypeScript, TSX, Python, Go, C, JSON, HTML, CSS, and Bash. TOML files open as plain text. LSP integration covers diagnostics, hover, completions, go-to-definition, find references, signature help, rename, code actions, formatting, inlay hints, code lens, document symbols, and workspace symbols when the matching language server is available on PATH. Find & replace, project search, multi-cursor (Cmd+D), code folding, bracket matching, comment toggle, git gutter indicators, minimap, word wrap, snippets, fuzzy file finding, file watching, and build task detection are included.
 
 **Sketch** -- Drawing canvas with marker, rectangle, and text tools. Save and recall named sketches.
 
 **Stacker** -- Prompt queue manager. Save, categorize, search, and copy prompts. Optional prompt bar above the footer for quick access.
 
-**Visual Effects** -- Animated shader backgrounds (smoke, aurora, custom images), bloom/glow, GPU particle system, CRT scanlines with curvature/vignette/chromatic aberration, cursor glow and trail. All configurable per-view.
+**Visual Effects** -- Animated shader backgrounds, custom WGSL shader loading, image backgrounds, bloom/glow, GPU particle system, CRT scanlines with curvature/vignette/chromatic aberration, cursor glow, and cursor trail. Effects can be enabled, tuned, and applied selectively through config and themes.
 
-**Themes** -- Built-in presets plus custom theme creation. Save your colors, effects, and background as a named theme. Per-view application (terminal only, editor too, etc.). Background image library with persistent gallery.
+**Themes** -- Built-in presets plus custom theme creation. Save colors, effects, and backgrounds as named themes, choose whether effects apply to UI views, and manage a persistent background image gallery.
 
 **Workspaces** -- Bundle a theme, a project folder, and a tab layout into a named workspace. Launch from the Home screen to restore everything at once. The last session is saved on close and restored on startup.
 
