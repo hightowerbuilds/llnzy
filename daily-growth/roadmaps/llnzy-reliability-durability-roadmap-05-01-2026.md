@@ -90,6 +90,29 @@ Do not test only helpers. Test invariants:
 
 Purpose: establish a reliable baseline before deeper refactors.
 
+### Progress
+
+Started May 2, 2026:
+
+- Removed the unused `ctrl` binding warning in `src/editor/keymap.rs`.
+- Marked the retained image viewer helper as intentionally dormant for the standalone file browser/image preview path.
+- Added `docs/manual-smoke-checklist.md` as a repeatable manual validation checklist for UI-heavy and lifecycle-sensitive changes.
+- Added focused tests for Markdown file detection, Markdown mode cycling, and readable inline link rendering.
+- Extracted source/Markdown editor routing into `src/ui/editor_host.rs` as the first Phase 1 split from `src/ui/explorer_view.rs`.
+- Extracted file watcher polling and external-change reload prompts into `src/ui/editor_file_events.rs`.
+- Extracted project search rendering and navigation into `src/ui/project_search_view.rs`.
+- Extracted task picker rendering and pending-task handoff into `src/ui/task_picker_view.rs`.
+- Extracted rendered LSP popups for workspace symbols and references into `src/ui/editor_popups.rs`.
+- Extracted async LSP result polling and health/status refresh into `src/ui/editor_lsp_events.rs`.
+- Moved LSP request/apply methods for `EditorViewState` into `src/ui/editor_lsp_state.rs`.
+- Extracted sidebar file operation modals into `src/ui/sidebar_file_modals.rs`.
+- Extracted the standalone image viewer helper into `src/ui/image_viewer.rs`.
+- Extracted sidebar tree rendering, file finder UI, tree context menu, and sidebar drag/drop helpers into `src/ui/sidebar_tree.rs`.
+- Began the `src/ui/editor_view.rs` split by extracting word-wrap mapping into `src/ui/editor_wrap.rs`.
+- Extracted find/replace bar rendering into `src/ui/editor_search_bar.rs`.
+- Extracted folding and visible-line helpers into `src/ui/editor_folding.rs`.
+- Extracted reusable paint/input geometry helpers into `src/ui/editor_paint.rs`.
+
 ### Work
 
 - Keep `cargo check` clean except for explicitly tracked warnings.

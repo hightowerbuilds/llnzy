@@ -410,3 +410,32 @@ fn replace_markdown_links(input: &str) -> String {
     out.push_str(rest);
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detects_markdown_extensions_case_insensitively() {
+        assert!(is_markdown_path(Path::new("README.md")));
+        assert!(is_markdown_path(Path::new("notes.MDX")));
+        assert!(is_markdown_path(Path::new("post.markdown")));
+        assert!(!is_markdown_path(Path::new("main.rs")));
+        assert!(!is_markdown_path(Path::new("Makefile")));
+    }
+
+    #[test]
+    fn markdown_mode_cycles_source_preview_split() {
+        assert_eq!(MarkdownViewMode::Source.cycle(), MarkdownViewMode::Preview);
+        assert_eq!(MarkdownViewMode::Preview.cycle(), MarkdownViewMode::Split);
+        assert_eq!(MarkdownViewMode::Split.cycle(), MarkdownViewMode::Source);
+    }
+
+    #[test]
+    fn inline_display_text_preserves_readable_link_targets() {
+        assert_eq!(
+            inline_display_text("See [docs](https://example.com) for `code`."),
+            "See docs (https://example.com) for code."
+        );
+    }
+}

@@ -62,7 +62,6 @@ pub fn handle_editor_keys(
         let cmd = input.modifiers.command;
         let shift = input.modifiers.shift;
         let alt = input.modifiers.alt;
-        let ctrl = input.modifiers.ctrl;
 
         if let Some(chord) = view.pending_key_chord.take() {
             match chord {
