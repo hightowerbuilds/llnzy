@@ -508,6 +508,35 @@ Purpose: make the daily text editing path feel trustworthy.
 - Markdown preview handles normal README-quality Markdown without obvious layout errors.
 - Large Markdown files remain usable.
 
+### Progress
+
+Started May 2, 2026:
+
+- Fixed wrapped mouse hit testing so clicks beyond text on an earlier visual wrap row clamp to that row instead of jumping deeper into the logical line.
+- Added focused hit-testing coverage for:
+  - wrapped row-end clamping
+  - scrolled wrapped rows
+  - cursor wrap-row lookup at line end
+  - horizontal scroll hit testing
+  - folded visible-line hit mapping
+- Hardened cursor movement and multi-cursor selection behavior for empty buffers, long lines, document start/end, page movement, cursor clamping, duplicate extra cursors, and non-ASCII occurrence selection.
+- Hardened pointer input boundaries around the gutter, folded-line controls, negative y positions, scrolled-out rows, minimap exclusion, and click suppression after gutter fold handling.
+- Upgraded Markdown preview parsing/rendering for README-quality basics:
+  - structured tables
+  - nested list indentation
+  - local image path resolution
+  - fenced code language labels
+
+Focused validation completed:
+
+- `cargo test editor::cursor`
+- `cargo test editor_input`
+- `cargo test markdown_preview`
+- `cargo test editor_wrap`
+- `cargo test editor_paint`
+
+Completed May 2, 2026.
+
 ---
 
 ## Phase 6: Terminal Durability

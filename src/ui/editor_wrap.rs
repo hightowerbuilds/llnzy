@@ -80,6 +80,70 @@ pub(super) fn pixel_to_editor_pos_wrapped(
         is_first: true,
     });
     let col_in_row = (rel_x / char_width).max(0.0) as usize;
-    let doc_col = (row.col_start + col_in_row).min(buf.line_len(row.doc_line));
+    let doc_col = (row.col_start + col_in_row)
+        .min(row.col_end)
+        .min(buf.line_len(row.doc_line));
     (row.doc_line, doc_col)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::editor::buffer::{Buffer, Position};
+
+    fn buf_with(text: &str) -> Buffer {
+        let mut buf = Buffer::empty();
+        buf.insert(Position::new(0, 0), text);
+        buf
+    }
+
+    #[test]
+    fn wrapped_hit_testing_clamps_to_current_visual_row_end() {
+        let buf = buf_with("abcdefghijklmnopqrstuvwxy");
+        let rows = compute_wrap_rows(&[0], &buf, 10);
+        let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(300.0, 80.0));
+
+        let (line, col) = pixel_to_editor_pos_wrapped(
+            egui::pos2(260.0, 5.0),
+            rect,
+            20.0,
+            4.0,
+            10.0,
+            20.0,
+            0,
+            &rows,
+            &buf,
+        );
+
+        assert_eq!((line, col), (0, 10));
+    }
+
+    #[test]
+    fn wrapped_hit_testing_uses_scrolled_visual_row() {
+        let buf = buf_with("abcdefghijklmnopqrstuvwxy");
+        let rows = compute_wrap_rows(&[0], &buf, 10);
+        let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(300.0, 80.0));
+
+        let (line, col) = pixel_to_editor_pos_wrapped(
+            egui::pos2(44.0, 5.0),
+            rect,
+            20.0,
+            4.0,
+            10.0,
+            20.0,
+            1,
+            &rows,
+            &buf,
+        );
+
+        assert_eq!((line, col), (0, 12));
+    }
+
+    #[test]
+    fn wrap_row_for_cursor_uses_last_row_at_line_end() {
+        let buf = buf_with("abcdefghijklmnopqrstuvwxy");
+        let rows = compute_wrap_rows(&[0], &buf, 10);
+
+        assert_eq!(wrap_row_for_cursor(&rows, 0, buf.line_len(0)), 2);
+    }
 }

@@ -328,6 +328,13 @@ pub(super) fn pixel_to_editor_pos(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::editor::buffer::Buffer;
+
+    fn buf_with(text: &str) -> Buffer {
+        let mut buf = Buffer::empty();
+        buf.insert(Position::new(0, 0), text);
+        buf
+    }
 
     #[test]
     fn indentation_columns_counts_spaces() {
@@ -353,5 +360,47 @@ mod tests {
     #[test]
     fn indent_level_ignores_non_indented_lines() {
         assert_eq!(indent_level("value", IndentStyle::Spaces(4)), 0);
+    }
+
+    #[test]
+    fn pixel_hit_testing_accounts_for_horizontal_scroll() {
+        let buf = buf_with("abcdefghijklmnopqrstuvwxyz");
+        let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(320.0, 80.0));
+
+        let (line, col) = pixel_to_editor_pos(
+            egui::pos2(44.0, 5.0),
+            rect,
+            20.0,
+            4.0,
+            80.0,
+            10.0,
+            20.0,
+            0,
+            &[0],
+            &buf,
+        );
+
+        assert_eq!((line, col), (0, 10));
+    }
+
+    #[test]
+    fn pixel_hit_testing_uses_visible_doc_lines_after_folding() {
+        let buf = buf_with("line0\nhidden1\nhidden2\nline3");
+        let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(320.0, 120.0));
+
+        let (line, col) = pixel_to_editor_pos(
+            egui::pos2(34.0, 25.0),
+            rect,
+            20.0,
+            4.0,
+            0.0,
+            10.0,
+            20.0,
+            0,
+            &[0, 3],
+            &buf,
+        );
+
+        assert_eq!((line, col), (3, 1));
     }
 }

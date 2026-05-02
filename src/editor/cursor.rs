@@ -282,7 +282,7 @@ impl EditorCursor {
     pub fn move_page_down(&mut self, buf: &Buffer, page_lines: usize, extend: bool) {
         let target_col = self.desired_col.unwrap_or(self.pos.col);
         let last_line = buf.line_count().saturating_sub(1);
-        let new_line = (self.pos.line + page_lines).min(last_line);
+        let new_line = self.pos.line.saturating_add(page_lines).min(last_line);
         let new_col = target_col.min(buf.line_len(new_line));
         self.move_to(Position::new(new_line, new_col), extend);
         self.desired_col = Some(target_col);
@@ -360,6 +360,16 @@ impl EditorCursor {
                 anchor.col = anchor.col.min(buf.line_len(anchor.line));
             }
         }
+        let mut seen = Vec::with_capacity(self.extra_cursors.len() + 1);
+        seen.push(self.pos);
+        self.extra_cursors.retain(|extra| {
+            if seen.contains(&extra.pos) {
+                false
+            } else {
+                seen.push(extra.pos);
+                true
+            }
+        });
     }
 
     /// Clear all extra cursors.
@@ -430,13 +440,15 @@ impl EditorCursor {
         }
         let text = buf.text();
         let search_char_idx = buf.pos_to_char(search_after);
+        let search_byte_idx = char_to_byte_idx(&text, search_char_idx);
         // Search from after the last cursor, wrapping around
-        if let Some(found) = text[search_char_idx..].find(needle) {
-            let abs_char = search_char_idx + found;
+        if let Some(found) = text[search_byte_idx..].find(needle) {
+            let abs_byte = search_byte_idx + found;
+            let abs_char = byte_to_char_idx(&text, abs_byte);
             let found_pos = buf.char_to_pos(abs_char);
             let found_end = buf.char_to_pos(abs_char + needle.chars().count());
             // Don't add a duplicate
-            if found_pos != self.pos && !self.extra_cursors.iter().any(|c| c.pos == found_end) {
+            if found_end != self.pos && !self.extra_cursors.iter().any(|c| c.pos == found_end) {
                 self.extra_cursors.push(CursorRange {
                     pos: found_end,
                     anchor: Some(found_pos),
@@ -445,10 +457,11 @@ impl EditorCursor {
             }
         }
         // Wrap around from the beginning
-        if let Some(found) = text[..search_char_idx].find(needle) {
-            let found_pos = buf.char_to_pos(found);
-            let found_end = buf.char_to_pos(found + needle.chars().count());
-            if found_pos != self.pos && !self.extra_cursors.iter().any(|c| c.pos == found_end) {
+        if let Some(found) = text[..search_byte_idx].find(needle) {
+            let found_char = byte_to_char_idx(&text, found);
+            let found_pos = buf.char_to_pos(found_char);
+            let found_end = buf.char_to_pos(found_char + needle.chars().count());
+            if found_end != self.pos && !self.extra_cursors.iter().any(|c| c.pos == found_end) {
                 self.extra_cursors.push(CursorRange {
                     pos: found_end,
                     anchor: Some(found_pos),
@@ -467,9 +480,10 @@ impl EditorCursor {
         let text = buf.text();
         self.extra_cursors.clear();
         let mut first = true;
-        let mut start = 0;
-        while let Some(found) = text[start..].find(needle) {
-            let abs_char = start + found;
+        let mut start_byte = 0;
+        while let Some(found) = text[start_byte..].find(needle) {
+            let abs_byte = start_byte + found;
+            let abs_char = byte_to_char_idx(&text, abs_byte);
             let found_pos = buf.char_to_pos(abs_char);
             let found_end = buf.char_to_pos(abs_char + needle.chars().count());
             if first {
@@ -482,7 +496,7 @@ impl EditorCursor {
                     anchor: Some(found_pos),
                 });
             }
-            start = abs_char + needle.len().max(1);
+            start_byte = abs_byte + needle.len().max(1);
         }
     }
 }
@@ -509,6 +523,17 @@ fn char_kind(c: char) -> CharKind {
     } else {
         CharKind::Punctuation
     }
+}
+
+fn char_to_byte_idx(text: &str, char_idx: usize) -> usize {
+    text.char_indices()
+        .nth(char_idx)
+        .map(|(idx, _)| idx)
+        .unwrap_or(text.len())
+}
+
+fn byte_to_char_idx(text: &str, byte_idx: usize) -> usize {
+    text[..byte_idx].chars().count()
 }
 
 #[cfg(test)]
@@ -734,5 +759,139 @@ mod tests {
         let mut c = EditorCursor::at(1, 0);
         c.move_page_up(&buf, 20, false);
         assert_eq!(c.pos.line, 0);
+    }
+
+    #[test]
+    fn empty_buffer_movements_stay_at_origin() {
+        let buf = Buffer::empty();
+        let mut c = EditorCursor::new();
+
+        c.move_right(&buf, false);
+        c.move_left(&buf, false);
+        c.move_up(&buf, false);
+        c.move_down(&buf, false);
+        c.move_home(&buf, false);
+        c.move_end(&buf, false);
+        c.move_page_up(&buf, 100, false);
+        c.move_page_down(&buf, 100, false);
+        c.move_to_start(false);
+        c.move_to_end(&buf, false);
+        c.clamp(&buf);
+
+        assert_eq!(c.pos, Position::new(0, 0));
+        assert!(!c.has_selection());
+    }
+
+    #[test]
+    fn vertical_movement_restores_column_on_long_lines() {
+        let buf = buf_with("01234567890123456789\nx\n01234567890123456789");
+        let mut c = EditorCursor::at(0, 18);
+
+        c.move_down(&buf, false);
+        assert_eq!(c.pos, Position::new(1, 1));
+        c.move_down(&buf, false);
+        assert_eq!(c.pos, Position::new(2, 18));
+    }
+
+    #[test]
+    fn document_start_and_end_extend_selection() {
+        let buf = buf_with("abc\ndef");
+        let mut c = EditorCursor::at(0, 2);
+
+        c.move_to_end(&buf, true);
+        assert_eq!(
+            c.selection(),
+            Some((Position::new(0, 2), Position::new(1, 3)))
+        );
+
+        c.move_to_start(true);
+        assert_eq!(
+            c.selection(),
+            Some((Position::new(0, 0), Position::new(0, 2)))
+        );
+
+        c.move_to_end(&buf, false);
+        assert_eq!(c.pos, Position::new(1, 3));
+        assert!(!c.has_selection());
+    }
+
+    #[test]
+    fn page_down_saturates_and_clamps_to_document_end() {
+        let buf = buf_with("a\nbb\nccc");
+        let mut c = EditorCursor::at(0, 10);
+
+        c.move_page_down(&buf, usize::MAX, false);
+
+        assert_eq!(c.pos, Position::new(2, 3));
+        assert_eq!(c.desired_col, Some(10));
+    }
+
+    #[test]
+    fn page_movement_extends_selection_from_anchor() {
+        let buf = buf_with("aa\nbb\ncc\ndd");
+        let mut c = EditorCursor::at(1, 1);
+
+        c.move_page_down(&buf, 2, true);
+
+        assert_eq!(c.pos, Position::new(3, 1));
+        assert_eq!(
+            c.selection(),
+            Some((Position::new(1, 1), Position::new(3, 1)))
+        );
+    }
+
+    #[test]
+    fn clamp_clamps_anchors_and_dedups_extra_cursors() {
+        let buf = buf_with("hi\nx");
+        let mut c = EditorCursor::at(5, 5);
+        c.anchor = Some(Position::new(9, 9));
+        c.extra_cursors = vec![
+            CursorRange {
+                pos: Position::new(1, 50),
+                anchor: Some(Position::new(10, 10)),
+            },
+            CursorRange {
+                pos: Position::new(0, 20),
+                anchor: None,
+            },
+            CursorRange {
+                pos: Position::new(0, 2),
+                anchor: None,
+            },
+        ];
+
+        c.clamp(&buf);
+
+        assert_eq!(c.pos, Position::new(1, 1));
+        assert_eq!(c.anchor, Some(Position::new(1, 1)));
+        assert_eq!(
+            c.extra_cursors,
+            vec![CursorRange {
+                pos: Position::new(0, 2),
+                anchor: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn occurrences_use_character_positions_and_avoid_primary_duplicate() {
+        let buf = buf_with("éx éx");
+        let mut c = EditorCursor::new();
+
+        c.select_all_occurrences(&buf, "éx");
+        assert_eq!(
+            c.selection(),
+            Some((Position::new(0, 0), Position::new(0, 2)))
+        );
+        assert_eq!(
+            c.extra_cursors,
+            vec![CursorRange {
+                pos: Position::new(0, 5),
+                anchor: Some(Position::new(0, 3)),
+            }]
+        );
+
+        assert!(!c.add_next_occurrence(&buf, "éx"));
+        assert_eq!(c.extra_cursors.len(), 1);
     }
 }
