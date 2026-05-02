@@ -51,7 +51,7 @@ pub(crate) fn render_home_view_ui(ui: &mut egui::Ui, recent_projects: &[PathBuf]
         );
         ui.add_space(8.0);
         ui.label(
-            egui::RichText::new("GPU-accelerated terminal & editor")
+            egui::RichText::new("Terminal-first local project workbench")
                 .size(14.0)
                 .color(egui::Color32::from_rgb(120, 125, 140)),
         );

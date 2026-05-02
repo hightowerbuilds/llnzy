@@ -108,6 +108,39 @@ Manual checks for the typed command model and surface-specific actions.
 
 ---
 
+## Phase 9 Product Hierarchy And UX Consistency
+
+Manual checks for the product hierarchy and consistency rules in `daily-growth/roadmaps/llnzy-phase-9-product-hierarchy-ux-consistency-05-02-2026.md`.
+
+1. Launch with no restorable session and confirm Home appears with the current primary app identity.
+2. Create a new workspace and confirm the default tab layout starts with one Terminal tab.
+3. Add workspace tabs and confirm new layout rows default to Terminal.
+4. Open Stacker, Sketch, Git, Settings, and Appearances repeatedly and confirm singleton tabs focus instead of duplicating.
+5. Open the same code file repeatedly and confirm the existing code-file tab is focused.
+6. Confirm Stacker, Markdown, Sketch, Git, and Settings toolbars follow the documented grouping and do not resize the main work area unexpectedly.
+7. Confirm empty states in Home, Stacker, Sketch browser, Markdown preview, Git, and Settings are brief, clear, and leave the next useful action visible.
+8. Join two tabs, resize the divider, switch active sides, and confirm tab title, close, rename, and context-menu behavior stays consistent.
+9. Join mixed surfaces such as Terminal + CodeFile, CodeFile + Sketch, and Git + Stacker, then confirm each pane preserves its normal toolbar and empty-state behavior.
+
+---
+
+## Phase 8 Local Git Reliability
+
+Manual checks for Git states that depend on real repositories and local machine setup.
+
+1. Open the Git tab in a normal repository and confirm branch, dirty/clean, commit count, worktree, stashes, reflog, and commit log render.
+2. Open the Git tab outside a repository and confirm the state says no repository without blocking the app.
+3. Temporarily launch without `git` available on `PATH` and confirm the state says Git is unavailable.
+4. Open a detached HEAD repository and confirm the Git header shows the detached state.
+5. Open an unborn repository with no commits and confirm the Git header shows no commits without crashing.
+6. Open a bare repository and confirm the app reports that bare repositories are unsupported.
+7. Open a shallow clone and confirm the Git header shows the shallow state.
+8. Open a large repository and confirm the Git tab remains responsive while loading and marks the repository as large when detected.
+9. Trigger Refresh repeatedly while switching projects and confirm stale refresh results do not replace the current repository.
+10. Expand commit details, rapidly select different commits, and confirm stale details never replace the current selection.
+
+---
+
 ## LSP And Git Follow-Up
 
 Manual checks that remain important even with the Phase 7 lifecycle tests in place.

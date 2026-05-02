@@ -1,7 +1,10 @@
 use std::path::Path;
 
 use super::git_state::{GitPanel, GitUiState};
-use crate::git::{file_state_label, GitCommitNode, GitFileState, GitSnapshot, GitStatusEntry};
+use crate::git::{
+    file_state_label, GitCommitNode, GitErrorKind, GitFileState, GitHeadState, GitSnapshot,
+    GitStatusEntry,
+};
 
 const BG: egui::Color32 = egui::Color32::from_rgb(30, 31, 32);
 const PANEL: egui::Color32 = egui::Color32::from_rgb(38, 39, 40);
@@ -40,7 +43,7 @@ pub(crate) fn render_git_view_ui(ui: &mut egui::Ui, state: &mut GitUiState, proj
     render_header(ui, state, snapshot.as_ref());
 
     if let Some(error) = &state.error {
-        render_empty_state(ui, error, project_root);
+        render_empty_state(ui, state.error_kind, error, project_root);
         return;
     }
 
@@ -117,6 +120,7 @@ fn render_header(ui: &mut egui::Ui, state: &mut GitUiState, snapshot: Option<&Gi
                 ui.add_space(8.0);
                 if let Some(snapshot) = snapshot {
                     badge(ui, branch_label(snapshot), BLUE);
+                    render_repository_state_badges(ui, snapshot);
                     badge(
                         ui,
                         if snapshot.is_dirty { "DIRTY" } else { "CLEAN" },
@@ -162,10 +166,21 @@ fn render_panel_button(ui: &mut egui::Ui, state: &mut GitUiState, panel: GitPane
     }
 }
 
-fn render_empty_state(ui: &mut egui::Ui, error: &str, project_root: &Path) {
+fn render_empty_state(
+    ui: &mut egui::Ui,
+    error_kind: Option<GitErrorKind>,
+    error: &str,
+    project_root: &Path,
+) {
     ui.add_space(18.0);
     ui.vertical(|ui| {
-        ui.label(egui::RichText::new(error).size(18.0).color(TEXT));
+        ui.label(
+            egui::RichText::new(git_error_title(error_kind))
+                .size(18.0)
+                .color(TEXT),
+        );
+        ui.add_space(4.0);
+        ui.label(egui::RichText::new(error).size(13.0).color(DIM));
         ui.add_space(6.0);
         ui.label(
             egui::RichText::new(project_root.display().to_string())
@@ -270,6 +285,15 @@ fn render_readme_dashboard(ui: &mut egui::Ui, state: &mut GitUiState, snapshot: 
                     }
                 });
         });
+}
+
+fn git_error_title(error_kind: Option<GitErrorKind>) -> &'static str {
+    match error_kind {
+        Some(GitErrorKind::GitMissing) => "Git is unavailable",
+        Some(GitErrorKind::NotRepository) => "No repository",
+        Some(GitErrorKind::BareRepository) => "Bare repository",
+        Some(GitErrorKind::CommandFailed) | None => "Git error",
+    }
 }
 
 fn render_worktree_panel(ui: &mut egui::Ui, snapshot: &GitSnapshot) {
@@ -708,6 +732,21 @@ fn branch_label(snapshot: &GitSnapshot) -> String {
                 .map(|oid| format!("detached {}", short_display(oid)))
         })
         .unwrap_or_else(|| "no HEAD".to_string())
+}
+
+fn render_repository_state_badges(ui: &mut egui::Ui, snapshot: &GitSnapshot) {
+    let state = &snapshot.repository_state;
+    match state.head {
+        GitHeadState::Detached => badge(ui, "DETACHED", YELLOW),
+        GitHeadState::Unborn => badge(ui, "NO COMMITS", YELLOW),
+        GitHeadState::Unknown | GitHeadState::Branch => {}
+    }
+    if state.is_shallow {
+        badge(ui, "SHALLOW", YELLOW);
+    }
+    if state.is_large {
+        badge(ui, "LARGE REPO", YELLOW);
+    }
 }
 
 fn state_color(state: GitFileState) -> egui::Color32 {

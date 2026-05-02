@@ -722,6 +722,33 @@ Completed May 2, 2026.
 
 Purpose: keep Git useful without making repository state risky.
 
+### Progress
+
+Completed May 2, 2026:
+
+- Kept the Git surface read-only while hardening discovery, snapshot, and detail-loading behavior.
+- Added typed Git error categories for:
+  - Git missing
+  - no repository
+  - bare repository
+  - generic command failure
+- Added `GitRepositoryState` to snapshots with:
+  - head state
+  - bare/shallow flags
+  - large-repository heuristic
+  - object count
+  - status entry count
+- Added porcelain v2 parsing for detached and unborn HEAD states.
+- Rejected bare repositories before loading working-tree snapshots.
+- Added read-only repository state detection through `rev-parse` and `count-objects`.
+- Added visible Git tab states for missing Git, no repository, bare repository, detached HEAD, shallow clones, and large repositories.
+- Added explicit refresh and detail request identities in the Git UI state.
+- Guarded stale refresh results so older Git scans cannot overwrite the current repository.
+- Guarded stale commit detail results by request id, repo root, and selected commit.
+- Cancelled in-flight commit detail state on selection changes and repository changes while preserving lazy loading.
+- Kept commit detail loading lazy behind the expanded detail panel.
+- Added tests for additional porcelain status cases, repository state parsing, failure classification, refresh identity, stale refresh discard, stale detail discard, disconnected loaders, and repeat refresh behavior.
+
 ### Work
 
 - Keep Git read-only until mutation workflows are carefully designed.
@@ -742,11 +769,34 @@ Purpose: keep Git useful without making repository state risky.
 - Git tab handles non-standard repository states gracefully.
 - Stale commit detail results cannot overwrite a newer selection.
 
+### Validation
+
+- `cargo fmt`
+- `cargo test git`
+
 ---
 
 ## Phase 9: Product Hierarchy And UX Consistency
 
 Purpose: make the app feel intentional, not just capable.
+
+### Progress
+
+Completed May 2, 2026:
+
+- Created `daily-growth/roadmaps/llnzy-phase-9-product-hierarchy-ux-consistency-05-02-2026.md`.
+- Defined the primary product identity:
+  - `llnzy` is a terminal-first local project workbench that keeps code, Markdown, Git, prompts, sketches, and settings in one durable GPU-native tabbed workspace.
+- Reflected that identity in the Home tagline.
+- Documented the default workspace priorities:
+  - restore the last usable session
+  - fall back to Home when restore has no usable tabs
+  - lead Home with Open Project
+  - default new saved workspaces to one Terminal tab
+  - use explicit file actions for code-file tabs
+  - keep singleton tools as focus-reused tabs
+- Documented normalized toolbar, tab, empty-state, joined-tab, and split-pane rules.
+- Added a Phase 9 manual consistency checklist covering Stacker, Markdown, Git, Sketch, Settings, singleton tabs, code-file tabs, joined tabs, and split panes.
 
 ### Work
 
@@ -776,6 +826,10 @@ Purpose: make the app feel intentional, not just capable.
 - A new user can understand what each top-level surface is for within one minute.
 - Common controls feel consistent across Stacker, Markdown, Git, Sketch, and Settings.
 - The app feels quieter and more durable without losing its visual identity.
+
+### Validation
+
+- `cargo check`
 
 ---
 
