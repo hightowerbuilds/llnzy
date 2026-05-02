@@ -1,10 +1,27 @@
 use winit::event::KeyEvent;
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlainTextInputRoute {
+    Ignore,
+    Key,
+    Paste,
+}
+
 /// Returns true when a text input payload is more like a paste/dictation commit
 /// than a single keypress.
 pub fn text_should_use_paste_path(text: &str) -> bool {
     text.chars().take(2).count() > 1
+}
+
+pub fn plain_text_input_route(text: &str, modifiers: ModifiersState) -> PlainTextInputRoute {
+    if text.is_empty() || modifiers.control_key() || modifiers.alt_key() || modifiers.super_key() {
+        PlainTextInputRoute::Ignore
+    } else if text_should_use_paste_path(text) {
+        PlainTextInputRoute::Paste
+    } else {
+        PlainTextInputRoute::Key
+    }
 }
 
 /// Encode a winit key event into bytes to send to the PTY.
@@ -65,7 +82,7 @@ pub fn encode_key(
     // Plain text input (no Ctrl, no Alt, no Super)
     if let Some(ref text) = event.text {
         let s = text.as_str();
-        if !s.is_empty() && !modifiers.control_key() && !modifiers.alt_key() {
+        if plain_text_input_route(s, modifiers) == PlainTextInputRoute::Key {
             return Some(s.as_bytes().to_vec());
         }
     }
@@ -269,6 +286,62 @@ mod tests {
         assert!(text_should_use_paste_path("hello"));
         assert!(text_should_use_paste_path("hello world"));
         assert!(text_should_use_paste_path("a\nb"));
+    }
+
+    #[test]
+    fn empty_text_is_not_paste_payload() {
+        assert!(!text_should_use_paste_path(""));
+    }
+
+    #[test]
+    fn single_character_ime_commit_uses_key_path() {
+        assert!(!text_should_use_paste_path("你"));
+    }
+
+    #[test]
+    fn plain_text_route_distinguishes_keys_from_pastes() {
+        let mods = ModifiersState::empty();
+        assert_eq!(plain_text_input_route("x", mods), PlainTextInputRoute::Key);
+        assert_eq!(
+            plain_text_input_route("X", ModifiersState::SHIFT),
+            PlainTextInputRoute::Key
+        );
+        assert_eq!(
+            plain_text_input_route("hello", mods),
+            PlainTextInputRoute::Paste
+        );
+        assert_eq!(
+            plain_text_input_route("line 1\nline 2", mods),
+            PlainTextInputRoute::Paste
+        );
+    }
+
+    #[test]
+    fn modified_text_never_uses_plain_terminal_text_route() {
+        assert_eq!(
+            plain_text_input_route("x", ModifiersState::CONTROL),
+            PlainTextInputRoute::Ignore
+        );
+        assert_eq!(
+            plain_text_input_route("x", ModifiersState::ALT),
+            PlainTextInputRoute::Ignore
+        );
+        assert_eq!(
+            plain_text_input_route("x", ModifiersState::SUPER),
+            PlainTextInputRoute::Ignore
+        );
+        assert_eq!(
+            plain_text_input_route("line 1\nline 2", ModifiersState::CONTROL),
+            PlainTextInputRoute::Ignore
+        );
+        assert_eq!(
+            plain_text_input_route("line 1\nline 2", ModifiersState::ALT),
+            PlainTextInputRoute::Ignore
+        );
+        assert_eq!(
+            plain_text_input_route("line 1\nline 2", ModifiersState::SUPER),
+            PlainTextInputRoute::Ignore
+        );
     }
 
     // ── arrow_key ──

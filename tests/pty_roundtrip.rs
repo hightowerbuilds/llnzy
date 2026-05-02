@@ -11,15 +11,30 @@ use std::io::{Read, Write};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+use portable_pty::{native_pty_system, Child, CommandBuilder, PtySize};
 
 use llnzy::terminal::Terminal;
 
 /// Spawn a shell in a PTY and return the terminal, reader channel, and writer.
 type PtyWriter = Box<dyn Write + Send>;
 type PtyMaster = Box<dyn portable_pty::MasterPty + Send>;
+type PtyChild = Box<dyn Child + Send + Sync>;
 
 fn spawn_shell(cols: u16, rows: u16) -> (Terminal, mpsc::Receiver<Vec<u8>>, PtyWriter, PtyMaster) {
+    let (terminal, rx, writer, master, _child) = spawn_shell_with_child(cols, rows);
+    (terminal, rx, writer, master)
+}
+
+fn spawn_shell_with_child(
+    cols: u16,
+    rows: u16,
+) -> (
+    Terminal,
+    mpsc::Receiver<Vec<u8>>,
+    PtyWriter,
+    PtyMaster,
+    PtyChild,
+) {
     let pty_system = native_pty_system();
     let size = PtySize {
         rows,
@@ -33,7 +48,7 @@ fn spawn_shell(cols: u16, rows: u16) -> (Terminal, mpsc::Receiver<Vec<u8>>, PtyW
     let mut cmd = CommandBuilder::new("/bin/sh");
     cmd.env("TERM", "xterm-256color");
 
-    let _child = pair
+    let child = pair
         .slave
         .spawn_command(cmd)
         .expect("Failed to spawn shell");
@@ -63,7 +78,7 @@ fn spawn_shell(cols: u16, rows: u16) -> (Terminal, mpsc::Receiver<Vec<u8>>, PtyW
     });
 
     let terminal = Terminal::new(cols, rows);
-    (terminal, rx, writer, pair.master)
+    (terminal, rx, writer, pair.master, child)
 }
 
 /// Drain all available output from the PTY channel into the terminal.
@@ -91,6 +106,57 @@ fn wait_for_output(
             return false;
         }
         std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn wait_for_text(
+    terminal: &mut Terminal,
+    rx: &mpsc::Receiver<Vec<u8>>,
+    needle: &str,
+    timeout: Duration,
+) -> bool {
+    let start = Instant::now();
+    loop {
+        drain(terminal, rx);
+        if all_text(terminal).contains(needle) {
+            return true;
+        }
+        if start.elapsed() > timeout {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn wait_for_child_exit(child: &mut PtyChild, timeout: Duration) -> Option<i32> {
+    let start = Instant::now();
+    loop {
+        if let Some(status) = child.try_wait().expect("child status check failed") {
+            return Some(status.exit_code() as i32);
+        }
+        if start.elapsed() > timeout {
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn wait_for_reader_disconnect(
+    terminal: &mut Terminal,
+    rx: &mpsc::Receiver<Vec<u8>>,
+    timeout: Duration,
+) -> bool {
+    let start = Instant::now();
+    loop {
+        drain(terminal, rx);
+        match rx.recv_timeout(Duration::from_millis(25)) {
+            Ok(bytes) => terminal.process(&bytes),
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => return true,
+        }
+        if start.elapsed() > timeout {
+            return false;
+        }
     }
 }
 
@@ -241,4 +307,222 @@ fn pty_reader_closes_on_shell_exit() {
         std::thread::sleep(Duration::from_millis(50));
     }
     // If we got here, the reader thread closed — test passes
+}
+
+#[test]
+fn pty_exit_status_and_restart_are_clear() {
+    let (mut terminal, rx, mut writer, _master, mut child) = spawn_shell_with_child(80, 24);
+
+    wait_for_output(&mut terminal, &rx, Duration::from_secs(3));
+    writer
+        .write_all(b"printf 'EXIT_BEFORE_RESTART\\n'; exit 23\n")
+        .unwrap();
+    writer.flush().unwrap();
+
+    assert!(
+        wait_for_text(
+            &mut terminal,
+            &rx,
+            "EXIT_BEFORE_RESTART",
+            Duration::from_secs(3)
+        ),
+        "pre-exit marker missing. Full text:\n{}",
+        all_text(&terminal)
+    );
+    assert_eq!(
+        wait_for_child_exit(&mut child, Duration::from_secs(5)),
+        Some(23),
+        "first shell exit status should be observable"
+    );
+    assert!(
+        wait_for_reader_disconnect(&mut terminal, &rx, Duration::from_secs(3)),
+        "reader should disconnect after first shell exits"
+    );
+
+    let (
+        mut restarted_terminal,
+        restarted_rx,
+        mut restarted_writer,
+        _restarted_master,
+        mut restarted_child,
+    ) = spawn_shell_with_child(80, 24);
+    wait_for_output(
+        &mut restarted_terminal,
+        &restarted_rx,
+        Duration::from_secs(3),
+    );
+    restarted_writer
+        .write_all(b"printf 'RESTARTED_SHELL_READY\\n'; exit 0\n")
+        .unwrap();
+    restarted_writer.flush().unwrap();
+
+    assert!(
+        wait_for_text(
+            &mut restarted_terminal,
+            &restarted_rx,
+            "RESTARTED_SHELL_READY",
+            Duration::from_secs(3),
+        ),
+        "restarted shell marker missing. Full text:\n{}",
+        all_text(&restarted_terminal)
+    );
+    assert_eq!(
+        wait_for_child_exit(&mut restarted_child, Duration::from_secs(5)),
+        Some(0),
+        "restarted shell should exit cleanly"
+    );
+}
+
+#[test]
+fn pty_kill_terminates_child_and_reader() {
+    let (mut terminal, rx, _writer, _master, mut child) = spawn_shell_with_child(80, 24);
+
+    wait_for_output(&mut terminal, &rx, Duration::from_secs(3));
+    child.kill().expect("failed to kill shell");
+
+    assert!(
+        wait_for_child_exit(&mut child, Duration::from_secs(5)).is_some(),
+        "killed shell should report an exit status"
+    );
+    assert!(
+        wait_for_reader_disconnect(&mut terminal, &rx, Duration::from_secs(3)),
+        "reader should disconnect after shell is killed"
+    );
+}
+
+#[test]
+fn pty_resize_while_output_streams() {
+    let (mut terminal, rx, mut writer, master) = spawn_shell(80, 24);
+
+    wait_for_output(&mut terminal, &rx, Duration::from_secs(3));
+    writer
+        .write_all(
+            b"i=1; while [ $i -le 80 ]; do printf 'STREAM_%03d abcdefghijklmnopqrstuvwxyz\\n' \"$i\"; i=$((i + 1)); done; printf 'STREAM_DONE\\n'\n",
+        )
+        .unwrap();
+    writer.flush().unwrap();
+
+    for (cols, rows) in [(100, 30), (72, 18), (120, 36), (80, 24)] {
+        std::thread::sleep(Duration::from_millis(20));
+        master
+            .resize(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .unwrap();
+        terminal.resize(cols, rows);
+        drain(&mut terminal, &rx);
+    }
+
+    assert!(
+        wait_for_text(&mut terminal, &rx, "STREAM_DONE", Duration::from_secs(5)),
+        "stream should complete after repeated resizes. Full text:\n{}",
+        all_text(&terminal)
+    );
+    assert_eq!(terminal.size(), (80, 24));
+}
+
+#[test]
+fn pty_large_paste_reaches_shell_intact() {
+    let (mut terminal, rx, mut writer, _master) = spawn_shell(100, 30);
+
+    wait_for_output(&mut terminal, &rx, Duration::from_secs(3));
+
+    let mut payload = String::new();
+    for i in 0..1536 {
+        payload.push_str(&format!(
+            "LLNZY_LARGE_PASTE_{i:04}: abcdefghijklmnopqrstuvwxyz\n"
+        ));
+    }
+    let expected_bytes = payload.len();
+
+    let mut command = String::new();
+    command.push_str("p=/tmp/llnzy_pty_large_$$\n");
+    command.push_str("cat > \"$p\" <<'LLNZY_EOF'\n");
+    command.push_str(&payload);
+    command.push_str("LLNZY_EOF\n");
+    command.push_str("printf 'LARGE_BYTES:%s\\n' \"$(wc -c < \"$p\" | tr -d ' ')\"\n");
+    command.push_str("rm -f \"$p\"\n");
+    command.push_str("printf 'LARGE_DONE\\n'\n");
+
+    writer.write_all(command.as_bytes()).unwrap();
+    writer.flush().unwrap();
+
+    assert!(
+        wait_for_text(&mut terminal, &rx, "LARGE_DONE", Duration::from_secs(10)),
+        "large paste should finish. Full text:\n{}",
+        all_text(&terminal)
+    );
+
+    let text = all_text(&terminal);
+    assert!(
+        text.contains(&format!("LARGE_BYTES:{expected_bytes}")),
+        "shell should receive the full large paste. Expected {expected_bytes} bytes. Full text:\n{text}"
+    );
+}
+
+#[test]
+fn pty_osc_title_event_survives_real_pty_roundtrip() {
+    use llnzy::terminal::TerminalEvent;
+
+    let (mut terminal, rx, mut writer, _master) = spawn_shell(80, 24);
+
+    wait_for_output(&mut terminal, &rx, Duration::from_secs(3));
+    writer
+        .write_all(b"printf '\\033]0;LLNZY_OSC_TITLE\\007'\n")
+        .unwrap();
+    writer.flush().unwrap();
+
+    let start = Instant::now();
+    let mut title_seen = false;
+    while start.elapsed() <= Duration::from_secs(3) {
+        drain(&mut terminal, &rx);
+        if terminal
+            .drain_events()
+            .iter()
+            .any(|event| matches!(event, TerminalEvent::Title(title) if title == "LLNZY_OSC_TITLE"))
+        {
+            title_seen = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    assert!(title_seen, "OSC title event should survive PTY roundtrip");
+}
+
+#[test]
+fn pty_osc7_working_directory_event_survives_real_pty_roundtrip() {
+    use llnzy::terminal::TerminalEvent;
+
+    let (mut terminal, rx, mut writer, _master) = spawn_shell(80, 24);
+
+    wait_for_output(&mut terminal, &rx, Duration::from_secs(3));
+    writer
+        .write_all(b"printf '\\033]7;file://localhost/tmp/llnzy_osc7_roundtrip\\007'\n")
+        .unwrap();
+    writer.flush().unwrap();
+
+    let start = Instant::now();
+    let mut cwd_seen = false;
+    while start.elapsed() <= Duration::from_secs(3) {
+        drain(&mut terminal, &rx);
+        if terminal.drain_events().iter().any(|event| {
+            matches!(
+                event,
+                TerminalEvent::WorkingDirectory(cwd) if cwd == "/tmp/llnzy_osc7_roundtrip"
+            )
+        }) {
+            cwd_seen = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    assert!(
+        cwd_seen,
+        "OSC 7 working directory event should survive PTY roundtrip"
+    );
 }

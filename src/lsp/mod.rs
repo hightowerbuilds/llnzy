@@ -1,4 +1,5 @@
 pub mod client;
+pub mod document;
 pub mod registry;
 pub mod transport;
 
@@ -12,7 +13,7 @@ use tokio::runtime::Runtime;
 use tokio::sync::oneshot;
 
 use client::{uri_to_path, LspClient, LspNotification};
-use registry::find_server;
+use registry::{resolve_server, ServerLookup};
 use transport::{ServerMessage, Transport};
 
 /// A text edit from formatting or workspace edits.
@@ -121,6 +122,61 @@ pub enum LspEnsureStatus {
     Unavailable,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LspLifecycleState {
+    Idle,
+    Starting,
+    Running,
+    Unavailable,
+    ShuttingDown,
+    Stopped,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LspLifecycleStatus {
+    pub state: LspLifecycleState,
+    pub server_name: Option<String>,
+    pub pending_open_docs: usize,
+    pub unavailable_reason: Option<String>,
+}
+
+impl LspLifecycleStatus {
+    fn label(&self) -> String {
+        match self.state {
+            LspLifecycleState::Idle => String::new(),
+            LspLifecycleState::Starting => {
+                if self.pending_open_docs == 0 {
+                    "Starting...".to_string()
+                } else {
+                    format!("Starting... ({} pending)", self.pending_open_docs)
+                }
+            }
+            LspLifecycleState::Running => self.server_name.clone().unwrap_or_default(),
+            LspLifecycleState::Unavailable => {
+                let reason = self
+                    .unavailable_reason
+                    .as_deref()
+                    .unwrap_or("unknown reason");
+                format!("Unavailable: {reason}")
+            }
+            LspLifecycleState::ShuttingDown => "Shutting down...".to_string(),
+            LspLifecycleState::Stopped => "Stopped".to_string(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RootUpdate {
+    Unchanged,
+    Changed,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ExistingClientEnsurePlan {
+    ReuseRunning,
+    RemoveAndRetry,
+}
+
 impl From<Option<DiagnosticSeverity>> for DiagSeverity {
     fn from(s: Option<DiagnosticSeverity>) -> Self {
         match s {
@@ -169,6 +225,9 @@ impl LspManager {
     }
 
     pub fn set_root(&mut self, path: PathBuf) {
+        if plan_root_update(self.root_path.as_deref(), &path) == RootUpdate::Changed {
+            self.reset_servers_for_root_change();
+        }
         self.root_path = Some(path);
     }
 
@@ -176,22 +235,43 @@ impl LspManager {
     pub fn ensure_server(&mut self, lang_id: &'static str) -> LspEnsureStatus {
         self.poll_starting_servers();
 
-        if self.clients.contains_key(lang_id) {
-            return if self.clients[lang_id].is_running() {
-                LspEnsureStatus::Running
-            } else {
-                LspEnsureStatus::Unavailable
-            };
+        if let Some(client) = self.clients.get(lang_id) {
+            match plan_existing_client_ensure(client.is_running()) {
+                ExistingClientEnsurePlan::ReuseRunning => return LspEnsureStatus::Running,
+                ExistingClientEnsurePlan::RemoveAndRetry => {
+                    log::warn!("LSP server for {lang_id} is stopped -- removing client");
+                }
+            }
+        }
+        if self
+            .clients
+            .get(lang_id)
+            .is_some_and(|client| !client.is_running())
+        {
+            self.clients.remove(lang_id);
+            self.health_checks.remove(lang_id);
+            self.unavailable
+                .insert(lang_id, "server stopped responding".to_string());
         }
 
         if self.starting.contains_key(lang_id) {
             return LspEnsureStatus::Starting;
         }
 
-        let Some(config) = find_server(lang_id) else {
-            self.unavailable
-                .insert(lang_id, "server command not found".to_string());
-            return LspEnsureStatus::Unavailable;
+        let config = match resolve_server(lang_id) {
+            ServerLookup::Available(config) => config,
+            ServerLookup::MissingCommand(config) => {
+                self.unavailable.insert(
+                    lang_id,
+                    format!("server command not found: {}", config.command),
+                );
+                return LspEnsureStatus::Unavailable;
+            }
+            ServerLookup::UnsupportedLanguage => {
+                self.unavailable
+                    .insert(lang_id, "unsupported language".to_string());
+                return LspEnsureStatus::Unavailable;
+            }
         };
 
         log::info!("Starting LSP {} for {}", config.command, lang_id);
@@ -356,6 +436,7 @@ impl LspManager {
     }
 
     pub fn did_close(&mut self, path: &Path, lang_id: &str) {
+        self.clear_diagnostics(path);
         let Some(client) = self.clients.get_mut(lang_id) else {
             return;
         };
@@ -369,6 +450,32 @@ impl LspManager {
             }
         };
         self.spawn_notification(transport, notification, "didClose");
+    }
+
+    pub fn did_move(&mut self, old_path: &Path, new_path: &Path, lang_id: &str, text: &str) {
+        self.remap_diagnostics(old_path, new_path.to_path_buf());
+        let Some(client) = self.clients.get_mut(lang_id) else {
+            return;
+        };
+        let transport = client.transport().clone();
+        let notifications = match client.did_move_notifications(old_path, new_path, lang_id, text) {
+            Ok(notifications) => notifications,
+            Err(e) => {
+                log::warn!("didMove failed: {e}");
+                return;
+            }
+        };
+        for notification in notifications {
+            self.spawn_notification(transport.clone(), notification, "didMove");
+        }
+    }
+
+    pub fn clear_diagnostics(&mut self, path: &Path) {
+        clear_document_diagnostics(&mut self.diagnostics, path);
+    }
+
+    pub fn remap_diagnostics(&mut self, old_path: &Path, new_path: PathBuf) {
+        remap_document_diagnostics(&mut self.diagnostics, old_path, new_path);
     }
 
     fn spawn_notification(
@@ -385,6 +492,15 @@ impl LspManager {
                 log::warn!("{label} failed: {e}");
             }
         });
+    }
+
+    fn reset_servers_for_root_change(&mut self) {
+        self.clients.clear();
+        self.starting.clear();
+        self.health_checks.clear();
+        self.pending_open_docs.clear();
+        self.unavailable.clear();
+        self.diagnostics.clear();
     }
 
     /// Drain messages from language servers and update manager-owned state.
@@ -816,21 +932,71 @@ impl LspManager {
 
     /// Get the status string for a language server (for display in the status bar).
     pub fn server_status(&self, lang_id: &str) -> String {
+        self.lifecycle_status(lang_id).label()
+    }
+
+    pub fn lifecycle_status(&self, lang_id: &str) -> LspLifecycleStatus {
+        let pending_open_docs = self.pending_open_doc_count(lang_id);
         if self.starting.contains_key(lang_id) {
-            return "Starting...".to_string();
+            return LspLifecycleStatus {
+                state: LspLifecycleState::Starting,
+                server_name: None,
+                pending_open_docs,
+                unavailable_reason: None,
+            };
         }
         if let Some(reason) = self.unavailable.get(lang_id) {
-            return format!("Unavailable: {reason}");
+            return LspLifecycleStatus {
+                state: LspLifecycleState::Unavailable,
+                server_name: None,
+                pending_open_docs,
+                unavailable_reason: Some(reason.clone()),
+            };
         }
         match self.clients.get(lang_id) {
             Some(client) => match client.state {
-                client::ClientState::Starting => "Starting...".to_string(),
-                client::ClientState::Running => client.server_name.clone(),
-                client::ClientState::ShuttingDown => "Shutting down...".to_string(),
-                client::ClientState::Stopped => "Stopped".to_string(),
+                client::ClientState::Starting => LspLifecycleStatus {
+                    state: LspLifecycleState::Starting,
+                    server_name: Some(client.server_name.clone()),
+                    pending_open_docs,
+                    unavailable_reason: None,
+                },
+                client::ClientState::Running => LspLifecycleStatus {
+                    state: LspLifecycleState::Running,
+                    server_name: Some(client.server_name.clone()),
+                    pending_open_docs,
+                    unavailable_reason: None,
+                },
+                client::ClientState::ShuttingDown => LspLifecycleStatus {
+                    state: LspLifecycleState::ShuttingDown,
+                    server_name: Some(client.server_name.clone()),
+                    pending_open_docs,
+                    unavailable_reason: None,
+                },
+                client::ClientState::Stopped => LspLifecycleStatus {
+                    state: LspLifecycleState::Stopped,
+                    server_name: Some(client.server_name.clone()),
+                    pending_open_docs,
+                    unavailable_reason: None,
+                },
             },
-            None => String::new(),
+            None => LspLifecycleStatus {
+                state: LspLifecycleState::Idle,
+                server_name: None,
+                pending_open_docs,
+                unavailable_reason: None,
+            },
         }
+    }
+
+    pub fn pending_open_doc_count(&self, lang_id: &str) -> usize {
+        self.pending_open_docs
+            .get(lang_id)
+            .map_or(0, |docs| docs.len())
+    }
+
+    pub fn unavailable_reason(&self, lang_id: &str) -> Option<&str> {
+        self.unavailable.get(lang_id).map(String::as_str)
     }
 
     pub fn shutdown_all(&mut self) {
@@ -1497,5 +1663,141 @@ fn markup_value_to_string(v: lsp_types::MarkedString) -> String {
 impl Drop for LspManager {
     fn drop(&mut self) {
         self.shutdown_all();
+    }
+}
+
+fn plan_root_update(current: Option<&Path>, next: &Path) -> RootUpdate {
+    match current {
+        Some(current) if current == next => RootUpdate::Unchanged,
+        _ => RootUpdate::Changed,
+    }
+}
+
+fn plan_existing_client_ensure(is_running: bool) -> ExistingClientEnsurePlan {
+    if is_running {
+        ExistingClientEnsurePlan::ReuseRunning
+    } else {
+        ExistingClientEnsurePlan::RemoveAndRetry
+    }
+}
+
+fn clear_document_diagnostics(
+    diagnostics: &mut HashMap<PathBuf, Vec<FileDiagnostic>>,
+    path: &Path,
+) {
+    diagnostics.remove(path);
+}
+
+fn remap_document_diagnostics(
+    diagnostics: &mut HashMap<PathBuf, Vec<FileDiagnostic>>,
+    old_path: &Path,
+    new_path: PathBuf,
+) {
+    if old_path == new_path.as_path() {
+        return;
+    }
+    if let Some(diags) = diagnostics.remove(old_path) {
+        diagnostics.insert(new_path, diags);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn diagnostic(message: &str) -> FileDiagnostic {
+        FileDiagnostic {
+            line: 1,
+            col: 2,
+            end_line: 1,
+            end_col: 5,
+            severity: DiagSeverity::Warning,
+            message: message.to_string(),
+            source: Some("test".to_string()),
+        }
+    }
+
+    #[test]
+    fn root_update_only_restarts_when_path_changes() {
+        let current = Path::new("/workspace/app");
+
+        assert_eq!(
+            plan_root_update(Some(current), Path::new("/workspace/app")),
+            RootUpdate::Unchanged
+        );
+        assert_eq!(
+            plan_root_update(Some(current), Path::new("/workspace/other")),
+            RootUpdate::Changed
+        );
+        assert_eq!(
+            plan_root_update(None, Path::new("/workspace/app")),
+            RootUpdate::Changed
+        );
+    }
+
+    #[test]
+    fn stopped_client_is_removed_so_ensure_can_retry() {
+        assert_eq!(
+            plan_existing_client_ensure(true),
+            ExistingClientEnsurePlan::ReuseRunning
+        );
+        assert_eq!(
+            plan_existing_client_ensure(false),
+            ExistingClientEnsurePlan::RemoveAndRetry
+        );
+    }
+
+    #[test]
+    fn lifecycle_status_label_includes_pending_open_documents() {
+        let status = LspLifecycleStatus {
+            state: LspLifecycleState::Starting,
+            server_name: None,
+            pending_open_docs: 2,
+            unavailable_reason: None,
+        };
+
+        assert_eq!(status.label(), "Starting... (2 pending)");
+    }
+
+    #[test]
+    fn lifecycle_status_label_reports_unavailable_reason() {
+        let status = LspLifecycleStatus {
+            state: LspLifecycleState::Unavailable,
+            server_name: None,
+            pending_open_docs: 0,
+            unavailable_reason: Some("server command not found: rust-analyzer".to_string()),
+        };
+
+        assert_eq!(
+            status.label(),
+            "Unavailable: server command not found: rust-analyzer"
+        );
+    }
+
+    #[test]
+    fn clearing_document_diagnostics_removes_only_that_file() {
+        let first = PathBuf::from("/workspace/src/main.rs");
+        let second = PathBuf::from("/workspace/src/lib.rs");
+        let mut diagnostics = HashMap::from([
+            (first.clone(), vec![diagnostic("first")]),
+            (second.clone(), vec![diagnostic("second")]),
+        ]);
+
+        clear_document_diagnostics(&mut diagnostics, &first);
+
+        assert!(!diagnostics.contains_key(&first));
+        assert_eq!(diagnostics[&second][0].message, "second");
+    }
+
+    #[test]
+    fn remapping_document_diagnostics_moves_existing_entries() {
+        let old_path = PathBuf::from("/workspace/src/old.rs");
+        let new_path = PathBuf::from("/workspace/src/new.rs");
+        let mut diagnostics = HashMap::from([(old_path.clone(), vec![diagnostic("moved")])]);
+
+        remap_document_diagnostics(&mut diagnostics, &old_path, new_path.clone());
+
+        assert!(!diagnostics.contains_key(&old_path));
+        assert_eq!(diagnostics[&new_path][0].message, "moved");
     }
 }

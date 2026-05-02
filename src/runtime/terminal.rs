@@ -51,11 +51,7 @@ impl App {
                 }
                 if !was_exited {
                     if let Some(code) = session.exited {
-                        let pid = session
-                            .process_id
-                            .map(|pid| pid.to_string())
-                            .unwrap_or_else(|| "unknown pid".to_string());
-                        exited.push(format!("{pid} exited with status {code}"));
+                        exited.push(terminal_process_exit_message(session.process_id, code));
                     }
                 }
             }
@@ -129,11 +125,7 @@ impl App {
             return false;
         };
 
-        let text = if text.contains('\r') {
-            text.replace("\r\n", "\n").replace('\r', "\n")
-        } else {
-            text.to_string()
-        };
+        let text = normalize_stacker_editor_text(text);
         let editor_id = egui::Id::new(STACKER_PROMPT_EDITOR_ID);
         let char_count = ui.stacker.input.chars().count();
         let mut state =
@@ -264,5 +256,54 @@ impl App {
             self.selection.select_all(rows, cols);
         }
         self.request_redraw();
+    }
+}
+
+fn normalize_stacker_editor_text(text: &str) -> String {
+    if text.contains('\r') {
+        text.replace("\r\n", "\n").replace('\r', "\n")
+    } else {
+        text.to_string()
+    }
+}
+
+fn terminal_process_exit_message(process_id: Option<u32>, code: i32) -> String {
+    let pid = process_id
+        .map(|pid| pid.to_string())
+        .unwrap_or_else(|| "unknown pid".to_string());
+    format!("{pid} exited with status {code}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stacker_editor_text_normalization_preserves_unix_newlines() {
+        assert_eq!(normalize_stacker_editor_text("one\ntwo"), "one\ntwo");
+    }
+
+    #[test]
+    fn stacker_editor_text_normalization_converts_crlf_and_cr() {
+        assert_eq!(
+            normalize_stacker_editor_text("one\r\ntwo\rthree"),
+            "one\ntwo\nthree"
+        );
+    }
+
+    #[test]
+    fn terminal_exit_message_includes_process_id_and_status() {
+        assert_eq!(
+            terminal_process_exit_message(Some(4242), 7),
+            "4242 exited with status 7"
+        );
+    }
+
+    #[test]
+    fn terminal_exit_message_handles_unknown_process_id() {
+        assert_eq!(
+            terminal_process_exit_message(None, 0),
+            "unknown pid exited with status 0"
+        );
     }
 }

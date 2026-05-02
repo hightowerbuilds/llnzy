@@ -5,6 +5,8 @@ This roadmap turns the veteran editor review into a systematic hardening plan.
 
 The goal is not to make `llnzy` bigger. The goal is to make the core boringly reliable while preserving the app's personality: native, terminal-first, local-first, visually expressive, and workflow-oriented.
 
+Manual verification items that remain outside automated coverage are tracked in `daily-growth/roadmaps/reliability-manual-testing-05-02-2026.md`.
+
 ---
 
 ## North Star
@@ -571,6 +573,76 @@ Purpose: keep the terminal reliable under real daily usage.
 - Terminal resize does not corrupt visible content.
 - Process exit/restart behavior is clear and recoverable.
 
+### Progress
+
+Started May 2, 2026:
+
+- Split Phase 6 into parallel hardening tracks:
+  - PTY lifecycle coverage
+  - terminal parser/emulation durability
+  - input routing and keybinding boundaries
+- Added the manual Phase 6 stress checklist:
+  - run a long command and confirm output remains responsive
+  - resize the window repeatedly during command output
+  - switch tabs while terminal output is streaming
+  - paste a multi-line command into the terminal
+  - open a file path from terminal output
+  - kill an active terminal and restart it
+  - confirm terminal shortcuts do not leak into editor or Stacker tabs
+- Expanded real PTY round-trip coverage for:
+  - process exit status and restart clarity
+  - kill behavior and reader disconnect
+  - resize while output is streaming
+  - large paste/write integrity
+  - OSC title event propagation through a real PTY
+- Hardened terminal parser/emulation behavior:
+  - terminal sizes now clamp to at least `1x1`
+  - scroll regions stay isolated
+  - OSC titles survive split chunks and title stack push/pop
+  - paste-like multi-line payloads render line-by-line
+  - shrink/grow resize preserves visible content
+  - split SGR streams keep styling across wrapped output
+- Hardened input routing and keybinding boundaries:
+  - plain text input now has an explicit key/paste/ignore route
+  - `encode_key` only sends raw bytes for single-key plain text
+  - modified text no longer falls through the plain terminal text route
+  - command keybinding tests now use pure key parts without private `winit` internals
+  - tab navigation keybindings return no command when no tabs exist
+  - Stacker paste normalization handles CRLF and bare CR input
+- Added OSC 7 working-directory support:
+  - public terminal working-directory event
+  - streaming OSC 7 parser for `file://` payloads
+  - percent-decoded local path extraction
+  - direct `Session.cwd` updates from terminal events
+  - title-derived cwd fallback preserved
+  - real PTY round-trip coverage for OSC 7
+- Added runtime terminal lifecycle hardening:
+  - explicit kill/restart rejection messages for missing and non-terminal tabs
+  - already-exited terminal kill requests are rejected without another kill call
+  - restart planning preserves cwd and custom tab names
+  - restart planning skips kill for already-exited sessions
+  - terminal process exit log formatting is covered for known and unknown pids
+- Added final input/stress edge coverage:
+  - empty keybinding strings are rejected
+  - literal plus keybindings parse as `+`
+  - Shift text stays on the plain key route
+  - modified multi-line text is suppressed from plain terminal routing
+  - bracketed paste mode handles split control sequence bytes
+
+Focused validation completed:
+
+- `cargo test --test pty_roundtrip`
+- `cargo test --test terminal_emulation`
+- `cargo test input::tests`
+- `cargo test keybinding`
+- `cargo test runtime::terminal`
+- `cargo test runtime::tabs`
+- `cargo test pty`
+- `cargo test terminal::tests`
+- `cargo test session::tests`
+
+Completed May 2, 2026.
+
 ---
 
 ## Phase 7: LSP Lifecycle Hardening
@@ -598,6 +670,51 @@ Purpose: make language intelligence resilient instead of fragile.
 - Stale LSP responses cannot affect the wrong buffer.
 - Moving a file closes/reopens the correct LSP document identity.
 - Server crash/restart status is visible but not disruptive.
+
+### Progress
+
+Started May 2, 2026:
+
+- Split Phase 7 into parallel hardening tracks:
+  - LSP document lifecycle state
+  - LSP manager root/server health and restart behavior
+  - editor/UI stale async response guards
+- Centralized LSP document lifecycle state in `src/lsp/document.rs`:
+  - duplicate opens become versioned changes instead of invalid duplicate `didOpen`
+  - changes increment versions only for open documents
+  - save, change, and close after close are no-ops
+  - move support closes the old URI and opens/tracks the new URI
+- Wired LSP file move handling through `LspManager::did_move` and the existing open-file path remap path, so moved open files remap diagnostics and close/reopen the LSP document identity.
+- Hardened LSP manager lifecycle behavior:
+  - root changes clear clients, startup state, health checks, pending opens, unavailable state, and diagnostics
+  - stopped clients are removed so `ensure_server` can retry
+  - lifecycle status is structured and includes pending open document counts and unavailable reasons
+  - server registry lookup distinguishes available servers, missing commands, and unsupported languages
+  - document close clears diagnostics, and diagnostics can be remapped on file moves
+- Hardened editor-layer stale response handling:
+  - active-buffer requests stop polling when their request buffer is no longer active
+  - formatting continues to apply to the original existing buffer by `BufferId`
+  - completion cancellation only clears the active request popup
+  - rename requires the initiating buffer to remain active and reports no changes when edits target a remapped old path
+- Added focused coverage for:
+  - document lifecycle duplicate open/change/save/close/move behavior
+  - root update planning
+  - stopped-client retry planning
+  - lifecycle labels and unavailable reasons
+  - registry lookup states
+  - diagnostics clear/remap
+  - stale/closed-buffer LSP results for hover, completion, definition, signature help, references, inlay hints, code lenses, code actions, document symbols, rename, and formatting
+
+Focused validation completed:
+
+- `cargo test lsp::`
+- `cargo test lsp::document`
+- `cargo test editor_lsp_events`
+- `cargo test editor_lsp_state`
+- `cargo test remap_code_file_tab_paths`
+- `cargo test drag_drop`
+
+Completed May 2, 2026.
 
 ---
 

@@ -35,7 +35,11 @@ pub fn app_command_for_keybinding(
 }
 
 fn next_tab(active_tab_index: usize, tab_count: usize) -> Option<usize> {
-    (tab_count > 0).then_some((active_tab_index + 1) % tab_count)
+    if tab_count == 0 {
+        None
+    } else {
+        Some((active_tab_index + 1) % tab_count)
+    }
 }
 
 fn previous_tab(active_tab_index: usize, tab_count: usize) -> Option<usize> {
@@ -81,7 +85,32 @@ mod tests {
     #[test]
     fn surface_specific_actions_stay_out_of_app_command_mapping() {
         assert!(app_command_for_keybinding(&Action::Copy, 0, 1).is_none());
+        assert!(app_command_for_keybinding(&Action::Paste, 0, 1).is_none());
+        assert!(app_command_for_keybinding(&Action::SelectAll, 0, 1).is_none());
         assert!(app_command_for_keybinding(&Action::Search, 0, 1).is_none());
+        assert!(app_command_for_keybinding(&Action::ScrollPageUp, 0, 1).is_none());
+        assert!(app_command_for_keybinding(&Action::ScrollPageDown, 0, 1).is_none());
+        assert!(app_command_for_keybinding(&Action::CyclePaneForward, 0, 1).is_none());
+        assert!(app_command_for_keybinding(&Action::CyclePaneBackward, 0, 1).is_none());
+        assert!(app_command_for_keybinding(&Action::ToggleTerminalPanel, 0, 1).is_none());
         assert!(app_command_for_keybinding(&Action::ZoomIn, 0, 1).is_none());
+    }
+
+    #[test]
+    fn switch_tab_keybinding_uses_zero_based_app_command_indexes() {
+        assert!(matches!(
+            app_command_for_keybinding(&Action::SwitchTab(1), 0, 3),
+            Some(AppCommand::SwitchTab(0))
+        ));
+        assert!(matches!(
+            app_command_for_keybinding(&Action::SwitchTab(9), 0, 3),
+            Some(AppCommand::SwitchTab(8))
+        ));
+    }
+
+    #[test]
+    fn tab_navigation_commands_do_not_emit_when_no_tabs_exist() {
+        assert!(app_command_for_keybinding(&Action::NextTab, 0, 0).is_none());
+        assert!(app_command_for_keybinding(&Action::PrevTab, 0, 0).is_none());
     }
 }

@@ -178,6 +178,10 @@ impl KeyBindings {
     /// `modifiers.control_key()` via `primary_modifier()`, so the same
     /// keybinding config works on all platforms.
     pub fn match_key(&self, event: &KeyEvent, modifiers: ModifiersState) -> Option<Action> {
+        self.match_key_parts(&event.logical_key, modifiers)
+    }
+
+    pub fn match_key_parts(&self, key: &Key, modifiers: ModifiersState) -> Option<Action> {
         let has_primary = primary_modifier(modifiers);
         for (combo, action) in &self.bindings {
             // Check the primary modifier (Cmd on macOS, Ctrl on Linux/Windows).
@@ -201,7 +205,7 @@ impl KeyBindings {
 
             match &combo.key {
                 KeyMatch::Named(named) => {
-                    if let Key::Named(k) = &event.logical_key {
+                    if let Key::Named(k) = key {
                         if k == named {
                             // For shift-specific bindings, check shift matches
                             if combo.shift != modifiers.shift_key() {
@@ -212,7 +216,7 @@ impl KeyBindings {
                     }
                 }
                 KeyMatch::Char(ch) => {
-                    if let Key::Character(c) = &event.logical_key {
+                    if let Key::Character(c) = key {
                         let input = c.as_str();
                         if input.eq_ignore_ascii_case(ch) {
                             // For Cmd+Shift+F vs Cmd+F: only match if shift matches
@@ -238,7 +242,19 @@ impl KeyBindings {
 
 /// Parse a key string like "cmd+shift+f" into a KeyCombo.
 pub fn parse_key_combo(s: &str) -> Option<KeyCombo> {
-    let parts: Vec<&str> = s.split('+').map(|p| p.trim()).collect();
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let mut parts: Vec<&str> = trimmed.split('+').map(|p| p.trim()).collect();
+    if trimmed.ends_with('+') {
+        parts.pop();
+        if parts.last().is_some_and(|part| part.is_empty()) {
+            parts.pop();
+        }
+        parts.push("+");
+    }
     if parts.is_empty() {
         return None;
     }
@@ -269,6 +285,7 @@ pub fn parse_key_combo(s: &str) -> Option<KeyCombo> {
                 "tab" => KeyMatch::Named(NamedKey::Tab),
                 "escape" | "esc" => KeyMatch::Named(NamedKey::Escape),
                 "space" => KeyMatch::Named(NamedKey::Space),
+                "plus" | "+" => KeyMatch::Char("+".to_string()),
                 "backspace" => KeyMatch::Named(NamedKey::Backspace),
                 "delete" => KeyMatch::Named(NamedKey::Delete),
                 "up" => KeyMatch::Named(NamedKey::ArrowUp),
@@ -296,4 +313,159 @@ pub fn parse_key_combo(s: &str) -> Option<KeyCombo> {
         }
     }
     Some(combo)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn primary_mods() -> ModifiersState {
+        if cfg!(target_os = "macos") {
+            ModifiersState::SUPER
+        } else {
+            ModifiersState::CONTROL
+        }
+    }
+
+    fn ch(s: &str) -> Key {
+        Key::Character(s.into())
+    }
+
+    #[test]
+    fn default_copy_requires_primary_modifier() {
+        let bindings = KeyBindings::default_bindings();
+
+        assert_eq!(
+            bindings.match_key_parts(&ch("c"), primary_mods()),
+            Some(Action::Copy)
+        );
+        assert_eq!(
+            bindings.match_key_parts(&ch("c"), ModifiersState::empty()),
+            None
+        );
+    }
+
+    #[test]
+    fn command_paste_does_not_match_plain_text_v() {
+        let bindings = KeyBindings::default_bindings();
+
+        assert_eq!(
+            bindings.match_key_parts(&ch("v"), primary_mods()),
+            Some(Action::Paste)
+        );
+        assert_eq!(
+            bindings.match_key_parts(&ch("v"), ModifiersState::empty()),
+            None
+        );
+    }
+
+    #[test]
+    fn shifted_command_bindings_do_not_shadow_unshifted_command_bindings() {
+        let bindings = KeyBindings::default_bindings();
+
+        assert_eq!(
+            bindings.match_key_parts(&ch("f"), primary_mods()),
+            Some(Action::Search)
+        );
+        assert_eq!(
+            bindings.match_key_parts(&ch("f"), primary_mods() | ModifiersState::SHIFT),
+            Some(Action::ToggleEffects)
+        );
+    }
+
+    #[test]
+    fn terminal_scroll_keys_require_shift_keybinding() {
+        let bindings = KeyBindings::default_bindings();
+        let page_up = Key::Named(NamedKey::PageUp);
+        let page_down = Key::Named(NamedKey::PageDown);
+
+        assert_eq!(
+            bindings.match_key_parts(&page_up, ModifiersState::SHIFT),
+            Some(Action::ScrollPageUp)
+        );
+        assert_eq!(
+            bindings.match_key_parts(&page_down, ModifiersState::SHIFT),
+            Some(Action::ScrollPageDown)
+        );
+        assert_eq!(
+            bindings.match_key_parts(&page_up, ModifiersState::empty()),
+            None
+        );
+        assert_eq!(
+            bindings.match_key_parts(&page_down, ModifiersState::empty()),
+            None
+        );
+        assert_eq!(bindings.match_key_parts(&page_up, primary_mods()), None);
+        assert_eq!(bindings.match_key_parts(&page_down, primary_mods()), None);
+    }
+
+    #[test]
+    fn super_backspace_is_not_an_app_keybinding() {
+        let bindings = KeyBindings::default_bindings();
+
+        assert_eq!(
+            bindings.match_key_parts(&Key::Named(NamedKey::Backspace), ModifiersState::SUPER),
+            None
+        );
+    }
+
+    #[test]
+    fn parser_keeps_command_and_terminal_named_keys_distinct() {
+        assert_eq!(
+            parse_key_combo("cmd+shift+f"),
+            Some(KeyCombo {
+                super_key: true,
+                ctrl: false,
+                alt: false,
+                shift: true,
+                key: KeyMatch::Char("f".to_string())
+            })
+        );
+        assert_eq!(
+            parse_key_combo("shift+pageup"),
+            Some(KeyCombo {
+                super_key: false,
+                ctrl: false,
+                alt: false,
+                shift: true,
+                key: KeyMatch::Named(NamedKey::PageUp)
+            })
+        );
+    }
+
+    #[test]
+    fn parser_handles_literal_plus_and_rejects_empty_bindings() {
+        assert_eq!(parse_key_combo(""), None);
+        assert_eq!(parse_key_combo("   "), None);
+        assert_eq!(
+            parse_key_combo("+"),
+            Some(KeyCombo {
+                super_key: false,
+                ctrl: false,
+                alt: false,
+                shift: false,
+                key: KeyMatch::Char("+".to_string())
+            })
+        );
+        assert_eq!(
+            parse_key_combo("cmd++"),
+            Some(KeyCombo {
+                super_key: true,
+                ctrl: false,
+                alt: false,
+                shift: false,
+                key: KeyMatch::Char("+".to_string())
+            })
+        );
+        assert_eq!(
+            parse_key_combo("cmd+plus"),
+            Some(KeyCombo {
+                super_key: true,
+                ctrl: false,
+                alt: false,
+                shift: false,
+                key: KeyMatch::Char("+".to_string())
+            })
+        );
+    }
 }

@@ -5,7 +5,7 @@
 //! ANSI parsing to cell content.
 
 use llnzy::config::Config;
-use llnzy::terminal::Terminal;
+use llnzy::terminal::{Terminal, TerminalEvent};
 
 // ── Helper ──
 
@@ -155,6 +155,27 @@ fn scroll_region() {
     // Just verify the terminal didn't panic and cursor is in the region
     let (_, row) = t.cursor_point().unwrap();
     assert!(row <= 5); // row is within or below region
+}
+
+#[test]
+fn scroll_region_scrolls_only_inside_margins() {
+    let mut t = Terminal::new(8, 6);
+    for (row, label) in ["top", "one", "two", "three", "four", "bottom"]
+        .iter()
+        .enumerate()
+    {
+        t.process(format!("\x1b[{};1H{label}", row + 1).as_bytes());
+    }
+
+    t.process(b"\x1b[2;5r");
+    t.process(b"\x1b[5;1H\r\n");
+
+    assert_eq!(read_line(&t, 0, 8), "top");
+    assert_eq!(read_line(&t, 1, 8), "two");
+    assert_eq!(read_line(&t, 2, 8), "three");
+    assert_eq!(read_line(&t, 3, 8), "four");
+    assert_eq!(read_line(&t, 4, 8), "");
+    assert_eq!(read_line(&t, 5, 8), "bottom");
 }
 
 // ── Text attributes ──
@@ -309,6 +330,72 @@ fn osc_2_sets_title() {
     assert_eq!(title.as_deref(), Some("Window Title"));
 }
 
+#[test]
+fn osc_7_sets_working_directory() {
+    let mut t = term();
+    t.process(b"\x1b]7;file://localhost/tmp/llnzy%20project\x07");
+    let events = t.drain_events();
+    let cwd = events.iter().find_map(|e| {
+        if let TerminalEvent::WorkingDirectory(cwd) = e {
+            Some(cwd.clone())
+        } else {
+            None
+        }
+    });
+    assert_eq!(cwd.as_deref(), Some("/tmp/llnzy project"));
+}
+
+#[test]
+fn osc_7_split_across_chunks_with_st_terminator() {
+    let mut t = term();
+    t.process(b"\x1b]7;file://local");
+    assert!(t.drain_events().is_empty());
+
+    t.process(b"host/Users/test/llnzy");
+    assert!(t.drain_events().is_empty());
+
+    t.process(b"\x1b\\visible");
+    let events = t.drain_events();
+    assert!(events.iter().any(|e| {
+        matches!(e, TerminalEvent::WorkingDirectory(cwd) if cwd == "/Users/test/llnzy")
+    }));
+    assert_eq!(read_line(&t, 0, 80), "visible");
+}
+
+#[test]
+fn osc_title_split_across_chunks_with_st_terminator() {
+    let mut t = term();
+    t.process(b"\x1b]2;Stream");
+    assert!(t.drain_events().is_empty());
+
+    t.process(b"ed Title");
+    assert!(t.drain_events().is_empty());
+
+    t.process(b"\x1b\\visible");
+    let events = t.drain_events();
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, TerminalEvent::Title(title) if title == "Streamed Title")));
+    assert_eq!(read_line(&t, 0, 80), "visible");
+}
+
+#[test]
+fn osc_title_stack_push_pop_restores_saved_title() {
+    let mut t = term();
+    t.process(b"\x1b]2;Original\x07");
+    t.drain_events();
+
+    t.process(b"\x1b[22;0t");
+    t.process(b"\x1b]2;Temporary\x07");
+    t.drain_events();
+
+    t.process(b"\x1b[23;0t");
+    let events = t.drain_events();
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, TerminalEvent::Title(title) if title == "Original")));
+}
+
 // ── Terminal mode sequences ──
 
 #[test]
@@ -331,6 +418,29 @@ fn mode_toggle_sequence() {
     assert!(!t.app_cursor());
     assert!(!t.mouse_mode());
     assert!(!t.sgr_mouse());
+    assert!(!t.bracketed_paste());
+}
+
+#[test]
+fn bracketed_paste_mode_handles_split_control_sequence_bytes() {
+    let mut t = term();
+
+    for byte in b"\x1b[?2004h" {
+        t.process(&[*byte]);
+    }
+    assert!(t.bracketed_paste());
+
+    t.process(b"visible");
+    assert_eq!(read_line(&t, 0, 80), "visible");
+
+    for chunk in [
+        b"\x1b[?".as_slice(),
+        b"20".as_slice(),
+        b"04".as_slice(),
+        b"l".as_slice(),
+    ] {
+        t.process(chunk);
+    }
     assert!(!t.bracketed_paste());
 }
 
@@ -388,6 +498,17 @@ fn crlf_sequence() {
     assert_eq!(read_line(&t, 2, 80), "Line3");
 }
 
+#[test]
+fn paste_like_multiline_payload_renders_each_line() {
+    let mut t = Terminal::new(24, 5);
+    t.process(b"prompt> first line\r\nsecond line\r\nthird line");
+
+    assert_eq!(read_line(&t, 0, 24), "prompt> first line");
+    assert_eq!(read_line(&t, 1, 24), "second line");
+    assert_eq!(read_line(&t, 2, 24), "third line");
+    assert_eq!(t.cursor_point(), Some((2, 10)));
+}
+
 // ── Backspace ──
 
 #[test]
@@ -441,6 +562,47 @@ fn resize_preserves_content() {
     assert_eq!(t.size(), (120, 40));
     assert_eq!(t.cell_char(0, 0), 'H');
     assert_eq!(t.cell_char(0, 4), 'o');
+}
+
+#[test]
+fn resize_shrink_and_grow_preserves_visible_content() {
+    let mut t = Terminal::new(16, 5);
+    t.process(b"alpha\r\nbeta\r\ngamma");
+
+    t.resize(10, 3);
+    assert_eq!(t.size(), (10, 3));
+    assert_eq!(read_line(&t, 0, 10), "alpha");
+    assert_eq!(read_line(&t, 1, 10), "beta");
+    assert_eq!(read_line(&t, 2, 10), "gamma");
+
+    t.resize(20, 6);
+    assert_eq!(t.size(), (20, 6));
+    assert_eq!(read_line(&t, 0, 20), "alpha");
+    assert_eq!(read_line(&t, 1, 20), "beta");
+    assert_eq!(read_line(&t, 2, 20), "gamma");
+}
+
+#[test]
+fn streaming_split_sgr_keeps_style_across_wrapped_output() {
+    use alacritty_terminal::term::cell::Flags;
+
+    let mut t = Terminal::new(8, 4);
+    t.process(b"\x1b[1;4;31");
+    t.process(b"mabcdefgh");
+    t.process(b"ijkl\x1b[0");
+    t.process(b"m plain");
+
+    let config = Config::default();
+    assert_eq!(read_line(&t, 0, 8), "abcdefgh");
+    assert_eq!(read_line(&t, 1, 8), "ijkl pla");
+    assert!(t.cell_flags(0, 0).contains(Flags::BOLD));
+    assert!(t.cell_flags(1, 3).contains(Flags::UNDERLINE));
+    assert_eq!(
+        t.resolve_fg_with_attrs(1, 3, &config),
+        config.colors.ansi[1]
+    );
+    assert!(!t.cell_flags(1, 5).contains(Flags::BOLD));
+    assert!(!t.cell_flags(1, 5).contains(Flags::UNDERLINE));
 }
 
 // ── Decoration rects ──

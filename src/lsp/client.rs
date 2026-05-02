@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -6,19 +5,8 @@ use lsp_types::*;
 use serde_json::Value;
 use tokio::sync::mpsc;
 
+use super::document::{path_to_uri, DocumentStore, OpenAction};
 use super::transport::{ServerMessage, Transport};
-
-fn path_to_uri(path: &Path) -> Result<Uri, String> {
-    let abs = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        std::env::current_dir()
-            .map_err(|e| e.to_string())?
-            .join(path)
-    };
-    let s = format!("file://{}", abs.display());
-    s.parse::<Uri>().map_err(|e| e.to_string())
-}
 
 /// Convert a URI back to a file path.
 pub fn uri_to_path(uri: &Uri) -> Option<PathBuf> {
@@ -35,12 +23,6 @@ pub enum ClientState {
     Stopped,
 }
 
-/// Tracks an open document's version for incremental sync.
-struct OpenDoc {
-    uri: Uri,
-    version: i32,
-}
-
 pub(crate) struct LspNotification {
     pub method: &'static str,
     pub params: Value,
@@ -55,7 +37,7 @@ pub struct LspClient {
     pub server_name: String,
     root_uri: Option<Uri>,
     server_capabilities: Option<ServerCapabilities>,
-    open_docs: HashMap<PathBuf, OpenDoc>,
+    documents: DocumentStore,
 }
 
 impl LspClient {
@@ -80,7 +62,7 @@ impl LspClient {
             server_name: command.to_string(),
             root_uri,
             server_capabilities: None,
-            open_docs: HashMap::new(),
+            documents: DocumentStore::new(),
         })
     }
 
@@ -215,6 +197,22 @@ impl LspClient {
         Ok(())
     }
 
+    /// Notify the server that an open document moved to a new path.
+    pub async fn did_move(
+        &mut self,
+        old_path: &Path,
+        new_path: &Path,
+        lang_id: &str,
+        text: &str,
+    ) -> Result<(), String> {
+        for notification in self.did_move_notifications(old_path, new_path, lang_id, text)? {
+            self.transport
+                .notify(notification.method, notification.params)
+                .await?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn did_open_notification(
         &mut self,
         path: &Path,
@@ -225,23 +223,39 @@ impl LspClient {
             return Ok(None);
         }
         let uri = path_to_uri(path)?;
-        let version = 1;
-
-        let params = DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: lang_id.to_string(),
-                version,
-                text: text.to_string(),
-            },
+        let open = self.documents.open(path, uri);
+        let action = open.action;
+        let document = open.document;
+        let params = match action {
+            OpenAction::Open => serde_json::to_value(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: document.uri,
+                    language_id: lang_id.to_string(),
+                    version: document.version,
+                    text: text.to_string(),
+                },
+            })
+            .map_err(|e| e.to_string())?,
+            OpenAction::Change => serde_json::to_value(DidChangeTextDocumentParams {
+                text_document: VersionedTextDocumentIdentifier {
+                    uri: document.uri,
+                    version: document.version,
+                },
+                content_changes: vec![TextDocumentContentChangeEvent {
+                    range: None,
+                    range_length: None,
+                    text: text.to_string(),
+                }],
+            })
+            .map_err(|e| e.to_string())?,
         };
 
-        self.open_docs
-            .insert(path.to_path_buf(), OpenDoc { uri, version });
-
         Ok(Some(LspNotification {
-            method: "textDocument/didOpen",
-            params: serde_json::to_value(params).map_err(|e| e.to_string())?,
+            method: match action {
+                OpenAction::Open => "textDocument/didOpen",
+                OpenAction::Change => "textDocument/didChange",
+            },
+            params,
         }))
     }
 
@@ -253,14 +267,13 @@ impl LspClient {
         if self.state != ClientState::Running {
             return Ok(None);
         }
-        let Some(doc) = self.open_docs.get_mut(path) else {
+        let Some(doc) = self.documents.change(path) else {
             return Ok(None);
         };
-        doc.version += 1;
 
         let params = DidChangeTextDocumentParams {
             text_document: VersionedTextDocumentIdentifier {
-                uri: doc.uri.clone(),
+                uri: doc.uri,
                 version: doc.version,
             },
             content_changes: vec![TextDocumentContentChangeEvent {
@@ -288,14 +301,13 @@ impl LspClient {
         if self.state != ClientState::Running {
             return Ok(None);
         }
-        let Some(doc) = self.open_docs.get_mut(path) else {
+        let Some(doc) = self.documents.change(path) else {
             return Ok(None);
         };
-        doc.version += 1;
 
         let params = DidChangeTextDocumentParams {
             text_document: VersionedTextDocumentIdentifier {
-                uri: doc.uri.clone(),
+                uri: doc.uri,
                 version: doc.version,
             },
             content_changes: vec![TextDocumentContentChangeEvent {
@@ -328,14 +340,12 @@ impl LspClient {
         if self.state != ClientState::Running {
             return Ok(None);
         }
-        let Some(doc) = self.open_docs.get(path) else {
+        let Some(doc) = self.documents.save(path) else {
             return Ok(None);
         };
 
         let params = DidSaveTextDocumentParams {
-            text_document: TextDocumentIdentifier {
-                uri: doc.uri.clone(),
-            },
+            text_document: TextDocumentIdentifier { uri: doc.uri },
             text: Some(text.to_string()),
         };
 
@@ -352,7 +362,7 @@ impl LspClient {
         if self.state != ClientState::Running {
             return Ok(None);
         }
-        let Some(doc) = self.open_docs.remove(path) else {
+        let Some(doc) = self.documents.close(path) else {
             return Ok(None);
         };
 
@@ -366,20 +376,59 @@ impl LspClient {
         }))
     }
 
+    pub(crate) fn did_move_notifications(
+        &mut self,
+        old_path: &Path,
+        new_path: &Path,
+        lang_id: &str,
+        text: &str,
+    ) -> Result<Vec<LspNotification>, String> {
+        if self.state != ClientState::Running {
+            return Ok(Vec::new());
+        }
+        let new_uri = path_to_uri(new_path)?;
+        let Some(moved) = self.documents.move_path(old_path, new_path, new_uri) else {
+            return Ok(Vec::new());
+        };
+
+        let close_params = DidCloseTextDocumentParams {
+            text_document: TextDocumentIdentifier {
+                uri: moved.close_old.uri,
+            },
+        };
+        let open_params = DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: moved.open_new.uri,
+                language_id: lang_id.to_string(),
+                version: moved.open_new.version,
+                text: text.to_string(),
+            },
+        };
+
+        Ok(vec![
+            LspNotification {
+                method: "textDocument/didClose",
+                params: serde_json::to_value(close_params).map_err(|e| e.to_string())?,
+            },
+            LspNotification {
+                method: "textDocument/didOpen",
+                params: serde_json::to_value(open_params).map_err(|e| e.to_string())?,
+            },
+        ])
+    }
+
     /// Request hover information at a position.
     pub async fn hover(&self, path: &Path, line: u32, col: u32) -> Result<Option<Hover>, String> {
         if self.state != ClientState::Running {
             return Ok(None);
         }
-        let Some(doc) = self.open_docs.get(path) else {
+        let Some(uri) = self.documents.uri(path) else {
             return Ok(None);
         };
 
         let params = HoverParams {
             text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: doc.uri.clone(),
-                },
+                text_document: TextDocumentIdentifier { uri },
                 position: Position {
                     line,
                     character: col,
@@ -410,15 +459,13 @@ impl LspClient {
         if self.state != ClientState::Running {
             return Ok(None);
         }
-        let Some(doc) = self.open_docs.get(path) else {
+        let Some(uri) = self.documents.uri(path) else {
             return Ok(None);
         };
 
         let params = GotoDefinitionParams {
             text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: doc.uri.clone(),
-                },
+                text_document: TextDocumentIdentifier { uri },
                 position: Position {
                     line,
                     character: col,
@@ -454,15 +501,13 @@ impl LspClient {
         if self.state != ClientState::Running {
             return Ok(None);
         }
-        let Some(doc) = self.open_docs.get(path) else {
+        let Some(uri) = self.documents.uri(path) else {
             return Ok(None);
         };
 
         let params = CompletionParams {
             text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: doc.uri.clone(),
-                },
+                text_document: TextDocumentIdentifier { uri },
                 position: Position {
                     line,
                     character: col,
@@ -493,14 +538,12 @@ impl LspClient {
         if self.state != ClientState::Running {
             return Ok(Vec::new());
         }
-        let Some(doc) = self.open_docs.get(path) else {
+        let Some(uri) = self.documents.uri(path) else {
             return Ok(Vec::new());
         };
 
         let params = DocumentFormattingParams {
-            text_document: TextDocumentIdentifier {
-                uri: doc.uri.clone(),
-            },
+            text_document: TextDocumentIdentifier { uri },
             options: FormattingOptions {
                 tab_size: 4,
                 insert_spaces: true,
@@ -533,15 +576,13 @@ impl LspClient {
         if self.state != ClientState::Running {
             return Ok(None);
         }
-        let Some(doc) = self.open_docs.get(path) else {
+        let Some(uri) = self.documents.uri(path) else {
             return Ok(None);
         };
 
         let params = RenameParams {
             text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: doc.uri.clone(),
-                },
+                text_document: TextDocumentIdentifier { uri },
                 position: Position {
                     line,
                     character: col,
@@ -574,14 +615,12 @@ impl LspClient {
         if self.state != ClientState::Running {
             return Ok(Vec::new());
         }
-        let Some(doc) = self.open_docs.get(path) else {
+        let Some(uri) = self.documents.uri(path) else {
             return Ok(Vec::new());
         };
 
         let params = CodeActionParams {
-            text_document: TextDocumentIdentifier {
-                uri: doc.uri.clone(),
-            },
+            text_document: TextDocumentIdentifier { uri },
             range: Range {
                 start: Position {
                     line: start_line,
@@ -622,14 +661,12 @@ impl LspClient {
         if self.state != ClientState::Running {
             return Ok(None);
         }
-        let Some(doc) = self.open_docs.get(path) else {
+        let Some(uri) = self.documents.uri(path) else {
             return Ok(None);
         };
 
         let params = DocumentSymbolParams {
-            text_document: TextDocumentIdentifier {
-                uri: doc.uri.clone(),
-            },
+            text_document: TextDocumentIdentifier { uri },
             work_done_progress_params: Default::default(),
             partial_result_params: Default::default(),
         };
@@ -659,15 +696,13 @@ impl LspClient {
         if self.state != ClientState::Running {
             return Ok(None);
         }
-        let Some(doc) = self.open_docs.get(path) else {
+        let Some(uri) = self.documents.uri(path) else {
             return Ok(None);
         };
 
         let params = SignatureHelpParams {
             text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: doc.uri.clone(),
-                },
+                text_document: TextDocumentIdentifier { uri },
                 position: Position {
                     line,
                     character: col,
@@ -702,15 +737,13 @@ impl LspClient {
         if self.state != ClientState::Running {
             return Ok(Vec::new());
         }
-        let Some(doc) = self.open_docs.get(path) else {
+        let Some(uri) = self.documents.uri(path) else {
             return Ok(Vec::new());
         };
 
         let params = ReferenceParams {
             text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: doc.uri.clone(),
-                },
+                text_document: TextDocumentIdentifier { uri },
                 position: Position {
                     line,
                     character: col,
@@ -778,14 +811,12 @@ impl LspClient {
         if self.state != ClientState::Running {
             return Ok(Vec::new());
         }
-        let Some(doc) = self.open_docs.get(path) else {
+        let Some(uri) = self.documents.uri(path) else {
             return Ok(Vec::new());
         };
 
         let params = lsp_types::InlayHintParams {
-            text_document: TextDocumentIdentifier {
-                uri: doc.uri.clone(),
-            },
+            text_document: TextDocumentIdentifier { uri },
             range: lsp_types::Range {
                 start: Position {
                     line: start_line,
@@ -817,14 +848,12 @@ impl LspClient {
         if self.state != ClientState::Running {
             return Ok(Vec::new());
         }
-        let Some(doc) = self.open_docs.get(path) else {
+        let Some(uri) = self.documents.uri(path) else {
             return Ok(Vec::new());
         };
 
         let params = lsp_types::CodeLensParams {
-            text_document: TextDocumentIdentifier {
-                uri: doc.uri.clone(),
-            },
+            text_document: TextDocumentIdentifier { uri },
             work_done_progress_params: Default::default(),
             partial_result_params: Default::default(),
         };
@@ -844,7 +873,7 @@ impl LspClient {
 
     /// Get the URI for an open document (synchronous lookup).
     pub fn doc_uri(&self, path: &Path) -> Option<Uri> {
-        self.open_docs.get(path).map(|d| d.uri.clone())
+        self.documents.uri(path)
     }
 
     pub fn transport(&self) -> &Arc<Transport> {

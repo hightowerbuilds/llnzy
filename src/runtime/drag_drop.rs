@@ -222,8 +222,7 @@ impl App {
                 watcher.watch(new_path);
             }
             if let (Some(lsp), Some(lang_id)) = (&mut ui.editor_view.lsp, lang_id) {
-                lsp.did_close(&buffer_old_path, lang_id);
-                lsp.open_document(new_path, lang_id, &text);
+                lsp.did_move(&buffer_old_path, new_path, lang_id, &text);
             }
             if let Some(buffer_id) = ui.editor_view.editor.buffer_ids.get(idx).copied() {
                 remapped_buffer_ids.push(buffer_id);
