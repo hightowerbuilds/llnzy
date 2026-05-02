@@ -6,6 +6,17 @@ use std::path::Path;
 /// Special actions that the key handler requests from the editor host.
 #[derive(Default)]
 pub struct KeyAction {
+    pub save: bool,
+    pub undo: bool,
+    pub redo: bool,
+    pub select_all: bool,
+    pub cut: bool,
+    pub copy: bool,
+    pub paste: bool,
+    pub delete_line: bool,
+    pub duplicate_line: bool,
+    pub move_line_up: bool,
+    pub move_line_down: bool,
     pub goto_definition: bool,
     pub request_hover: bool,
     pub request_completion: bool,
@@ -237,83 +248,42 @@ pub fn handle_editor_keys(
         // ── Cmd shortcuts ──
 
         if cmd && !shift && input.key_pressed(egui::Key::S) {
-            match buf.save() {
-                Ok(()) => *status_msg = Some("Saved".to_string()),
-                Err(e) => *status_msg = Some(format!("Save failed: {e}")),
-            }
+            action.save = true;
             return;
         }
 
         if cmd && !shift && input.key_pressed(egui::Key::Z) {
-            if let Some(pos) = buf.undo() {
-                view.cursor.clear_selection();
-                view.cursor.pos = pos;
-                view.cursor.desired_col = None;
-            }
+            action.undo = true;
             return;
         }
 
         if cmd && shift && input.key_pressed(egui::Key::Z) {
-            if let Some(pos) = buf.redo() {
-                view.cursor.clear_selection();
-                view.cursor.pos = pos;
-                view.cursor.desired_col = None;
-            }
+            action.redo = true;
             return;
         }
 
         if cmd && input.key_pressed(egui::Key::A) {
-            view.cursor.select_all(buf);
+            action.select_all = true;
             return;
         }
 
         if cmd && !shift && input.key_pressed(egui::Key::C) {
-            let text = if let Some((start, end)) = view.cursor.selection() {
-                buf.text_range(start, end)
-            } else {
-                buf.line_text_for_copy(view.cursor.pos.line)
-            };
-            *clipboard_out = Some(text);
+            action.copy = true;
             return;
         }
 
         if cmd && !shift && input.key_pressed(egui::Key::X) {
-            *status_msg = None;
-            if let Some((start, end)) = view.cursor.selection() {
-                *clipboard_out = Some(buf.text_range(start, end));
-                buf.delete(start, end);
-                view.cursor.clear_selection();
-                view.cursor.pos = start;
-            } else {
-                *clipboard_out = Some(buf.line_text_for_copy(view.cursor.pos.line));
-                view.cursor.pos = buf.delete_line(view.cursor.pos.line);
-                view.cursor.clear_selection();
-            }
-            view.cursor.desired_col = None;
+            action.cut = true;
             return;
         }
 
         if cmd && !shift && input.key_pressed(egui::Key::V) {
-            if let Some(text) = clipboard_in.take() {
-                *status_msg = None;
-                if let Some((start, end)) = view.cursor.selection() {
-                    buf.delete(start, end);
-                    view.cursor.clear_selection();
-                    view.cursor.pos = start;
-                }
-                let end_pos = buf.compute_end_pos_pub(view.cursor.pos, &text);
-                buf.insert(view.cursor.pos, &text);
-                view.cursor.pos = end_pos;
-                view.cursor.desired_col = None;
-            }
+            action.paste = true;
             return;
         }
 
         if cmd && shift && input.key_pressed(egui::Key::K) {
-            *status_msg = None;
-            view.cursor.pos = buf.delete_line(view.cursor.pos.line);
-            view.cursor.clear_selection();
-            view.cursor.desired_col = None;
+            action.delete_line = true;
             return;
         }
 
@@ -324,10 +294,7 @@ pub fn handle_editor_keys(
         }
 
         if cmd && shift && input.key_pressed(egui::Key::D) {
-            *status_msg = None;
-            view.cursor.pos = buf.duplicate_line(view.cursor.pos.line);
-            view.cursor.clear_selection();
-            view.cursor.desired_col = None;
+            action.duplicate_line = true;
             return;
         }
 
@@ -408,21 +375,11 @@ pub fn handle_editor_keys(
 
         // Alt+Up/Down: move line
         if alt && !cmd && !shift && input.key_pressed(egui::Key::ArrowUp) {
-            *status_msg = None;
-            if let Some(pos) = buf.move_line_up(view.cursor.pos.line) {
-                view.cursor.pos = pos;
-                view.cursor.clear_selection();
-                view.cursor.desired_col = None;
-            }
+            action.move_line_up = true;
             return;
         }
         if alt && !cmd && !shift && input.key_pressed(egui::Key::ArrowDown) {
-            *status_msg = None;
-            if let Some(pos) = buf.move_line_down(view.cursor.pos.line) {
-                view.cursor.pos = pos;
-                view.cursor.clear_selection();
-                view.cursor.desired_col = None;
-            }
+            action.move_line_down = true;
             return;
         }
 

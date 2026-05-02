@@ -2,86 +2,13 @@ use crate::app::commands::AppCommand;
 use crate::app::drag_drop::{DragDropCommand, DragPayload};
 use crate::explorer::{format_size, ExplorerState};
 
-use super::{explorer_view::EditorViewState, sidebar_file_modals};
+use super::{
+    explorer_view::EditorViewState,
+    sidebar_file_modals,
+    sidebar_file_types::{file_type_icon, is_image_ext},
+};
 
-#[allow(dead_code)] // Retained for potential standalone file browser mode.
-pub(super) fn render_file_browser(
-    ui: &mut egui::Ui,
-    explorer: &mut ExplorerState,
-    editor_state: &mut EditorViewState,
-) {
-    if explorer.finder_open {
-        render_finder(ui, explorer, editor_state);
-        return;
-    }
-
-    ui.horizontal(|ui| {
-        let project_name = explorer
-            .root
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("Project");
-        ui.label(
-            egui::RichText::new(project_name)
-                .size(16.0)
-                .color(egui::Color32::WHITE)
-                .strong(),
-        );
-        ui.add_space(12.0);
-        if ui
-            .add(
-                egui::Button::new(
-                    egui::RichText::new("Find File")
-                        .size(12.0)
-                        .color(egui::Color32::from_rgb(100, 180, 255)),
-                )
-                .fill(egui::Color32::TRANSPARENT),
-            )
-            .clicked()
-        {
-            explorer.open_finder();
-        }
-    });
-
-    ui.add_space(4.0);
-    ui.separator();
-    ui.add_space(4.0);
-
-    if let Some(err) = &explorer.error {
-        ui.label(
-            egui::RichText::new(err)
-                .size(14.0)
-                .color(egui::Color32::from_rgb(255, 100, 100)),
-        );
-        ui.add_space(8.0);
-    }
-
-    egui::ScrollArea::vertical()
-        .auto_shrink([false; 2])
-        .show(ui, |ui| {
-            let mut action: Option<TreeAction> = None;
-            render_tree_nodes(ui, &explorer.tree, &explorer.root, 0, &mut action, 13.0);
-
-            match action {
-                Some(TreeAction::OpenFile(path)) => {
-                    if is_image_ext(&path) {
-                        explorer.open(path);
-                    } else {
-                        match editor_state.open_file(path) {
-                            Ok(_) => editor_state.status_msg = None,
-                            Err(e) => editor_state.status_msg = Some(e),
-                        }
-                    }
-                }
-                Some(TreeAction::Toggle(indices)) => {
-                    toggle_at(&mut explorer.tree, &indices);
-                }
-                _ => {}
-            }
-        });
-}
-
-enum TreeAction {
+pub(super) enum TreeAction {
     OpenFile(std::path::PathBuf),
     Toggle(Vec<usize>),
     CopyAbsPath(std::path::PathBuf),
@@ -96,7 +23,7 @@ enum TreeAction {
     },
 }
 
-fn render_tree_nodes(
+pub(super) fn render_tree_nodes(
     ui: &mut egui::Ui,
     nodes: &[crate::explorer::TreeNode],
     root: &std::path::Path,
@@ -410,7 +337,7 @@ fn render_tree_context_menu(
     }
 }
 
-fn toggle_at(tree: &mut [crate::explorer::TreeNode], indices: &[usize]) {
+pub(super) fn toggle_at(tree: &mut [crate::explorer::TreeNode], indices: &[usize]) {
     if indices.is_empty() {
         return;
     }
@@ -422,180 +349,6 @@ fn toggle_at(tree: &mut [crate::explorer::TreeNode], indices: &[usize]) {
         tree[idx].toggle();
     } else if let Some(children) = &mut tree[idx].children {
         toggle_at(children, &indices[1..]);
-    }
-}
-
-fn render_finder(
-    ui: &mut egui::Ui,
-    explorer: &mut ExplorerState,
-    editor_state: &mut EditorViewState,
-) {
-    explorer.poll_file_index();
-    if explorer.is_indexing() {
-        ui.ctx()
-            .request_repaint_after(std::time::Duration::from_millis(50));
-    }
-
-    ui.vertical(|ui| {
-        ui.label(
-            egui::RichText::new("Find File")
-                .size(16.0)
-                .color(egui::Color32::WHITE)
-                .strong(),
-        );
-        ui.add_space(4.0);
-
-        let mut query = explorer.finder_query.clone();
-        let response = ui.add(
-            egui::TextEdit::singleline(&mut query)
-                .hint_text("Type to search...")
-                .desired_width((ui.available_width() - 20.0).max(80.0))
-                .text_color(egui::Color32::WHITE)
-                .font(egui::TextStyle::Monospace),
-        );
-        response.request_focus();
-
-        if query != explorer.finder_query {
-            explorer.finder_query = query;
-            explorer.update_finder();
-        }
-
-        let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
-        let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
-        let down = ui.input(|i| i.key_pressed(egui::Key::ArrowDown));
-        let up = ui.input(|i| i.key_pressed(egui::Key::ArrowUp));
-
-        if escape {
-            explorer.close_finder();
-            return;
-        }
-        if down {
-            explorer.finder_selected =
-                (explorer.finder_selected + 1).min(explorer.finder_results.len().saturating_sub(1));
-        }
-        if up {
-            explorer.finder_selected = explorer.finder_selected.saturating_sub(1);
-        }
-        if enter && !explorer.finder_results.is_empty() {
-            let path = explorer.finder_results[explorer.finder_selected].clone();
-            explorer.close_finder();
-            if is_image_ext(&path) {
-                explorer.open(path);
-            } else {
-                match editor_state.open_file(path) {
-                    Ok(_) => editor_state.status_msg = None,
-                    Err(e) => editor_state.status_msg = Some(e),
-                }
-            }
-            return;
-        }
-
-        ui.add_space(4.0);
-        ui.separator();
-        ui.add_space(4.0);
-
-        let selected_color = egui::Color32::from_rgb(50, 80, 130);
-        egui::ScrollArea::vertical()
-            .auto_shrink([false; 2])
-            .show(ui, |ui| {
-                if explorer.is_indexing() && explorer.finder_results.is_empty() {
-                    ui.label(
-                        egui::RichText::new("Indexing project files...")
-                            .size(13.0)
-                            .color(egui::Color32::from_rgb(150, 155, 170)),
-                    );
-                }
-                let results = explorer.finder_results.clone();
-                for (i, path) in results.iter().enumerate() {
-                    let rel = explorer.relative_path(path);
-                    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-
-                    let bg = if i == explorer.finder_selected {
-                        selected_color
-                    } else {
-                        egui::Color32::TRANSPARENT
-                    };
-                    let text_color = if i == explorer.finder_selected {
-                        egui::Color32::WHITE
-                    } else {
-                        egui::Color32::from_rgb(200, 205, 215)
-                    };
-
-                    let frame = egui::Frame::none()
-                        .fill(bg)
-                        .inner_margin(egui::Margin::symmetric(4.0, 2.0));
-                    frame.show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new(name).size(13.0).color(text_color));
-                            ui.label(
-                                egui::RichText::new(&rel)
-                                    .size(11.0)
-                                    .color(egui::Color32::from_rgb(100, 105, 120)),
-                            );
-                        });
-                    });
-
-                    let resp = ui.interact(
-                        ui.min_rect(),
-                        egui::Id::new(("finder_item", i)),
-                        egui::Sense::click(),
-                    );
-                    if resp.clicked() {
-                        let path = path.clone();
-                        explorer.close_finder();
-                        if is_image_ext(&path) {
-                            explorer.open(path);
-                        } else {
-                            match editor_state.open_file(path) {
-                                Ok(_) => editor_state.status_msg = None,
-                                Err(e) => editor_state.status_msg = Some(e),
-                            }
-                        }
-                        return;
-                    }
-                }
-            });
-    });
-}
-
-fn is_image_ext(path: &std::path::Path) -> bool {
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_lowercase();
-    matches!(
-        ext.as_str(),
-        "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp" | "tiff" | "tif" | "ico"
-    )
-}
-
-fn file_type_icon(name: &str) -> Option<(&'static str, egui::Color32)> {
-    let ext = name.rsplit('.').next().unwrap_or("").to_lowercase();
-    match ext.as_str() {
-        "rs" => Some(("R", egui::Color32::from_rgb(230, 140, 60))),
-        "js" | "jsx" | "mjs" | "cjs" => Some(("J", egui::Color32::from_rgb(240, 220, 80))),
-        "ts" | "tsx" => Some(("T", egui::Color32::from_rgb(70, 140, 230))),
-        "py" | "pyi" => Some(("P", egui::Color32::from_rgb(80, 140, 220))),
-        "go" => Some(("G", egui::Color32::from_rgb(80, 200, 200))),
-        "json" | "jsonc" => Some(("{", egui::Color32::from_rgb(240, 220, 80))),
-        "md" | "mdx" => Some(("#", egui::Color32::from_rgb(100, 200, 120))),
-        "toml" | "yaml" | "yml" => Some(("*", egui::Color32::from_rgb(180, 140, 220))),
-        "html" | "htm" => Some(("<", egui::Color32::from_rgb(230, 120, 80))),
-        "css" | "scss" | "sass" | "less" => Some(("S", egui::Color32::from_rgb(80, 160, 230))),
-        "sh" | "bash" | "zsh" | "fish" => Some(("$", egui::Color32::from_rgb(130, 200, 130))),
-        "c" | "h" => Some(("C", egui::Color32::from_rgb(100, 160, 230))),
-        "cpp" | "cc" | "cxx" | "hpp" | "hxx" => Some(("C", egui::Color32::from_rgb(130, 100, 230))),
-        "java" => Some(("J", egui::Color32::from_rgb(230, 100, 80))),
-        "rb" => Some(("R", egui::Color32::from_rgb(220, 70, 70))),
-        "swift" => Some(("S", egui::Color32::from_rgb(230, 120, 60))),
-        "lua" => Some(("L", egui::Color32::from_rgb(80, 80, 230))),
-        "sql" => Some(("Q", egui::Color32::from_rgb(200, 180, 80))),
-        "lock" => Some(("L", egui::Color32::from_rgb(120, 120, 130))),
-        "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp" | "svg" | "ico" => {
-            Some(("I", egui::Color32::from_rgb(180, 130, 220)))
-        }
-        _ => None,
     }
 }
 
@@ -625,9 +378,9 @@ pub(crate) fn render_sidebar_tree(
             } else {
                 let file_path = path.clone();
                 match editor_state.open_file(path) {
-                    Ok(idx) => {
+                    Ok(buffer_id) => {
                         editor_state.status_msg = None;
-                        editor_state.pending_file_tab = Some((file_path, idx));
+                        editor_state.pending_file_tab = Some((file_path, buffer_id));
                     }
                     Err(e) => editor_state.status_msg = Some(e),
                 }

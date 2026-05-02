@@ -12,6 +12,7 @@ use winit::window::{Window, WindowAttributes, WindowId};
 use llnzy::app::click_state::ClickState;
 use llnzy::app::commands::AppCommand;
 use llnzy::app::file_location::parse_file_location;
+use llnzy::app::keybinding_commands::app_command_for_keybinding;
 use llnzy::app::terminal_events::terminal_input_event;
 use llnzy::app::window_state;
 use llnzy::config::Config;
@@ -636,7 +637,12 @@ impl ApplicationHandler<UserEvent> for App {
                             // Open in editor
                             if let Some(ui) = &mut self.ui {
                                 match ui.editor_view.open_file(path) {
-                                    Ok(idx) => {
+                                    Ok(buffer_id) => {
+                                        let Some(idx) =
+                                            ui.editor_view.editor.index_for_id(buffer_id)
+                                        else {
+                                            return;
+                                        };
                                         let view = &mut ui.editor_view.editor.views[idx];
                                         view.cursor.pos = llnzy::editor::buffer::Position::new(
                                             line.saturating_sub(1),
@@ -854,6 +860,18 @@ impl ApplicationHandler<UserEvent> for App {
                     .keybindings
                     .match_key(&key_event, self.modifiers)
                 {
+                    if let Some(command) =
+                        app_command_for_keybinding(&action, self.active_tab, self.tabs.len())
+                    {
+                        let mut sidebar_changed = false;
+                        if self.handle_app_command(command, &mut sidebar_changed) && sidebar_changed
+                        {
+                            self.recompute_layout();
+                            self.resize_terminal_tabs();
+                        }
+                        return;
+                    }
+
                     match action {
                         Action::Search => {
                             // Search only works on terminal tabs
@@ -873,44 +891,9 @@ impl ApplicationHandler<UserEvent> for App {
                                 self.do_select_all();
                             }
                         }
-                        Action::NewTab => self.new_tab(),
-                        Action::CloseTab => self.close_tab(),
-                        Action::NextTab => {
-                            let next = (self.active_tab + 1) % self.tabs.len().max(1);
-                            self.switch_tab(next);
-                        }
-                        Action::PrevTab => {
-                            let prev = if self.active_tab == 0 {
-                                self.tabs.len().saturating_sub(1)
-                            } else {
-                                self.active_tab - 1
-                            };
-                            self.switch_tab(prev);
-                        }
-                        Action::SplitVertical | Action::SplitHorizontal => {
-                            // Legacy shortcuts now open a normal terminal tab.
-                            self.new_tab();
-                        }
-                        Action::ToggleFullscreen => self.toggle_fullscreen(),
-                        Action::ToggleEffects => self.toggle_effects(),
-                        Action::ToggleFps => {
-                            if let Some(ui) = &mut self.ui {
-                                ui.show_fps = !ui.show_fps;
-                            }
-                            self.request_redraw();
-                        }
                         Action::ToggleErrorPanel => {
                             self.error_panel.toggle();
                             self.request_redraw();
-                        }
-                        Action::ToggleSidebar => {
-                            if let Some(ui) = &mut self.ui {
-                                ui.toggle_sidebar();
-                            }
-                            self.recompute_layout();
-                            self.resize_terminal_tabs();
-                            self.selection.clear();
-                            self.invalidate_and_redraw();
                         }
                         Action::CyclePaneForward | Action::CyclePaneBackward => {
                             // Pane cycling removed — these are no-ops now
@@ -964,9 +947,17 @@ impl ApplicationHandler<UserEvent> for App {
                             self.resize_terminal_tabs();
                             self.invalidate_and_redraw();
                         }
-                        Action::SwitchTab(n) => {
-                            self.switch_tab((n - 1) as usize);
-                        }
+                        Action::NewTab
+                        | Action::CloseTab
+                        | Action::NextTab
+                        | Action::PrevTab
+                        | Action::SplitVertical
+                        | Action::SplitHorizontal
+                        | Action::ToggleFullscreen
+                        | Action::ToggleEffects
+                        | Action::ToggleFps
+                        | Action::ToggleSidebar
+                        | Action::SwitchTab(_) => {}
                     }
                     return;
                 }
@@ -1085,8 +1076,17 @@ impl ApplicationHandler<UserEvent> for App {
             UserEvent::MenuAction(action) => {
                 use llnzy::menu::MenuAction;
                 match action {
-                    MenuAction::NewTab => self.new_tab(),
-                    MenuAction::CloseTab => self.close_tab(),
+                    MenuAction::NewTab => {
+                        let mut sidebar_changed = false;
+                        self.handle_app_command(AppCommand::NewTerminalTab, &mut sidebar_changed);
+                    }
+                    MenuAction::CloseTab => {
+                        let mut sidebar_changed = false;
+                        self.handle_app_command(
+                            AppCommand::CloseTab(self.active_tab),
+                            &mut sidebar_changed,
+                        );
+                    }
                     MenuAction::Copy => {
                         if !self.copy_stacker_editor_selection() {
                             self.copy_selection();
@@ -1102,22 +1102,27 @@ impl ApplicationHandler<UserEvent> for App {
                         self.search.open();
                         self.request_redraw();
                     }
-                    MenuAction::ToggleFullscreen => self.toggle_fullscreen(),
-                    MenuAction::SplitVertical | MenuAction::SplitHorizontal => self.new_tab(),
-                    MenuAction::ToggleEffects => self.toggle_effects(),
+                    MenuAction::ToggleFullscreen => {
+                        let mut sidebar_changed = false;
+                        self.handle_app_command(AppCommand::ToggleFullscreen, &mut sidebar_changed);
+                    }
+                    MenuAction::SplitVertical | MenuAction::SplitHorizontal => {
+                        let mut sidebar_changed = false;
+                        self.handle_app_command(AppCommand::NewTerminalTab, &mut sidebar_changed);
+                    }
+                    MenuAction::ToggleEffects => {
+                        let mut sidebar_changed = false;
+                        self.handle_app_command(AppCommand::ToggleEffects, &mut sidebar_changed);
+                    }
                     MenuAction::OpenProject => {
-                        if let Some(path) = rfd::FileDialog::new()
-                            .set_title("Open Project Folder")
-                            .pick_folder()
+                        let mut sidebar_changed = false;
+                        if self
+                            .handle_app_command(AppCommand::PickOpenProject, &mut sidebar_changed)
                         {
-                            if let Some(ui) = &mut self.ui {
-                                ui.explorer.set_root(path.clone());
-                                llnzy::explorer::add_recent_project(&mut ui.recent_projects, path);
-                                ui.sidebar.open = true;
-                                ui.active_view = ActiveView::Shells;
+                            if sidebar_changed {
+                                self.recompute_layout();
+                                self.resize_terminal_tabs();
                             }
-                            self.recompute_layout();
-                            self.resize_terminal_tabs();
                             self.request_redraw();
                         }
                     }

@@ -56,6 +56,7 @@ impl App {
         let snapshot = llnzy::workspace_store::SessionSnapshot {
             theme: None,
             project_path,
+            active_tab: Some(self.active_tab),
             tabs: tab_entries,
         };
         let _ = llnzy::workspace_store::save_session(&snapshot);
@@ -85,8 +86,8 @@ impl App {
             .iter()
             .map(|tab| UiTabPaneInfo {
                 kind: tab.content.kind(),
-                buffer_idx: match &tab.content {
-                    TabContent::CodeFile { buffer_idx, .. } => Some(*buffer_idx),
+                buffer_id: match &tab.content {
+                    TabContent::CodeFile { buffer_id, .. } => Some(*buffer_id),
                     _ => None,
                 },
             })

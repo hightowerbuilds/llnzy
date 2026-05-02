@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// A saved workspace definition (theme + project + tab layout).
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -13,7 +13,7 @@ pub struct SavedWorkspace {
 }
 
 /// A tab descriptor for workspace serialization.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum TabEntry {
     /// The Home launch screen.
     Home,
@@ -145,7 +145,67 @@ fn last_session_path() -> Option<PathBuf> {
 pub struct SessionSnapshot {
     pub theme: Option<String>,
     pub project_path: Option<PathBuf>,
+    #[serde(default)]
+    pub active_tab: Option<usize>,
     pub tabs: Vec<TabEntry>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SessionRestorePlan {
+    pub theme: Option<String>,
+    pub project_path: Option<PathBuf>,
+    pub missing_project_path: Option<PathBuf>,
+    pub active_tab: Option<usize>,
+    pub tabs: Vec<TabEntry>,
+    pub skipped_files: Vec<PathBuf>,
+}
+
+impl SessionRestorePlan {
+    pub fn needs_home_fallback(&self) -> bool {
+        self.tabs.is_empty()
+    }
+}
+
+pub fn plan_session_restore(snapshot: SessionSnapshot) -> SessionRestorePlan {
+    plan_session_restore_with(snapshot, Path::is_dir, Path::is_file)
+}
+
+pub fn plan_session_restore_with(
+    snapshot: SessionSnapshot,
+    project_exists: impl Fn(&Path) -> bool,
+    file_exists: impl Fn(&Path) -> bool,
+) -> SessionRestorePlan {
+    let (project_path, missing_project_path) = match snapshot.project_path {
+        Some(path) if project_exists(&path) => (Some(path), None),
+        Some(path) => (None, Some(path)),
+        None => (None, None),
+    };
+
+    let mut active_tab = None;
+    let mut tabs = Vec::new();
+    let mut skipped_files = Vec::new();
+    for (snapshot_index, entry) in snapshot.tabs.into_iter().enumerate() {
+        if let TabEntry::CodeFile { path } = &entry {
+            if !file_exists(path) {
+                skipped_files.push(path.clone());
+                continue;
+            }
+        }
+
+        if snapshot.active_tab == Some(snapshot_index) {
+            active_tab = Some(tabs.len());
+        }
+        tabs.push(entry);
+    }
+
+    SessionRestorePlan {
+        theme: snapshot.theme,
+        project_path,
+        missing_project_path,
+        active_tab,
+        tabs,
+        skipped_files,
+    }
 }
 
 /// Save the current session state.
@@ -204,13 +264,152 @@ mod tests {
         let snap = SessionSnapshot {
             theme: Some("Buzz".to_string()),
             project_path: Some(PathBuf::from("/home/user/project")),
+            active_tab: Some(1),
             tabs: vec![TabEntry::Terminal, TabEntry::Stacker],
         };
 
         let toml_str = toml::to_string_pretty(&snap).unwrap();
         let loaded: SessionSnapshot = toml::from_str(&toml_str).unwrap();
         assert_eq!(loaded.theme.as_deref(), Some("Buzz"));
+        assert_eq!(loaded.active_tab, Some(1));
         assert_eq!(loaded.tabs.len(), 2);
+    }
+
+    #[test]
+    fn session_snapshot_deserializes_without_active_tab() {
+        let toml_str = r#"
+theme = "Buzz"
+project_path = "/home/user/project"
+
+[[tabs]]
+Terminal = {}
+
+[[tabs]]
+Stacker = {}
+"#;
+
+        let loaded: SessionSnapshot = toml::from_str(toml_str).unwrap();
+
+        assert_eq!(loaded.active_tab, None);
+        assert_eq!(loaded.tabs.len(), 2);
+    }
+
+    #[test]
+    fn restore_plan_keeps_existing_project_and_tabs() {
+        let project = PathBuf::from("/project");
+        let file = project.join("src/main.rs");
+        let snapshot = SessionSnapshot {
+            theme: Some("Buzz".to_string()),
+            project_path: Some(project.clone()),
+            active_tab: Some(1),
+            tabs: vec![
+                TabEntry::Terminal,
+                TabEntry::CodeFile { path: file.clone() },
+                TabEntry::Stacker,
+            ],
+        };
+
+        let plan = plan_session_restore_with(snapshot, |path| path == project, |path| path == file);
+
+        assert_eq!(plan.theme.as_deref(), Some("Buzz"));
+        assert_eq!(plan.project_path, Some(project));
+        assert_eq!(plan.missing_project_path, None);
+        assert_eq!(plan.active_tab, Some(1));
+        assert_eq!(
+            plan.tabs,
+            vec![
+                TabEntry::Terminal,
+                TabEntry::CodeFile { path: file },
+                TabEntry::Stacker,
+            ]
+        );
+        assert!(plan.skipped_files.is_empty());
+        assert!(!plan.needs_home_fallback());
+    }
+
+    #[test]
+    fn restore_plan_skips_missing_project_and_files() {
+        let missing_project = PathBuf::from("/missing-project");
+        let missing_file = missing_project.join("missing.rs");
+        let existing_file = PathBuf::from("/project/src/lib.rs");
+        let snapshot = SessionSnapshot {
+            theme: None,
+            project_path: Some(missing_project.clone()),
+            active_tab: Some(1),
+            tabs: vec![
+                TabEntry::Terminal,
+                TabEntry::CodeFile {
+                    path: missing_file.clone(),
+                },
+                TabEntry::CodeFile {
+                    path: existing_file.clone(),
+                },
+            ],
+        };
+
+        let plan = plan_session_restore_with(snapshot, |_| false, |path| path == existing_file);
+
+        assert_eq!(plan.project_path, None);
+        assert_eq!(plan.missing_project_path, Some(missing_project));
+        assert_eq!(plan.skipped_files, vec![missing_file]);
+        assert_eq!(
+            plan.tabs,
+            vec![
+                TabEntry::Terminal,
+                TabEntry::CodeFile {
+                    path: existing_file
+                }
+            ]
+        );
+        assert_eq!(plan.active_tab, None);
+    }
+
+    #[test]
+    fn restore_plan_remaps_active_tab_after_skips() {
+        let missing_file = PathBuf::from("/project/missing.rs");
+        let existing_file = PathBuf::from("/project/existing.rs");
+        let snapshot = SessionSnapshot {
+            theme: None,
+            project_path: None,
+            active_tab: Some(2),
+            tabs: vec![
+                TabEntry::Terminal,
+                TabEntry::CodeFile { path: missing_file },
+                TabEntry::CodeFile {
+                    path: existing_file.clone(),
+                },
+            ],
+        };
+
+        let plan = plan_session_restore_with(snapshot, |_| false, |path| path == existing_file);
+
+        assert_eq!(
+            plan.tabs,
+            vec![
+                TabEntry::Terminal,
+                TabEntry::CodeFile {
+                    path: existing_file
+                }
+            ]
+        );
+        assert_eq!(plan.active_tab, Some(1));
+    }
+
+    #[test]
+    fn restore_plan_requests_home_fallback_when_no_tabs_are_usable() {
+        let missing_file = PathBuf::from("/project/missing.rs");
+        let snapshot = SessionSnapshot {
+            theme: None,
+            project_path: None,
+            active_tab: Some(0),
+            tabs: vec![TabEntry::CodeFile { path: missing_file }],
+        };
+
+        let plan = plan_session_restore_with(snapshot, |_| false, |_| false);
+
+        assert!(plan.tabs.is_empty());
+        assert!(plan.needs_home_fallback());
+        assert_eq!(plan.active_tab, None);
     }
 
     #[test]

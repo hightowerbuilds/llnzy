@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use crate::editor::BufferId;
 use crate::session::Session;
 
 /// What kind of content a workspace tab holds.
@@ -9,7 +10,7 @@ pub enum TabContent {
     /// A terminal shell session.
     Terminal(Box<Session>),
     /// A source code file open in the editor.
-    CodeFile { path: PathBuf, buffer_idx: usize },
+    CodeFile { path: PathBuf, buffer_id: BufferId },
     /// The prompt queue manager (singleton).
     Stacker,
     /// The drawing canvas (singleton).

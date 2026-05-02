@@ -94,6 +94,7 @@ fn render_rename_modal(
             match std::fs::rename(&rename_path, &new_path) {
                 Ok(_) => {
                     explorer.set_root(explorer.root.clone());
+                    editor_state.pending_file_remap = Some((rename_path.clone(), new_path));
                     editor_state.status_msg = Some(format!("Renamed to {new_name}"));
                 }
                 Err(e) => editor_state.status_msg = Some(format!("Rename failed: {e}")),

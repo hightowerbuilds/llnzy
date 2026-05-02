@@ -171,7 +171,12 @@ pub(super) fn render_project_search(
     if let Some((path, line, col)) = navigate_to {
         editor_state.project_search.close();
         match editor_state.open_file(path) {
-            Ok(idx) => {
+            Ok(buffer_id) => {
+                let Some(idx) = editor_state.editor.index_for_id(buffer_id) else {
+                    editor_state.status_msg =
+                        Some("Opened search result buffer is missing".to_string());
+                    return;
+                };
                 let view = &mut editor_state.editor.views[idx];
                 view.cursor.pos = crate::editor::buffer::Position::new(line, col);
                 view.cursor.clear_selection();

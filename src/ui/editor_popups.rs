@@ -133,7 +133,11 @@ pub(super) fn render_workspace_symbols_popup(
     if let Some((path, line, col)) = navigate_to {
         editor_state.workspace_symbols_popup = None;
         match editor_state.open_file(path) {
-            Ok(idx) => {
+            Ok(buffer_id) => {
+                let Some(idx) = editor_state.editor.index_for_id(buffer_id) else {
+                    editor_state.status_msg = Some("Opened symbol buffer is missing".to_string());
+                    return;
+                };
                 let view = &mut editor_state.editor.views[idx];
                 view.cursor.pos = crate::editor::buffer::Position::new(line as usize, col as usize);
                 view.cursor.clear_selection();
@@ -250,7 +254,12 @@ pub(super) fn render_references_popup(ui: &mut egui::Ui, editor_state: &mut Edit
     if let Some((path, line, col)) = navigate_to {
         editor_state.references_popup = None;
         match editor_state.open_file(path) {
-            Ok(idx) => {
+            Ok(buffer_id) => {
+                let Some(idx) = editor_state.editor.index_for_id(buffer_id) else {
+                    editor_state.status_msg =
+                        Some("Opened reference buffer is missing".to_string());
+                    return;
+                };
                 let view = &mut editor_state.editor.views[idx];
                 view.cursor.pos = crate::editor::buffer::Position::new(line as usize, col as usize);
                 view.cursor.clear_selection();

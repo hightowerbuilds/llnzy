@@ -112,6 +112,21 @@ Started May 2, 2026:
 - Extracted find/replace bar rendering into `src/ui/editor_search_bar.rs`.
 - Extracted folding and visible-line helpers into `src/ui/editor_folding.rs`.
 - Extracted reusable paint/input geometry helpers into `src/ui/editor_paint.rs`.
+- Continued the editor split until `src/ui/editor_view.rs` reached 453 lines by extracting:
+  - status text into `src/ui/editor_status.rs`
+  - selection/search/extra-cursor rendering into `src/ui/editor_selection.rs`
+  - minimap rendering into `src/ui/editor_minimap.rs`
+  - inline hover/signature/completion overlays into `src/ui/editor_inline_overlays.rs`
+  - visible line rendering into `src/ui/editor_lines.rs`
+  - cursor rendering into `src/ui/editor_cursor.rs`
+  - pointer input handling into `src/ui/editor_input.rs`
+  - gutter markers into `src/ui/editor_gutter.rs`
+  - fold/inlay/code-lens decorations into `src/ui/editor_line_decorations.rs`
+- Moved editor helper tests into the modules that own the helpers.
+- Split the sidebar tree follow-up so `src/ui/sidebar_tree.rs` reached 426 lines by extracting:
+  - standalone file browser wrapper into `src/ui/sidebar_file_browser.rs`
+  - finder UI into `src/ui/sidebar_finder.rs`
+  - file type/icon helpers into `src/ui/sidebar_file_types.rs`
 
 ### Work
 
@@ -230,6 +245,17 @@ Extract:
 - `cargo test editor` still passes.
 - Manual smoke checklist passes.
 
+### Current Status
+
+As of May 2, 2026, the primary Phase 1 UI targets are under the working size target:
+
+- `src/ui/explorer_view.rs`: 489 lines
+- `src/ui/editor_view.rs`: 453 lines
+- `src/ui/sidebar_tree.rs`: 426 lines
+- `src/ui/editor_lines.rs`: 433 lines
+
+Remaining files over 500 lines are outside the primary Phase 1 UI split and should be handled as separate roadmap work unless the phase scope expands.
+
 ---
 
 ## Phase 2: Build A Real Command Model
@@ -264,6 +290,27 @@ Purpose: make actions predictable and reusable across keybindings, command palet
 - Convert command palette commands from passive IDs into real command dispatch.
 - Route keymap actions through command dispatch where practical.
 - Keep UI buttons dumb: buttons emit commands; command handlers mutate state.
+
+### Progress
+
+Started May 2, 2026:
+
+- Added `src/ui/editor_command.rs` with an `EditorCommand` enum and dispatcher on `EditorViewState`.
+- Added command dispatch coverage for save, undo, redo, select all, cut, copy, paste, delete line, duplicate line, move line up/down, find, find/replace, project search, run task, LSP requests, file finder, and Markdown mode changes.
+- Added Markdown-specific command palette entries for cycling source/preview/split and setting each mode directly.
+- Converted command palette selections from passive `CommandId` storage into immediate dispatch via `src/ui/palette_command_dispatch.rs`.
+- Routed keymap host actions through the shared editor command dispatcher where practical: LSP requests, finder, search, project search, task picker, and formatting now share the command path.
+- Kept completion navigation separate for now because it depends on the frame-local completion snapshot.
+- Added focused command-routing tests for palette mapping, find dispatch, Markdown mode dispatch, and cut behavior.
+- Routed standard editor key actions for save, undo, redo, select all, cut, copy, paste, delete line, duplicate line, and move line up/down through `EditorCommand` instead of mutating directly inside the raw key handler.
+- Added `AppCommand::PickOpenProject` so command palette and menu project-opening share the same typed app command path.
+- Made registered palette commands for Open Workspace and Toggle Terminal produce real app commands instead of silently no-oping.
+- Added focused tests for key-action edit dispatch, non-mutating copy dispatch, app-level palette command routing, and previous-tab wrapping.
+- Added `src/app/keybinding_commands.rs` to translate app-level keybinding actions into typed `AppCommand` values.
+- Routed global keybindings for new tab, close tab, next/previous tab, switch tab, fullscreen, effects, FPS, sidebar toggle, and legacy split shortcuts through `AppCommand`.
+- Routed the macOS menu actions for new tab, close tab, fullscreen, effects, and legacy split shortcuts through `AppCommand`.
+- Added app-level command variants for fullscreen, effects, FPS, and sidebar toggles, keeping app mutations centralized in the runtime command handler.
+- Added tests for keybinding-to-command tab wrapping, legacy split behavior, and palette app-toggle routing.
 
 ### Acceptance Criteria
 
@@ -305,6 +352,31 @@ Purpose: make tabs, buffers, file paths, and workspace/session state resilient.
   - skip missing files safely
   - never restore dirty unsaved buffers silently
 - Add session restore tests for partial/missing state.
+
+### Progress
+
+Started May 2, 2026:
+
+- Added stable `BufferId` values to `EditorState` and moved parse-result routing from shifting view indexes to buffer IDs.
+- Updated `TabContent::CodeFile`, `UiTabPaneInfo`, and `AppCommand::OpenCodeFile` to carry `BufferId` instead of editor buffer indexes.
+- Added editor registry helpers for resolving, switching, and closing by `BufferId`.
+- Reworked code-file tab close/save/sync behavior to resolve buffers by ID at the point of use.
+- Preserved tab identity across file moves and sidebar renames by remapping open buffer paths and tab paths through `AppCommand::RemapCodeFilePath`.
+- Repaired `restore_last_session` so it loads the saved session, applies a valid theme/project, restores usable tabs, skips missing code files, restores the saved active tab when possible, falls back to Home when needed, and clears the restore file after the restore decision.
+- Added backward-compatible `SessionSnapshot.active_tab`.
+- Added tests for stable buffer IDs after index shifts and old session snapshots without `active_tab`.
+- Completed more of the buffer registry API with path lookup, path update, and dirty-buffer ID listing helpers.
+- Added a guard for `Close Other Tabs` and `Close Tabs To Right` so dirty code-file tabs cannot be silently removed from the workspace tab bar.
+- Added focused editor registry tests for path lookup/update and dirty-buffer identity reporting.
+- Extracted session restore decision-making into a pure `SessionRestorePlan` so missing project/file behavior and active-tab remapping can be tested without constructing the desktop `App`.
+- Added restore planner tests for normal restore, missing project, missing files, active-tab remapping after skipped entries, and Home fallback when no tabs are usable.
+- Split drag/drop command execution, file move handling, and open-file path remapping out of `src/runtime/commands.rs` into `src/runtime/drag_drop.rs`, leaving the runtime command dispatcher closer to a focused app command router.
+- Split save-prompt response handling out of `src/runtime/commands.rs` into `src/runtime/save_prompt.rs`, bringing `src/runtime/commands.rs` down to 445 lines.
+- Added request identity guards for Git refresh/detail async results so stale repo or commit work cannot overwrite the current Git panel state.
+- Added focused Git UI state tests for refresh identity matching, commit-detail identity matching, and stale detail discard behavior.
+- Wrapped buffer-local LSP pending requests with `BufferId` so stale hover, completion, definition, signature, references, formatting, hints, code lens, code action, document symbol, and rename responses cannot apply to the wrong active buffer.
+- Reworked LSP formatting response application to resolve the original request buffer by `BufferId`, including its follow-up `didChange` notification.
+- Added focused LSP event tests for request identity, formatting after active-buffer switches, and ignoring formatting results for closed buffers.
 
 ### Acceptance Criteria
 

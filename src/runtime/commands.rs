@@ -4,14 +4,10 @@ use std::time::Instant;
 use winit::event_loop::ActiveEventLoop;
 
 use llnzy::app::commands::AppCommand;
-use llnzy::app::drag_drop::{
-    plan_file_moves, remap_index_after_insert, remap_index_after_reorder, tab_insert_index,
-    terminal_paths_text, DragDropCommand, FileMovePlan,
-};
-use llnzy::editor::git_gutter::GitGutter;
-use llnzy::path_utils::comparable_path;
+use llnzy::app::drag_drop::{remap_index_after_insert, remap_index_after_reorder};
+use llnzy::editor::BufferId;
 use llnzy::session::Session;
-use llnzy::ui::{ActiveView, PendingClose, SavePromptResponse, UiFrameOutput};
+use llnzy::ui::{ActiveView, UiFrameOutput};
 use llnzy::workspace::{find_singleton, TabContent, TabKind, WorkspaceTab};
 
 use crate::App;
@@ -40,17 +36,17 @@ impl App {
         self.active_tab = self.tabs.len() - 1;
     }
 
-    pub(crate) fn open_code_file_tab(&mut self, path: PathBuf, buffer_idx: usize) {
+    pub(crate) fn open_code_file_tab(&mut self, path: PathBuf, buffer_id: BufferId) {
         let existing = self
             .tabs
             .iter()
-            .position(|t| matches!(&t.content, TabContent::CodeFile { path: p, .. } if *p == path));
+            .position(|t| matches!(&t.content, TabContent::CodeFile { buffer_id: id, .. } if *id == buffer_id));
         if let Some(idx) = existing {
             self.active_tab = idx;
         } else {
             let id = self.alloc_tab_id();
             self.tabs.push(WorkspaceTab {
-                content: TabContent::CodeFile { path, buffer_idx },
+                content: TabContent::CodeFile { path, buffer_id },
                 name: None,
                 id,
             });
@@ -61,16 +57,16 @@ impl App {
         }
     }
 
-    fn open_code_file_tab_at(
+    pub(crate) fn open_code_file_tab_at(
         &mut self,
         path: PathBuf,
-        buffer_idx: usize,
+        buffer_id: BufferId,
         insert_at: usize,
     ) -> bool {
         let existing = self
             .tabs
             .iter()
-            .position(|t| matches!(&t.content, TabContent::CodeFile { path: p, .. } if *p == path));
+            .position(|t| matches!(&t.content, TabContent::CodeFile { buffer_id: id, .. } if *id == buffer_id));
         let inserted = existing.is_none();
         if let Some(idx) = existing {
             self.active_tab = idx;
@@ -80,7 +76,7 @@ impl App {
             self.tabs.insert(
                 insert_at,
                 WorkspaceTab {
-                    content: TabContent::CodeFile { path, buffer_idx },
+                    content: TabContent::CodeFile { path, buffer_id },
                     name: None,
                     id,
                 },
@@ -101,7 +97,7 @@ impl App {
             llnzy::workspace_store::TabEntry::CodeFile { path } => {
                 let Some(ui) = &mut self.ui else { return };
                 match ui.editor_view.open_file(path.clone()) {
-                    Ok(idx) => self.open_code_file_tab(path, idx),
+                    Ok(buffer_id) => self.open_code_file_tab(path, buffer_id),
                     Err(e) => self.error_log.error(format!("Workspace: {e}")),
                 }
             }
@@ -117,6 +113,15 @@ impl App {
         sidebar_changed: &mut bool,
     ) -> bool {
         match command {
+            AppCommand::PickOpenProject => {
+                let Some(project_path) = rfd::FileDialog::new()
+                    .set_title("Open Project Folder")
+                    .pick_folder()
+                else {
+                    return false;
+                };
+                self.handle_app_command(AppCommand::OpenProject(project_path), sidebar_changed)
+            }
             AppCommand::NewTerminalTab => {
                 self.new_tab();
                 if let Some(ui) = &mut self.ui {
@@ -141,6 +146,31 @@ impl App {
                 }
                 self.active_tab = idx;
                 self.close_tab();
+                true
+            }
+            AppCommand::ToggleFullscreen => {
+                self.toggle_fullscreen();
+                true
+            }
+            AppCommand::ToggleEffects => {
+                self.toggle_effects();
+                true
+            }
+            AppCommand::ToggleFps => {
+                if let Some(ui) = &mut self.ui {
+                    ui.show_fps = !ui.show_fps;
+                }
+                self.request_redraw();
+                true
+            }
+            AppCommand::ToggleSidebar => {
+                if let Some(ui) = &mut self.ui {
+                    ui.toggle_sidebar();
+                }
+                self.recompute_layout();
+                self.resize_terminal_tabs();
+                self.selection.clear();
+                self.invalidate_and_redraw();
                 true
             }
             AppCommand::JoinTab(idx) => {
@@ -174,6 +204,12 @@ impl App {
                 if keep_idx >= self.tabs.len() {
                     return false;
                 }
+                let closing: Vec<usize> = (0..self.tabs.len())
+                    .filter(|idx| *idx != keep_idx)
+                    .collect();
+                if self.block_closing_modified_tabs(&closing) {
+                    return false;
+                }
                 let kept = self.tabs.remove(keep_idx);
                 self.tabs.clear();
                 self.tabs.push(kept);
@@ -185,6 +221,10 @@ impl App {
             }
             AppCommand::CloseTabsToRight(idx) => {
                 if idx + 1 >= self.tabs.len() {
+                    return false;
+                }
+                let closing: Vec<usize> = (idx + 1..self.tabs.len()).collect();
+                if self.block_closing_modified_tabs(&closing) {
                     return false;
                 }
                 self.tabs.truncate(idx + 1);
@@ -226,8 +266,12 @@ impl App {
                     false
                 }
             }
-            AppCommand::OpenCodeFile { path, buffer_idx } => {
-                self.open_code_file_tab(path, buffer_idx);
+            AppCommand::OpenCodeFile { path, buffer_id } => {
+                self.open_code_file_tab(path, buffer_id);
+                true
+            }
+            AppCommand::RemapCodeFilePath { old_path, new_path } => {
+                self.remap_open_file_path(&old_path, &new_path);
                 true
             }
             AppCommand::OpenProject(project_path) => {
@@ -323,206 +367,6 @@ impl App {
         }
     }
 
-    pub(crate) fn handle_drag_drop_command(&mut self, command: DragDropCommand) -> bool {
-        match command {
-            DragDropCommand::InsertTerminalPaths { tab_idx, paths } => {
-                let text = terminal_paths_text(&paths);
-                if text.is_empty() {
-                    return false;
-                }
-                self.write_to_terminal_tab(tab_idx, text.as_bytes())
-            }
-            DragDropCommand::OpenFiles { paths } => {
-                let Some(ui) = &mut self.ui else { return false };
-                let mut opened = Vec::new();
-                let mut errors = Vec::new();
-                let mut opened_any = false;
-                for path in paths {
-                    match ui.editor_view.open_file(path.clone()) {
-                        Ok(idx) => {
-                            opened.push((path, idx));
-                            opened_any = true;
-                        }
-                        Err(e) => errors.push(format!("Drop: {e}")),
-                    }
-                }
-                for error in errors {
-                    self.error_log.error(error);
-                }
-                for (path, idx) in opened {
-                    self.open_code_file_tab(path, idx);
-                }
-                opened_any
-            }
-            DragDropCommand::OpenFilesNearTab {
-                paths,
-                tab_idx,
-                zone,
-            } => {
-                let Some(ui) = &mut self.ui else { return false };
-                let mut opened = Vec::new();
-                let mut errors = Vec::new();
-                let mut opened_any = false;
-                for path in paths {
-                    match ui.editor_view.open_file(path.clone()) {
-                        Ok(idx) => {
-                            opened.push((path, idx));
-                            opened_any = true;
-                        }
-                        Err(e) => errors.push(format!("Drop: {e}")),
-                    }
-                }
-                for error in errors {
-                    self.error_log.error(error);
-                }
-
-                let mut insert_at = tab_insert_index(tab_idx, zone, self.tabs.len());
-                for (path, idx) in opened {
-                    if self.open_code_file_tab_at(path, idx, insert_at) {
-                        insert_at = self.active_tab + 1;
-                    }
-                }
-                opened_any
-            }
-            DragDropCommand::OpenProject(project_path) => {
-                let mut sidebar_changed = false;
-                let handled = self.handle_app_command(
-                    AppCommand::OpenProject(project_path),
-                    &mut sidebar_changed,
-                );
-                if sidebar_changed {
-                    self.recompute_layout();
-                    self.resize_terminal_tabs();
-                }
-                handled
-            }
-            DragDropCommand::ReorderTab { from, to } => {
-                if from >= self.tabs.len() || to >= self.tabs.len() || from == to {
-                    return false;
-                }
-                let tab = self.tabs.remove(from);
-                self.tabs.insert(to, tab);
-                self.active_tab = remap_index_after_reorder(self.active_tab, from, to);
-                remap_joined_tabs_after_reorder(self.ui.as_mut(), from, to);
-                true
-            }
-            DragDropCommand::MoveFilesToFolder { files, folder } => {
-                self.move_files_to_folder(&files, &folder)
-            }
-        }
-    }
-
-    fn move_files_to_folder(&mut self, files: &[PathBuf], folder: &std::path::Path) -> bool {
-        let plan = match plan_file_moves(files, folder) {
-            Ok(plan) => plan,
-            Err(message) => {
-                self.report_file_move_status(message.clone());
-                self.error_log.error(message);
-                return false;
-            }
-        };
-
-        if let Some(message) = self.modified_open_file_move_error(&plan) {
-            self.report_file_move_status(message.clone());
-            self.error_log.error(message);
-            return false;
-        }
-
-        let mut moved = Vec::with_capacity(plan.len());
-        for item in &plan {
-            let source_key = comparable_path(&item.source);
-            if let Err(error) = std::fs::rename(&item.source, &item.destination) {
-                let message = format!("Move failed: {error}");
-                self.report_file_move_status(message.clone());
-                self.error_log.error(message);
-                return false;
-            }
-            moved.push((source_key, item.clone()));
-        }
-
-        self.remap_moved_open_files(&moved);
-        if let Some(ui) = &mut self.ui {
-            ui.explorer
-                .refresh_preserving_expansion(&[folder.to_path_buf()]);
-            let moved_count = moved.len();
-            ui.editor_view.status_msg = Some(if moved_count == 1 {
-                "Moved file".to_string()
-            } else {
-                format!("Moved {moved_count} files")
-            });
-        }
-        true
-    }
-
-    fn modified_open_file_move_error(&self, plan: &[FileMovePlan]) -> Option<String> {
-        let ui = self.ui.as_ref()?;
-        for item in plan {
-            let source_key = comparable_path(&item.source);
-            let Some(buffer) = ui.editor_view.editor.buffers.iter().find(|buffer| {
-                buffer
-                    .path()
-                    .is_some_and(|path| comparable_path(path) == source_key)
-            }) else {
-                continue;
-            };
-            if buffer.is_modified() {
-                return Some(format!(
-                    "Save or close {} before moving it.",
-                    buffer.file_name()
-                ));
-            }
-        }
-        None
-    }
-
-    fn remap_moved_open_files(&mut self, moved: &[(PathBuf, FileMovePlan)]) {
-        let Some(ui) = &mut self.ui else { return };
-        for (source_key, item) in moved {
-            let mut remapped_buffer_indexes = Vec::new();
-            for (idx, buffer) in ui.editor_view.editor.buffers.iter_mut().enumerate() {
-                let Some(old_path) = buffer.path().map(PathBuf::from) else {
-                    continue;
-                };
-                if comparable_path(&old_path) != *source_key {
-                    continue;
-                }
-
-                let lang_id = ui.editor_view.editor.views[idx].lang_id;
-                let text = buffer.text();
-                buffer.set_path(item.destination.clone());
-                if let Some(view) = ui.editor_view.editor.views.get_mut(idx) {
-                    view.tree_dirty = true;
-                    view.git_gutter = GitGutter::load(&item.destination);
-                }
-                if let Some(watcher) = &mut ui.editor_view.file_watcher {
-                    watcher.unwatch(&old_path);
-                    watcher.watch(&item.destination);
-                }
-                if let (Some(lsp), Some(lang_id)) = (&mut ui.editor_view.lsp, lang_id) {
-                    lsp.did_close(&old_path, lang_id);
-                    lsp.open_document(&item.destination, lang_id, &text);
-                }
-                remapped_buffer_indexes.push(idx);
-            }
-
-            for tab in &mut self.tabs {
-                if let TabContent::CodeFile { path, buffer_idx } = &mut tab.content {
-                    if comparable_path(path) == *source_key
-                        || remapped_buffer_indexes.contains(buffer_idx)
-                    {
-                        *path = item.destination.clone();
-                    }
-                }
-            }
-        }
-    }
-
-    fn report_file_move_status(&mut self, message: String) {
-        if let Some(ui) = &mut self.ui {
-            ui.editor_view.status_msg = Some(message);
-        }
-    }
-
     pub(crate) fn handle_ui_frame_output(
         &mut self,
         output: UiFrameOutput,
@@ -549,86 +393,6 @@ impl App {
             self.request_redraw();
         }
     }
-
-    pub(crate) fn handle_save_prompt_response(
-        &mut self,
-        response: Option<SavePromptResponse>,
-        event_loop: &ActiveEventLoop,
-    ) -> bool {
-        let Some(response) = response else {
-            return false;
-        };
-
-        let pending = self.ui.as_mut().and_then(|u| u.pending_close.take());
-        match (response, pending) {
-            (SavePromptResponse::Save, Some(PendingClose::Tab(idx, name))) => {
-                match self.save_code_tab_for_close(idx) {
-                    Ok(()) => {
-                        if let Some(ui) = &mut self.ui {
-                            ui.save_prompt_error = None;
-                        }
-                        self.active_tab = idx;
-                        self.force_close_tab();
-                    }
-                    Err(e) => {
-                        if let Some(ui) = &mut self.ui {
-                            ui.pending_close = Some(PendingClose::Tab(idx, name));
-                        }
-                        self.report_save_failure(e);
-                    }
-                }
-                true
-            }
-            (SavePromptResponse::DontSave, Some(PendingClose::Tab(idx, _))) => {
-                if let Some(ui) = &mut self.ui {
-                    ui.save_prompt_error = None;
-                }
-                self.active_tab = idx;
-                self.force_close_tab();
-                true
-            }
-            (SavePromptResponse::Save, Some(PendingClose::Window(tabs))) => {
-                match self.save_modified_tabs_for_close(&tabs) {
-                    Ok(()) => {
-                        if let Some(ui) = &mut self.ui {
-                            ui.save_prompt_error = None;
-                        }
-                        self.save_window_state();
-                        event_loop.exit();
-                    }
-                    Err(e) => {
-                        let still_modified = self.modified_code_tabs();
-                        if let Some(ui) = &mut self.ui {
-                            ui.pending_close =
-                                Some(PendingClose::Window(if still_modified.is_empty() {
-                                    tabs
-                                } else {
-                                    still_modified
-                                }));
-                        }
-                        self.report_save_failure(e);
-                    }
-                }
-                true
-            }
-            (SavePromptResponse::DontSave, Some(PendingClose::Window(_))) => {
-                if let Some(ui) = &mut self.ui {
-                    ui.save_prompt_error = None;
-                }
-                self.save_window_state();
-                event_loop.exit();
-                true
-            }
-            (SavePromptResponse::Cancel, pending) => {
-                drop(pending);
-                if let Some(ui) = &mut self.ui {
-                    ui.save_prompt_error = None;
-                }
-                true
-            }
-            _ => false,
-        }
-    }
 }
 
 fn clear_joined_tabs(ui: Option<&mut llnzy::ui::UiState>) {
@@ -648,7 +412,10 @@ fn clear_joined_tabs_if(
     }
 }
 
-fn remap_joined_tabs_after_insert(ui: Option<&mut llnzy::ui::UiState>, insert_at: usize) {
+pub(crate) fn remap_joined_tabs_after_insert(
+    ui: Option<&mut llnzy::ui::UiState>,
+    insert_at: usize,
+) {
     if let Some(ui) = ui {
         if let Some(joined) = ui.joined_tabs {
             ui.joined_tabs = Some(llnzy::workspace_layout::JoinedTabs {
@@ -660,7 +427,11 @@ fn remap_joined_tabs_after_insert(ui: Option<&mut llnzy::ui::UiState>, insert_at
     }
 }
 
-fn remap_joined_tabs_after_reorder(ui: Option<&mut llnzy::ui::UiState>, from: usize, to: usize) {
+pub(crate) fn remap_joined_tabs_after_reorder(
+    ui: Option<&mut llnzy::ui::UiState>,
+    from: usize,
+    to: usize,
+) {
     if let Some(ui) = ui {
         if let Some(joined) = ui.joined_tabs {
             ui.joined_tabs = Some(llnzy::workspace_layout::JoinedTabs {

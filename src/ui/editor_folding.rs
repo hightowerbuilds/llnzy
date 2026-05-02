@@ -137,3 +137,52 @@ pub(super) fn folded_range_starting_at(
 pub(super) fn is_range_folded(folded_ranges: &[FoldRange], line: usize) -> bool {
     folded_ranges.iter().any(|range| range.start_line == line)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::editor::buffer::Position;
+
+    #[test]
+    fn visible_doc_lines_skips_folded_interiors() {
+        let folds = vec![FoldRange {
+            start_line: 1,
+            end_line: 3,
+        }];
+        assert_eq!(visible_doc_lines(6, &folds), vec![0, 1, 4, 5]);
+    }
+
+    #[test]
+    fn visible_index_for_hidden_line_snaps_to_fold_start() {
+        let visible = vec![0, 1, 4, 5];
+        assert_eq!(visible_index_for_doc_line(&visible, 3), 1);
+    }
+
+    #[test]
+    fn fold_current_uses_innermost_range() {
+        let mut view = BufferView::default();
+        view.cursor.pos = Position::new(3, 0);
+        let ranges = vec![
+            FoldRange {
+                start_line: 0,
+                end_line: 10,
+            },
+            FoldRange {
+                start_line: 2,
+                end_line: 4,
+            },
+        ];
+        let action = KeyAction {
+            fold_current: true,
+            ..KeyAction::default()
+        };
+        apply_folding_actions(&action, &mut view, &ranges, 12);
+        assert_eq!(
+            view.folded_ranges,
+            vec![FoldRange {
+                start_line: 2,
+                end_line: 4
+            }]
+        );
+    }
+}

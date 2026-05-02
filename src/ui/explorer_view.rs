@@ -8,7 +8,7 @@ use crate::editor::file_watcher::FileWatcher;
 use crate::editor::project_search::ProjectSearch;
 use crate::editor::search::EditorSearch;
 use crate::editor::snippet::ActiveSnippet;
-use crate::editor::EditorState;
+use crate::editor::{BufferId, EditorState};
 use crate::explorer::ExplorerState;
 use crate::lsp::LspManager;
 
@@ -20,18 +20,29 @@ use super::{
 /// Pending async LSP requests being polled each frame.
 #[derive(Default)]
 pub struct LspPending {
-    pub hover: Option<oneshot::Receiver<Option<String>>>,
-    pub completion: Option<oneshot::Receiver<Vec<crate::lsp::CompletionItem>>>,
-    pub definition: Option<oneshot::Receiver<Option<(PathBuf, u32, u32)>>>,
-    pub signature_help: Option<oneshot::Receiver<Option<crate::lsp::SignatureInfo>>>,
-    pub references: Option<oneshot::Receiver<Vec<crate::lsp::ReferenceLocation>>>,
-    pub format: Option<oneshot::Receiver<Vec<crate::lsp::FormatEdit>>>,
-    pub inlay_hints: Option<oneshot::Receiver<Vec<crate::lsp::InlayHintInfo>>>,
-    pub code_lens: Option<oneshot::Receiver<Vec<crate::lsp::CodeLensInfo>>>,
-    pub code_actions: Option<oneshot::Receiver<Vec<crate::lsp::CodeAction>>>,
-    pub document_symbols: Option<oneshot::Receiver<Vec<crate::lsp::SymbolInfo>>>,
+    pub hover: Option<PendingLspRequest<Option<String>>>,
+    pub completion: Option<PendingLspRequest<Vec<crate::lsp::CompletionItem>>>,
+    pub definition: Option<PendingLspRequest<Option<(PathBuf, u32, u32)>>>,
+    pub signature_help: Option<PendingLspRequest<Option<crate::lsp::SignatureInfo>>>,
+    pub references: Option<PendingLspRequest<Vec<crate::lsp::ReferenceLocation>>>,
+    pub format: Option<PendingLspRequest<Vec<crate::lsp::FormatEdit>>>,
+    pub inlay_hints: Option<PendingLspRequest<Vec<crate::lsp::InlayHintInfo>>>,
+    pub code_lens: Option<PendingLspRequest<Vec<crate::lsp::CodeLensInfo>>>,
+    pub code_actions: Option<PendingLspRequest<Vec<crate::lsp::CodeAction>>>,
+    pub document_symbols: Option<PendingLspRequest<Vec<crate::lsp::SymbolInfo>>>,
     pub workspace_symbols: Option<oneshot::Receiver<Vec<crate::lsp::WorkspaceSymbol>>>,
-    pub rename: Option<oneshot::Receiver<Vec<(PathBuf, Vec<crate::lsp::FormatEdit>)>>>,
+    pub rename: Option<PendingLspRequest<Vec<(PathBuf, Vec<crate::lsp::FormatEdit>)>>>,
+}
+
+pub struct PendingLspRequest<T> {
+    pub buffer_id: BufferId,
+    pub rx: oneshot::Receiver<T>,
+}
+
+impl<T> PendingLspRequest<T> {
+    pub fn new(buffer_id: BufferId, rx: oneshot::Receiver<T>) -> Self {
+        Self { buffer_id, rx }
+    }
 }
 
 /// Persistent editor UI state -- lives alongside the ExplorerState.
@@ -102,7 +113,9 @@ pub struct EditorViewState {
     /// Debounce: last time LSP didChange was sent.
     pub(super) last_change_sent: Instant,
     /// File to open as a workspace tab (set by sidebar click, consumed by main loop).
-    pub pending_file_tab: Option<(std::path::PathBuf, usize)>,
+    pub pending_file_tab: Option<(std::path::PathBuf, crate::editor::BufferId)>,
+    /// File path remap caused by sidebar rename (consumed by main loop).
+    pub pending_file_remap: Option<(std::path::PathBuf, std::path::PathBuf)>,
     /// Sidebar file/folder rename state: (path being renamed, current input text).
     pub sidebar_rename: Option<(std::path::PathBuf, String)>,
     /// Sidebar delete confirmation: path to delete.
@@ -162,6 +175,7 @@ impl Default for EditorViewState {
             last_health_check: Instant::now(),
             last_change_sent: Instant::now(),
             pending_file_tab: None,
+            pending_file_remap: None,
             sidebar_rename: None,
             sidebar_delete_confirm: None,
             sidebar_new_entry: None,
@@ -335,17 +349,12 @@ pub(crate) fn render_explorer_view(
             editor_state.request_hints_and_lenses();
         }
 
-        // Handle LSP key actions
-        // Goto definition (async -- result arrives via pending.definition)
-        if frame_result.key_action.goto_definition {
-            editor_state.request_goto_definition();
+        let command_outcome = editor_state
+            .dispatch_key_action_commands(&frame_result.key_action, Some(&explorer.root));
+        if command_outcome.open_file_finder {
+            explorer.open_finder();
         }
-        if frame_result.key_action.request_hover {
-            editor_state.request_hover();
-        }
-        if frame_result.key_action.request_completion {
-            editor_state.request_completion();
-        }
+
         // Completion navigation
         if let Some(ref mut comp) = editor_state.completion {
             if frame_result.key_action.dismiss_completion {
@@ -381,91 +390,6 @@ pub(crate) fn render_explorer_view(
                     editor_state.lsp_did_change();
                 }
                 editor_state.completion = None;
-            }
-        }
-
-        // Format document
-        if frame_result.key_action.format_document {
-            editor_state.format_document();
-        }
-
-        // Rename symbol: open input or apply
-        if frame_result.key_action.rename_symbol && editor_state.rename_input.is_none() {
-            // Get current word at cursor for prefill
-            let word = {
-                let buf = &editor_state.editor.buffers[active];
-                let pos = editor_state.editor.views[active].cursor.pos;
-                let line = buf.line(pos.line);
-                let chars: Vec<char> = line.chars().collect();
-                let mut start = pos.col;
-                let mut end = pos.col;
-                while start > 0
-                    && chars
-                        .get(start - 1)
-                        .is_some_and(|c| c.is_alphanumeric() || *c == '_')
-                {
-                    start -= 1;
-                }
-                while end < chars.len()
-                    && chars
-                        .get(end)
-                        .is_some_and(|c| c.is_alphanumeric() || *c == '_')
-                {
-                    end += 1;
-                }
-                chars[start..end].iter().collect::<String>()
-            };
-            editor_state.rename_input = Some(word);
-        }
-
-        // Code actions
-        if frame_result.key_action.code_actions {
-            editor_state.request_code_actions();
-        }
-
-        // File finder (Cmd+P)
-        if frame_result.key_action.open_file_finder {
-            explorer.open_finder();
-        }
-
-        // Document symbols
-        if frame_result.key_action.document_symbols {
-            editor_state.request_document_symbols();
-        }
-
-        // Workspace symbols
-        if frame_result.key_action.workspace_symbols {
-            // Initial query: fetch all symbols with empty query
-            editor_state.request_workspace_symbols("");
-            editor_state.workspace_symbols_popup = Some(Vec::new());
-            editor_state.workspace_symbols_selected = 0;
-            editor_state.workspace_symbols_query.clear();
-        }
-
-        // Find references (async -- result arrives via pending.references)
-        if frame_result.key_action.find_references {
-            editor_state.request_references();
-        }
-
-        // Find & replace
-        if frame_result.key_action.open_find {
-            editor_state.editor_search.open_find();
-            editor_state.editor_search.mark_dirty();
-        }
-        if frame_result.key_action.open_find_replace {
-            editor_state.editor_search.open_replace();
-            editor_state.editor_search.mark_dirty();
-        }
-        if frame_result.key_action.project_search {
-            editor_state.project_search.open();
-        }
-        if frame_result.key_action.run_task {
-            let tasks = crate::tasks::detect_tasks(&explorer.root);
-            if tasks.is_empty() {
-                editor_state.status_msg = Some("No tasks detected in project".to_string());
-            } else {
-                editor_state.task_picker = Some(tasks);
-                editor_state.task_picker_selected = 0;
             }
         }
 

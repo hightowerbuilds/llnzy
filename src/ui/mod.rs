@@ -1,12 +1,22 @@
 pub mod command_palette;
+mod editor_command;
+mod editor_cursor;
 mod editor_file_events;
 mod editor_folding;
+mod editor_gutter;
 mod editor_host;
+mod editor_inline_overlays;
+mod editor_input;
+mod editor_line_decorations;
+mod editor_lines;
 mod editor_lsp_events;
 mod editor_lsp_state;
+mod editor_minimap;
 mod editor_paint;
 mod editor_popups;
 mod editor_search_bar;
+mod editor_selection;
+mod editor_status;
 mod editor_view;
 mod editor_wrap;
 mod explorer_view;
@@ -17,11 +27,16 @@ mod home_view;
 mod image_viewer;
 mod markdown_preview;
 mod overlays;
+mod palette_command_dispatch;
 mod project_search_view;
+mod settings_hotkeys;
 mod settings_state;
 mod settings_tabs;
 mod sidebar;
+mod sidebar_file_browser;
 mod sidebar_file_modals;
+mod sidebar_file_types;
+mod sidebar_finder;
 mod sidebar_state;
 mod sidebar_tree;
 mod sketch_state;
@@ -454,19 +469,36 @@ impl UiState {
         // Persist to disk when dirty
         stacker.persist_if_dirty();
 
+        if let Some(command_id) = palette_command {
+            palette_command_dispatch::apply_palette_command(
+                command_id,
+                &mut editor_view,
+                &mut explorer,
+                &mut sidebar_state,
+                &mut config_clone,
+                active_tab_index,
+                tab_names.len(),
+                &mut commands_out,
+            );
+        }
+
         // Apply state changes
         self.settings = settings;
         self.stacker = stacker;
         sketch.persist_if_dirty();
         self.sketch = sketch;
         self.sidebar = sidebar_state;
+        self.show_fps = show_fps;
         self.explorer = explorer;
         self.git = git;
         self.tab_panes = tab_panes;
         self.joined_tabs = joined_tabs;
         self.wispr_flow_mode = wispr_flow_mode;
-        if let Some((path, buffer_idx)) = editor_view.pending_file_tab.take() {
-            commands_out.push(AppCommand::OpenCodeFile { path, buffer_idx });
+        if let Some((path, buffer_id)) = editor_view.pending_file_tab.take() {
+            commands_out.push(AppCommand::OpenCodeFile { path, buffer_id });
+        }
+        if let Some((old_path, new_path)) = editor_view.pending_file_remap.take() {
+            commands_out.push(AppCommand::RemapCodeFilePath { old_path, new_path });
         }
         if let Some(task) = editor_view.pending_task.take() {
             commands_out.push(AppCommand::RunTask(task));

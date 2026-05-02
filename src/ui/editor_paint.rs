@@ -324,3 +324,34 @@ pub(super) fn pixel_to_editor_pos(
     let col = col.min(buf.line_len(line));
     (line, col)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn indentation_columns_counts_spaces() {
+        assert_eq!(
+            indentation_columns("        value", IndentStyle::Spaces(4)),
+            8
+        );
+    }
+
+    #[test]
+    fn indentation_columns_counts_tabs_as_indent_width() {
+        assert_eq!(indentation_columns("\t\tvalue", IndentStyle::Spaces(4)), 8);
+        assert_eq!(indentation_columns("\t\tvalue", IndentStyle::Tabs), 2);
+    }
+
+    #[test]
+    fn indent_level_uses_detected_style_width() {
+        assert_eq!(indent_level("    value", IndentStyle::Spaces(2)), 2);
+        assert_eq!(indent_level("    value", IndentStyle::Spaces(4)), 1);
+        assert_eq!(indent_level("\t\tvalue", IndentStyle::Tabs), 2);
+    }
+
+    #[test]
+    fn indent_level_ignores_non_indented_lines() {
+        assert_eq!(indent_level("value", IndentStyle::Spaces(4)), 0);
+    }
+}

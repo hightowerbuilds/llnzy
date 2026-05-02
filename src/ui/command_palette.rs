@@ -32,6 +32,10 @@ pub enum CommandId {
     WorkspaceSymbols,
     ProjectSearch,
     RunTask,
+    ToggleMarkdownMode,
+    MarkdownSource,
+    MarkdownPreview,
+    MarkdownSplit,
     OpenWorkspace,
     FindFile,
     ToggleTerminal,
@@ -161,6 +165,26 @@ pub fn all_commands() -> Vec<Command> {
             name: "Run Task",
             keybinding: "Cmd+Shift+B",
             id: CommandId::RunTask,
+        },
+        Command {
+            name: "Toggle Markdown Preview Mode",
+            keybinding: "",
+            id: CommandId::ToggleMarkdownMode,
+        },
+        Command {
+            name: "Markdown Source Mode",
+            keybinding: "",
+            id: CommandId::MarkdownSource,
+        },
+        Command {
+            name: "Markdown Preview Mode",
+            keybinding: "",
+            id: CommandId::MarkdownPreview,
+        },
+        Command {
+            name: "Markdown Split Mode",
+            keybinding: "",
+            id: CommandId::MarkdownSplit,
         },
         Command {
             name: "Open Workspace",

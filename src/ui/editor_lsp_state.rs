@@ -3,9 +3,10 @@ use std::time::Instant;
 
 use crate::editor::file_watcher::FileWatcher;
 use crate::editor::perf;
+use crate::editor::BufferId;
 use crate::lsp::{LspEnsureStatus, LspManager};
 
-use super::explorer_view::{CompletionState, EditorViewState};
+use super::explorer_view::{CompletionState, EditorViewState, PendingLspRequest};
 
 impl EditorViewState {
     pub fn init_lsp(&mut self, proxy: winit::event_loop::EventLoopProxy<crate::UserEvent>) {
@@ -20,8 +21,12 @@ impl EditorViewState {
         }
     }
 
-    pub fn open_file(&mut self, path: PathBuf) -> Result<usize, String> {
-        let idx = self.editor.open(path.clone())?;
+    pub fn open_file(&mut self, path: PathBuf) -> Result<BufferId, String> {
+        let buffer_id = self.editor.open(path.clone())?;
+        let idx = self
+            .editor
+            .index_for_id(buffer_id)
+            .ok_or_else(|| "Opened buffer is missing from editor registry".to_string())?;
 
         if let Some(watcher) = &mut self.file_watcher {
             watcher.watch(&path);
@@ -56,35 +61,50 @@ impl EditorViewState {
 
         self.request_hints_and_lenses();
 
-        Ok(idx)
+        Ok(buffer_id)
     }
 
     pub fn lsp_did_change(&mut self) {
+        let Some(buffer_id) = self.editor.active_buffer_id() else {
+            return;
+        };
+        self.send_lsp_did_change_for_buffer_id(buffer_id, true);
+    }
+
+    pub(super) fn lsp_did_change_for_buffer_id(&mut self, buffer_id: BufferId) {
+        self.send_lsp_did_change_for_buffer_id(buffer_id, false);
+    }
+
+    fn send_lsp_did_change_for_buffer_id(&mut self, buffer_id: BufferId, consume_last_edit: bool) {
         let now = Instant::now();
         if now.duration_since(self.last_change_sent).as_millis() < perf::LSP_DEBOUNCE_MS as u128 {
             return;
         }
         let Some(lsp) = &mut self.lsp else { return };
-        let active = self.editor.active;
-        if active >= self.editor.buffers.len() {
+        let Some(idx) = self.editor.index_for_id(buffer_id) else {
             return;
-        }
-        let buf = &self.editor.buffers[active];
-        let view = &self.editor.views[active];
+        };
+        let buf = &self.editor.buffers[idx];
+        let view = &self.editor.views[idx];
         if buf.line_count() > perf::LSP_CHANGE_LINE_LIMIT {
             return;
         }
         if let (Some(lang_id), Some(path)) = (view.lang_id, buf.path()) {
-            if let Some((start, end, new_text)) = self.last_edit.take() {
-                lsp.did_change_incremental(
-                    path,
-                    lang_id,
-                    start.line as u32,
-                    start.col as u32,
-                    end.line as u32,
-                    end.col as u32,
-                    &new_text,
-                );
+            if consume_last_edit {
+                if let Some((start, end, new_text)) = self.last_edit.take() {
+                    lsp.did_change_incremental(
+                        path,
+                        lang_id,
+                        start.line as u32,
+                        start.col as u32,
+                        end.line as u32,
+                        end.col as u32,
+                        &new_text,
+                    );
+                } else {
+                    let text = buf.text();
+                    lsp.did_change(path, lang_id, &text);
+                }
             } else {
                 let text = buf.text();
                 lsp.did_change(path, lang_id, &text);
@@ -101,11 +121,14 @@ impl EditorViewState {
         }
         let buf = &self.editor.buffers[active];
         let view = &self.editor.views[active];
+        let Some(buffer_id) = self.editor.active_buffer_id() else {
+            return;
+        };
         let pos = view.cursor.pos;
         if let (Some(lang_id), Some(path)) = (view.lang_id, buf.path()) {
             if let Some(rx) = lsp.hover_async(path, lang_id, pos.line as u32, pos.col as u32) {
                 self.hover_pos = Some((pos.line, pos.col));
-                self.pending.hover = Some(rx);
+                self.pending.hover = Some(PendingLspRequest::new(buffer_id, rx));
             }
         }
     }
@@ -118,10 +141,13 @@ impl EditorViewState {
         }
         let buf = &self.editor.buffers[active];
         let view = &self.editor.views[active];
+        let Some(buffer_id) = self.editor.active_buffer_id() else {
+            return;
+        };
         let pos = view.cursor.pos;
         if let (Some(lang_id), Some(path)) = (view.lang_id, buf.path()) {
             if let Some(rx) = lsp.definition_async(path, lang_id, pos.line as u32, pos.col as u32) {
-                self.pending.definition = Some(rx);
+                self.pending.definition = Some(PendingLspRequest::new(buffer_id, rx));
             }
         }
     }
@@ -131,7 +157,11 @@ impl EditorViewState {
             return;
         };
         match self.open_file(path) {
-            Ok(idx) => {
+            Ok(buffer_id) => {
+                let Some(idx) = self.editor.index_for_id(buffer_id) else {
+                    self.status_msg = Some("Definition buffer is missing".to_string());
+                    return;
+                };
                 let view = &mut self.editor.views[idx];
                 view.cursor.pos = crate::editor::buffer::Position::new(line as usize, col as usize);
                 view.cursor.clear_selection();
@@ -150,10 +180,13 @@ impl EditorViewState {
         }
         let buf = &self.editor.buffers[active];
         let view = &self.editor.views[active];
+        let Some(buffer_id) = self.editor.active_buffer_id() else {
+            return;
+        };
         let pos = view.cursor.pos;
         if let (Some(lang_id), Some(path)) = (view.lang_id, buf.path()) {
             if let Some(rx) = lsp.completion_async(path, lang_id, pos.line as u32, pos.col as u32) {
-                self.pending.completion = Some(rx);
+                self.pending.completion = Some(PendingLspRequest::new(buffer_id, rx));
                 self.completion = Some(CompletionState {
                     items: Vec::new(),
                     selected: 0,
@@ -190,9 +223,12 @@ impl EditorViewState {
         }
         let buf = &self.editor.buffers[active];
         let view = &self.editor.views[active];
+        let Some(buffer_id) = self.editor.active_buffer_id() else {
+            return;
+        };
         if let (Some(lang_id), Some(path)) = (view.lang_id, buf.path()) {
             if let Some(rx) = lsp.format_async(path, lang_id) {
-                self.pending.format = Some(rx);
+                self.pending.format = Some(PendingLspRequest::new(buffer_id, rx));
                 self.status_msg = Some("Formatting...".to_string());
             }
         }
@@ -206,12 +242,15 @@ impl EditorViewState {
         }
         let buf = &self.editor.buffers[active];
         let view = &self.editor.views[active];
+        let Some(buffer_id) = self.editor.active_buffer_id() else {
+            return;
+        };
         let pos = view.cursor.pos;
         if let (Some(lang_id), Some(path)) = (view.lang_id, buf.path()) {
             if let Some(rx) =
                 lsp.rename_async(path, lang_id, pos.line as u32, pos.col as u32, new_name)
             {
-                self.pending.rename = Some(rx);
+                self.pending.rename = Some(PendingLspRequest::new(buffer_id, rx));
                 self.status_msg = Some("Renaming...".to_string());
             }
         }
@@ -262,6 +301,9 @@ impl EditorViewState {
         }
         let buf = &self.editor.buffers[active];
         let view = &self.editor.views[active];
+        let Some(buffer_id) = self.editor.active_buffer_id() else {
+            return;
+        };
         let pos = view.cursor.pos;
         let (start, end) = view.cursor.selection().unwrap_or((pos, pos));
         if let (Some(lang_id), Some(path)) = (view.lang_id, buf.path()) {
@@ -273,7 +315,7 @@ impl EditorViewState {
                 end.line as u32,
                 end.col as u32,
             ) {
-                self.pending.code_actions = Some(rx);
+                self.pending.code_actions = Some(PendingLspRequest::new(buffer_id, rx));
                 self.status_msg = Some("Loading code actions...".to_string());
             }
         }
@@ -325,9 +367,12 @@ impl EditorViewState {
         }
         let buf = &self.editor.buffers[active];
         let view = &self.editor.views[active];
+        let Some(buffer_id) = self.editor.active_buffer_id() else {
+            return;
+        };
         if let (Some(lang_id), Some(path)) = (view.lang_id, buf.path()) {
             if let Some(rx) = lsp.document_symbols_async(path, lang_id) {
-                self.pending.document_symbols = Some(rx);
+                self.pending.document_symbols = Some(PendingLspRequest::new(buffer_id, rx));
                 self.status_msg = Some("Loading symbols...".to_string());
             }
         }
@@ -341,12 +386,15 @@ impl EditorViewState {
         }
         let buf = &self.editor.buffers[active];
         let view = &self.editor.views[active];
+        let Some(buffer_id) = self.editor.active_buffer_id() else {
+            return;
+        };
         let pos = view.cursor.pos;
         if let (Some(lang_id), Some(path)) = (view.lang_id, buf.path()) {
             if let Some(rx) =
                 lsp.signature_help_async(path, lang_id, pos.line as u32, pos.col as u32)
             {
-                self.pending.signature_help = Some(rx);
+                self.pending.signature_help = Some(PendingLspRequest::new(buffer_id, rx));
             }
         }
     }
@@ -375,10 +423,13 @@ impl EditorViewState {
         }
         let buf = &self.editor.buffers[active];
         let view = &self.editor.views[active];
+        let Some(buffer_id) = self.editor.active_buffer_id() else {
+            return;
+        };
         let pos = view.cursor.pos;
         if let (Some(lang_id), Some(path)) = (view.lang_id, buf.path()) {
             if let Some(rx) = lsp.references_async(path, lang_id, pos.line as u32, pos.col as u32) {
-                self.pending.references = Some(rx);
+                self.pending.references = Some(PendingLspRequest::new(buffer_id, rx));
                 self.status_msg = Some("Finding references...".to_string());
             }
         }
@@ -392,13 +443,16 @@ impl EditorViewState {
         }
         let buf = &self.editor.buffers[active];
         let view = &self.editor.views[active];
+        let Some(buffer_id) = self.editor.active_buffer_id() else {
+            return;
+        };
         if let (Some(lang_id), Some(path)) = (view.lang_id, buf.path()) {
             let line_count = buf.line_count() as u32;
             if let Some(rx) = lsp.inlay_hints_async(path, lang_id, 0, line_count) {
-                self.pending.inlay_hints = Some(rx);
+                self.pending.inlay_hints = Some(PendingLspRequest::new(buffer_id, rx));
             }
             if let Some(rx) = lsp.code_lens_async(path, lang_id) {
-                self.pending.code_lens = Some(rx);
+                self.pending.code_lens = Some(PendingLspRequest::new(buffer_id, rx));
             }
         }
     }

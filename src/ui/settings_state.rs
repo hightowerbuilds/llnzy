@@ -1,3 +1,4 @@
+use super::settings_hotkeys;
 use super::settings_tabs::{self, WorkspaceAction};
 use super::types::SettingsTab;
 use crate::config::Config;
@@ -15,6 +16,7 @@ pub struct SettingsUiState {
     active_appearance: AppearancePage,
     preview_background_path: Option<String>,
     preview_background_texture: Option<egui::TextureHandle>,
+    show_hotkey_legend: bool,
 }
 
 #[derive(Default)]
@@ -29,6 +31,7 @@ impl Default for SettingsUiState {
             active_appearance: AppearancePage::Terminal,
             preview_background_path: None,
             preview_background_texture: None,
+            show_hotkey_legend: false,
         }
     }
 }
@@ -88,6 +91,7 @@ impl SettingsUiState {
         }
         let mut output = SettingsRenderOutput::default();
         render_settings_panel(ui, |ui| {
+            settings_hotkeys::render_hotkey_legend(ui, &mut self.show_hotkey_legend);
             settings_tabs::render_editor_tab(ui, config);
             ui.add_space(24.0);
             ui.separator();

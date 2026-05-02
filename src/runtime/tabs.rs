@@ -41,14 +41,14 @@ impl App {
         if self.tabs.is_empty() {
             return;
         }
-        if let TabContent::CodeFile { buffer_idx, .. } = &self.tabs[self.active_tab].content {
+        if let TabContent::CodeFile { buffer_id, .. } = &self.tabs[self.active_tab].content {
             if let Some(ui) = &self.ui {
-                if *buffer_idx < ui.editor_view.editor.buffers.len()
-                    && ui.editor_view.editor.buffers[*buffer_idx].is_modified()
-                {
-                    let name = ui.editor_view.editor.buffers[*buffer_idx]
-                        .file_name()
-                        .to_string();
+                if let Some(buffer) = ui.editor_view.editor.buffer_for_id(*buffer_id) {
+                    if !buffer.is_modified() {
+                        self.force_close_tab();
+                        return;
+                    }
+                    let name = buffer.file_name().to_string();
                     if let Some(ui) = &mut self.ui {
                         ui.pending_close = Some(PendingClose::Tab(self.active_tab, name));
                         ui.save_prompt_error = None;
@@ -157,13 +157,12 @@ impl App {
         let mut modified = Vec::new();
         if let Some(ui) = &self.ui {
             for (i, tab) in self.tabs.iter().enumerate() {
-                if let TabContent::CodeFile { buffer_idx, .. } = &tab.content {
-                    if *buffer_idx < ui.editor_view.editor.buffers.len()
-                        && ui.editor_view.editor.buffers[*buffer_idx].is_modified()
-                    {
-                        let name = ui.editor_view.editor.buffers[*buffer_idx]
-                            .file_name()
-                            .to_string();
+                if let TabContent::CodeFile { buffer_id, .. } = &tab.content {
+                    if let Some(buffer) = ui.editor_view.editor.buffer_for_id(*buffer_id) {
+                        if !buffer.is_modified() {
+                            continue;
+                        }
+                        let name = buffer.file_name().to_string();
                         modified.push((i, name));
                     }
                 }
@@ -173,16 +172,16 @@ impl App {
     }
 
     pub(crate) fn save_code_tab_for_close(&mut self, idx: usize) -> Result<(), String> {
-        let Some(TabContent::CodeFile { buffer_idx, .. }) =
+        let Some(TabContent::CodeFile { buffer_id, .. }) =
             self.tabs.get(idx).map(|tab| &tab.content)
         else {
             return Ok(());
         };
-        let buffer_idx = *buffer_idx;
+        let buffer_id = *buffer_id;
         let Some(ui) = &mut self.ui else {
             return Ok(());
         };
-        let Some(buf) = ui.editor_view.editor.buffers.get_mut(buffer_idx) else {
+        let Some(buf) = ui.editor_view.editor.buffer_for_id_mut(buffer_id) else {
             return Err(format!(
                 "Cannot save tab {}: editor buffer is missing",
                 idx + 1
@@ -208,6 +207,54 @@ impl App {
             self.save_code_tab_for_close(*idx)?;
         }
         Ok(())
+    }
+
+    pub(crate) fn block_closing_modified_tabs(&mut self, tab_indexes: &[usize]) -> bool {
+        let modified = self.modified_code_tabs_for_indexes(tab_indexes);
+        if modified.is_empty() {
+            return false;
+        }
+
+        let names = modified
+            .iter()
+            .map(|(_, name)| name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let message = if modified.len() == 1 {
+            format!("Save or close {names} before closing other tabs.")
+        } else {
+            format!(
+                "Save or close {} modified files before closing other tabs.",
+                modified.len()
+            )
+        };
+        self.error_log.warn(message.clone());
+        if let Some(ui) = &mut self.ui {
+            ui.editor_view.status_msg = Some(message);
+        }
+        true
+    }
+
+    fn modified_code_tabs_for_indexes(&self, tab_indexes: &[usize]) -> Vec<(usize, String)> {
+        let mut modified = Vec::new();
+        let Some(ui) = &self.ui else {
+            return modified;
+        };
+
+        for idx in tab_indexes {
+            let Some(tab) = self.tabs.get(*idx) else {
+                continue;
+            };
+            if let TabContent::CodeFile { buffer_id, .. } = &tab.content {
+                if let Some(buffer) = ui.editor_view.editor.buffer_for_id(*buffer_id) {
+                    if buffer.is_modified() {
+                        modified.push((*idx, buffer.file_name().to_string()));
+                    }
+                }
+            }
+        }
+
+        modified
     }
 
     pub(crate) fn report_save_failure(&mut self, message: String) {
@@ -245,9 +292,15 @@ impl App {
         };
 
         ui.active_view = ActiveView::Shells;
-        if let TabContent::CodeFile { buffer_idx, .. } = &tab.content {
-            ui.editor_view.editor.switch_to(*buffer_idx);
-            ui.editor_view.request_hints_and_lenses();
+        if let TabContent::CodeFile { buffer_id, .. } = &tab.content {
+            if ui.editor_view.editor.switch_to_id(*buffer_id) {
+                ui.editor_view.request_hints_and_lenses();
+            } else {
+                ui.editor_view.status_msg = Some(format!(
+                    "Missing editor buffer for tab {}",
+                    self.active_tab + 1
+                ));
+            }
         }
     }
 }

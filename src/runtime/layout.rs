@@ -160,11 +160,18 @@ impl App {
                 });
             }
 
-            if let Some(TabContent::CodeFile { buffer_idx, .. }) =
+            if let Some(TabContent::CodeFile { buffer_id, .. }) =
                 self.tabs.get(self.active_tab).map(|tab| &tab.content)
             {
+                let Some(buffer_idx) = self
+                    .ui
+                    .as_ref()
+                    .and_then(|ui| ui.editor_view.editor.index_for_id(*buffer_id))
+                else {
+                    return None;
+                };
                 return Some(DropTarget::Editor {
-                    buffer_idx: *buffer_idx,
+                    buffer_idx,
                     position: llnzy::editor::buffer::Position::new(0, 0),
                 });
             }

@@ -172,11 +172,11 @@ fn render_joined_tabs(
             );
         });
 
-    if let Some(active_buffer_idx) = tab_panes
+    if let Some(active_buffer_id) = tab_panes
         .get(active_tab_index)
-        .and_then(|pane| pane.buffer_idx)
+        .and_then(|pane| pane.buffer_id)
     {
-        state.editor_view.editor.switch_to(active_buffer_idx);
+        state.editor_view.editor.switch_to_id(active_buffer_id);
     }
 }
 
@@ -242,8 +242,8 @@ fn render_joined_pane(
             );
         }
         TabKind::CodeFile => {
-            if let Some(buffer_idx) = pane.buffer_idx {
-                state.editor_view.editor.switch_to(buffer_idx);
+            if let Some(buffer_id) = pane.buffer_id {
+                state.editor_view.editor.switch_to_id(buffer_id);
             }
             render_pane_frame(&mut pane_ui, color_from_rgb(appearance.bg), 12.0, |ui| {
                 explorer_view::render_explorer_view(ui, state.explorer, state.editor_view, config);

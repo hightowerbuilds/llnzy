@@ -1,6 +1,7 @@
 use std::time::Instant;
 
 use crate::app::commands::AppCommand;
+use crate::editor::BufferId;
 use crate::workspace::TabKind;
 
 pub const SIDEBAR_WIDTH: f32 = 200.0;
@@ -71,5 +72,5 @@ pub struct UiTabInfo {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct UiTabPaneInfo {
     pub kind: TabKind,
-    pub buffer_idx: Option<usize>,
+    pub buffer_id: Option<BufferId>,
 }

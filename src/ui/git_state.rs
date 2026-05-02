@@ -24,7 +24,8 @@ pub struct GitUiState {
     pub detail_loading: bool,
     pub error: Option<String>,
     pub detail_error: Option<String>,
-    refresh_rx: Option<Receiver<Result<GitSnapshot, GitError>>>,
+    refresh_rx: Option<Receiver<(PathBuf, Result<GitSnapshot, GitError>)>>,
+    refresh_requested: Option<PathBuf>,
     detail_rx: Option<Receiver<Result<CommitDetail, GitError>>>,
     detail_requested: Option<String>,
     readme_root: Option<PathBuf>,
@@ -49,6 +50,7 @@ impl Default for GitUiState {
             error: None,
             detail_error: None,
             refresh_rx: None,
+            refresh_requested: None,
             detail_rx: None,
             detail_requested: None,
             readme_root: None,
@@ -168,16 +170,18 @@ impl GitUiState {
     }
 
     fn start_refresh(&mut self, candidate: PathBuf) {
-        if self.loading {
+        if self.loading && self.refresh_requested.as_ref() == Some(&candidate) {
             return;
         }
         let (tx, rx) = mpsc::channel();
+        let requested = candidate.clone();
         self.loading = true;
         self.error = None;
+        self.refresh_requested = Some(requested.clone());
         thread::spawn(move || {
             let snapshot = git::discover_repo_root(&candidate)
                 .and_then(|root| git::load_snapshot(&root, 1_000));
-            let _ = tx.send(snapshot);
+            let _ = tx.send((requested, snapshot));
         });
         self.refresh_rx = Some(rx);
     }
@@ -187,8 +191,17 @@ impl GitUiState {
             return;
         };
         match rx.try_recv() {
-            Ok(Ok(snapshot)) => {
+            Ok((request, result)) if !self.refresh_result_is_current(&request) => {
+                if self.refresh_requested.as_ref() == Some(&request) {
+                    self.loading = false;
+                    self.refresh_requested = None;
+                }
+                self.refresh_rx = None;
+                drop(result);
+            }
+            Ok((_request, Ok(snapshot))) => {
                 self.loading = false;
+                self.refresh_requested = None;
                 self.repo_root = Some(snapshot.repo_root.clone());
                 self.error = None;
                 self.last_refresh = Some(Instant::now());
@@ -204,8 +217,9 @@ impl GitUiState {
                 self.snapshot = Some(snapshot);
                 self.refresh_rx = None;
             }
-            Ok(Err(err)) => {
+            Ok((_request, Err(err))) => {
                 self.loading = false;
+                self.refresh_requested = None;
                 self.error = Some(err.message);
                 self.snapshot = None;
                 self.repo_root = None;
@@ -216,6 +230,7 @@ impl GitUiState {
             Err(TryRecvError::Empty) => {}
             Err(TryRecvError::Disconnected) => {
                 self.loading = false;
+                self.refresh_requested = None;
                 self.error = Some("Git refresh stopped unexpectedly.".to_string());
                 self.refresh_rx = None;
             }
@@ -228,6 +243,12 @@ impl GitUiState {
         };
         match rx.try_recv() {
             Ok(Ok(detail)) => {
+                if !self.detail_result_is_current(&detail.oid) {
+                    self.detail_loading = false;
+                    self.detail_requested = None;
+                    self.detail_rx = None;
+                    return;
+                }
                 self.detail_loading = false;
                 self.detail_error = None;
                 self.detail_requested = None;
@@ -248,5 +269,71 @@ impl GitUiState {
                 self.detail_rx = None;
             }
         }
+    }
+
+    fn refresh_result_is_current(&self, request: &Path) -> bool {
+        self.refresh_requested.as_deref() == Some(request)
+    }
+
+    fn detail_result_is_current(&self, oid: &str) -> bool {
+        self.selected_commit.as_deref() == Some(oid)
+            && self.detail_requested.as_deref() == Some(oid)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn refresh_result_identity_matches_requested_candidate() {
+        let mut state = GitUiState {
+            refresh_requested: Some(PathBuf::from("/tmp/repo-a")),
+            ..GitUiState::default()
+        };
+
+        assert!(state.refresh_result_is_current(Path::new("/tmp/repo-a")));
+        assert!(!state.refresh_result_is_current(Path::new("/tmp/repo-b")));
+
+        state.refresh_requested = None;
+        assert!(!state.refresh_result_is_current(Path::new("/tmp/repo-a")));
+    }
+
+    #[test]
+    fn detail_result_identity_requires_selected_and_requested_commit() {
+        let mut state = GitUiState {
+            selected_commit: Some("abc123".to_string()),
+            detail_requested: Some("abc123".to_string()),
+            ..GitUiState::default()
+        };
+
+        assert!(state.detail_result_is_current("abc123"));
+        assert!(!state.detail_result_is_current("def456"));
+
+        state.selected_commit = Some("def456".to_string());
+        assert!(!state.detail_result_is_current("abc123"));
+    }
+
+    #[test]
+    fn stale_detail_result_is_discarded() {
+        let (tx, rx) = mpsc::channel();
+        tx.send(Ok(CommitDetail {
+            oid: "old".to_string(),
+            ..CommitDetail::default()
+        }))
+        .unwrap();
+
+        let mut state = GitUiState {
+            selected_commit: Some("new".to_string()),
+            detail_requested: Some("old".to_string()),
+            detail_loading: true,
+            detail_rx: Some(rx),
+            ..GitUiState::default()
+        };
+
+        state.poll_detail();
+
+        assert!(state.selected_detail.is_none());
+        assert!(state.detail_rx.is_none());
     }
 }
