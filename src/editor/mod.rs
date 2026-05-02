@@ -49,11 +49,30 @@ pub struct BufferView {
     pub vim_mode: Option<VimMode>,
     /// Pending Vim command buffer for multi-key sequences (e.g. "dd", "gg", "yy").
     pub vim_pending: Option<char>,
+    /// Markdown source/preview state for markdown buffers.
+    pub markdown_mode: MarkdownViewMode,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EditorKeyChord {
     CmdK,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MarkdownViewMode {
+    Source,
+    Preview,
+    Split,
+}
+
+impl MarkdownViewMode {
+    pub fn cycle(self) -> Self {
+        match self {
+            Self::Source => Self::Preview,
+            Self::Preview => Self::Split,
+            Self::Split => Self::Source,
+        }
+    }
 }
 
 impl Default for BufferView {
@@ -76,6 +95,7 @@ impl Default for BufferView {
             git_gutter: None,
             vim_mode: None,
             vim_pending: None,
+            markdown_mode: MarkdownViewMode::Source,
         }
     }
 }
@@ -100,6 +120,7 @@ impl Clone for BufferView {
             git_gutter: None, // Git gutter reloaded on open
             vim_mode: self.vim_mode,
             vim_pending: self.vim_pending,
+            markdown_mode: self.markdown_mode,
         }
     }
 }

@@ -14,7 +14,7 @@ use crate::editor::EditorState;
 use crate::explorer::{format_size, ExplorerState, FileContent};
 use crate::lsp::{LspEnsureStatus, LspManager};
 
-use super::editor_view;
+use super::{editor_view, markdown_preview};
 
 /// Pending async LSP requests being polled each frame.
 #[derive(Default)]
@@ -1079,28 +1079,84 @@ pub(crate) fn render_explorer_view(
             }
         }
 
-        let syntax = &editor_state.editor.syntax;
         let effective_editor_config = config.editor.effective_for(view.lang_id, config.font_size);
-        let frame_result = editor_view::render_text_editor(
-            ui,
-            buf,
-            view,
-            syntax,
-            &effective_editor_config,
-            &config.syntax_colors,
-            diags.as_deref(),
-            hover_text.as_deref(),
-            completions_arg,
-            sig_help.as_ref(),
-            &inlay_hints_snapshot,
-            &code_lenses_snapshot,
-            &mut editor_state.status_msg,
-            &mut editor_state.clipboard_out,
-            &mut editor_state.clipboard_in,
-            &mut editor_state.editor_search,
-            &lsp_status_snapshot,
-            config.editor.keybinding_preset,
-        );
+        let markdown_file = buf.path().is_some_and(markdown_preview::is_markdown_path);
+        let frame_result = if markdown_file {
+            let theme = markdown_theme(config);
+            markdown_preview::render_markdown_mode_bar(ui, &mut view.markdown_mode, theme);
+            match view.markdown_mode {
+                crate::editor::MarkdownViewMode::Source => render_source_editor(
+                    ui,
+                    buf,
+                    view,
+                    &editor_state.editor.syntax,
+                    &effective_editor_config,
+                    config,
+                    diags.as_deref(),
+                    hover_text.as_deref(),
+                    completions_arg,
+                    sig_help.as_ref(),
+                    &inlay_hints_snapshot,
+                    &code_lenses_snapshot,
+                    &lsp_status_snapshot,
+                    &mut editor_state.status_msg,
+                    &mut editor_state.clipboard_out,
+                    &mut editor_state.clipboard_in,
+                    &mut editor_state.editor_search,
+                ),
+                crate::editor::MarkdownViewMode::Preview => {
+                    markdown_preview::render_markdown_preview(ui, buf, theme);
+                    editor_view::EditorFrameResult::default()
+                }
+                crate::editor::MarkdownViewMode::Split => {
+                    let mut frame_result = editor_view::EditorFrameResult::default();
+                    ui.columns(2, |columns| {
+                        let (left, right) = columns.split_at_mut(1);
+                        frame_result = render_source_editor(
+                            &mut left[0],
+                            buf,
+                            view,
+                            &editor_state.editor.syntax,
+                            &effective_editor_config,
+                            config,
+                            diags.as_deref(),
+                            hover_text.as_deref(),
+                            completions_arg,
+                            sig_help.as_ref(),
+                            &inlay_hints_snapshot,
+                            &code_lenses_snapshot,
+                            &lsp_status_snapshot,
+                            &mut editor_state.status_msg,
+                            &mut editor_state.clipboard_out,
+                            &mut editor_state.clipboard_in,
+                            &mut editor_state.editor_search,
+                        );
+                        markdown_preview::render_markdown_preview(&mut right[0], buf, theme);
+                    });
+                    frame_result
+                }
+            }
+        } else {
+            render_source_editor(
+                ui,
+                buf,
+                view,
+                &editor_state.editor.syntax,
+                &effective_editor_config,
+                config,
+                diags.as_deref(),
+                hover_text.as_deref(),
+                completions_arg,
+                sig_help.as_ref(),
+                &inlay_hints_snapshot,
+                &code_lenses_snapshot,
+                &lsp_status_snapshot,
+                &mut editor_state.status_msg,
+                &mut editor_state.clipboard_out,
+                &mut editor_state.clipboard_in,
+                &mut editor_state.editor_search,
+            )
+        };
 
         let len_after = editor_state.editor.buffers[active].len_chars();
         let is_modified = editor_state.editor.buffers[active].is_modified();
@@ -1798,6 +1854,66 @@ pub(crate) fn render_explorer_view(
                 }
             }
         }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_source_editor(
+    ui: &mut egui::Ui,
+    buf: &mut crate::editor::buffer::Buffer,
+    view: &mut crate::editor::BufferView,
+    syntax: &crate::editor::syntax::SyntaxEngine,
+    editor_config: &crate::config::EffectiveEditorConfig,
+    config: &crate::config::Config,
+    diagnostics: Option<&[crate::lsp::FileDiagnostic]>,
+    hover_text: Option<&str>,
+    completions: Option<(&[&crate::lsp::CompletionItem], usize)>,
+    signature_help: Option<&crate::lsp::SignatureInfo>,
+    inlay_hints: &[crate::lsp::InlayHintInfo],
+    code_lenses: &[crate::lsp::CodeLensInfo],
+    lsp_status: &str,
+    status_msg: &mut Option<String>,
+    clipboard_out: &mut Option<String>,
+    clipboard_in: &mut Option<String>,
+    editor_search: &mut EditorSearch,
+) -> editor_view::EditorFrameResult {
+    editor_view::render_text_editor(
+        ui,
+        buf,
+        view,
+        syntax,
+        editor_config,
+        &config.syntax_colors,
+        diagnostics,
+        hover_text,
+        completions,
+        signature_help,
+        inlay_hints,
+        code_lenses,
+        status_msg,
+        clipboard_out,
+        clipboard_in,
+        editor_search,
+        lsp_status,
+        config.editor.keybinding_preset,
+    )
+}
+
+fn markdown_theme(config: &crate::config::Config) -> markdown_preview::MarkdownPreviewTheme {
+    let bg = config.colors.background;
+    let fg = config.colors.foreground;
+    let cursor = config.colors.cursor;
+    let surface = egui::Color32::from_rgb(
+        bg[0].saturating_add(2),
+        bg[1].saturating_add(2),
+        bg[2].saturating_add(4),
+    );
+    markdown_preview::MarkdownPreviewTheme {
+        background: surface,
+        surface,
+        text: egui::Color32::from_rgb(fg[0], fg[1], fg[2]),
+        muted: egui::Color32::from_rgb(145, 150, 164),
+        accent: egui::Color32::from_rgb(cursor[0], cursor[1], cursor[2]),
     }
 }
 

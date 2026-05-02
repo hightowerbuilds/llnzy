@@ -5,6 +5,7 @@ mod footer;
 mod git_state;
 mod git_view;
 mod home_view;
+mod markdown_preview;
 mod overlays;
 mod settings_state;
 mod settings_tabs;

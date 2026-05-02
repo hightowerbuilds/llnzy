@@ -65,9 +65,6 @@ pub fn render_footer(
                         result = Some(FooterAction::NewTerminalTab);
                     },
                 );
-                if terminal_active {
-                    render_wispr_toggle(ui, wispr_flow_mode, text_color);
-                }
 
                 // All singleton tab buttons
                 let singletons: &[(&str, TabKind)] = &[
@@ -82,6 +79,10 @@ pub fn render_footer(
                     render_button(ui, name, is_active, active_btn, text_color, || {
                         result = Some(FooterAction::OpenSingletonTab(kind));
                     });
+                }
+
+                if matches!(active_tab_kind, Some(TabKind::Terminal | TabKind::Stacker)) {
+                    render_wispr_toggle(ui, wispr_flow_mode, text_color);
                 }
 
                 if matches!(active_tab_kind, Some(TabKind::Terminal)) && !queued_prompts.is_empty()
@@ -137,7 +138,7 @@ fn render_wispr_toggle(ui: &mut egui::Ui, wispr_flow_mode: &mut bool, text_color
             .rounding(egui::Rounding::same(4.0))
             .min_size(egui::Vec2::new(0.0, FOOTER_BUTTON_HEIGHT)),
         )
-        .on_hover_text("Route Wispr Flow voice text directly into the active terminal");
+        .on_hover_text("Route Wispr Flow voice text directly into the active terminal or Stacker");
     if response.clicked() {
         *wispr_flow_mode = !*wispr_flow_mode;
     }

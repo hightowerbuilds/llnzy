@@ -97,15 +97,23 @@ impl App {
         self.ui.as_ref().is_some_and(|ui| ui.wispr_flow_mode)
     }
 
+    fn active_stacker_tab(&self) -> bool {
+        self.active_tab()
+            .is_some_and(|tab| matches!(tab.content, TabContent::Stacker))
+    }
+
     fn route_wispr_flow_text(&mut self, text: &str) -> bool {
-        if !self.wispr_flow_mode()
-            || !input::text_should_use_paste_path(text)
-            || self.active_session().is_none()
-            || self.search.active
-        {
+        if !self.wispr_flow_mode() || !input::text_should_use_paste_path(text) {
             return false;
         }
 
+        if self.active_stacker_tab() {
+            return self.append_text_to_stacker_editor(text);
+        }
+
+        if self.active_session().is_none() || self.search.active {
+            return false;
+        }
         self.last_keypress = Instant::now();
         if self.selection.is_active() {
             self.selection.clear();
@@ -116,11 +124,7 @@ impl App {
     }
 
     fn route_wispr_flow_paste_command(&mut self, key_event: &winit::event::KeyEvent) -> bool {
-        if !self.wispr_flow_mode()
-            || key_event.state != ElementState::Pressed
-            || self.active_session().is_none()
-            || self.search.active
-        {
+        if !self.wispr_flow_mode() || key_event.state != ElementState::Pressed {
             return false;
         }
 
@@ -132,6 +136,14 @@ impl App {
             return false;
         }
 
+        if self.active_stacker_tab() {
+            self.do_paste();
+            return true;
+        }
+
+        if self.active_session().is_none() || self.search.active {
+            return false;
+        }
         self.last_keypress = Instant::now();
         if self.selection.is_active() {
             self.selection.clear();
@@ -255,12 +267,6 @@ impl ApplicationHandler<UserEvent> for App {
             matches!(&event, WindowEvent::Ime(Ime::Commit(_))) && self.active_session().is_some();
 
         if let WindowEvent::Ime(Ime::Commit(text)) = &event {
-            if input::text_should_use_paste_path(text) && self.append_text_to_stacker_editor(text) {
-                return;
-            }
-        }
-
-        if let WindowEvent::Ime(Ime::Commit(text)) = &event {
             if self.route_wispr_flow_text(text) {
                 return;
             }
@@ -291,10 +297,7 @@ impl ApplicationHandler<UserEvent> for App {
             event: key_event, ..
         } = &event
         {
-            let active_stacker = self
-                .active_tab()
-                .is_some_and(|tab| matches!(tab.content, TabContent::Stacker));
-            if active_stacker && key_event.state == ElementState::Pressed {
+            if self.active_stacker_tab() && key_event.state == ElementState::Pressed {
                 if let Some(action) = self.config.keybindings.match_key(key_event, self.modifiers) {
                     match action {
                         Action::Copy => {
