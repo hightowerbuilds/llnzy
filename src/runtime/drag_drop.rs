@@ -12,6 +12,36 @@ use llnzy::workspace::remap_code_file_tab_paths;
 use crate::runtime::commands::remap_joined_tabs_after_reorder;
 use crate::App;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct OpenFileMoveCandidate {
+    path: PathBuf,
+    file_name: String,
+    modified: bool,
+}
+
+fn modified_open_file_move_message<I>(plan: &[FileMovePlan], open_files: I) -> Option<String>
+where
+    I: IntoIterator<Item = OpenFileMoveCandidate>,
+{
+    let open_files: Vec<_> = open_files.into_iter().collect();
+    for item in plan {
+        let source_key = comparable_path(&item.source);
+        let Some(file) = open_files
+            .iter()
+            .find(|file| comparable_path(&file.path) == source_key)
+        else {
+            continue;
+        };
+        if file.modified {
+            return Some(format!(
+                "Save or close {} before moving it.",
+                file.file_name
+            ));
+        }
+    }
+    None
+}
+
 impl App {
     pub(crate) fn handle_drag_drop_command(&mut self, command: DragDropCommand) -> bool {
         match command {
@@ -149,23 +179,17 @@ impl App {
 
     fn modified_open_file_move_error(&self, plan: &[FileMovePlan]) -> Option<String> {
         let ui = self.ui.as_ref()?;
-        for item in plan {
-            let source_key = comparable_path(&item.source);
-            let Some(buffer) = ui.editor_view.editor.buffers.iter().find(|buffer| {
-                buffer
-                    .path()
-                    .is_some_and(|path| comparable_path(path) == source_key)
-            }) else {
-                continue;
-            };
-            if buffer.is_modified() {
-                return Some(format!(
-                    "Save or close {} before moving it.",
-                    buffer.file_name()
-                ));
-            }
-        }
-        None
+        modified_open_file_move_message(
+            plan,
+            ui.editor_view.editor.buffers.iter().filter_map(|buffer| {
+                let path = buffer.path()?.to_path_buf();
+                Some(OpenFileMoveCandidate {
+                    path,
+                    file_name: buffer.file_name().to_string(),
+                    modified: buffer.is_modified(),
+                })
+            }),
+        )
     }
 
     fn remap_moved_open_files(&mut self, moved: &[(PathBuf, FileMovePlan)]) {
@@ -213,5 +237,61 @@ impl App {
         if let Some(ui) = &mut self.ui {
             ui.editor_view.status_msg = Some(message);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn move_plan(source: &str, destination: &str) -> Vec<FileMovePlan> {
+        vec![FileMovePlan {
+            source: PathBuf::from(source),
+            destination: PathBuf::from(destination),
+        }]
+    }
+
+    fn open_file(path: &str, file_name: &str, modified: bool) -> OpenFileMoveCandidate {
+        OpenFileMoveCandidate {
+            path: PathBuf::from(path),
+            file_name: file_name.to_string(),
+            modified,
+        }
+    }
+
+    #[test]
+    fn open_clean_file_move_is_not_blocked() {
+        let plan = move_plan("/project/src/note.md", "/project/archive/note.md");
+        let message = modified_open_file_move_message(
+            &plan,
+            [open_file("/project/src/note.md", "note.md", false)],
+        );
+
+        assert_eq!(message, None);
+    }
+
+    #[test]
+    fn open_dirty_file_move_is_blocked() {
+        let plan = move_plan("/project/src/note.md", "/project/archive/note.md");
+        let message = modified_open_file_move_message(
+            &plan,
+            [open_file("/project/src/note.md", "note.md", true)],
+        );
+
+        assert_eq!(
+            message,
+            Some("Save or close note.md before moving it.".to_string())
+        );
+    }
+
+    #[test]
+    fn unrelated_dirty_open_file_does_not_block_move() {
+        let plan = move_plan("/project/src/note.md", "/project/archive/note.md");
+        let message = modified_open_file_move_message(
+            &plan,
+            [open_file("/project/src/other.md", "other.md", true)],
+        );
+
+        assert_eq!(message, None);
     }
 }

@@ -1,3 +1,4 @@
+use llnzy::editor::buffer::Buffer;
 use llnzy::session::Session;
 use llnzy::ui::{ActiveView, PendingClose};
 use llnzy::workspace::{TabContent, WorkspaceTab};
@@ -195,8 +196,7 @@ impl App {
             .path()
             .map(|path| path.display().to_string())
             .unwrap_or_else(|| buf.file_name().to_string());
-        buf.save()
-            .map_err(|err| format!("Failed to save {label}: {err}"))
+        save_modified_buffer_for_close(buf, label)
     }
 
     pub(crate) fn save_modified_tabs_for_close(
@@ -258,10 +258,11 @@ impl App {
     }
 
     pub(crate) fn report_save_failure(&mut self, message: String) {
-        self.error_log.error(message.clone());
+        let status = save_failure_status(message);
+        self.error_log.error(status.log_message.clone());
         if let Some(ui) = &mut self.ui {
-            ui.save_prompt_error = Some(message.clone());
-            ui.editor_view.status_msg = Some(message);
+            ui.save_prompt_error = Some(status.prompt_error);
+            ui.editor_view.status_msg = Some(status.editor_status);
         }
     }
 
@@ -305,10 +306,70 @@ impl App {
     }
 }
 
+fn save_modified_buffer_for_close(buf: &mut Buffer, label: String) -> Result<(), String> {
+    if !buf.is_modified() {
+        return Ok(());
+    }
+
+    buf.save()
+        .map_err(|err| save_for_close_failed_status(&label, &err))
+}
+
+fn save_for_close_failed_status(label: &str, error: &str) -> String {
+    format!("Save failed for {label}: {error}")
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct SaveFailureStatus {
+    log_message: String,
+    prompt_error: String,
+    editor_status: String,
+}
+
+fn save_failure_status(message: String) -> SaveFailureStatus {
+    SaveFailureStatus {
+        log_message: message.clone(),
+        prompt_error: message.clone(),
+        editor_status: message,
+    }
+}
+
 fn remap_index_after_remove(index: usize, removed_idx: usize) -> usize {
     if index > removed_idx {
         index - 1
     } else {
         index
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use llnzy::editor::buffer::Position;
+
+    #[test]
+    fn save_for_close_failure_keeps_buffer_dirty_and_formats_error() {
+        let missing_parent =
+            std::env::temp_dir().join(format!("llnzy-close-missing-{}", std::process::id()));
+        let path = missing_parent.join("file.txt");
+        let label = path.display().to_string();
+        let mut buf = Buffer::empty();
+        buf.insert(Position::new(0, 0), "unsaved");
+        buf.set_path(path);
+
+        let error = save_modified_buffer_for_close(&mut buf, label.clone()).unwrap_err();
+
+        assert!(buf.is_modified());
+        assert_eq!(buf.text(), "unsaved");
+        assert!(error.starts_with(&format!("Save failed for {label}: ")));
+    }
+
+    #[test]
+    fn save_failure_status_is_durable_across_prompt_and_editor_status() {
+        let status = save_failure_status("Save failed for file.txt: disk full".to_string());
+
+        assert_eq!(status.log_message, "Save failed for file.txt: disk full");
+        assert_eq!(status.prompt_error, status.log_message);
+        assert_eq!(status.editor_status, status.log_message);
     }
 }

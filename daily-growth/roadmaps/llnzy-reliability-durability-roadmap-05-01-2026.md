@@ -441,6 +441,37 @@ Purpose: make external filesystem changes boring and safe.
 - The app never saves a dirty buffer to an unexpected path.
 - The user always has a clear choice when disk and buffer contents diverge.
 
+### Progress
+
+Started May 2, 2026:
+
+- Added a pure external file-event planner in `src/ui/editor_file_events.rs`.
+- Centralized the first file watcher decisions for:
+  - clean file modified externally: reload immediately
+  - dirty file modified externally: prompt before reload
+  - deleted file: prompt before resolving
+- Routed the existing watcher flow through the planner without changing the current prompt UI.
+- Added focused tests for clean external modification, dirty external modification, and deletion planning.
+- Replaced reload prompt buffer indexes with stable `BufferId` prompt targets.
+- Added stale-prompt guards so an external reload prompt cannot apply after the buffer path has been remapped.
+- Tightened deleted-file path matching so missing paths are not treated as the same file just because canonicalization fails.
+- Added focused tests for prompt targeting after index shifts, stale path rejection after remap, and missing-path matching.
+- Added sidebar rename/delete lifecycle guards for open files.
+- Blocked sidebar rename/delete of dirty open files until they are saved or closed.
+- Blocked sidebar folder rename/delete when open child buffers would be stranded by the operation.
+- Added focused tests for dirty open file guards, clean exact file rename allowance, and open child buffer folder guards.
+- Centralized lifecycle path comparison in `src/path_utils.rs` so external file events and sidebar actions share the same missing-path and containment rules.
+- Added path utility tests for distinct missing paths and existing child containment.
+- Added file watcher classification for modified, deleted, and detectable external rename/move events.
+- Added explicit external file lifecycle states for clean/current, clean/dirty external changes, clean/dirty deletes, and clean/dirty moved-on-disk.
+- Added moved-file prompts that can route detectable moves through the existing open-file remap path.
+- Added save-failure durability helpers for normal editor save and save-for-close paths.
+- Preserved dirty buffers and surfaced durable status/prompt/log messages when save fails.
+- Added testable drag/drop move guards for open clean files, open dirty files, and unrelated dirty files.
+- Added focused tests for file watcher classification, moved-file lifecycle modeling, save-failure status, and drag/drop move blocking.
+- Extracted external prompt response planning so reload, moved-file remap, stale prompt rejection, and deleted/moved keep actions are covered without relying on UI rendering.
+- Added focused tests for external prompt response actions.
+
 ---
 
 ## Phase 5: Editor Feel And Correctness

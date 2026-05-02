@@ -97,8 +97,8 @@ pub struct EditorViewState {
     pub active_snippet: Option<ActiveSnippet>,
     /// File watcher for detecting external changes.
     pub file_watcher: Option<FileWatcher>,
-    /// Pending reload prompt: (buffer_index, path, is_deleted).
-    pub reload_prompt: Option<(usize, PathBuf, bool)>,
+    /// Pending external file prompt anchored to a stable buffer identity.
+    pub(super) reload_prompt: Option<editor_file_events::ExternalFilePrompt>,
     /// Last edit info for incremental LSP sync: (start_pos, end_pos, new_text).
     /// Set by the editor after each edit, consumed by lsp_did_change.
     pub last_edit: Option<(

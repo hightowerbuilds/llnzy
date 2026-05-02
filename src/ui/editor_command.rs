@@ -201,7 +201,7 @@ impl EditorViewState {
                 self.lsp_did_save();
                 self.request_hints_and_lenses();
             }
-            Err(e) => self.status_msg = Some(format!("Save failed: {e}")),
+            Err(e) => self.status_msg = Some(save_failed_status(&e)),
         }
     }
 
@@ -439,6 +439,10 @@ fn key_action_commands(action: &KeyAction) -> impl Iterator<Item = EditorCommand
     .filter_map(|(enabled, command)| enabled.then_some(command))
 }
 
+fn save_failed_status(error: &str) -> String {
+    format!("Save failed: {error}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -528,5 +532,21 @@ mod tests {
 
         assert!(!outcome.changed_buffer);
         assert_eq!(state.clipboard_out.as_deref(), Some("beta\n"));
+    }
+
+    #[test]
+    fn dispatch_save_failure_keeps_buffer_dirty_and_reports_status() {
+        let mut state = state_with_text("unsaved");
+        let missing_parent =
+            std::env::temp_dir().join(format!("llnzy-command-missing-{}", std::process::id()));
+        state.editor.buffers[0].set_path(missing_parent.join("file.txt"));
+
+        state.dispatch_editor_command(EditorCommand::Save, None);
+
+        assert!(state.editor.buffers[0].is_modified());
+        assert!(state
+            .status_msg
+            .as_deref()
+            .is_some_and(|message| message.starts_with("Save failed: ")));
     }
 }
