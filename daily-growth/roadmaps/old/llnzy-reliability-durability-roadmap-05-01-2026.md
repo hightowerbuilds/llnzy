@@ -784,7 +784,7 @@ Purpose: make the app feel intentional, not just capable.
 
 Completed May 2, 2026:
 
-- Created `daily-growth/roadmaps/llnzy-phase-9-product-hierarchy-ux-consistency-05-02-2026.md`.
+- Created `docs/llnzy-phase-9-product-hierarchy-ux-consistency-05-02-2026.md`.
 - Defined the primary product identity:
   - `llnzy` is a terminal-first local project workbench that keeps code, Markdown, Git, prompts, sketches, and settings in one durable GPU-native tabbed workspace.
 - Reflected that identity in the Home tagline.

@@ -110,17 +110,130 @@ Manual checks for the typed command model and surface-specific actions.
 
 ## Phase 9 Product Hierarchy And UX Consistency
 
-Manual checks for the product hierarchy and consistency rules in `daily-growth/roadmaps/llnzy-phase-9-product-hierarchy-ux-consistency-05-02-2026.md`.
+Manual checks for the product hierarchy and consistency rules in `docs/llnzy-phase-9-product-hierarchy-ux-consistency-05-02-2026.md`.
+
+### Product Identity And Workspace Priority
 
 1. Launch with no restorable session and confirm Home appears with the current primary app identity.
-2. Create a new workspace and confirm the default tab layout starts with one Terminal tab.
-3. Add workspace tabs and confirm new layout rows default to Terminal.
-4. Open Stacker, Sketch, Git, Settings, and Appearances repeatedly and confirm singleton tabs focus instead of duplicating.
-5. Open the same code file repeatedly and confirm the existing code-file tab is focused.
-6. Confirm Stacker, Markdown, Sketch, Git, and Settings toolbars follow the documented grouping and do not resize the main work area unexpectedly.
-7. Confirm empty states in Home, Stacker, Sketch browser, Markdown preview, Git, and Settings are brief, clear, and leave the next useful action visible.
-8. Join two tabs, resize the divider, switch active sides, and confirm tab title, close, rename, and context-menu behavior stays consistent.
-9. Join mixed surfaces such as Terminal + CodeFile, CodeFile + Sketch, and Git + Stacker, then confirm each pane preserves its normal toolbar and empty-state behavior.
+2. Confirm Home copy, workspace-builder defaults, and footer/navigation affordances all reinforce a terminal-first local project workbench.
+3. Create a new workspace and confirm the default tab layout starts with one Terminal tab.
+4. Add workspace tabs and confirm new layout rows default to Terminal.
+5. Confirm saved workspace launch with Terminal, Stacker, Sketch, and Git focuses the intended first active tab after launch.
+6. Confirm session restore status messages are visible enough when missing files or missing project folders are skipped.
+
+### Toolbar Consistency
+
+1. Confirm Stacker toolbar remains usable at narrow widths without hiding the prompt editor.
+2. Confirm Sketch toolbar remains usable at narrow widths without pushing the canvas below a practical height.
+3. Confirm Git toolbar/header behavior follows compact grouping, short labels, and stable sizing.
+4. Confirm Settings does not create a confusing third tab concept inside the Settings surface.
+5. Confirm toolbar actions that modify editor text or prompt text preserve focus.
+6. Confirm toolbar controls do not resize the main canvas/editor/list while typing or switching modes.
+
+### Tab Consistency
+
+1. Open Stacker, Sketch, Git, Settings, Home, and Appearances repeatedly and confirm singleton tabs focus instead of duplicating.
+2. Open the same code file repeatedly and confirm the existing code-file tab is focused.
+3. Open a different file and confirm a new CodeFile tab is created.
+4. Confirm tab rename, close, and context menus behave the same in single and joined tab bars.
+5. Confirm terminal-only commands in tab context menus appear only on terminal tabs.
+6. Confirm active-tab styling remains legible for terminals, code files, Stacker, Sketch, Git, and Settings.
+7. Confirm long tab names truncate consistently and do not overlap close buttons.
+
+### Empty And Error States
+
+1. Confirm Home is the only full launch empty state.
+2. Confirm every empty state leaves the next useful action visible.
+3. Confirm empty Markdown preview does not look like a broken renderer.
+4. Confirm Git no-repository, loading, empty-history, large-repository, and command-error states remain distinct.
+5. Confirm Stacker queue and saved prompt empty states stay short and keep the editor visible.
+6. Confirm Sketch empty saved-sketch browser does not shrink or obscure the canvas.
+7. Confirm Settings optional asset lists, such as saved backgrounds, have clear empty or unavailable behavior.
+8. Confirm app-level no-tab fallback is rarely reachable outside defensive rendering.
+
+### Stacker
+
+1. Confirm the header says Stacker and the sublabel describes prompt work without competing with the app identity.
+2. Confirm queue empty state is short and does not hide saved prompts or the editor.
+3. Confirm saved prompt empty state is short and does not hide queue or editor.
+4. Confirm toolbar actions preserve editor focus when applying formatting.
+5. Confirm prompt font-size controls stay bounded and do not resize the surrounding layout unexpectedly.
+6. Confirm queue actions use consistent labels for Add to queue and Queued.
+7. Confirm command routing keeps paste, copy, select all, undo, and redo inside Stacker when active.
+
+### Markdown
+
+1. Confirm Source, Preview, and Split buttons are grouped and mutually exclusive.
+2. Confirm Markdown mode changes do not change tab identity or dirty state.
+3. Confirm preview margins, headings, tables, nested lists, images, and code blocks remain readable.
+4. Confirm empty Markdown documents render as blank usable documents, not broken views.
+5. Confirm Split mode keeps source and preview proportions usable at narrow widths.
+6. Confirm Markdown commands remain available through keybindings and the command palette.
+
+### Git
+
+1. Confirm opening Git reuses the existing singleton tab.
+2. Confirm no-repository, loading, empty-history, and command-error states are visually distinct.
+3. Confirm commit selection does not let stale details overwrite the current selection.
+4. Confirm large repositories do not block app input.
+5. Confirm Git tab context-menu behavior matches other singleton tabs except for Git-specific internals.
+6. Confirm Git remains a repository context surface, not the primary app identity.
+
+### Sketch
+
+1. Confirm opening Sketch reuses the existing singleton tab.
+2. Confirm toolbar groups tools, style, history, and document actions in that order.
+3. Confirm empty canvas remains immediately drawable.
+4. Confirm empty sketch browser does not shrink or obscure the canvas.
+5. Confirm Save As and Browse controls do not trap keyboard input after closing.
+6. Confirm Sketch pointer and keyboard input do not leak into terminal or editor tabs.
+
+### Settings
+
+1. Confirm opening Settings reuses the existing singleton tab.
+2. Confirm Settings contains editor/workspace configuration while Appearances contains visual/effects configuration.
+3. Confirm workspace builder defaults to one Terminal tab.
+4. Confirm Add Tab defaults to Terminal.
+5. Confirm workspace tab choices do not imply that CodeFile tabs are generic defaults.
+6. Confirm hotkey legend matches the real command routing for common shortcuts.
+7. Confirm optional asset lists, such as saved backgrounds, have clear empty/unavailable behavior.
+
+### Singleton Tabs
+
+1. Confirm Home, Stacker, Sketch, Git, Appearances, and Settings never duplicate through normal navigation.
+2. Confirm repeat activation focuses the existing tab.
+3. Confirm singleton titles stay stable unless the user explicitly renames the tab.
+4. Confirm closing a singleton removes only that tab and does not reset the singleton's persisted state unless that is the surface's existing behavior.
+5. Confirm singleton tabs can participate in joined tabs without losing their singleton identity.
+
+### Code-File Tabs
+
+1. Confirm opening the same buffer focuses the existing tab.
+2. Confirm opening a different file creates a new CodeFile tab.
+3. Confirm rename/move of clean open files updates tab path/title.
+4. Confirm rename/move of dirty open files is blocked or prompted according to file lifecycle rules.
+5. Confirm dirty close prompts are consistent from tab close, menu close, and window close.
+6. Confirm missing files after session restore are skipped and reported.
+
+### Joined Tabs
+
+1. Confirm joined tab pairs validate against current tab count and active tab.
+2. Confirm joined divider clamps ratio between the documented min and max.
+3. Confirm joined tabs expose close, rename, switch, and context menus for each member.
+4. Confirm Separate Tabs returns to normal tab rendering without changing tab order.
+5. Confirm closing either side remaps or clears joined state predictably.
+6. Confirm reordering a joined tab does not leave stale primary/secondary indexes.
+7. Join two tabs, resize the divider, switch active sides, and confirm tab title, close, rename, and context-menu behavior stays consistent.
+
+### Split Panes
+
+1. Confirm terminal effects render over the correct pane when one or both joined tabs are terminals.
+2. Confirm CodeFile panes switch the editor to the pane buffer before rendering.
+3. Confirm Sketch panes maintain a correct canvas pixel rect after resize.
+4. Confirm Git, Settings, Home, and Stacker panes preserve their normal empty and toolbar behavior inside a pane.
+5. Confirm divider hover/drag feedback is visible but does not steal normal pane input.
+6. Confirm narrow split panes remain usable or degrade gracefully.
+7. Join mixed surfaces such as Terminal + CodeFile, CodeFile + Sketch, and Git + Stacker, then confirm each pane preserves its normal toolbar and empty-state behavior.
 
 ---
 
