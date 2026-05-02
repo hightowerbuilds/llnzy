@@ -18,6 +18,7 @@ impl App {
     fn apply_session_restore_plan(&mut self, plan: SessionRestorePlan) {
         self.restore_session_theme(plan.theme.as_deref());
         self.restore_session_project(&plan);
+        let restore_status = plan.status_message();
 
         let initial_tab_count = self.tabs.len();
         let needs_home_fallback = plan.needs_home_fallback();
@@ -46,6 +47,9 @@ impl App {
 
         if !self.tabs.is_empty() {
             self.sync_active_tab_content();
+        }
+        if let (Some(status), Some(ui)) = (restore_status, &mut self.ui) {
+            ui.editor_view.status_msg = Some(status);
         }
         self.recompute_layout();
         self.resize_terminal_tabs();

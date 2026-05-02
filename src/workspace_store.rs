@@ -164,6 +164,23 @@ impl SessionRestorePlan {
     pub fn needs_home_fallback(&self) -> bool {
         self.tabs.is_empty()
     }
+
+    pub fn status_message(&self) -> Option<String> {
+        let skipped_file_count = self.skipped_files.len();
+        let missing_project = self.missing_project_path.is_some();
+        match (missing_project, skipped_file_count) {
+            (false, 0) => None,
+            (true, 0) => Some("Session restore skipped a missing project folder.".to_string()),
+            (false, 1) => Some("Session restore skipped 1 missing file.".to_string()),
+            (false, count) => Some(format!("Session restore skipped {count} missing files.")),
+            (true, 1) => Some(
+                "Session restore skipped a missing project folder and 1 missing file.".to_string(),
+            ),
+            (true, count) => Some(format!(
+                "Session restore skipped a missing project folder and {count} missing files."
+            )),
+        }
+    }
 }
 
 pub fn plan_session_restore(snapshot: SessionSnapshot) -> SessionRestorePlan {
@@ -410,6 +427,29 @@ Stacker = {}
         assert!(plan.tabs.is_empty());
         assert!(plan.needs_home_fallback());
         assert_eq!(plan.active_tab, None);
+    }
+
+    #[test]
+    fn restore_plan_status_message_summarizes_skipped_state() {
+        let missing_project = PathBuf::from("/missing-project");
+        let missing_one = missing_project.join("missing-one.rs");
+        let missing_two = missing_project.join("missing-two.rs");
+        let snapshot = SessionSnapshot {
+            theme: None,
+            project_path: Some(missing_project),
+            active_tab: None,
+            tabs: vec![
+                TabEntry::CodeFile { path: missing_one },
+                TabEntry::CodeFile { path: missing_two },
+            ],
+        };
+
+        let plan = plan_session_restore_with(snapshot, |_| false, |_| false);
+
+        assert_eq!(
+            plan.status_message().as_deref(),
+            Some("Session restore skipped a missing project folder and 2 missing files.")
+        );
     }
 
     #[test]

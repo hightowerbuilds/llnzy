@@ -1,6 +1,7 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::editor::BufferId;
+use crate::path_utils::comparable_path;
 use crate::session::Session;
 
 /// What kind of content a workspace tab holds.
@@ -114,4 +115,90 @@ impl WorkspaceTab {
 /// Find the index of an existing singleton tab of the given kind.
 pub fn find_singleton(tabs: &[WorkspaceTab], kind: TabKind) -> Option<usize> {
     tabs.iter().position(|t| t.content.kind() == kind)
+}
+
+pub fn remap_code_file_tab_paths(
+    tabs: &mut [WorkspaceTab],
+    old_path: &Path,
+    new_path: &Path,
+    remapped_buffer_ids: &[BufferId],
+) {
+    let old_key = comparable_path(old_path);
+    for tab in tabs {
+        if let TabContent::CodeFile { path, buffer_id } = &mut tab.content {
+            if comparable_path(path) == old_key || remapped_buffer_ids.contains(buffer_id) {
+                *path = new_path.to_path_buf();
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::editor::EditorState;
+
+    fn temp_file(name: &str, text: &str) -> PathBuf {
+        let path =
+            std::env::temp_dir().join(format!("llnzy-workspace-{name}-{}", std::process::id()));
+        std::fs::write(&path, text).unwrap();
+        path
+    }
+
+    #[test]
+    fn remap_code_file_tab_paths_updates_matching_path_or_buffer_id() {
+        let old_path = temp_file("old.rs", "old");
+        let other_path = temp_file("other.rs", "other");
+        let new_path =
+            std::env::temp_dir().join(format!("llnzy-workspace-new.rs-{}", std::process::id()));
+        let mut editor = EditorState::new();
+        let old_id = editor.open(old_path.clone()).unwrap();
+        let other_id = editor.open(other_path.clone()).unwrap();
+        let stale_path = PathBuf::from("/tmp/stale-but-same-buffer.rs");
+
+        let mut tabs = vec![
+            WorkspaceTab {
+                content: TabContent::CodeFile {
+                    path: old_path.clone(),
+                    buffer_id: old_id,
+                },
+                name: None,
+                id: 1,
+            },
+            WorkspaceTab {
+                content: TabContent::CodeFile {
+                    path: stale_path,
+                    buffer_id: old_id,
+                },
+                name: None,
+                id: 2,
+            },
+            WorkspaceTab {
+                content: TabContent::CodeFile {
+                    path: other_path.clone(),
+                    buffer_id: other_id,
+                },
+                name: None,
+                id: 3,
+            },
+        ];
+
+        remap_code_file_tab_paths(&mut tabs, &old_path, &new_path, &[old_id]);
+
+        assert!(matches!(
+            &tabs[0].content,
+            TabContent::CodeFile { path, .. } if path == &new_path
+        ));
+        assert!(matches!(
+            &tabs[1].content,
+            TabContent::CodeFile { path, .. } if path == &new_path
+        ));
+        assert!(matches!(
+            &tabs[2].content,
+            TabContent::CodeFile { path, .. } if path == &other_path
+        ));
+
+        let _ = std::fs::remove_file(old_path);
+        let _ = std::fs::remove_file(other_path);
+    }
 }

@@ -7,7 +7,7 @@ use llnzy::app::drag_drop::{
 };
 use llnzy::editor::git_gutter::GitGutter;
 use llnzy::path_utils::comparable_path;
-use llnzy::workspace::TabContent;
+use llnzy::workspace::remap_code_file_tab_paths;
 
 use crate::runtime::commands::remap_joined_tabs_after_reorder;
 use crate::App;
@@ -206,13 +206,7 @@ impl App {
             }
         }
 
-        for tab in &mut self.tabs {
-            if let TabContent::CodeFile { path, buffer_id } = &mut tab.content {
-                if comparable_path(path) == old_key || remapped_buffer_ids.contains(buffer_id) {
-                    *path = new_path.clone();
-                }
-            }
-        }
+        remap_code_file_tab_paths(&mut self.tabs, old_path, new_path, &remapped_buffer_ids);
     }
 
     fn report_file_move_status(&mut self, message: String) {

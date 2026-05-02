@@ -299,6 +299,15 @@ impl EditorState {
         }
     }
 
+    pub fn active_buffer_view(&self) -> Option<(BufferId, &Buffer, &BufferView)> {
+        let buffer_id = self.active_buffer_id()?;
+        Some((
+            buffer_id,
+            self.buffers.get(self.active)?,
+            self.views.get(self.active)?,
+        ))
+    }
+
     pub fn active_parse_pending(&self) -> bool {
         self.views
             .get(self.active)
@@ -499,6 +508,21 @@ mod tests {
 
         let _ = std::fs::remove_file(first);
         let _ = std::fs::remove_file(second);
+    }
+
+    #[test]
+    fn active_buffer_view_returns_buffer_id_buffer_and_view() {
+        let path = temp_file("active_buffer_view.rs", "fn main() {}\n");
+        let mut editor = EditorState::new();
+        let buffer_id = editor.open(path.clone()).unwrap();
+
+        let (active_id, buffer, view) = editor.active_buffer_view().unwrap();
+
+        assert_eq!(active_id, buffer_id);
+        assert_eq!(buffer.path(), Some(path.as_path()));
+        assert_eq!(view.lang_id, Some("rust"));
+
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]

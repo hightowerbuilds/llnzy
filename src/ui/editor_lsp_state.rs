@@ -115,13 +115,7 @@ impl EditorViewState {
 
     pub fn request_hover(&mut self) {
         let Some(lsp) = &self.lsp else { return };
-        let active = self.editor.active;
-        if active >= self.editor.buffers.len() {
-            return;
-        }
-        let buf = &self.editor.buffers[active];
-        let view = &self.editor.views[active];
-        let Some(buffer_id) = self.editor.active_buffer_id() else {
+        let Some((buffer_id, buf, view)) = self.editor.active_buffer_view() else {
             return;
         };
         let pos = view.cursor.pos;
@@ -135,13 +129,7 @@ impl EditorViewState {
 
     pub fn request_goto_definition(&mut self) {
         let Some(lsp) = &self.lsp else { return };
-        let active = self.editor.active;
-        if active >= self.editor.buffers.len() {
-            return;
-        }
-        let buf = &self.editor.buffers[active];
-        let view = &self.editor.views[active];
-        let Some(buffer_id) = self.editor.active_buffer_id() else {
+        let Some((buffer_id, buf, view)) = self.editor.active_buffer_view() else {
             return;
         };
         let pos = view.cursor.pos;
@@ -174,13 +162,7 @@ impl EditorViewState {
 
     pub fn request_completion(&mut self) {
         let Some(lsp) = &self.lsp else { return };
-        let active = self.editor.active;
-        if active >= self.editor.buffers.len() {
-            return;
-        }
-        let buf = &self.editor.buffers[active];
-        let view = &self.editor.views[active];
-        let Some(buffer_id) = self.editor.active_buffer_id() else {
+        let Some((buffer_id, buf, view)) = self.editor.active_buffer_view() else {
             return;
         };
         let pos = view.cursor.pos;
@@ -217,13 +199,7 @@ impl EditorViewState {
 
     pub fn format_document(&mut self) {
         let Some(lsp) = &self.lsp else { return };
-        let active = self.editor.active;
-        if active >= self.editor.buffers.len() {
-            return;
-        }
-        let buf = &self.editor.buffers[active];
-        let view = &self.editor.views[active];
-        let Some(buffer_id) = self.editor.active_buffer_id() else {
+        let Some((buffer_id, buf, view)) = self.editor.active_buffer_view() else {
             return;
         };
         if let (Some(lang_id), Some(path)) = (view.lang_id, buf.path()) {
@@ -236,13 +212,7 @@ impl EditorViewState {
 
     pub fn rename_symbol(&mut self, new_name: &str) {
         let Some(lsp) = &self.lsp else { return };
-        let active = self.editor.active;
-        if active >= self.editor.buffers.len() {
-            return;
-        }
-        let buf = &self.editor.buffers[active];
-        let view = &self.editor.views[active];
-        let Some(buffer_id) = self.editor.active_buffer_id() else {
+        let Some((buffer_id, buf, view)) = self.editor.active_buffer_view() else {
             return;
         };
         let pos = view.cursor.pos;
@@ -295,13 +265,7 @@ impl EditorViewState {
         let Some(lsp) = &self.lsp else {
             return;
         };
-        let active = self.editor.active;
-        if active >= self.editor.buffers.len() {
-            return;
-        }
-        let buf = &self.editor.buffers[active];
-        let view = &self.editor.views[active];
-        let Some(buffer_id) = self.editor.active_buffer_id() else {
+        let Some((buffer_id, buf, view)) = self.editor.active_buffer_view() else {
             return;
         };
         let pos = view.cursor.pos;
@@ -361,13 +325,7 @@ impl EditorViewState {
         let Some(lsp) = &self.lsp else {
             return;
         };
-        let active = self.editor.active;
-        if active >= self.editor.buffers.len() {
-            return;
-        }
-        let buf = &self.editor.buffers[active];
-        let view = &self.editor.views[active];
-        let Some(buffer_id) = self.editor.active_buffer_id() else {
+        let Some((buffer_id, buf, view)) = self.editor.active_buffer_view() else {
             return;
         };
         if let (Some(lang_id), Some(path)) = (view.lang_id, buf.path()) {
@@ -380,13 +338,7 @@ impl EditorViewState {
 
     pub fn request_signature_help(&mut self) {
         let Some(lsp) = &self.lsp else { return };
-        let active = self.editor.active;
-        if active >= self.editor.buffers.len() {
-            return;
-        }
-        let buf = &self.editor.buffers[active];
-        let view = &self.editor.views[active];
-        let Some(buffer_id) = self.editor.active_buffer_id() else {
+        let Some((buffer_id, buf, view)) = self.editor.active_buffer_view() else {
             return;
         };
         let pos = view.cursor.pos;
@@ -403,11 +355,9 @@ impl EditorViewState {
         let Some(lsp) = &self.lsp else {
             return;
         };
-        let active = self.editor.active;
-        if active >= self.editor.buffers.len() {
+        let Some((_buffer_id, _buf, view)) = self.editor.active_buffer_view() else {
             return;
-        }
-        let view = &self.editor.views[active];
+        };
         if let Some(lang_id) = view.lang_id {
             if let Some(rx) = lsp.workspace_symbols_async(lang_id, query) {
                 self.pending.workspace_symbols = Some(rx);
@@ -417,13 +367,7 @@ impl EditorViewState {
 
     pub fn request_references(&mut self) {
         let Some(lsp) = &self.lsp else { return };
-        let active = self.editor.active;
-        if active >= self.editor.buffers.len() {
-            return;
-        }
-        let buf = &self.editor.buffers[active];
-        let view = &self.editor.views[active];
-        let Some(buffer_id) = self.editor.active_buffer_id() else {
+        let Some((buffer_id, buf, view)) = self.editor.active_buffer_view() else {
             return;
         };
         let pos = view.cursor.pos;
@@ -437,13 +381,7 @@ impl EditorViewState {
 
     pub fn request_hints_and_lenses(&mut self) {
         let Some(lsp) = &self.lsp else { return };
-        let active = self.editor.active;
-        if active >= self.editor.buffers.len() {
-            return;
-        }
-        let buf = &self.editor.buffers[active];
-        let view = &self.editor.views[active];
-        let Some(buffer_id) = self.editor.active_buffer_id() else {
+        let Some((buffer_id, buf, view)) = self.editor.active_buffer_view() else {
             return;
         };
         if let (Some(lang_id), Some(path)) = (view.lang_id, buf.path()) {
@@ -459,12 +397,9 @@ impl EditorViewState {
 
     pub fn lsp_did_save(&mut self) {
         let Some(lsp) = &mut self.lsp else { return };
-        let active = self.editor.active;
-        if active >= self.editor.buffers.len() {
+        let Some((_buffer_id, buf, view)) = self.editor.active_buffer_view() else {
             return;
-        }
-        let buf = &self.editor.buffers[active];
-        let view = &self.editor.views[active];
+        };
         if let (Some(lang_id), Some(path)) = (view.lang_id, buf.path()) {
             let text = buf.text();
             lsp.did_save(path, lang_id, &text);

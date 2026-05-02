@@ -377,6 +377,12 @@ Started May 2, 2026:
 - Wrapped buffer-local LSP pending requests with `BufferId` so stale hover, completion, definition, signature, references, formatting, hints, code lens, code action, document symbol, and rename responses cannot apply to the wrong active buffer.
 - Reworked LSP formatting response application to resolve the original request buffer by `BufferId`, including its follow-up `didChange` notification.
 - Added focused LSP event tests for request identity, formatting after active-buffer switches, and ignoring formatting results for closed buffers.
+- Added `SessionRestorePlan::status_message()` and surfaced restore skips through the editor status line, so missing restored projects/files are visible to the user instead of only logged.
+- Added `EditorState::active_buffer_view()` so identity-sensitive code can read the active `BufferId`, buffer, and view through one helper rather than rebuilding that relationship by index.
+- Updated LSP request creation to use the active buffer identity helper.
+- Added focused tests for restore skip status summaries and the active buffer identity helper.
+- Added `remap_code_file_tab_paths()` as a pure workspace helper and routed runtime file remaps through it.
+- Added focused tab path remap coverage for path-based and `BufferId`-based updates.
 
 ### Acceptance Criteria
 
@@ -384,6 +390,21 @@ Started May 2, 2026:
 - Moving or renaming files preserves correct open tab identity.
 - Last session restore works for normal terminal/file/workspace cases.
 - Missing files during restore are skipped with a clear status message.
+
+### Phase 3 Closeout
+
+Completed May 2, 2026.
+
+The Phase 3 identity layer is now in place:
+
+- code-file tabs carry stable `BufferId` values
+- delayed parse, Git, and LSP results are guarded against stale identity
+- file moves and renames remap open buffers and tab paths through explicit helpers
+- session restore plans are tested for partial and missing state
+- restore skips are visible in the editor status line
+- bulk tab close paths guard dirty code-file tabs
+
+Remaining file lifecycle work moves into Phase 4, where the focus shifts from identity to external disk changes and conflict prompts.
 
 ---
 
