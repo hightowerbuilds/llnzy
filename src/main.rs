@@ -562,6 +562,10 @@ impl ApplicationHandler<UserEvent> for App {
 
             // --- Mouse wheel ---
             WindowEvent::MouseWheel { delta, .. } => {
+                if self.cursor_over_non_terminal_chrome() {
+                    self.request_redraw();
+                    return;
+                }
                 if self.mouse_reporting() {
                     let (row, col) = self.pixel_to_grid(self.cursor_pos);
                     let sgr = self.sgr_mouse();
@@ -606,15 +610,15 @@ impl ApplicationHandler<UserEvent> for App {
 
             // --- Mouse buttons ---
             WindowEvent::MouseInput { state, button, .. } => {
+                if self.cursor_over_non_terminal_chrome() {
+                    self.request_redraw();
+                    return;
+                }
                 let (row, col) = self.pixel_to_grid(self.cursor_pos);
 
                 if button == MouseButton::Right && state == ElementState::Pressed {
                     if self.selection.is_active() {
                         self.copy_selection();
-                    } else if let Some(cb) = &mut self.clipboard {
-                        if let Ok(text) = cb.get_text() {
-                            self.paste_text(&text);
-                        }
                     }
                     return;
                 }

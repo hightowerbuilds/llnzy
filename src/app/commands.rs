@@ -23,6 +23,10 @@ pub enum AppCommand {
     ToggleFps,
     ToggleSidebar,
     JoinTab(usize),
+    JoinTabs {
+        primary: usize,
+        secondary: usize,
+    },
     SeparateTabs,
     ResizeTerminalTabs,
     CloseOtherTabs(usize),

@@ -157,6 +157,9 @@ impl Selection {
         let Some((start, end)) = self.range() else {
             return Vec::new();
         };
+        if cols == 0 {
+            return Vec::new();
+        }
         let color = [
             sel_color[0] as f32 / 255.0,
             sel_color[1] as f32 / 255.0,
@@ -166,12 +169,20 @@ impl Selection {
         let mut rects = Vec::new();
 
         for row in start.0..=end.0 {
-            let col_start = if row == start.0 { start.1 } else { 0 };
-            let col_end = if row == end.0 {
-                end.1
+            let max_col = cols.saturating_sub(1);
+            let col_start = if row == start.0 {
+                start.1.min(max_col)
             } else {
-                cols.saturating_sub(1)
+                0
             };
+            let col_end = if row == end.0 {
+                end.1.min(max_col)
+            } else {
+                max_col
+            };
+            if col_end < col_start {
+                continue;
+            }
 
             let x = col_start as f32 * cell_w;
             let y = row as f32 * cell_h;
@@ -343,6 +354,23 @@ mod tests {
         assert!((color[1] - 0.502).abs() < 0.01); // 128/255
         assert!((color[2] - 0.0).abs() < 0.01); // 0/255
         assert_eq!(color[3], 0.4);
+    }
+
+    #[test]
+    fn rects_clamps_selection_after_terminal_resize() {
+        let mut sel = Selection::new();
+        sel.start(0, 70);
+        sel.update(2, 79);
+
+        let rects = sel.rects(10.0, 20.0, 40, [255, 0, 0], 0.5);
+
+        assert_eq!(rects.len(), 3);
+        assert_eq!(rects[0].0, 390.0);
+        assert_eq!(rects[0].2, 10.0);
+        assert_eq!(rects[1].0, 0.0);
+        assert_eq!(rects[1].2, 400.0);
+        assert_eq!(rects[2].0, 0.0);
+        assert_eq!(rects[2].2, 400.0);
     }
 
     // ── update without start does nothing ──

@@ -125,11 +125,13 @@ fn render_finder_results(
                     });
                 });
 
-                let resp = ui.interact(
-                    ui.min_rect(),
-                    egui::Id::new(("finder_item", i)),
-                    egui::Sense::click(),
-                );
+                let resp = ui
+                    .interact(
+                        ui.min_rect(),
+                        egui::Id::new(("finder_item", i)),
+                        egui::Sense::click(),
+                    )
+                    .on_hover_cursor(egui::CursorIcon::PointingHand);
                 if resp.clicked() {
                     open_finder_path(explorer, editor_state, path.clone());
                     return;

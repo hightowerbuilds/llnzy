@@ -1,6 +1,6 @@
 use super::tab_bar::{
-    paint_drag_ghost, render_tab_context_menu, render_tab_name_editor, tab_drop_zone,
-    truncated_title, TabBarAction, TabBarEditState, CLOSE_BUTTON_SIZE, CLOSE_TEXT_SIZE, TAB_HEIGHT,
+    paint_drag_ghost, render_tab_name_editor, tab_drop_zone, truncated_title, TabBarAction,
+    TabBarEditState, TabContextMenuState, CLOSE_BUTTON_SIZE, CLOSE_TEXT_SIZE, TAB_HEIGHT,
     TAB_MAX_WIDTH, TAB_MIN_WIDTH, TAB_TEXT_SIZE,
 };
 use super::types::UiTabInfo;
@@ -126,18 +126,21 @@ pub(super) fn render_joined_tab(
         );
     }
 
-    group_response.context_menu(|ui| {
-        let pointer_x = ui
-            .ctx()
-            .input(|input| input.pointer.latest_pos().map(|pos| pos.x))
-            .unwrap_or(rect.center().x);
-        let (tab_idx, tab) = if pointer_x >= secondary_rect.left() {
-            (secondary, secondary_tab)
+    if group_response.secondary_clicked() {
+        let pointer_pos = ctx
+            .input(|input| input.pointer.latest_pos())
+            .unwrap_or(rect.center());
+        let tab_idx = if pointer_pos.x >= secondary_rect.left() {
+            secondary
         } else {
-            (primary, primary_tab)
+            primary
         };
-        render_tab_context_menu(ui, tab, tab_idx, active_tab_index, Some(joined), action);
-    });
+        edit_state.context_menu = Some(TabContextMenuState {
+            tab_idx,
+            pos: pointer_pos,
+            view: super::tab_bar::TabContextMenuView::Main,
+        });
+    }
 }
 
 fn paint_joined_segment(

@@ -93,6 +93,7 @@ pub struct UiState {
     // Tab renaming
     pub editing_tab: Option<usize>,
     pub editing_tab_text: String,
+    pub tab_context_menu: Option<tab_bar::TabContextMenuState>,
     pub saved_tab_name: Option<(usize, String)>, // (tab_index, new_name) to apply after render
     // Tab context for rendering interaction
     pub tab_count: usize,
@@ -190,6 +191,7 @@ impl UiState {
             editor_view: explorer_view::EditorViewState::default(),
             editing_tab: None,
             editing_tab_text: String::new(),
+            tab_context_menu: None,
             saved_tab_name: None,
             tab_count: 0,
             active_tab_index: 0,
@@ -339,6 +341,7 @@ impl UiState {
         let mut tab_bar_state = tab_bar::TabBarEditState {
             editing_tab,
             editing_tab_text: editing_tab_text.clone(),
+            context_menu: self.tab_context_menu,
         };
         let mut tab_bar_action = tab_bar::TabBarAction::default();
         let mut joined_tabs = self.joined_tabs.map(JoinedTabs::clamped);
@@ -512,6 +515,7 @@ impl UiState {
         // Restore tab editing state
         self.editing_tab = tab_bar_state.editing_tab;
         self.editing_tab_text = tab_bar_state.editing_tab_text;
+        self.tab_context_menu = tab_bar_state.context_menu;
         self.saved_tab_name = None;
 
         self.pending_close = pending_close;

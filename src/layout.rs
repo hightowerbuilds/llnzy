@@ -37,6 +37,7 @@ impl Zone {
 
 pub const TAB_BAR_HEIGHT: f32 = 44.0;
 pub const FOOTER_HEIGHT: f32 = 48.0;
+pub const MIN_TOP_CONTENT_PADDING: f32 = 70.0;
 
 pub struct LayoutInputs {
     pub window_w: f32,
@@ -53,6 +54,8 @@ impl ScreenLayout {
     /// Compute the full screen layout using Taffy flexbox.
     pub fn compute(input: LayoutInputs) -> Self {
         let padding_x = input.padding_x + input.glyph_offset_x;
+        let top_padding_y = input.padding_y.max(MIN_TOP_CONTENT_PADDING);
+        let bottom_padding_y = input.padding_y;
         let mut tree: TaffyTree<()> = TaffyTree::new();
         let show_tab_bar = true; // always show tab bar
 
@@ -87,8 +90,8 @@ impl ScreenLayout {
                 padding: Rect {
                     left: LengthPercentage::Length(padding_x),
                     right: LengthPercentage::Length(padding_x),
-                    top: LengthPercentage::Length(input.padding_y),
-                    bottom: LengthPercentage::Length(input.padding_y),
+                    top: LengthPercentage::Length(top_padding_y),
+                    bottom: LengthPercentage::Length(bottom_padding_y),
                 },
                 ..Default::default()
             })
@@ -136,9 +139,9 @@ impl ScreenLayout {
         // the inner area. But Taffy's layout gives the outer box — we need inner.
         let content = Zone {
             x: content_layout.location.x + padding_x + input.sidebar_w,
-            y: content_layout.location.y + input.padding_y,
+            y: content_layout.location.y + top_padding_y,
             w: content_layout.size.width - padding_x * 2.0,
-            h: content_layout.size.height - input.padding_y * 2.0,
+            h: content_layout.size.height - top_padding_y - bottom_padding_y,
         };
 
         // ── Grid dimensions from content zone ──
@@ -152,7 +155,7 @@ impl ScreenLayout {
             tab_bar,
             content,
             content_padding_x: padding_x,
-            content_padding_y: input.padding_y,
+            content_padding_y: top_padding_y,
             cell_w: input.cell_w,
             cell_h: input.cell_h,
             grid_cols,
@@ -168,5 +171,39 @@ impl ScreenLayout {
         let col = col.min(self.grid_cols.saturating_sub(1) as usize);
         let row = row.min(self.grid_rows.saturating_sub(1) as usize);
         (row, col)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn layout_with_padding(padding_y: f32) -> ScreenLayout {
+        ScreenLayout::compute(LayoutInputs {
+            window_w: 1000.0,
+            window_h: 700.0,
+            cell_w: 10.0,
+            cell_h: 20.0,
+            padding_x: 20.0,
+            padding_y,
+            glyph_offset_x: 0.0,
+            sidebar_w: 0.0,
+        })
+    }
+
+    #[test]
+    fn content_top_padding_is_at_least_seventy_pixels() {
+        let layout = layout_with_padding(25.0);
+
+        assert_eq!(layout.content_padding_y, MIN_TOP_CONTENT_PADDING);
+        assert_eq!(layout.content.y, TAB_BAR_HEIGHT + MIN_TOP_CONTENT_PADDING);
+    }
+
+    #[test]
+    fn larger_configured_top_padding_is_preserved() {
+        let layout = layout_with_padding(90.0);
+
+        assert_eq!(layout.content_padding_y, 90.0);
+        assert_eq!(layout.content.y, TAB_BAR_HEIGHT + 90.0);
     }
 }

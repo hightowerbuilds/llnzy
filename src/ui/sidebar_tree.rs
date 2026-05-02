@@ -48,15 +48,17 @@ pub(super) fn render_tree_nodes(
             if node.is_dir {
                 let folder_icon = if node.expanded { "v " } else { "> " };
                 let label = format!("{folder_icon}{}", node.name);
-                let resp = ui.add(
-                    egui::Label::new(
-                        egui::RichText::new(&label)
-                            .size(font_size)
-                            .color(dir_color)
-                            .strong(),
+                let resp = ui
+                    .add(
+                        egui::Label::new(
+                            egui::RichText::new(&label)
+                                .size(font_size)
+                                .color(dir_color)
+                                .strong(),
+                        )
+                        .sense(egui::Sense::click()),
                     )
-                    .sense(egui::Sense::click()),
-                );
+                    .on_hover_cursor(egui::CursorIcon::PointingHand);
                 if resp.clicked() {
                     let mut indices = Vec::new();
                     indices.push(i);
@@ -72,14 +74,16 @@ pub(super) fn render_tree_nodes(
                             .strong(),
                     );
                 }
-                let resp = ui.add(
-                    egui::Label::new(
-                        egui::RichText::new(&node.name)
-                            .size(font_size)
-                            .color(file_color),
+                let resp = ui
+                    .add(
+                        egui::Label::new(
+                            egui::RichText::new(&node.name)
+                                .size(font_size)
+                                .color(file_color),
+                        )
+                        .sense(egui::Sense::click_and_drag()),
                     )
-                    .sense(egui::Sense::click_and_drag()),
-                );
+                    .on_hover_cursor(egui::CursorIcon::PointingHand);
                 if node.size > 0 {
                     ui.label(
                         egui::RichText::new(format_size(node.size))
@@ -152,15 +156,17 @@ fn render_tree_children(
             if node.is_dir {
                 let folder_icon = if node.expanded { "v " } else { "> " };
                 let label = format!("{folder_icon}{}", node.name);
-                let resp = ui.add(
-                    egui::Label::new(
-                        egui::RichText::new(&label)
-                            .size(font_size)
-                            .color(dir_color)
-                            .strong(),
+                let resp = ui
+                    .add(
+                        egui::Label::new(
+                            egui::RichText::new(&label)
+                                .size(font_size)
+                                .color(dir_color)
+                                .strong(),
+                        )
+                        .sense(egui::Sense::click()),
                     )
-                    .sense(egui::Sense::click()),
-                );
+                    .on_hover_cursor(egui::CursorIcon::PointingHand);
                 if resp.clicked() {
                     let mut indices: Vec<usize> = parent_path.to_vec();
                     indices.push(i);
@@ -176,14 +182,16 @@ fn render_tree_children(
                             .strong(),
                     );
                 }
-                let resp = ui.add(
-                    egui::Label::new(
-                        egui::RichText::new(&node.name)
-                            .size(font_size)
-                            .color(file_color),
+                let resp = ui
+                    .add(
+                        egui::Label::new(
+                            egui::RichText::new(&node.name)
+                                .size(font_size)
+                                .color(file_color),
+                        )
+                        .sense(egui::Sense::click_and_drag()),
                     )
-                    .sense(egui::Sense::click_and_drag()),
-                );
+                    .on_hover_cursor(egui::CursorIcon::PointingHand);
                 if node.size > 0 {
                     ui.label(
                         egui::RichText::new(format_size(node.size))
@@ -229,7 +237,7 @@ fn handle_file_drag(
 ) {
     response.dnd_set_drag_payload(DragPayload::ExplorerItems(vec![path.to_path_buf()]));
     if response.hovered() {
-        response.ctx.set_cursor_icon(egui::CursorIcon::Grab);
+        response.ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
     }
     if response.dragged() {
         response.ctx.set_cursor_icon(egui::CursorIcon::Grabbing);

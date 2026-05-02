@@ -82,6 +82,18 @@ impl App {
         }
     }
 
+    pub(crate) fn cursor_over_non_terminal_chrome(&self) -> bool {
+        let Some(layout) = &self.screen_layout else {
+            return false;
+        };
+        let x = self.cursor_pos.x as f32;
+        let y = self.cursor_pos.y as f32;
+        let sidebar_w = self.ui.as_ref().map(|ui| ui.sidebar_width()).unwrap_or(0.0);
+        x < sidebar_w
+            || layout.tab_bar.contains(x, y)
+            || y >= layout.window_h - llnzy::layout::FOOTER_HEIGHT
+    }
+
     fn active_joined_terminal_rect(&self, layout: &ScreenLayout) -> Option<PaneRect> {
         let joined = self
             .ui

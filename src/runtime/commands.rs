@@ -184,6 +184,24 @@ impl App {
                     ));
                 }
                 self.resize_terminal_tabs();
+                self.selection.clear();
+                self.request_redraw();
+                true
+            }
+            AppCommand::JoinTabs { primary, secondary } => {
+                if primary >= self.tabs.len()
+                    || secondary >= self.tabs.len()
+                    || primary == secondary
+                {
+                    return false;
+                }
+                self.active_tab = primary;
+                if let Some(ui) = &mut self.ui {
+                    ui.joined_tabs =
+                        Some(llnzy::workspace_layout::JoinedTabs::new(primary, secondary));
+                }
+                self.resize_terminal_tabs();
+                self.selection.clear();
                 self.request_redraw();
                 true
             }
@@ -192,6 +210,7 @@ impl App {
                     ui.joined_tabs = None;
                 }
                 self.resize_terminal_tabs();
+                self.selection.clear();
                 self.request_redraw();
                 true
             }
