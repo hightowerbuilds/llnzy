@@ -5,6 +5,39 @@ This document tracks the reliability and durability checks that still need human
 
 ---
 
+## Active Manual Pass -- May 3, 2026
+
+### Completed
+
+- [x] Sidebar root New File creates a file immediately visible in Finder.
+- [x] Sidebar folder context New Folder creates a folder immediately visible in Finder.
+- [x] Sidebar file rename works through the context menu.
+- [x] Clean open editor tab tracks a file renamed from the sidebar.
+- [x] Dirty open file rename is blocked.
+- [x] Long file names wrap inside the sidebar without widening into the workspace.
+- [x] Code editor command routing handles save, undo, redo, cut, copy, paste, select all, and search.
+  - May 3, 2026: Initial pass failed in the code editor. Select all, selection highlighting, copy, and paste did not work.
+  - May 3, 2026: Fixed CodeFile shortcut/menu routing, active-buffer sync, and snap-to-click cursor placement. Manual retest confirmed the editor commands are working much better.
+- [x] Terminal command routing handles local selection/copy/paste correctly in mouse-reporting CLI/TUI apps.
+  - May 3, 2026: Initial pass failed inside mouse-reporting CLIs such as Codex or Gemini. Paste reaches the CLI, but printed output could not be selected/copied locally, and highlighting was controlled by the CLI instead of LLNZY's terminal selection.
+  - May 3, 2026: Repair applied so Shift-drag uses LLNZY local terminal selection even when the active CLI has mouse reporting enabled. Needs manual retest with Shift-drag, Cmd+C, and Cmd+V.
+  - May 3, 2026: Follow-up pass found selection highlighting worked, but Cmd+C/right-click did not reliably copy and could clear the highlight. Repair applied so terminal clipboard shortcuts route before egui, and copying preserves the terminal selection.
+  - May 3, 2026: App-side terminal selection was replaced with Alacritty-backed terminal selection. Rendering, selected text extraction, select all, word/line selection, and terminal copy now route through the terminal emulator wrapper instead of a parallel app-level selection model.
+  - May 3, 2026: Follow-up pass found pressing Command alone cleared highlighted terminal selections before copy could run. Repair applied so modifier-only key events are ignored by terminal input and do not clear terminal selections.
+  - May 3, 2026: Follow-up pass found terminal copy could collapse to the final selected character. Repair applied at the Alacritty selection layer so drag direction uses the correct selection sides, and mouse release refreshes the final emulator selection endpoint before copying.
+  - May 3, 2026: Follow-up pass found mouse-reporting TUIs such as Codex, Gemini, and Claude Code could still show TUI-owned highlight while LLNZY copied only stale emulator text. Repair applied so normal drags in mouse-reporting TUIs become LLNZY/Alacritty selections after the pointer leaves the press cell, plain clicks are still delivered to the TUI, and copied text is rebuilt from the emulator's selected grid range.
+  - May 3, 2026: Manual retest confirmed the copy bug is fixed in the target CLI/TUI workflow. Remaining follow-up: selection drag still has noticeable latency and should get a focused performance pass.
+
+### Next: Command Routing
+
+- [ ] Tune terminal selection drag latency in mouse-reporting CLI/TUI apps.
+- [ ] Use the same commands while Stacker is active and confirm Stacker-specific behavior wins.
+- [ ] Use tab navigation keybindings with terminal, code, and singleton tabs.
+- [ ] Use menu actions and confirm they route through the same behavior as keybindings.
+- [ ] Confirm Settings hotkey legend entries match actual behavior for common shortcuts.
+
+---
+
 ## Baseline Smoke Test
 
 Run after broad UI, editor, terminal, or workspace changes.

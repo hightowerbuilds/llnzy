@@ -53,23 +53,9 @@ pub(super) fn render_primary_cursor(
         - if word_wrap { 0.0 } else { h_offset };
     let target_y = rect.top() + vis_y;
 
-    if !view.cursor_display_init {
-        view.cursor_display_x = target_x;
-        view.cursor_display_y = target_y;
-        view.cursor_display_init = true;
-    } else {
-        let lerp_factor = 0.25;
-        let dx = target_x - view.cursor_display_x;
-        let dy = target_y - view.cursor_display_y;
-        if dx.abs() < 0.5 && dy.abs() < 0.5 {
-            view.cursor_display_x = target_x;
-            view.cursor_display_y = target_y;
-        } else {
-            view.cursor_display_x += dx * lerp_factor;
-            view.cursor_display_y += dy * lerp_factor;
-            ui.ctx().request_repaint();
-        }
-    }
+    view.cursor_display_x = target_x;
+    view.cursor_display_y = target_y;
+    view.cursor_display_init = true;
 
     let cursor_x = view.cursor_display_x;
     let cursor_y = view.cursor_display_y;

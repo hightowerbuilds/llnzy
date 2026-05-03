@@ -505,6 +505,47 @@ mod tests {
     }
 
     #[test]
+    fn dispatch_select_all_selects_entire_buffer() {
+        let mut state = state_with_text("hello\nworld");
+
+        let outcome = state.dispatch_editor_command(EditorCommand::SelectAll, None);
+
+        assert!(!outcome.changed_buffer);
+        assert_eq!(
+            state.editor.views[0].cursor.selection(),
+            Some((Position::new(0, 0), Position::new(1, 5)))
+        );
+    }
+
+    #[test]
+    fn dispatch_copy_uses_active_selection() {
+        let mut state = state_with_text("hello world");
+        state.editor.views[0].cursor.anchor = Some(Position::new(0, 6));
+        state.editor.views[0].cursor.pos = Position::new(0, 11);
+
+        let outcome = state.dispatch_editor_command(EditorCommand::Copy, None);
+
+        assert!(!outcome.changed_buffer);
+        assert_eq!(state.clipboard_out.as_deref(), Some("world"));
+        assert_eq!(state.editor.buffers[0].text(), "hello world");
+    }
+
+    #[test]
+    fn dispatch_paste_replaces_active_selection() {
+        let mut state = state_with_text("hello world");
+        state.editor.views[0].cursor.anchor = Some(Position::new(0, 6));
+        state.editor.views[0].cursor.pos = Position::new(0, 11);
+        state.clipboard_in = Some("llnzy".to_string());
+
+        let outcome = state.dispatch_editor_command(EditorCommand::Paste, None);
+
+        assert!(outcome.changed_buffer);
+        assert_eq!(state.editor.buffers[0].text(), "hello llnzy");
+        assert_eq!(state.editor.views[0].cursor.pos, Position::new(0, 11));
+        assert!(!state.editor.views[0].cursor.has_selection());
+    }
+
+    #[test]
     fn key_action_delete_line_routes_through_command_dispatch() {
         let mut state = state_with_text("one\ntwo\nthree");
         state.editor.views[0].cursor.pos = Position::new(1, 0);

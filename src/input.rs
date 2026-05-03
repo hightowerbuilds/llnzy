@@ -24,6 +24,32 @@ pub fn plain_text_input_route(text: &str, modifiers: ModifiersState) -> PlainTex
     }
 }
 
+pub fn is_modifier_only_key(event: &KeyEvent) -> bool {
+    is_modifier_key(&event.logical_key)
+}
+
+pub fn is_modifier_key(key: &Key) -> bool {
+    matches!(
+        key,
+        Key::Named(
+            NamedKey::Alt
+                | NamedKey::AltGraph
+                | NamedKey::CapsLock
+                | NamedKey::Control
+                | NamedKey::Fn
+                | NamedKey::FnLock
+                | NamedKey::Hyper
+                | NamedKey::Meta
+                | NamedKey::NumLock
+                | NamedKey::ScrollLock
+                | NamedKey::Shift
+                | NamedKey::Super
+                | NamedKey::Symbol
+                | NamedKey::SymbolLock
+        )
+    )
+}
+
 /// Encode a winit key event into bytes to send to the PTY.
 /// `app_cursor` indicates whether application cursor key mode is active.
 /// `super_held` should be true when the Cmd/Super key is down — these
@@ -342,6 +368,13 @@ mod tests {
             plain_text_input_route("line 1\nline 2", ModifiersState::SUPER),
             PlainTextInputRoute::Ignore
         );
+    }
+
+    #[test]
+    fn modifier_keys_are_not_terminal_input() {
+        assert!(is_modifier_key(&Key::Named(NamedKey::Super)));
+        assert!(is_modifier_key(&Key::Named(NamedKey::Shift)));
+        assert!(!is_modifier_key(&Key::Character("c".into())));
     }
 
     // ── arrow_key ──

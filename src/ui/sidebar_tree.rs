@@ -26,7 +26,6 @@ pub(super) enum TreeAction {
 pub(super) fn render_tree_nodes(
     ui: &mut egui::Ui,
     nodes: &[crate::explorer::TreeNode],
-    root: &std::path::Path,
     depth: usize,
     action: &mut Option<TreeAction>,
     font_size: f32,
@@ -34,7 +33,6 @@ pub(super) fn render_tree_nodes(
     let indent = depth as f32 * 16.0;
     let dir_color = egui::Color32::from_rgb(100, 180, 255);
     let file_color = egui::Color32::WHITE;
-    let dim_color = egui::Color32::from_rgb(120, 120, 130);
 
     for (i, node) in nodes.iter().enumerate() {
         if action.is_some() {
@@ -48,20 +46,11 @@ pub(super) fn render_tree_nodes(
             if node.is_dir {
                 let folder_icon = if node.expanded { "v " } else { "> " };
                 let label = format!("{folder_icon}{}", node.name);
-                let resp = ui
-                    .add(
-                        egui::Label::new(
-                            egui::RichText::new(&label)
-                                .size(font_size)
-                                .color(dir_color)
-                                .strong(),
-                        )
-                        .sense(egui::Sense::click()),
-                    )
+                let resp = wrapped_tree_label(ui, &label, font_size, dir_color, true)
+                    .on_hover_text(node.path.display().to_string())
                     .on_hover_cursor(egui::CursorIcon::PointingHand);
                 if resp.clicked() {
-                    let mut indices = Vec::new();
-                    indices.push(i);
+                    let indices = vec![i];
                     *action = Some(TreeAction::Toggle(indices));
                 }
                 resp
@@ -74,23 +63,14 @@ pub(super) fn render_tree_nodes(
                             .strong(),
                     );
                 }
-                let resp = ui
-                    .add(
-                        egui::Label::new(
-                            egui::RichText::new(&node.name)
-                                .size(font_size)
-                                .color(file_color),
-                        )
-                        .sense(egui::Sense::click_and_drag()),
-                    )
+                let hover_text = if node.size > 0 {
+                    format!("{}\n{}", node.path.display(), format_size(node.size))
+                } else {
+                    node.path.display().to_string()
+                };
+                let resp = wrapped_tree_label(ui, &node.name, font_size, file_color, false)
+                    .on_hover_text(hover_text)
                     .on_hover_cursor(egui::CursorIcon::PointingHand);
-                if node.size > 0 {
-                    ui.label(
-                        egui::RichText::new(format_size(node.size))
-                            .size(font_size - 2.0)
-                            .color(dim_color),
-                    );
-                }
                 if resp.clicked() {
                     *action = Some(TreeAction::OpenFile(node.path.clone()));
                 }
@@ -114,15 +94,7 @@ pub(super) fn render_tree_nodes(
         if node.is_dir && node.expanded {
             if let Some(children) = &node.children {
                 let mut child_action: Option<TreeAction> = None;
-                render_tree_children(
-                    ui,
-                    children,
-                    root,
-                    depth + 1,
-                    &mut child_action,
-                    &[i],
-                    font_size,
-                );
+                render_tree_children(ui, children, depth + 1, &mut child_action, &[i], font_size);
                 if child_action.is_some() && action.is_none() {
                     *action = child_action;
                 }
@@ -134,7 +106,6 @@ pub(super) fn render_tree_nodes(
 fn render_tree_children(
     ui: &mut egui::Ui,
     nodes: &[crate::explorer::TreeNode],
-    root: &std::path::Path,
     depth: usize,
     action: &mut Option<TreeAction>,
     parent_path: &[usize],
@@ -143,7 +114,6 @@ fn render_tree_children(
     let indent = depth as f32 * 16.0;
     let dir_color = egui::Color32::from_rgb(100, 180, 255);
     let file_color = egui::Color32::WHITE;
-    let dim_color = egui::Color32::from_rgb(120, 120, 130);
 
     for (i, node) in nodes.iter().enumerate() {
         if action.is_some() {
@@ -156,16 +126,8 @@ fn render_tree_children(
             if node.is_dir {
                 let folder_icon = if node.expanded { "v " } else { "> " };
                 let label = format!("{folder_icon}{}", node.name);
-                let resp = ui
-                    .add(
-                        egui::Label::new(
-                            egui::RichText::new(&label)
-                                .size(font_size)
-                                .color(dir_color)
-                                .strong(),
-                        )
-                        .sense(egui::Sense::click()),
-                    )
+                let resp = wrapped_tree_label(ui, &label, font_size, dir_color, true)
+                    .on_hover_text(node.path.display().to_string())
                     .on_hover_cursor(egui::CursorIcon::PointingHand);
                 if resp.clicked() {
                     let mut indices: Vec<usize> = parent_path.to_vec();
@@ -182,23 +144,14 @@ fn render_tree_children(
                             .strong(),
                     );
                 }
-                let resp = ui
-                    .add(
-                        egui::Label::new(
-                            egui::RichText::new(&node.name)
-                                .size(font_size)
-                                .color(file_color),
-                        )
-                        .sense(egui::Sense::click_and_drag()),
-                    )
+                let hover_text = if node.size > 0 {
+                    format!("{}\n{}", node.path.display(), format_size(node.size))
+                } else {
+                    node.path.display().to_string()
+                };
+                let resp = wrapped_tree_label(ui, &node.name, font_size, file_color, false)
+                    .on_hover_text(hover_text)
                     .on_hover_cursor(egui::CursorIcon::PointingHand);
-                if node.size > 0 {
-                    ui.label(
-                        egui::RichText::new(format_size(node.size))
-                            .size(font_size - 2.0)
-                            .color(dim_color),
-                    );
-                }
                 if resp.clicked() {
                     *action = Some(TreeAction::OpenFile(node.path.clone()));
                 }
@@ -223,10 +176,40 @@ fn render_tree_children(
             if let Some(children) = &node.children {
                 let mut path: Vec<usize> = parent_path.to_vec();
                 path.push(i);
-                render_tree_children(ui, children, root, depth + 1, action, &path, font_size);
+                render_tree_children(ui, children, depth + 1, action, &path, font_size);
             }
         }
     }
+}
+
+fn wrapped_tree_label(
+    ui: &mut egui::Ui,
+    text: &str,
+    font_size: f32,
+    color: egui::Color32,
+    strong: bool,
+) -> egui::Response {
+    let available_w = ui.available_width().max(48.0);
+    let approx_char_w = (font_size * 0.58).max(6.0);
+    let chars_per_line = (available_w / approx_char_w).floor().max(8.0) as usize;
+    let line_count = text.chars().count().div_ceil(chars_per_line).clamp(1, 2);
+    let height = if line_count > 1 {
+        font_size * 2.65
+    } else {
+        font_size * 1.45
+    };
+
+    let mut rich = egui::RichText::new(text).size(font_size).color(color);
+    if strong {
+        rich = rich.strong();
+    }
+
+    ui.add_sized(
+        [available_w, height],
+        egui::Label::new(rich)
+            .wrap()
+            .sense(egui::Sense::click_and_drag()),
+    )
 }
 
 fn handle_file_drag(
@@ -370,14 +353,7 @@ pub(crate) fn render_sidebar_tree(
     sidebar_file_modals::render_sidebar_file_modals(ui, explorer, editor_state);
 
     let mut action: Option<TreeAction> = None;
-    render_tree_nodes(
-        ui,
-        &explorer.tree,
-        &explorer.root,
-        0,
-        &mut action,
-        sidebar_font_size,
-    );
+    render_tree_nodes(ui, &explorer.tree, 0, &mut action, sidebar_font_size);
 
     match action {
         Some(TreeAction::OpenFile(path)) => {

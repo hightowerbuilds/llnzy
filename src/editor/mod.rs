@@ -37,7 +37,7 @@ pub struct BufferView {
     pub scroll_col: usize,
     /// Smooth scroll target (None = already at destination).
     pub scroll_target: Option<f32>,
-    /// Smooth cursor display position (lerped toward actual cursor pos).
+    /// Rendered cursor display position.
     pub cursor_display_x: f32,
     pub cursor_display_y: f32,
     /// Whether cursor display position has been initialized.

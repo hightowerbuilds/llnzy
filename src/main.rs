@@ -23,7 +23,7 @@ use llnzy::keybindings::Action;
 use llnzy::layout::{LayoutInputs, ScreenLayout};
 use llnzy::renderer::{RenderRequest, Renderer, TerminalPane};
 use llnzy::search::Search;
-use llnzy::selection::Selection;
+use llnzy::ui::command_palette::CommandId;
 use llnzy::ui::{ActiveView, PendingClose, UiFrameOutput, UiState, BUMPER_WIDTH};
 use llnzy::workspace::{TabContent, WorkspaceTab};
 use llnzy::workspace_layout::{
@@ -41,13 +41,14 @@ struct App {
     next_tab_id: u64,
     proxy: winit::event_loop::EventLoopProxy<UserEvent>,
     modifiers: ModifiersState,
-    selection: Selection,
     search: Search,
     error_log: ErrorLog,
     error_panel: ErrorPanel,
     clipboard: Option<arboard::Clipboard>,
     cursor_pos: winit::dpi::PhysicalPosition<f64>,
     mouse_pressed: bool,
+    terminal_selection_drag: bool,
+    terminal_pending_mouse_press: Option<(usize, usize)>,
     click_state: ClickState,
     ui: Option<UiState>,
     screen_layout: Option<ScreenLayout>,
@@ -70,13 +71,14 @@ impl App {
             next_tab_id: 1,
             proxy,
             modifiers: ModifiersState::empty(),
-            selection: Selection::new(),
             search: Search::new(),
             error_log: ErrorLog::new(),
             error_panel: ErrorPanel::new(),
             clipboard,
             cursor_pos: winit::dpi::PhysicalPosition::new(0.0, 0.0),
             mouse_pressed: false,
+            terminal_selection_drag: false,
+            terminal_pending_mouse_press: None,
             click_state: ClickState::new(),
             ui: None,
             screen_layout: None,
@@ -116,9 +118,7 @@ impl App {
             return false;
         }
         self.last_keypress = Instant::now();
-        if self.selection.is_active() {
-            self.selection.clear();
-        }
+        self.clear_terminal_selection();
         self.paste_text(text);
         self.request_redraw();
         true
@@ -146,9 +146,7 @@ impl App {
             return false;
         }
         self.last_keypress = Instant::now();
-        if self.selection.is_active() {
-            self.selection.clear();
-        }
+        self.clear_terminal_selection();
         self.do_paste();
         self.request_redraw();
         true
@@ -182,6 +180,18 @@ impl App {
 
         None
     }
+}
+
+fn local_terminal_selection_requested(
+    mouse_reporting: bool,
+    shift_key: bool,
+    terminal_selection_drag: bool,
+) -> bool {
+    mouse_reporting && (shift_key || terminal_selection_drag)
+}
+
+fn terminal_mouse_drag_exceeded(start: (usize, usize), row: usize, col: usize) -> bool {
+    start != (row, col)
 }
 
 impl ApplicationHandler<UserEvent> for App {
@@ -298,6 +308,26 @@ impl ApplicationHandler<UserEvent> for App {
             event: key_event, ..
         } = &event
         {
+            if self.active_session().is_some() && key_event.state == ElementState::Pressed {
+                if let Some(action) = self.config.keybindings.match_key(key_event, self.modifiers) {
+                    match action {
+                        Action::Copy => {
+                            self.copy_selection();
+                            return;
+                        }
+                        Action::Paste => {
+                            self.do_paste();
+                            return;
+                        }
+                        Action::SelectAll => {
+                            self.do_select_all();
+                            return;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+
             if self.active_stacker_tab() && key_event.state == ElementState::Pressed {
                 if let Some(action) = self.config.keybindings.match_key(key_event, self.modifiers) {
                     match action {
@@ -316,6 +346,10 @@ impl ApplicationHandler<UserEvent> for App {
                         _ => {}
                     }
                 }
+            }
+
+            if self.route_code_editor_keybinding(key_event) {
+                return;
             }
         }
 
@@ -399,7 +433,8 @@ impl ApplicationHandler<UserEvent> for App {
                 }
                 self.recompute_layout();
                 self.resize_terminal_tabs();
-                self.selection.clear();
+                self.clear_terminal_selection();
+                self.terminal_pending_mouse_press = None;
             }
 
             WindowEvent::RedrawRequested => {
@@ -433,11 +468,9 @@ impl ApplicationHandler<UserEvent> for App {
                 let sel_info = self
                     .active_session()
                     .map(|session| {
-                        let cols = session.terminal.size().0;
-                        self.selection.rects(
+                        session.terminal.selection_rects(
                             cw,
                             ch,
-                            cols,
                             self.config.colors.selection,
                             self.config.colors.selection_alpha,
                         )
@@ -551,7 +584,7 @@ impl ApplicationHandler<UserEvent> for App {
                 if (sidebar_w_after - sidebar_w_before).abs() > 0.1 {
                     self.recompute_layout();
                     self.resize_terminal_tabs();
-                    self.selection.clear();
+                    self.clear_terminal_selection();
                     self.invalidate_and_redraw();
                 }
             }
@@ -617,7 +650,7 @@ impl ApplicationHandler<UserEvent> for App {
                 let (row, col) = self.pixel_to_grid(self.cursor_pos);
 
                 if button == MouseButton::Right && state == ElementState::Pressed {
-                    if self.selection.is_active() {
+                    if self.terminal_selection_active() {
                         self.copy_selection();
                     }
                     return;
@@ -678,7 +711,7 @@ impl ApplicationHandler<UserEvent> for App {
                                     .map(|(_, _, url)| url)
                             })
                             .or_else(|| {
-                                let text = Selection::word_at(row, col, &session.terminal);
+                                let text = session.terminal.word_at(row, col);
                                 if text.starts_with("http://") || text.starts_with("https://") {
                                     Some(text)
                                 } else {
@@ -692,43 +725,86 @@ impl ApplicationHandler<UserEvent> for App {
                     return;
                 }
 
-                if self.mouse_reporting() && button == MouseButton::Left {
-                    let sgr = self.sgr_mouse();
-                    let pressed = state == ElementState::Pressed;
-                    let bytes = input::encode_mouse(0, col, row, pressed, sgr, &self.modifiers);
-                    self.write_to_active(&bytes);
-                    self.mouse_pressed = pressed;
+                let local_terminal_selection = local_terminal_selection_requested(
+                    self.mouse_reporting(),
+                    self.modifiers.shift_key(),
+                    self.terminal_selection_drag,
+                );
+                if self.mouse_reporting()
+                    && button == MouseButton::Left
+                    && !local_terminal_selection
+                {
+                    match state {
+                        ElementState::Pressed => {
+                            self.clear_terminal_selection();
+                            self.mouse_pressed = true;
+                            self.terminal_selection_drag = false;
+                            self.terminal_pending_mouse_press = Some((row, col));
+                            self.request_redraw();
+                        }
+                        ElementState::Released => {
+                            if let Some((press_row, press_col)) =
+                                self.terminal_pending_mouse_press.take()
+                            {
+                                let sgr = self.sgr_mouse();
+                                let press = input::encode_mouse(
+                                    0,
+                                    press_col,
+                                    press_row,
+                                    true,
+                                    sgr,
+                                    &self.modifiers,
+                                );
+                                let release =
+                                    input::encode_mouse(0, col, row, false, sgr, &self.modifiers);
+                                self.write_to_active(&press);
+                                self.write_to_active(&release);
+                            } else if self.terminal_selection_drag {
+                                if let Some(session) = self.active_session_mut() {
+                                    session.terminal.update_selection(row, col);
+                                }
+                                self.request_redraw();
+                            }
+                            self.mouse_pressed = false;
+                            self.terminal_selection_drag = false;
+                        }
+                    }
                     return;
                 }
 
                 if button == MouseButton::Left {
                     match state {
                         ElementState::Pressed => {
+                            self.terminal_selection_drag = local_terminal_selection;
                             let click_count = self.click_state.click(row, col);
                             match click_count {
                                 2 => {
-                                    if let Some(terminal) = self
-                                        .tabs
-                                        .get(self.active_tab)
-                                        .and_then(|t| t.content.as_terminal())
-                                        .map(|s| &s.terminal)
-                                    {
-                                        self.selection.select_word(row, col, terminal);
+                                    if let Some(session) = self.active_session_mut() {
+                                        session.terminal.select_word(row, col);
                                     }
                                 }
                                 3 => {
-                                    let cols = self
-                                        .active_session()
-                                        .map(|s| s.terminal.size().0)
-                                        .unwrap_or(80);
-                                    self.selection.select_line(row, cols);
+                                    if let Some(session) = self.active_session_mut() {
+                                        session.terminal.select_line(row);
+                                    }
                                 }
-                                _ => self.selection.start(row, col),
+                                _ => {
+                                    if let Some(session) = self.active_session_mut() {
+                                        session.terminal.start_selection(row, col);
+                                    }
+                                }
                             }
                             self.mouse_pressed = true;
                             self.request_redraw();
                         }
-                        ElementState::Released => self.mouse_pressed = false,
+                        ElementState::Released => {
+                            if let Some(session) = self.active_session_mut() {
+                                session.terminal.update_selection(row, col);
+                            }
+                            self.mouse_pressed = false;
+                            self.terminal_selection_drag = false;
+                            self.terminal_pending_mouse_press = None;
+                        }
                     }
                 }
             }
@@ -738,12 +814,27 @@ impl ApplicationHandler<UserEvent> for App {
 
                 if self.mouse_pressed {
                     let (row, col) = self.pixel_to_grid(position);
-                    if self.mouse_reporting() {
-                        let sgr = self.sgr_mouse();
-                        let bytes = input::encode_mouse(32, col, row, true, sgr, &self.modifiers);
-                        self.write_to_active(&bytes);
+                    if self.mouse_reporting() && !self.modifiers.shift_key() {
+                        if self.terminal_selection_drag {
+                            if let Some(session) = self.active_session_mut() {
+                                session.terminal.update_selection(row, col);
+                            }
+                            self.request_redraw();
+                        } else if let Some(start) = self.terminal_pending_mouse_press {
+                            if terminal_mouse_drag_exceeded(start, row, col) {
+                                self.terminal_pending_mouse_press = None;
+                                self.terminal_selection_drag = true;
+                                if let Some(session) = self.active_session_mut() {
+                                    session.terminal.start_selection(start.0, start.1);
+                                    session.terminal.update_selection(row, col);
+                                }
+                                self.request_redraw();
+                            }
+                        }
                     } else if self.click_state.count() <= 1 {
-                        self.selection.update(row, col);
+                        if let Some(session) = self.active_session_mut() {
+                            session.terminal.update_selection(row, col);
+                        }
                         self.request_redraw();
                     }
                 }
@@ -878,6 +969,9 @@ impl ApplicationHandler<UserEvent> for App {
 
                     match action {
                         Action::Search => {
+                            if self.route_code_editor_command(CommandId::Find) {
+                                return;
+                            }
                             // Search only works on terminal tabs
                             if self.active_session().is_some() {
                                 self.search.open();
@@ -885,12 +979,23 @@ impl ApplicationHandler<UserEvent> for App {
                             }
                         }
                         Action::Copy => {
+                            if self.route_code_editor_command(CommandId::Copy) {
+                                return;
+                            }
                             if !self.copy_stacker_editor_selection() {
                                 self.copy_selection();
                             }
                         }
-                        Action::Paste => self.do_paste(),
+                        Action::Paste => {
+                            if self.route_code_editor_command(CommandId::Paste) {
+                                return;
+                            }
+                            self.do_paste();
+                        }
                         Action::SelectAll => {
+                            if self.route_code_editor_command(CommandId::SelectAll) {
+                                return;
+                            }
                             if !self.select_all_stacker_editor() {
                                 self.do_select_all();
                             }
@@ -980,8 +1085,12 @@ impl ApplicationHandler<UserEvent> for App {
 
                 // Only send raw keys to PTY if active tab is a terminal
                 if self.active_session().is_some() {
-                    if self.selection.is_active() {
-                        self.selection.clear();
+                    if input::is_modifier_only_key(&key_event) {
+                        return;
+                    }
+
+                    if self.terminal_selection_active() {
+                        self.clear_terminal_selection();
                         self.request_redraw();
                     }
 
@@ -1018,8 +1127,8 @@ impl ApplicationHandler<UserEvent> for App {
                     match ime {
                         Ime::Commit(text) => {
                             self.last_keypress = Instant::now();
-                            if self.selection.is_active() {
-                                self.selection.clear();
+                            if self.terminal_selection_active() {
+                                self.clear_terminal_selection();
                             }
                             if self.search.active {
                                 if let Some(terminal) = self
@@ -1092,17 +1201,31 @@ impl ApplicationHandler<UserEvent> for App {
                         );
                     }
                     MenuAction::Copy => {
+                        if self.route_code_editor_command(CommandId::Copy) {
+                            return;
+                        }
                         if !self.copy_stacker_editor_selection() {
                             self.copy_selection();
                         }
                     }
-                    MenuAction::Paste => self.do_paste(),
+                    MenuAction::Paste => {
+                        if self.route_code_editor_command(CommandId::Paste) {
+                            return;
+                        }
+                        self.do_paste();
+                    }
                     MenuAction::SelectAll => {
+                        if self.route_code_editor_command(CommandId::SelectAll) {
+                            return;
+                        }
                         if !self.select_all_stacker_editor() {
                             self.do_select_all();
                         }
                     }
                     MenuAction::Find => {
+                        if self.route_code_editor_command(CommandId::Find) {
+                            return;
+                        }
                         self.search.open();
                         self.request_redraw();
                     }
@@ -1262,6 +1385,34 @@ fn rect_to_uv(rect: llnzy::session::Rect, size: winit::dpi::PhysicalSize<u32>) -
         (rect.x + rect.w) / w,
         (rect.y + rect.h) / h,
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn terminal_mouse_reporting_uses_local_selection_when_shift_is_held() {
+        assert!(local_terminal_selection_requested(true, true, false));
+    }
+
+    #[test]
+    fn terminal_mouse_reporting_keeps_existing_local_selection_drag() {
+        assert!(local_terminal_selection_requested(true, false, true));
+    }
+
+    #[test]
+    fn terminal_mouse_reporting_routes_normal_mouse_to_cli() {
+        assert!(!local_terminal_selection_requested(true, false, false));
+        assert!(!local_terminal_selection_requested(false, true, false));
+    }
+
+    #[test]
+    fn terminal_mouse_drag_starts_after_leaving_press_cell() {
+        assert!(!terminal_mouse_drag_exceeded((4, 8), 4, 8));
+        assert!(terminal_mouse_drag_exceeded((4, 8), 4, 9));
+        assert!(terminal_mouse_drag_exceeded((4, 8), 5, 8));
+    }
 }
 
 fn main() {

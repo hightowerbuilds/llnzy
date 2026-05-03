@@ -72,6 +72,11 @@ The goal is not exhaustive QA. The goal is to catch obvious durability regressio
 - Move a clean file into a folder from the sidebar.
 - Confirm the sidebar refreshes.
 - Confirm an open clean file tab remaps to the new path.
+- Create a new file from the sidebar root controls and confirm it appears immediately in Finder.
+- Create a new folder from a folder context menu and confirm it appears immediately in Finder.
+- Rename a file from the sidebar context menu and confirm the matching editor tab tracks the new path.
+- Rename a folder from the sidebar context menu.
+- Open a project containing a very long file name and confirm the name wraps inside the sidebar without pushing into the main workspace.
 - Edit a file without saving.
 - Try to move that dirty open file.
 - Confirm the app blocks the move and preserves the dirty buffer.
@@ -193,3 +198,22 @@ Verification:
 - `cargo fmt --check` passed.
 - `cargo check` passed.
 - Targeted layout tests passed.
+
+## Addendum: 05-03-2026 Sidebar File Explorer Pass
+
+Manual smoke testing verified the sidebar file lifecycle checks added for the file explorer hardening pass:
+
+- Created a new file from the sidebar root controls.
+- Confirmed the new file appears immediately in Finder.
+- Created a new folder from a folder context menu.
+- Confirmed the new folder appears immediately in Finder.
+- Renamed a file from the sidebar context menu.
+- Confirmed the matching clean open editor tab tracks the renamed path.
+- Confirmed renaming a dirty open file is blocked.
+- Confirmed a very long file name wraps inside the sidebar without pushing into the main workspace.
+
+Remaining follow-up:
+
+- Consider inline rename/create instead of modal rename/create.
+- Decide whether folder rename should remap clean open descendant buffers or continue requiring descendants to be closed.
+- Add selection/focus restoration for newly created or renamed tree items.

@@ -54,7 +54,15 @@ pub(super) fn render_tab_content(
     match active_tab_kind {
         Some(TabKind::Home) => render_home(ctx, state),
         Some(TabKind::Stacker) => render_stacker(ctx, state),
-        Some(TabKind::CodeFile) => render_code_file(ctx, config, &appearance, state),
+        Some(TabKind::CodeFile) => {
+            if let Some(buffer_id) = tab_panes
+                .get(active_tab_index)
+                .and_then(|pane| pane.buffer_id)
+            {
+                state.editor_view.editor.switch_to_id(buffer_id);
+            }
+            render_code_file(ctx, config, &appearance, state);
+        }
         Some(TabKind::Sketch) => render_sketch(ctx, &appearance, state),
         Some(TabKind::Git) => render_git(ctx, state),
         Some(TabKind::Appearances) => {

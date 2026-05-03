@@ -169,7 +169,7 @@ impl App {
                 }
                 self.recompute_layout();
                 self.resize_terminal_tabs();
-                self.selection.clear();
+                self.clear_terminal_selection();
                 self.invalidate_and_redraw();
                 true
             }
@@ -184,7 +184,7 @@ impl App {
                     ));
                 }
                 self.resize_terminal_tabs();
-                self.selection.clear();
+                self.clear_terminal_selection();
                 self.request_redraw();
                 true
             }
@@ -201,7 +201,7 @@ impl App {
                         Some(llnzy::workspace_layout::JoinedTabs::new(primary, secondary));
                 }
                 self.resize_terminal_tabs();
-                self.selection.clear();
+                self.clear_terminal_selection();
                 self.request_redraw();
                 true
             }
@@ -210,7 +210,7 @@ impl App {
                     ui.joined_tabs = None;
                 }
                 self.resize_terminal_tabs();
-                self.selection.clear();
+                self.clear_terminal_selection();
                 self.request_redraw();
                 true
             }
@@ -235,7 +235,7 @@ impl App {
                 self.active_tab = 0;
                 clear_joined_tabs(self.ui.as_mut());
                 self.sync_active_tab_content();
-                self.selection.clear();
+                self.clear_terminal_selection();
                 true
             }
             AppCommand::CloseTabsToRight(idx) => {
@@ -254,7 +254,7 @@ impl App {
                     joined.primary > idx || joined.secondary > idx
                 });
                 self.sync_active_tab_content();
-                self.selection.clear();
+                self.clear_terminal_selection();
                 true
             }
             AppCommand::KillTerminalTab(idx) => self.kill_terminal_tab(idx),

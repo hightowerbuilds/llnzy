@@ -249,6 +249,21 @@ impl UiState {
         self.sidebar.toggle();
     }
 
+    pub fn dispatch_editor_command_id(&mut self, command_id: command_palette::CommandId) -> bool {
+        let Some(command) = editor_command::EditorCommand::from_palette(command_id) else {
+            return false;
+        };
+
+        let outcome = self
+            .editor_view
+            .dispatch_editor_command(command, Some(&self.explorer.root));
+        if outcome.open_file_finder {
+            self.explorer.open_finder();
+            self.sidebar.open = true;
+        }
+        true
+    }
+
     /// Total width consumed by sidebar UI (bumper is always visible).
     pub fn sidebar_width(&self) -> f32 {
         self.sidebar.total_width()

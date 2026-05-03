@@ -2,7 +2,8 @@ use std::sync::mpsc;
 
 use alacritty_terminal::event::{Event as TermEvent, EventListener};
 use alacritty_terminal::grid::{Dimensions, Scroll};
-use alacritty_terminal::index::{Column, Point};
+use alacritty_terminal::index::{Column, Line, Point, Side};
+use alacritty_terminal::selection::{Selection as TermSelection, SelectionRange, SelectionType};
 use alacritty_terminal::term::cell::{Cell, Flags};
 use alacritty_terminal::term::{self, Config as TermConfig, Term, TermMode};
 use alacritty_terminal::vte::ansi::{Color as AnsiColor, NamedColor, Processor};
@@ -83,6 +84,7 @@ pub struct Terminal {
     event_tx: mpsc::Sender<TerminalEvent>,
     event_rx: mpsc::Receiver<TerminalEvent>,
     osc7_parser: Osc7Parser,
+    selection_anchor: Option<(usize, usize)>,
 }
 
 impl Terminal {
@@ -99,6 +101,7 @@ impl Terminal {
             event_tx: tx,
             event_rx: rx,
             osc7_parser: Osc7Parser::default(),
+            selection_anchor: None,
         }
     }
 
@@ -270,6 +273,206 @@ impl Terminal {
     pub fn row_text(&self, row: usize) -> String {
         let (cols, _) = self.size();
         (0..cols).map(|c| self.cell_char(row, c)).collect()
+    }
+
+    /// Get the word-like run under the given viewport position.
+    pub fn word_at(&self, row: usize, col: usize) -> String {
+        let (cols, _) = self.size();
+        let is_word_char = |c: char| !c.is_whitespace() && c != '\0';
+
+        let mut start = col;
+        while start > 0 && is_word_char(self.cell_char(row, start - 1)) {
+            start -= 1;
+        }
+
+        let mut end = col;
+        while end + 1 < cols && is_word_char(self.cell_char(row, end + 1)) {
+            end += 1;
+        }
+
+        (start..=end).map(|col| self.cell_char(row, col)).collect()
+    }
+
+    // --- Selection ---
+
+    fn viewport_point(&self, row: usize, col: usize) -> Point {
+        let display_offset = self.term.grid().display_offset();
+        term::viewport_to_point(display_offset, Point::new(row, Column(col)))
+    }
+
+    pub fn start_selection(&mut self, row: usize, col: usize) {
+        let point = self.viewport_point(row, col);
+        self.term.selection = Some(TermSelection::new(SelectionType::Simple, point, Side::Left));
+        self.selection_anchor = Some((row, col));
+    }
+
+    pub fn update_selection(&mut self, row: usize, col: usize) {
+        let Some((anchor_row, anchor_col)) = self.selection_anchor else {
+            return;
+        };
+        let anchor = self.viewport_point(anchor_row, anchor_col);
+        let point = self.viewport_point(row, col);
+        let dragging_backward = (row, col) < (anchor_row, anchor_col);
+        let (anchor_side, point_side) = if dragging_backward {
+            (Side::Right, Side::Left)
+        } else {
+            (Side::Left, Side::Right)
+        };
+        let mut selection = TermSelection::new(SelectionType::Simple, anchor, anchor_side);
+        selection.update(point, point_side);
+        self.term.selection = Some(selection);
+    }
+
+    pub fn clear_selection(&mut self) {
+        self.term.selection = None;
+        self.selection_anchor = None;
+    }
+
+    pub fn has_selection(&self) -> bool {
+        self.term
+            .selection
+            .as_ref()
+            .is_some_and(|selection| !selection.is_empty())
+    }
+
+    pub fn selected_text(&self) -> Option<String> {
+        let range = self.selection_range()?;
+        Some(self.selection_range_to_string(range))
+    }
+
+    fn selection_range(&self) -> Option<SelectionRange> {
+        self.term
+            .selection
+            .as_ref()
+            .and_then(|selection| (!selection.is_empty()).then(|| selection.to_range(&self.term)))
+            .flatten()
+    }
+
+    fn selection_range_to_string(&self, range: SelectionRange) -> String {
+        let (cols, _) = self.size();
+        if cols == 0 {
+            return String::new();
+        }
+
+        let mut lines = Vec::new();
+        let max_col = cols.saturating_sub(1);
+        for line in range.start.line.0..=range.end.line.0 {
+            let col_start = if range.is_block || line == range.start.line.0 {
+                range.start.column.0.min(max_col)
+            } else {
+                0
+            };
+            let col_end = if range.is_block || line == range.end.line.0 {
+                range.end.column.0.min(max_col)
+            } else {
+                max_col
+            };
+            if col_end < col_start {
+                lines.push(String::new());
+                continue;
+            }
+
+            let mut text = String::new();
+            for col in col_start..=col_end {
+                let c = self.term.grid()[Point::new(Line(line), Column(col))].c;
+                if c != '\0' {
+                    text.push(c);
+                }
+            }
+            lines.push(text.trim_end().to_string());
+        }
+
+        lines.join("\n")
+    }
+
+    pub fn select_all(&mut self) {
+        let (cols, rows) = self.size();
+        if cols == 0 || rows == 0 {
+            self.clear_selection();
+            return;
+        }
+
+        self.start_selection(0, 0);
+        self.update_selection(rows.saturating_sub(1), cols.saturating_sub(1));
+    }
+
+    pub fn select_word(&mut self, row: usize, col: usize) {
+        let point = self.viewport_point(row, col);
+        self.term.selection = Some(TermSelection::new(
+            SelectionType::Semantic,
+            point,
+            Side::Left,
+        ));
+        self.selection_anchor = None;
+    }
+
+    pub fn select_line(&mut self, row: usize) {
+        let point = self.viewport_point(row, 0);
+        self.term.selection = Some(TermSelection::new(SelectionType::Lines, point, Side::Left));
+        self.selection_anchor = None;
+    }
+
+    pub fn selection_rects(
+        &self,
+        cell_w: f32,
+        cell_h: f32,
+        sel_color: [u8; 3],
+        sel_alpha: f32,
+    ) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+        let Some(selection_range) = self.selection_range() else {
+            return Vec::new();
+        };
+
+        let (cols, rows) = self.size();
+        if cols == 0 || rows == 0 {
+            return Vec::new();
+        }
+
+        let color = [
+            sel_color[0] as f32 / 255.0,
+            sel_color[1] as f32 / 255.0,
+            sel_color[2] as f32 / 255.0,
+            sel_alpha,
+        ];
+        let mut rects = Vec::new();
+
+        for line in selection_range.start.line.0..=selection_range.end.line.0 {
+            let point = Point::new(alacritty_terminal::index::Line(line), Column(0));
+            let Some(viewport_row) =
+                term::point_to_viewport(self.term.grid().display_offset(), point)
+                    .map(|point| point.line)
+            else {
+                continue;
+            };
+            if viewport_row >= rows {
+                continue;
+            }
+
+            let max_col = cols.saturating_sub(1);
+            let col_start = if selection_range.is_block || line == selection_range.start.line.0 {
+                selection_range.start.column.0.min(max_col)
+            } else {
+                0
+            };
+            let col_end = if selection_range.is_block || line == selection_range.end.line.0 {
+                selection_range.end.column.0.min(max_col)
+            } else {
+                max_col
+            };
+            if col_end < col_start {
+                continue;
+            }
+
+            rects.push((
+                col_start as f32 * cell_w,
+                viewport_row as f32 * cell_h,
+                (col_end - col_start + 1) as f32 * cell_w,
+                cell_h,
+                color,
+            ));
+        }
+
+        rects
     }
 
     // --- Terminal mode queries ---
@@ -648,6 +851,81 @@ mod tests {
         term.process(b"A\r\nB");
         assert_eq!(term.cell_char(0, 0), 'A');
         assert_eq!(term.cell_char(1, 0), 'B');
+    }
+
+    #[test]
+    fn simple_selection_uses_alacritty_selected_text() {
+        let mut term = Terminal::new(80, 24);
+        term.process(b"Hello world");
+
+        term.start_selection(0, 0);
+        term.update_selection(0, 4);
+
+        assert!(term.has_selection());
+        assert_eq!(term.selected_text().as_deref(), Some("Hello"));
+    }
+
+    #[test]
+    fn forward_drag_selection_uses_full_range() {
+        let mut term = Terminal::new(80, 24);
+        term.process(b"Hello world");
+
+        term.start_selection(0, 0);
+        term.update_selection(0, 10);
+
+        assert_eq!(term.selected_text().as_deref(), Some("Hello world"));
+    }
+
+    #[test]
+    fn backward_drag_selection_uses_full_range() {
+        let mut term = Terminal::new(80, 24);
+        term.process(b"Hello world");
+
+        term.start_selection(0, 10);
+        term.update_selection(0, 0);
+
+        assert_eq!(term.selected_text().as_deref(), Some("Hello world"));
+    }
+
+    #[test]
+    fn multiline_drag_selection_uses_full_range() {
+        let mut term = Terminal::new(80, 24);
+        term.process(b"Hello\r\nworld");
+
+        term.start_selection(0, 0);
+        term.update_selection(1, 4);
+
+        assert_eq!(term.selected_text().as_deref(), Some("Hello\nworld"));
+    }
+
+    #[test]
+    fn mouse_reporting_tui_selection_copies_visible_grid_text() {
+        let mut term = Terminal::new(80, 24);
+        term.process(b"\x1b[?1000h\x1b[?1006hCodex status\r\nSelect this text");
+
+        assert!(term.mouse_mode());
+        assert!(term.sgr_mouse());
+
+        term.start_selection(0, 0);
+        term.update_selection(1, 15);
+
+        assert_eq!(
+            term.selected_text().as_deref(),
+            Some("Codex status\nSelect this text")
+        );
+    }
+
+    #[test]
+    fn clearing_selection_removes_selected_text() {
+        let mut term = Terminal::new(80, 24);
+        term.process(b"Hello");
+        term.start_selection(0, 0);
+        term.update_selection(0, 4);
+
+        term.clear_selection();
+
+        assert!(!term.has_selection());
+        assert_eq!(term.selected_text(), None);
     }
 
     // ── Cursor position ──

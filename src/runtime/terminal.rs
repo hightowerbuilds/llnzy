@@ -209,17 +209,18 @@ impl App {
         true
     }
 
-    pub(crate) fn copy_selection(&mut self) {
-        if self.selection.is_active() {
-            if let Some(session) = self.active_session() {
-                let text = self.selection.text(&session.terminal);
-                if let Some(cb) = &mut self.clipboard {
-                    let _ = cb.set_text(text);
-                }
-            }
-            self.selection.clear();
-            self.request_redraw();
-        }
+    pub(crate) fn copy_selection(&mut self) -> bool {
+        let Some(session) = self.active_session() else {
+            return false;
+        };
+        let Some(text) = session.terminal.selected_text() else {
+            return false;
+        };
+        let Some(cb) = &mut self.clipboard else {
+            return false;
+        };
+
+        cb.set_text(text).is_ok()
     }
 
     pub(crate) fn mouse_reporting(&self) -> bool {
@@ -251,11 +252,21 @@ impl App {
     }
 
     pub(crate) fn do_select_all(&mut self) {
-        if let Some(s) = self.active_session() {
-            let (cols, rows) = s.terminal.size();
-            self.selection.select_all(rows, cols);
+        if let Some(s) = self.active_session_mut() {
+            s.terminal.select_all();
         }
         self.request_redraw();
+    }
+
+    pub(crate) fn clear_terminal_selection(&mut self) {
+        if let Some(session) = self.active_session_mut() {
+            session.terminal.clear_selection();
+        }
+    }
+
+    pub(crate) fn terminal_selection_active(&self) -> bool {
+        self.active_session()
+            .is_some_and(|session| session.terminal.has_selection())
     }
 }
 

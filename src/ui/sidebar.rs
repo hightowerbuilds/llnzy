@@ -89,6 +89,10 @@ fn render_file_tree(
     let mut close_folder = false;
     let mut open_project = None;
     let sidebar_font_size = config.editor.sidebar_font_size;
+    let project_active = !explorer.tree.is_empty()
+        || dirs::home_dir()
+            .map(|home| !crate::path_utils::same_path(&explorer.root, &home))
+            .unwrap_or(true);
 
     let response = egui::SidePanel::left("file_sidebar")
         .default_width(default_width)
@@ -114,7 +118,7 @@ fn render_file_tree(
                         .strong(),
                 );
                 // Close Folder button (only shown when a project is open)
-                if !explorer.tree.is_empty() {
+                if project_active {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let btn = ui.add(
                             egui::Button::new(
@@ -202,14 +206,56 @@ fn render_file_tree(
                     }
                 }
             }
+            if project_active {
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_sized(
+                            [ui.available_width() * 0.5 - 3.0, 24.0],
+                            egui::Button::new(
+                                egui::RichText::new("New File")
+                                    .size(sidebar_font_size)
+                                    .color(egui::Color32::from_rgb(225, 230, 238)),
+                            )
+                            .fill(egui::Color32::from_rgb(48, 52, 64))
+                            .rounding(egui::Rounding::same(3.0)),
+                        )
+                        .clicked()
+                    {
+                        editor_view.sidebar_new_entry =
+                            Some((explorer.root.clone(), String::new(), false));
+                    }
+                    if ui
+                        .add_sized(
+                            [ui.available_width(), 24.0],
+                            egui::Button::new(
+                                egui::RichText::new("New Folder")
+                                    .size(sidebar_font_size)
+                                    .color(egui::Color32::from_rgb(225, 230, 238)),
+                            )
+                            .fill(egui::Color32::from_rgb(48, 52, 64))
+                            .rounding(egui::Rounding::same(3.0)),
+                        )
+                        .clicked()
+                    {
+                        editor_view.sidebar_new_entry =
+                            Some((explorer.root.clone(), String::new(), true));
+                    }
+                });
+            }
             ui.add_space(6.0);
             ui.separator();
             ui.add_space(4.0);
 
             // Tree
             if explorer.tree.is_empty() {
+                let empty_text = if project_active {
+                    "This folder is empty"
+                } else {
+                    "Open a project from the button above"
+                };
                 ui.label(
-                    egui::RichText::new("Open a project from the button above")
+                    egui::RichText::new(empty_text)
                         .size(sidebar_font_size)
                         .color(egui::Color32::from_rgb(100, 105, 120)),
                 );

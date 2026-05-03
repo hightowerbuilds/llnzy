@@ -1,6 +1,7 @@
 use super::explorer_view::EditorViewState;
 use crate::explorer::ExplorerState;
 use crate::path_utils::{path_contains, same_path};
+use std::fs::OpenOptions;
 use std::path::Path;
 
 pub(super) fn render_sidebar_file_modals(
@@ -90,22 +91,23 @@ fn render_rename_modal(
         });
 
     if done {
-        let new_name = rename_text.trim().to_string();
-        let new_path = rename_path.parent().map(|p| p.join(&new_name));
-        if let Some(new_path) = new_path {
-            if let Some(message) =
-                blocking_open_file_lifecycle_message(editor_state, &rename_path, "renaming")
-            {
-                editor_state.status_msg = Some(message);
-            } else {
-                match std::fs::rename(&rename_path, &new_path) {
-                    Ok(_) => {
-                        explorer.set_root(explorer.root.clone());
-                        editor_state.pending_file_remap = Some((rename_path.clone(), new_path));
-                        editor_state.status_msg = Some(format!("Renamed to {new_name}"));
-                    }
-                    Err(e) => editor_state.status_msg = Some(format!("Rename failed: {e}")),
+        match rename_sidebar_entry(&rename_path, &rename_text, editor_state) {
+            Ok(RenameOutcome::Unchanged(name)) => {
+                editor_state.status_msg = Some(format!("Name unchanged: {name}"));
+            }
+            Ok(RenameOutcome::Renamed {
+                new_name,
+                expand_paths,
+                remap_open_file,
+            }) => {
+                explorer.refresh_preserving_expansion(&expand_paths);
+                if let Some(remap) = remap_open_file {
+                    editor_state.pending_file_remap = Some(remap);
                 }
+                editor_state.status_msg = Some(format!("Renamed to {new_name}"));
+            }
+            Err(e) => {
+                editor_state.status_msg = Some(format!("Rename failed: {e}"));
             }
         }
     } else if !cancel {
@@ -189,7 +191,11 @@ fn render_delete_modal(
             };
             match result {
                 Ok(_) => {
-                    explorer.set_root(explorer.root.clone());
+                    let expand_paths = delete_path
+                        .parent()
+                        .map(|path| vec![path.to_path_buf()])
+                        .unwrap_or_default();
+                    explorer.refresh_preserving_expansion(&expand_paths);
                     editor_state.status_msg = Some(format!("Deleted {display_name}"));
                 }
                 Err(e) => editor_state.status_msg = Some(format!("Delete failed: {e}")),
@@ -320,19 +326,17 @@ fn render_new_entry_modal(
         });
 
     if done {
-        let name = input_text.trim().to_string();
-        let new_path = parent_dir.join(&name);
-        let result = if is_folder {
-            std::fs::create_dir_all(&new_path)
-        } else {
-            if let Some(p) = new_path.parent() {
-                let _ = std::fs::create_dir_all(p);
-            }
-            std::fs::write(&new_path, "")
-        };
-        match result {
-            Ok(_) => {
-                explorer.set_root(explorer.root.clone());
+        match create_sidebar_entry(&parent_dir, &input_text, is_folder) {
+            Ok(new_path) => {
+                let mut expand_paths = vec![parent_dir.clone()];
+                if is_folder {
+                    expand_paths.push(new_path.clone());
+                }
+                explorer.refresh_preserving_expansion(&expand_paths);
+                let name = new_path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("item");
                 editor_state.status_msg = Some(format!("Created {name}"));
             }
             Err(e) => editor_state.status_msg = Some(format!("Create failed: {e}")),
@@ -340,6 +344,103 @@ fn render_new_entry_modal(
     } else if !cancel {
         editor_state.sidebar_new_entry = Some((parent_dir, input_text, is_folder));
     }
+}
+
+#[derive(Debug)]
+enum RenameOutcome {
+    Renamed {
+        new_name: String,
+        expand_paths: Vec<std::path::PathBuf>,
+        remap_open_file: Option<(std::path::PathBuf, std::path::PathBuf)>,
+    },
+    Unchanged(String),
+}
+
+fn rename_sidebar_entry(
+    rename_path: &Path,
+    raw_name: &str,
+    editor_state: &EditorViewState,
+) -> Result<RenameOutcome, String> {
+    let new_name = validate_entry_name(raw_name)?.to_string();
+    let current_name = rename_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "Cannot determine current name".to_string())?;
+    if current_name == new_name {
+        return Ok(RenameOutcome::Unchanged(new_name));
+    }
+    if !rename_path.exists() {
+        return Err("item no longer exists".to_string());
+    }
+    if let Some(message) =
+        blocking_open_file_lifecycle_message(editor_state, rename_path, "renaming")
+    {
+        return Err(message);
+    }
+
+    let parent = rename_path
+        .parent()
+        .ok_or_else(|| "Cannot rename project root".to_string())?;
+    let new_path = parent.join(&new_name);
+    if new_path.exists() && !same_path(rename_path, &new_path) {
+        return Err(format!("{new_name} already exists"));
+    }
+
+    let was_dir = rename_path.is_dir();
+    std::fs::rename(rename_path, &new_path).map_err(|e| e.to_string())?;
+    let mut expand_paths = vec![parent.to_path_buf()];
+    if was_dir {
+        expand_paths.push(new_path.clone());
+    }
+    let remap_open_file = (!was_dir).then(|| (rename_path.to_path_buf(), new_path.clone()));
+
+    Ok(RenameOutcome::Renamed {
+        new_name,
+        expand_paths,
+        remap_open_file,
+    })
+}
+
+fn create_sidebar_entry(
+    parent_dir: &Path,
+    raw_name: &str,
+    is_folder: bool,
+) -> Result<std::path::PathBuf, String> {
+    let name = validate_entry_name(raw_name)?;
+    if !parent_dir.is_dir() {
+        return Err("parent folder no longer exists".to_string());
+    }
+    let new_path = parent_dir.join(name);
+    if new_path.exists() {
+        return Err(format!("{name} already exists"));
+    }
+
+    if is_folder {
+        std::fs::create_dir(&new_path).map_err(|e| e.to_string())?;
+    } else {
+        let file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&new_path)
+            .map_err(|e| e.to_string())?;
+        file.sync_all().map_err(|e| e.to_string())?;
+    }
+
+    Ok(new_path)
+}
+
+fn validate_entry_name(raw_name: &str) -> Result<&str, String> {
+    let name = raw_name.trim();
+    if name.is_empty() {
+        return Err("name cannot be empty".to_string());
+    }
+    if name == "." || name == ".." {
+        return Err("name cannot be . or ..".to_string());
+    }
+    if name.contains('/') || name.contains('\\') {
+        return Err("name cannot contain path separators".to_string());
+    }
+    Ok(name)
 }
 
 #[cfg(test)]
@@ -419,6 +520,108 @@ mod tests {
             .expect("dirty child buffer should block folder lifecycle action");
 
         assert_eq!(message, "Save or close note.md before deleting it.");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn sidebar_entry_name_validation_rejects_path_like_names() {
+        assert_eq!(validate_entry_name(" note.md "), Ok("note.md"));
+        assert_eq!(
+            validate_entry_name(""),
+            Err("name cannot be empty".to_string())
+        );
+        assert_eq!(
+            validate_entry_name("nested/file.md"),
+            Err("name cannot contain path separators".to_string())
+        );
+        assert_eq!(
+            validate_entry_name("nested\\file.md"),
+            Err("name cannot contain path separators".to_string())
+        );
+        assert_eq!(
+            validate_entry_name(".."),
+            Err("name cannot be . or ..".to_string())
+        );
+    }
+
+    #[test]
+    fn create_sidebar_file_uses_create_new_semantics() {
+        let root = temp_root("create-file");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+
+        let path = create_sidebar_entry(&root, "note.md", false).unwrap();
+        assert!(path.exists());
+
+        std::fs::write(&path, "keep me").unwrap();
+        let err = create_sidebar_entry(&root, "note.md", false).unwrap_err();
+        assert_eq!(err, "note.md already exists");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "keep me");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn create_sidebar_folder_rejects_existing_folder() {
+        let root = temp_root("create-folder");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+
+        let path = create_sidebar_entry(&root, "docs", true).unwrap();
+        assert!(path.is_dir());
+
+        let err = create_sidebar_entry(&root, "docs", true).unwrap_err();
+        assert_eq!(err, "docs already exists");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn rename_sidebar_file_remaps_clean_open_file() {
+        let root = temp_root("rename-file");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("before.md");
+        std::fs::write(&path, "saved").unwrap();
+
+        let mut editor_state = EditorViewState::default();
+        editor_state.editor.open(path.clone()).unwrap();
+
+        let outcome = rename_sidebar_entry(&path, "after.md", &editor_state).unwrap();
+        match outcome {
+            RenameOutcome::Renamed {
+                new_name,
+                remap_open_file,
+                ..
+            } => {
+                let new_path = root.join("after.md");
+                assert_eq!(new_name, "after.md");
+                assert_eq!(remap_open_file, Some((path.clone(), new_path.clone())));
+                assert!(!path.exists());
+                assert!(new_path.exists());
+            }
+            RenameOutcome::Unchanged(_) => panic!("rename should change the file"),
+        }
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn rename_sidebar_file_rejects_sibling_collision() {
+        let root = temp_root("rename-collision");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("before.md");
+        let existing = root.join("after.md");
+        std::fs::write(&path, "saved").unwrap();
+        std::fs::write(&existing, "existing").unwrap();
+
+        let editor_state = EditorViewState::default();
+        let err = rename_sidebar_entry(&path, "after.md", &editor_state).unwrap_err();
+        assert_eq!(err, "after.md already exists");
+        assert!(path.exists());
+        assert_eq!(std::fs::read_to_string(existing).unwrap(), "existing");
 
         let _ = std::fs::remove_dir_all(root);
     }

@@ -30,7 +30,7 @@ impl App {
                     id,
                 });
                 self.active_tab = self.tabs.len() - 1;
-                self.selection.clear();
+                self.clear_terminal_selection();
                 self.recompute_layout();
                 self.request_redraw();
             }
@@ -145,7 +145,7 @@ impl App {
                 tab.content = TabContent::Terminal(Box::new(new_session));
                 self.active_tab = restart.active_tab;
                 if restart.clear_selection {
-                    self.selection.clear();
+                    self.clear_terminal_selection();
                 }
                 self.request_redraw();
                 true
@@ -186,7 +186,7 @@ impl App {
             self.active_tab = self.tabs.len() - 1;
         }
         self.sync_active_tab_content();
-        self.selection.clear();
+        self.clear_terminal_selection();
         self.recompute_layout();
         self.request_redraw();
     }
@@ -314,7 +314,7 @@ impl App {
             }
             self.sync_active_tab_content();
             if changed {
-                self.selection.clear();
+                self.clear_terminal_selection();
             }
             self.invalidate_and_redraw();
         }

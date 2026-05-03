@@ -63,7 +63,7 @@ pub(super) fn render_file_browser(
         .auto_shrink([false; 2])
         .show(ui, |ui| {
             let mut action: Option<TreeAction> = None;
-            render_tree_nodes(ui, &explorer.tree, &explorer.root, 0, &mut action, 13.0);
+            render_tree_nodes(ui, &explorer.tree, 0, &mut action, 13.0);
 
             match action {
                 Some(TreeAction::OpenFile(path)) => {
