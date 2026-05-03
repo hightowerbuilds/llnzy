@@ -30,8 +30,6 @@ This document tracks the reliability and durability checks that still need human
 
 ### Next: Command Routing
 
-- [ ] Tune terminal selection drag latency in mouse-reporting CLI/TUI apps.
-- [ ] Use the same commands while Stacker is active and confirm Stacker-specific behavior wins.
 - [ ] Use tab navigation keybindings with terminal, code, and singleton tabs.
 - [ ] Use menu actions and confirm they route through the same behavior as keybindings.
 - [ ] Confirm Settings hotkey legend entries match actual behavior for common shortcuts.
