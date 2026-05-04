@@ -563,6 +563,9 @@ impl UiState {
 
         self.winit_state
             .handle_platform_output(window, full_output.platform_output);
+        if matches!(active_tab_kind, Some(crate::workspace::TabKind::Stacker)) {
+            window.set_ime_allowed(true);
+        }
 
         let tris = self
             .ctx

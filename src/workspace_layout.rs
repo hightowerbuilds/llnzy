@@ -234,6 +234,82 @@ mod tests {
         );
     }
 
+    #[test]
+    fn tab_bar_entries_follow_visual_order_after_reorder() {
+        let tabs = tabs_with_ids(&[30, 10, 20, 40]);
+        let mut groups = TabGroupState::default();
+        groups.join_pair(10, 20);
+        groups.join_pair(30, 40);
+
+        let entries = tab_bar_entries(&tabs, &groups);
+
+        assert_eq!(
+            entries,
+            vec![
+                TabBarEntry::Joined {
+                    primary: 0,
+                    secondary: 3,
+                    ratio: 0.5
+                },
+                TabBarEntry::Joined {
+                    primary: 1,
+                    secondary: 2,
+                    ratio: 0.5
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn tab_bar_entries_ignore_groups_with_missing_members() {
+        let tabs = tabs_with_ids(&[10, 12, 13]);
+        let mut groups = TabGroupState::default();
+        groups.join_pair(10, 11);
+        groups.join_pair(12, 13);
+
+        let entries = tab_bar_entries(&tabs, &groups);
+
+        assert_eq!(
+            entries,
+            vec![
+                TabBarEntry::Single { tab_idx: 0 },
+                TabBarEntry::Joined {
+                    primary: 1,
+                    secondary: 2,
+                    ratio: 0.5
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn active_joined_tabs_finds_group_by_stable_active_id_after_reorder() {
+        let tabs = tabs_with_ids(&[13, 10, 12, 11]);
+        let mut groups = TabGroupState::default();
+        groups.join_pair(10, 11);
+        groups.set_ratio_for_tab(10, 0.66);
+
+        let joined = active_joined_tabs(&tabs, 3, &groups).unwrap();
+
+        assert_eq!(
+            joined,
+            JoinedTabs {
+                primary: 1,
+                secondary: 3,
+                ratio: 0.66,
+            }
+        );
+    }
+
+    #[test]
+    fn active_joined_tabs_returns_none_for_missing_group_member() {
+        let tabs = tabs_with_ids(&[10, 12]);
+        let mut groups = TabGroupState::default();
+        groups.join_pair(10, 11);
+
+        assert_eq!(active_joined_tabs(&tabs, 0, &groups), None);
+    }
+
     fn tabs_with_ids(ids: &[u64]) -> Vec<WorkspaceTab> {
         ids.iter()
             .copied()

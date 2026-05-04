@@ -31,9 +31,12 @@ use llnzy::ui::{stacker_cursor, STACKER_PROMPT_EDITOR_ID};
 use llnzy::ui::{ActiveView, PendingClose, UiFrameOutput, UiState, BUMPER_WIDTH};
 use llnzy::workspace::{TabContent, TabKind, WorkspaceTab};
 use llnzy::workspace_layout::{
-    active_joined_tabs, joined_terminal_content_rects, terminal_effect_rect, JoinedTabs,
+    active_joined_tabs, joined_content_rects, joined_terminal_content_rects, terminal_effect_rect,
+    JoinedTabs,
 };
 use llnzy::UserEvent;
+
+type SelectionRect = (f32, f32, f32, f32, [f32; 4]);
 
 #[derive(Clone, Copy)]
 struct TerminalPaneHit {
@@ -45,6 +48,17 @@ struct TerminalPaneHit {
 enum StackerHistoryCommand {
     Undo,
     Redo,
+}
+
+#[derive(Clone)]
+struct SelectionRectCache {
+    tab_id: u64,
+    revision: u64,
+    cell_w_bits: u32,
+    cell_h_bits: u32,
+    color: [u8; 3],
+    alpha_bits: u32,
+    rects: Vec<SelectionRect>,
 }
 
 struct App {
@@ -64,8 +78,10 @@ struct App {
     mouse_pressed: bool,
     terminal_selection_drag: bool,
     terminal_pending_mouse_press: Option<(usize, usize)>,
+    selection_rect_cache: Option<SelectionRectCache>,
     click_state: ClickState,
     stacker_webview: Option<StackerWebView>,
+    stacker_webview_pending_focus: bool,
     ui: Option<UiState>,
     screen_layout: Option<ScreenLayout>,
     visual_bell_until: Option<Instant>,
@@ -99,8 +115,10 @@ impl App {
             mouse_pressed: false,
             terminal_selection_drag: false,
             terminal_pending_mouse_press: None,
+            selection_rect_cache: None,
             click_state: ClickState::new(),
             stacker_webview: None,
+            stacker_webview_pending_focus: false,
             ui: None,
             screen_layout: None,
             visual_bell_until: None,
@@ -126,6 +144,28 @@ impl App {
             .is_some_and(|tab| matches!(tab.content, TabContent::Stacker))
     }
 
+    fn stacker_visible_in_active_context(&self) -> bool {
+        self.stacker_tab_in_active_context().is_some()
+    }
+
+    fn stacker_tab_in_active_context(&self) -> Option<usize> {
+        if self.active_stacker_tab() {
+            return Some(self.active_tab);
+        }
+        let Some(ui) = &self.ui else {
+            return None;
+        };
+        let Some(joined) = active_joined_tabs(&self.tabs, self.active_tab, &ui.tab_groups) else {
+            return None;
+        };
+
+        [joined.primary, joined.secondary].into_iter().find(|&idx| {
+            self.tabs
+                .get(idx)
+                .is_some_and(|tab| matches!(tab.content, TabContent::Stacker))
+        })
+    }
+
     fn create_stacker_webview(&mut self) {
         if self.stacker_webview.is_some() {
             return;
@@ -144,12 +184,14 @@ impl App {
     }
 
     fn sync_stacker_webview(&mut self) {
-        let active = self.active_stacker_tab();
+        let active = self.stacker_visible_in_active_context();
+        let focus_when_shown = self.active_stacker_tab();
         let Some(webview) = &mut self.stacker_webview else {
             return;
         };
         if !active {
             webview.set_visible(false);
+            self.stacker_webview_pending_focus = false;
             return;
         }
 
@@ -172,8 +214,12 @@ impl App {
         webview.set_bounds(rect);
         webview.set_font_size(ui.stacker.editor_font_size);
         webview.set_document(ui.stacker.editor.text(), ui.stacker.editor.selection());
-        if webview.set_visible(true) {
+        let became_visible = webview.set_visible(true);
+        let should_focus =
+            focus_when_shown && (self.stacker_webview_pending_focus || became_visible);
+        if should_focus {
             webview.focus();
+            self.stacker_webview_pending_focus = false;
         }
     }
 
@@ -183,11 +229,16 @@ impl App {
                 .error(format!("Invalid Stacker WebView message: {raw}"));
             return false;
         };
-        let Some(tab) = self.active_tab() else {
+        let Some(stacker_tab_idx) = self.stacker_tab_in_active_context() else {
             return false;
         };
-        if !matches!(tab.content, TabContent::Stacker) {
-            return false;
+        let should_activate_stacker = matches!(
+            message.message_type.as_str(),
+            "pointerDown" | "focus" | "textChanged" | "selectionChanged"
+        ) && stacker_tab_idx != self.active_tab;
+        if should_activate_stacker {
+            self.switch_tab(stacker_tab_idx);
+            self.stacker_webview_pending_focus = true;
         }
 
         let Some(ui) = &mut self.ui else {
@@ -232,6 +283,11 @@ impl App {
                 }
                 true
             }
+            "pointerDown" => {
+                self.stacker_webview_pending_focus = true;
+                self.request_redraw();
+                true
+            }
             _ => false,
         }
     }
@@ -267,6 +323,25 @@ impl App {
 
     fn joined_terminal_tab_at_cursor(&self) -> Option<usize> {
         self.terminal_pane_hit_at_cursor().map(|hit| hit.tab_idx)
+    }
+
+    fn joined_tab_at_cursor(&self) -> Option<usize> {
+        let layout = self.screen_layout.as_ref()?;
+        let x = self.cursor_pos.x as f32;
+        let y = self.cursor_pos.y as f32;
+        let joined = self
+            .ui
+            .as_ref()
+            .and_then(|ui| active_joined_tabs(&self.tabs, self.active_tab, &ui.tab_groups))?;
+        let (left_rect, right_rect) = joined_content_rects(layout, joined.ratio);
+
+        if rect_contains(left_rect, x, y) {
+            Some(joined.primary)
+        } else if rect_contains(right_rect, x, y) {
+            Some(joined.secondary)
+        } else {
+            None
+        }
     }
 
     fn terminal_pane_hit_at_cursor(&self) -> Option<TerminalPaneHit> {
@@ -317,6 +392,56 @@ impl App {
             row: row.min(rows.saturating_sub(1)),
             col: col.min(cols.saturating_sub(1)),
         })
+    }
+
+    fn active_selection_rects(&mut self, cell_w: f32, cell_h: f32) -> Vec<SelectionRect> {
+        let Some(tab) = self.tabs.get(self.active_tab) else {
+            self.selection_rect_cache = None;
+            return Vec::new();
+        };
+        let Some(session) = tab.content.as_terminal() else {
+            self.selection_rect_cache = None;
+            return Vec::new();
+        };
+
+        let tab_id = tab.id;
+        let revision = session.terminal.selection_revision();
+        let cell_w_bits = cell_w.to_bits();
+        let cell_h_bits = cell_h.to_bits();
+        let color = self.config.colors.selection;
+        let alpha = self.config.colors.selection_alpha;
+        let alpha_bits = alpha.to_bits();
+
+        if let Some(cache) = &self.selection_rect_cache {
+            if cache.tab_id == tab_id
+                && cache.revision == revision
+                && cache.cell_w_bits == cell_w_bits
+                && cache.cell_h_bits == cell_h_bits
+                && cache.color == color
+                && cache.alpha_bits == alpha_bits
+            {
+                return cache.rects.clone();
+            }
+        }
+
+        let rects = session
+            .terminal
+            .selection_rects(cell_w, cell_h, color, alpha);
+        self.selection_rect_cache = Some(SelectionRectCache {
+            tab_id,
+            revision,
+            cell_w_bits,
+            cell_h_bits,
+            color,
+            alpha_bits,
+            rects: rects.clone(),
+        });
+        rects
+    }
+
+    fn update_active_terminal_selection(&mut self, row: usize, col: usize) -> bool {
+        self.active_session_mut()
+            .is_some_and(|session| session.terminal.update_selection(row, col))
     }
 
     fn route_terminal_mouse_wheel(&mut self, delta: &MouseScrollDelta) -> bool {
@@ -631,6 +756,12 @@ impl ApplicationHandler<UserEvent> for App {
             ..
         } = &event
         {
+            if let Some(tab_idx) = self.joined_tab_at_cursor() {
+                if tab_idx != self.active_tab {
+                    self.switch_tab(tab_idx);
+                }
+            }
+
             if let Some(tab_idx) = self.joined_terminal_tab_at_cursor() {
                 if tab_idx != self.active_tab {
                     self.switch_tab(tab_idx);
@@ -726,6 +857,11 @@ impl ApplicationHandler<UserEvent> for App {
                     }
                 }
                 if focused {
+                    if self.active_stacker_tab() {
+                        if let Some(window) = &self.window {
+                            window.set_ime_allowed(true);
+                        }
+                    }
                     self.request_redraw();
                 }
             }
@@ -777,17 +913,7 @@ impl ApplicationHandler<UserEvent> for App {
                     .as_ref()
                     .map(|r| r.cell_dimensions())
                     .unwrap_or((1.0, 1.0));
-                let sel_info = self
-                    .active_session()
-                    .map(|session| {
-                        session.terminal.selection_rects(
-                            cw,
-                            ch,
-                            self.config.colors.selection,
-                            self.config.colors.selection_alpha,
-                        )
-                    })
-                    .unwrap_or_default();
+                let sel_info = self.active_selection_rects(cw, ch);
                 let search_rects = self.search.highlight_rects(cw, ch);
                 let search_bar = if self.search.active {
                     Some((self.search.query.as_str(), self.search.status()))
@@ -1036,10 +1162,9 @@ impl ApplicationHandler<UserEvent> for App {
                                 self.write_to_active(&press);
                                 self.write_to_active(&release);
                             } else if self.terminal_selection_drag {
-                                if let Some(session) = self.active_session_mut() {
-                                    session.terminal.update_selection(row, col);
+                                if self.update_active_terminal_selection(row, col) {
+                                    self.request_redraw();
                                 }
-                                self.request_redraw();
                             }
                             self.mouse_pressed = false;
                             self.terminal_selection_drag = false;
@@ -1074,8 +1199,8 @@ impl ApplicationHandler<UserEvent> for App {
                             self.request_redraw();
                         }
                         ElementState::Released => {
-                            if let Some(session) = self.active_session_mut() {
-                                session.terminal.update_selection(row, col);
+                            if self.update_active_terminal_selection(row, col) {
+                                self.request_redraw();
                             }
                             self.mouse_pressed = false;
                             self.terminal_selection_drag = false;
@@ -1092,10 +1217,9 @@ impl ApplicationHandler<UserEvent> for App {
                     let (row, col) = self.pixel_to_grid(position);
                     if self.mouse_reporting() && !self.modifiers.shift_key() {
                         if self.terminal_selection_drag {
-                            if let Some(session) = self.active_session_mut() {
-                                session.terminal.update_selection(row, col);
+                            if self.update_active_terminal_selection(row, col) {
+                                self.request_redraw();
                             }
-                            self.request_redraw();
                         } else if let Some(start) = self.terminal_pending_mouse_press {
                             if terminal_mouse_drag_exceeded(start, row, col) {
                                 self.terminal_pending_mouse_press = None;
@@ -1108,10 +1232,9 @@ impl ApplicationHandler<UserEvent> for App {
                             }
                         }
                     } else if self.click_state.count() <= 1 {
-                        if let Some(session) = self.active_session_mut() {
-                            session.terminal.update_selection(row, col);
+                        if self.update_active_terminal_selection(row, col) {
+                            self.request_redraw();
                         }
-                        self.request_redraw();
                     }
                 }
             }

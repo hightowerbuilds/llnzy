@@ -360,6 +360,9 @@ impl App {
             if let Some(ui) = &mut self.ui {
                 ui.tab_groups.set_active_tab(self.tabs[idx].id);
             }
+            if matches!(self.tabs[idx].content, TabContent::Stacker) {
+                self.stacker_webview_pending_focus = true;
+            }
             self.sync_active_tab_content();
             if changed {
                 self.clear_terminal_selection();

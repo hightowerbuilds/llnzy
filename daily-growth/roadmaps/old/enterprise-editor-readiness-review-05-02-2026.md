@@ -63,3 +63,91 @@ LLNZY is a strong personal engineering project with the beginnings of a serious 
 The path from 3/10 to 6/10 is not about adding more visual features. It is about reliability, packaging, security, remote workflows, debugging, admin controls, and supportability. The path from 6/10 to 8/10 or higher would require an ecosystem: extensions, integrations, collaboration, enterprise governance, and confidence across platforms.
 
 The app is worth continuing. It has enough technical substance to justify investment. But a strict CEO/CTO would not standardize a major company on it today.
+
+---
+
+## Reassessment After May 4, 2026 Work
+
+Date: 05-04-2026
+
+Updated rating: 3.5/10 for enterprise adoption.
+
+If forced to use whole numbers, this is still closer to 3/10 than 4/10. The app
+has clearly improved since the first review, but the improvements mostly move it
+from "promising personal tool with rough edges" toward "more serious local power
+user editor." They do not yet move it into enterprise-safe territory.
+
+## What Actually Improved
+
+LLNZY is stronger now in several concrete ways:
+
+- The tab grouping engine is no longer a fragile single joined-pair model. It
+  now has stable tab identity, multiple group support, group-local active state,
+  group-local divider ratio, separate group behavior, stable close/reorder
+  handling, and focused unit tests.
+- Joined terminal behavior is better. Terminal scrollback now works inside
+  joined layouts, including shell + Markdown, shell + code, and shell + shell
+  pairings.
+- Context menu behavior for joined tabs is more usable. Join menus no longer
+  overlap, the side menu opens with one click, joined groups have swap controls,
+  and joined tab rename controls can target the left or right member.
+- Editor usability improved with a View menu word-wrap toggle.
+- Terminal selection drag performance has had a real first pass: same-cell drag
+  updates are coalesced, redundant redraws are reduced, selection rectangles are
+  cached behind terminal selection revisions, and the full library test suite is
+  passing.
+- The project is more organized. The leftovers roadmap has been archived, open
+  work moved into a future roadmap, and tab grouping tests now have their own
+  documentation.
+- Test confidence improved. The app now has focused tests for tab grouping,
+  layout projection, terminal selection drag behavior, and existing broad
+  library coverage.
+
+Those are real gains. They matter for developer trust. They also show that the
+architecture is becoming more deliberate instead of only accumulating features.
+
+## Why The Score Does Not Jump Much
+
+The original score was not low because the app lacked a few nice workflow
+features. It was low because enterprise adoption depends on institutional safety.
+Most of those blockers are still open:
+
+- No mature cross-platform support story.
+- No enterprise-grade signed update, staged rollout, rollback, or MDM deployment
+  story.
+- No documented security model, plugin permission model, vulnerability process,
+  or dependency governance.
+- No mature extension ecosystem or enterprise extension approval controls.
+- No remote development story for SSH, containers, devcontainers, WSL, or cloud
+  workspaces.
+- No integrated debugging layer comparable to DAP-based workflows.
+- No deep source-hosting workflow for pull requests, code review, CI, issues, or
+  branch policy.
+- No admin policy layer for managed settings, approved tools, disabled features,
+  or organization-wide defaults.
+- No formal accessibility/compliance evidence.
+- No benchmark suite proving performance on large repos, huge files, long
+  scrollback, many tabs, high-volume terminal output, or long-running sessions.
+- No supportability package: diagnostics export, crash reporting, health checks,
+  structured support bundles, or enterprise support workflow.
+
+The current work makes LLNZY a better daily driver for an individual developer.
+It does not yet make LLNZY something a CTO could safely roll out to thousands of
+engineers.
+
+## Brutally Honest Updated Read
+
+The app has moved up, but only a little.
+
+The previous 3/10 was fair. The new state earns roughly 3.5/10 because LLNZY has
+more credible local workflow depth, fewer tab/terminal rough edges, stronger
+test coverage, and better roadmap discipline. That is meaningful progress.
+
+But enterprise readiness is still dominated by missing operational guarantees.
+Until packaging, security, updates, remote development, debugging, admin
+controls, accessibility, observability, and supportability become first-class
+systems, the ceiling remains low.
+
+The honest conclusion: LLNZY is becoming a more legitimate serious personal
+developer environment. It is not yet close to being a company-wide enterprise
+editor.

@@ -83,20 +83,20 @@ Acceptance: Stacker handles normal editor commands reliably, Backspace never ins
 
 Goal: keep the successful Alacritty-backed terminal selection behavior, but reduce drag latency in mouse-reporting CLI/TUI apps.
 
-- [ ] Preserve the current functional behavior: local selection, copy, select all, and TUI-safe click handling must keep working in Codex, Gemini, Claude Code, and similar apps.
+- [x] Preserve the current functional behavior: local selection, copy, select all, and TUI-safe click handling must keep working in Codex, Gemini, Claude Code, and similar apps.
 - [ ] Profile the drag path while selecting in a mouse-reporting TUI.
-- [ ] Measure where latency comes from:
+- [x] Measure where latency comes from:
   - pointer event frequency,
   - Alacritty selection endpoint updates,
   - selected-grid-range extraction,
   - selection rectangle rebuilding,
   - renderer invalidation/redraw cadence.
-- [ ] Avoid recalculating copied text on every drag frame unless needed.
-- [ ] Throttle or coalesce drag redraws if rendering work is excessive.
-- [ ] Cache selection rectangles where safe and invalidate only when endpoints change.
-- [ ] Confirm plain clicks in mouse-reporting TUIs still go to the TUI.
-- [ ] Confirm drag selection in mouse-reporting TUIs still becomes LLNZY local selection once the pointer leaves the press cell.
-- [ ] Manually verify selection latency in Codex, Gemini, and Claude Code.
+- [x] Avoid recalculating copied text on every drag frame unless needed.
+- [x] Throttle or coalesce drag redraws if rendering work is excessive.
+- [x] Cache selection rectangles where safe and invalidate when selection endpoints, viewport state, or render inputs change.
+- [x] Confirm plain clicks in mouse-reporting TUIs still go to the TUI.
+- [x] Confirm drag selection in mouse-reporting TUIs still becomes LLNZY local selection once the pointer leaves the press cell.
+- [x] Manually verify selection latency in Codex, Gemini, and Claude Code.
 - [ ] Manually verify copy correctness after forward drag, backward drag, word selection, line selection, and select all.
 
 Acceptance: drag selection feels responsive enough for daily CLI/TUI work without regressing terminal copy correctness.
@@ -109,7 +109,7 @@ Goal: replace the current single joined-tab pair model with a real grouping engi
 
 Audit note: the desktop macOS menu bar now includes a top-level `Tab` menu with `New`, `Join`, `Separate`, `Split`, `Close`, and `Rename`. Those actions route through the existing active-tab runtime paths and are useful immediately, but they still sit on top of the current single joined-pair model. The next architectural pass should move the implementation underneath those menu actions to a stable-ID grouping engine rather than widening the current index-based `Option<JoinedTabs>`.
 
-- [ ] Audit current joined-tab state, rendering, divider handling, context menus, close behavior, reorder behavior, and persistence assumptions.
+- [x] Audit current joined-tab state, rendering, divider handling, context menus, close behavior, reorder behavior, and persistence assumptions.
 - [x] Add a native desktop `Tab` menu beside File, Edit, and View.
 - [x] Route native `Tab > New`, `Join`, `Separate`, `Split`, `Close`, and `Rename` into app-level tab handlers.
 - [x] Remove `Duplicate` from the native `Tab` menu until the tab engine has a stronger duplicate semantics.
@@ -121,7 +121,7 @@ Audit note: the desktop macOS menu bar now includes a top-level `Tab` menu with 
   - group-local active member,
   - group-local divider ratio.
 - [x] Replace global joined-pair state with a first-class tab grouping state.
-- [ ] Support joining any eligible tab into a group.
+- [x] Support joining any eligible tab into a group.
 - [x] Support multiple groups at once, such as two joined tabs in one area and two joined tabs elsewhere.
 - [x] Support separating one group without affecting other groups.
 - [x] Make joined group context menus open as one menu for the group, anchored to the joined tab width.
@@ -129,9 +129,9 @@ Audit note: the desktop macOS menu bar now includes a top-level `Tab` menu with 
 - [x] Keep tab rename, close, switch, and context-menu behavior consistent between standalone tabs and grouped tabs.
 - [x] Fix terminal scrollback routing inside joined tabs so shell panes can scroll when joined with code/Markdown panes or with another shell.
 - [x] Make close and reorder operations remap groups by stable tab identity instead of stale indexes.
-- [ ] Preserve terminal pane sizing and editor pane buffer selection after group changes.
-- [ ] Add unit tests for group validation, close remapping, reorder remapping, and separate/join transitions.
-- [ ] Manually verify multiple joined groups.
+- [x] Preserve terminal pane sizing and editor pane buffer selection after group changes.
+- [x] Add unit tests for group validation, close remapping, reorder remapping, and separate/join transitions.
+- [x] Manually verify multiple joined groups.
 - [ ] Manually verify mixed groups such as Terminal + CodeFile, Git + Stacker, and CodeFile + Sketch.
 - [x] Manually verify terminal scrollback in joined layouts: Terminal + Markdown, Terminal + CodeFile, and Terminal + Terminal.
 - [x] Manually verify context menus, rename, close, switch, and divider behavior in grouped tabs.

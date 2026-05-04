@@ -220,6 +220,8 @@ fn stacker_editor_html() -> &'static str {
     };
 
     editor.addEventListener('input', () => post('textChanged'));
+    editor.addEventListener('pointerdown', () => post('pointerDown'));
+    editor.addEventListener('mousedown', () => post('pointerDown'));
     editor.addEventListener('select', () => post('selectionChanged'));
     editor.addEventListener('keyup', () => post('selectionChanged'));
     editor.addEventListener('mouseup', () => post('selectionChanged'));

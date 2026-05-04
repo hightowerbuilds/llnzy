@@ -134,6 +134,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn join_pair_rejects_same_tab() {
+        let mut groups = TabGroupState::default();
+
+        assert_eq!(groups.join_pair(1, 1), None);
+        assert!(groups.is_empty());
+    }
+
+    #[test]
+    fn join_pair_creates_one_group_for_standalone_tabs() {
+        let mut groups = TabGroupState::default();
+
+        let id = groups.join_pair(1, 2).unwrap();
+
+        assert_eq!(id.raw(), 1);
+        assert_eq!(groups.groups().len(), 1);
+
+        let group = groups.group_for_tab(1).unwrap();
+        assert_eq!(group.id, id);
+        assert_eq!(group.primary, 1);
+        assert_eq!(group.secondary, 2);
+        assert_eq!(group.active, 1);
+        assert_eq!(group.ratio, 0.5);
+    }
+
+    #[test]
     fn join_pair_allows_multiple_groups() {
         let mut groups = TabGroupState::default();
 
@@ -161,6 +186,20 @@ mod tests {
     }
 
     #[test]
+    fn join_pair_rehomes_only_tabs_in_the_new_pair() {
+        let mut groups = TabGroupState::default();
+        groups.join_pair(1, 2);
+        groups.join_pair(3, 4);
+
+        groups.join_pair(2, 5);
+
+        assert_eq!(group_members(&groups, 2), (2, 5));
+        assert_eq!(group_members(&groups, 3), (3, 4));
+        assert!(groups.group_for_tab(1).is_none());
+        assert_eq!(groups.groups().len(), 2);
+    }
+
+    #[test]
     fn separate_tab_removes_one_group_without_affecting_others() {
         let mut groups = TabGroupState::default();
         groups.join_pair(1, 2);
@@ -172,6 +211,20 @@ mod tests {
         assert!(groups.group_for_tab(2).is_none());
         assert!(groups.group_for_tab(3).is_some());
         assert!(groups.group_for_tab(4).is_some());
+    }
+
+    #[test]
+    fn remove_tab_dissolves_only_the_closed_tabs_group() {
+        let mut groups = TabGroupState::default();
+        groups.join_pair(1, 2);
+        groups.join_pair(3, 4);
+
+        assert!(groups.remove_tab(2));
+
+        assert!(groups.group_for_tab(1).is_none());
+        assert!(groups.group_for_tab(2).is_none());
+        assert_eq!(group_members(&groups, 3), (3, 4));
+        assert_eq!(groups.groups().len(), 1);
     }
 
     #[test]
@@ -187,6 +240,44 @@ mod tests {
     }
 
     #[test]
+    fn retain_tabs_preserves_groups_across_reorder() {
+        let mut groups = TabGroupState::default();
+        groups.join_pair(1, 2);
+        groups.join_pair(3, 4);
+
+        let reordered = [4, 1, 3, 2];
+        groups.retain_tabs(|tab_id| reordered.contains(&tab_id));
+
+        assert_eq!(group_members(&groups, 1), (1, 2));
+        assert_eq!(group_members(&groups, 3), (3, 4));
+        assert_eq!(groups.groups().len(), 2);
+    }
+
+    #[test]
+    fn set_active_tab_updates_only_containing_group() {
+        let mut groups = TabGroupState::default();
+        groups.join_pair(1, 2);
+        groups.join_pair(3, 4);
+
+        groups.set_active_tab(4);
+
+        assert_eq!(groups.group_for_tab(1).unwrap().active, 1);
+        assert_eq!(groups.group_for_tab(3).unwrap().active, 4);
+    }
+
+    #[test]
+    fn set_ratio_for_tab_clamps_to_group_bounds() {
+        let mut groups = TabGroupState::default();
+        groups.join_pair(1, 2);
+
+        assert!(groups.set_ratio_for_tab(2, 0.03));
+        assert_eq!(groups.group_for_tab(1).unwrap().ratio, TabGroup::MIN_RATIO);
+
+        assert!(groups.set_ratio_for_tab(1, 0.95));
+        assert_eq!(groups.group_for_tab(2).unwrap().ratio, TabGroup::MAX_RATIO);
+    }
+
+    #[test]
     fn swap_tabs_for_tab_flips_left_and_right_members() {
         let mut groups = TabGroupState::default();
         groups.join_pair(1, 2);
@@ -196,5 +287,26 @@ mod tests {
         let group = groups.group_for_tab(1).unwrap();
         assert_eq!(group.primary, 2);
         assert_eq!(group.secondary, 1);
+    }
+
+    #[test]
+    fn swap_tabs_preserves_active_tab_and_ratio() {
+        let mut groups = TabGroupState::default();
+        groups.join_pair(1, 2);
+        groups.set_active_tab(2);
+        groups.set_ratio_for_tab(1, 0.72);
+
+        assert!(groups.swap_tabs_for_tab(2));
+
+        let group = groups.group_for_tab(1).unwrap();
+        assert_eq!(group.primary, 2);
+        assert_eq!(group.secondary, 1);
+        assert_eq!(group.active, 2);
+        assert!((group.ratio - 0.72).abs() <= f32::EPSILON);
+    }
+
+    fn group_members(groups: &TabGroupState, tab_id: TabId) -> (TabId, TabId) {
+        let group = groups.group_for_tab(tab_id).unwrap();
+        (group.primary, group.secondary)
     }
 }

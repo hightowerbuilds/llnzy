@@ -85,6 +85,8 @@ pub struct Terminal {
     event_rx: mpsc::Receiver<TerminalEvent>,
     osc7_parser: Osc7Parser,
     selection_anchor: Option<(usize, usize)>,
+    selection_end: Option<(usize, usize)>,
+    selection_revision: u64,
 }
 
 impl Terminal {
@@ -102,6 +104,8 @@ impl Terminal {
             event_rx: rx,
             osc7_parser: Osc7Parser::default(),
             selection_anchor: None,
+            selection_end: None,
+            selection_revision: 0,
         }
     }
 
@@ -117,6 +121,7 @@ impl Terminal {
     /// Feed raw bytes from the PTY into the terminal emulator.
     pub fn process(&mut self, bytes: &[u8]) {
         self.processor.advance(&mut self.term, bytes);
+        self.bump_selection_revision_if_visible();
         for cwd in self.osc7_parser.advance(bytes) {
             let _ = self.event_tx.send(TerminalEvent::WorkingDirectory(cwd));
         }
@@ -126,6 +131,7 @@ impl Terminal {
     pub fn resize(&mut self, cols: u16, rows: u16) {
         let size = TermSize::new(cols as usize, rows as usize);
         self.term.resize(size);
+        self.bump_selection_revision_if_visible();
     }
 
     /// Get the number of columns and rows.
@@ -139,21 +145,25 @@ impl Terminal {
     /// Scroll the display by delta lines (positive = up into history).
     pub fn scroll(&mut self, delta: i32) {
         self.term.scroll_display(Scroll::Delta(delta));
+        self.bump_selection_revision_if_visible();
     }
 
     /// Scroll one page up.
     pub fn scroll_page_up(&mut self) {
         self.term.scroll_display(Scroll::PageUp);
+        self.bump_selection_revision_if_visible();
     }
 
     /// Scroll one page down.
     pub fn scroll_page_down(&mut self) {
         self.term.scroll_display(Scroll::PageDown);
+        self.bump_selection_revision_if_visible();
     }
 
     /// Scroll to the bottom (latest output).
     pub fn scroll_to_bottom(&mut self) {
         self.term.scroll_display(Scroll::Bottom);
+        self.bump_selection_revision_if_visible();
     }
 
     // --- Cell access (viewport-aware) ---
@@ -304,12 +314,17 @@ impl Terminal {
         let point = self.viewport_point(row, col);
         self.term.selection = Some(TermSelection::new(SelectionType::Simple, point, Side::Left));
         self.selection_anchor = Some((row, col));
+        self.selection_end = Some((row, col));
+        self.bump_selection_revision();
     }
 
-    pub fn update_selection(&mut self, row: usize, col: usize) {
+    pub fn update_selection(&mut self, row: usize, col: usize) -> bool {
         let Some((anchor_row, anchor_col)) = self.selection_anchor else {
-            return;
+            return false;
         };
+        if self.selection_end == Some((row, col)) {
+            return false;
+        }
         let anchor = self.viewport_point(anchor_row, anchor_col);
         let point = self.viewport_point(row, col);
         let dragging_backward = (row, col) < (anchor_row, anchor_col);
@@ -321,11 +336,21 @@ impl Terminal {
         let mut selection = TermSelection::new(SelectionType::Simple, anchor, anchor_side);
         selection.update(point, point_side);
         self.term.selection = Some(selection);
+        self.selection_end = Some((row, col));
+        self.bump_selection_revision();
+        true
     }
 
     pub fn clear_selection(&mut self) {
+        let had_selection = self.term.selection.is_some()
+            || self.selection_anchor.is_some()
+            || self.selection_end.is_some();
         self.term.selection = None;
         self.selection_anchor = None;
+        self.selection_end = None;
+        if had_selection {
+            self.bump_selection_revision();
+        }
     }
 
     pub fn has_selection(&self) -> bool {
@@ -338,6 +363,10 @@ impl Terminal {
     pub fn selected_text(&self) -> Option<String> {
         let range = self.selection_range()?;
         Some(self.selection_range_to_string(range))
+    }
+
+    pub fn selection_revision(&self) -> u64 {
+        self.selection_revision
     }
 
     fn selection_range(&self) -> Option<SelectionRange> {
@@ -404,12 +433,16 @@ impl Terminal {
             Side::Left,
         ));
         self.selection_anchor = None;
+        self.selection_end = Some((row, col));
+        self.bump_selection_revision();
     }
 
     pub fn select_line(&mut self, row: usize) {
         let point = self.viewport_point(row, 0);
         self.term.selection = Some(TermSelection::new(SelectionType::Lines, point, Side::Left));
         self.selection_anchor = None;
+        self.selection_end = Some((row, 0));
+        self.bump_selection_revision();
     }
 
     pub fn selection_rects(
@@ -473,6 +506,16 @@ impl Terminal {
         }
 
         rects
+    }
+
+    fn bump_selection_revision(&mut self) {
+        self.selection_revision = self.selection_revision.wrapping_add(1);
+    }
+
+    fn bump_selection_revision_if_visible(&mut self) {
+        if self.has_selection() {
+            self.bump_selection_revision();
+        }
     }
 
     // --- Terminal mode queries ---
@@ -874,6 +917,34 @@ mod tests {
         term.update_selection(0, 10);
 
         assert_eq!(term.selected_text().as_deref(), Some("Hello world"));
+    }
+
+    #[test]
+    fn same_cell_drag_update_is_coalesced() {
+        let mut term = Terminal::new(80, 24);
+        term.process(b"Hello world");
+
+        term.start_selection(0, 0);
+        let revision = term.selection_revision();
+
+        assert!(!term.update_selection(0, 0));
+        assert_eq!(term.selection_revision(), revision);
+
+        assert!(term.update_selection(0, 1));
+        assert!(term.selection_revision() > revision);
+    }
+
+    #[test]
+    fn selection_revision_changes_when_visible_selection_scrolls() {
+        let mut term = Terminal::new(80, 3);
+        term.process(b"one\r\ntwo\r\nthree");
+        term.start_selection(0, 0);
+        term.update_selection(0, 2);
+        let revision = term.selection_revision();
+
+        term.scroll(1);
+
+        assert!(term.selection_revision() > revision);
     }
 
     #[test]

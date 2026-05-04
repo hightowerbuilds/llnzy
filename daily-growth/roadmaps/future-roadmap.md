@@ -7,11 +7,11 @@ not need to block the current leftovers roadmap.
 
 ## Wispr Flow Optimization
 
-- [ ] Continue optimizing Wispr Flow input behavior with multiple workspace tabs
+- [x] Continue optimizing Wispr Flow input behavior with multiple workspace tabs
   open and multiple shell sessions running at the same time.
-- [ ] Verify Wispr Flow delivery when switching between grouped shells,
+- [x] Verify Wispr Flow delivery when switching between grouped shells,
   standalone shells, Stacker, and editor tabs.
-- [ ] Manually verify Wispr Flow delivery in joined layouts where one pane is
+- [x] Manually verify Wispr Flow delivery in joined layouts where one pane is
   Stacker, especially Terminal + Stacker and CodeFile + Stacker.
 - [x] Resolve Stacker-specific Wispr Flow delivery by moving Stacker text entry
   onto a WebView-backed native browser textarea while keeping the Rust document
@@ -98,6 +98,8 @@ not need to block the current leftovers roadmap.
   toolbar actions, dirty-draft warning, save behavior, and queue actions.
 - [x] Manually verify Wispr Flow or a comparable OS-level dictation/paste tool
   after the external ingress path is implemented.
+- [x] Preserve Stacker WebView bounds inside joined-tab split panes so the native
+  textarea cannot draw across the Terminal or CodeFile partition.
 
 ---
 

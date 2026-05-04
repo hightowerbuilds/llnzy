@@ -572,6 +572,7 @@ fn render_text_edit_prompt(
             ui.scope(|ui| {
                 let before_edit = editor.text().to_string();
                 let before_selection = editor.selection();
+                let editor_width = ui.available_width().max(1.0);
                 ui.visuals_mut().extreme_bg_color = egui::Color32::TRANSPARENT;
                 ui.visuals_mut().widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
                 ui.visuals_mut().widgets.hovered.bg_fill = egui::Color32::TRANSPARENT;
@@ -579,11 +580,11 @@ fn render_text_edit_prompt(
                 ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::NONE;
                 ui.visuals_mut().widgets.hovered.bg_stroke = egui::Stroke::NONE;
                 ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::NONE;
-                ui.set_min_size(egui::vec2(ui.available_width(), ui.available_height()));
+                ui.set_min_size(egui::vec2(editor_width, ui.available_height()));
                 let mut output = egui::TextEdit::multiline(editor.text_mut_for_widget())
                     .id(editor_id)
                     .desired_rows(32)
-                    .desired_width(f32::INFINITY)
+                    .desired_width(editor_width)
                     .hint_text("Write your prompt here...")
                     .font(stacker_editor_font(editor_font_size))
                     .text_color(NOTE_TEXT)
@@ -616,7 +617,8 @@ fn render_text_edit_prompt(
                 }
             });
         });
-    *web_editor_rect = Some(frame_output.response.rect);
+    let clipped_rect = frame_output.response.rect.intersect(ui.clip_rect());
+    *web_editor_rect = clipped_rect.is_positive().then_some(clipped_rect);
 }
 
 fn stacker_toolbar_button(
