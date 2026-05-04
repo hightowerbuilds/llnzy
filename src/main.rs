@@ -172,8 +172,9 @@ impl App {
         webview.set_bounds(rect);
         webview.set_font_size(ui.stacker.editor_font_size);
         webview.set_document(ui.stacker.editor.text(), ui.stacker.editor.selection());
-        webview.set_visible(true);
-        webview.focus();
+        if webview.set_visible(true) {
+            webview.focus();
+        }
     }
 
     fn apply_stacker_webview_message(&mut self, raw: String) -> bool {
@@ -214,7 +215,7 @@ impl App {
                     .draft
                     .record_current_text(ui.stacker.editor.text().to_string());
                 if let Some(webview) = &mut self.stacker_webview {
-                    webview.note_webview_text(ui.stacker.editor.text());
+                    webview.note_webview_document(ui.stacker.editor.text(), selection);
                 }
                 if changed {
                     llnzy::external_input_trace::trace("stacker.webview_text_changed", || {
@@ -226,6 +227,9 @@ impl App {
             }
             "selectionChanged" | "focus" => {
                 store_stacker_webview_selection(ui, selection);
+                if let Some(webview) = &mut self.stacker_webview {
+                    webview.note_webview_document(ui.stacker.editor.text(), selection);
+                }
                 true
             }
             _ => false,

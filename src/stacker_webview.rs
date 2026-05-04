@@ -21,6 +21,7 @@ pub struct StackerWebView {
     webview: WebView,
     visible: bool,
     last_text: String,
+    last_selection: StackerSelection,
     last_rect: Option<[i32; 4]>,
     last_font_size: f32,
 }
@@ -39,6 +40,7 @@ impl StackerWebView {
             webview,
             visible: true,
             last_text: String::new(),
+            last_selection: StackerSelection::collapsed(0),
             last_rect: None,
             last_font_size: 16.0,
         };
@@ -46,12 +48,13 @@ impl StackerWebView {
         Ok(this)
     }
 
-    pub fn set_visible(&mut self, visible: bool) {
+    pub fn set_visible(&mut self, visible: bool) -> bool {
         if self.visible == visible {
-            return;
+            return false;
         }
         self.visible = visible;
         let _ = self.webview.set_visible(visible);
+        true
     }
 
     pub fn set_bounds(&mut self, rect: egui::Rect) {
@@ -71,10 +74,16 @@ impl StackerWebView {
     }
 
     pub fn set_document(&mut self, text: &str, selection: StackerSelection) {
+        let selection = clamp_selection(text, selection);
+        if self.last_text == text && self.last_selection == selection {
+            return;
+        }
+
         if self.last_text != text {
             self.last_text.clear();
             self.last_text.push_str(text);
         }
+        self.last_selection = selection;
         let Ok(encoded) = serde_json::to_string(text) else {
             return;
         };
@@ -84,9 +93,10 @@ impl StackerWebView {
         let _ = self.webview.evaluate_script(&script);
     }
 
-    pub fn note_webview_text(&mut self, text: &str) {
+    pub fn note_webview_document(&mut self, text: &str, selection: StackerSelection) {
         self.last_text.clear();
         self.last_text.push_str(text);
+        self.last_selection = clamp_selection(text, selection);
     }
 
     pub fn set_font_size(&mut self, font_size: f32) {
@@ -120,6 +130,14 @@ pub fn utf16_index_to_char_index(text: &str, utf16_index: usize) -> usize {
 
 pub fn char_index_to_utf16_index(text: &str, char_index: usize) -> usize {
     text.chars().take(char_index).map(|ch| ch.len_utf16()).sum()
+}
+
+fn clamp_selection(text: &str, selection: StackerSelection) -> StackerSelection {
+    let char_count = text.chars().count();
+    StackerSelection {
+        start: selection.start.min(char_count),
+        end: selection.end.min(char_count),
+    }
 }
 
 fn stacker_editor_html() -> &'static str {
