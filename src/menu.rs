@@ -26,6 +26,10 @@ pub enum MenuAction {
     SelectAll,
     Find,
     ToggleFullscreen,
+    TabJoin,
+    TabSeparate,
+    TabSplit,
+    TabRename,
     SplitVertical,
     SplitHorizontal,
     ToggleEffects,
@@ -56,6 +60,26 @@ define_class!(
         #[unsafe(method(llnzyCloseTab:))]
         fn close_tab(&self, _sender: &AnyObject) {
             send_action(MenuAction::CloseTab);
+        }
+
+        #[unsafe(method(llnzyTabJoin:))]
+        fn tab_join(&self, _sender: &AnyObject) {
+            send_action(MenuAction::TabJoin);
+        }
+
+        #[unsafe(method(llnzyTabSeparate:))]
+        fn tab_separate(&self, _sender: &AnyObject) {
+            send_action(MenuAction::TabSeparate);
+        }
+
+        #[unsafe(method(llnzyTabSplit:))]
+        fn tab_split(&self, _sender: &AnyObject) {
+            send_action(MenuAction::TabSplit);
+        }
+
+        #[unsafe(method(llnzyTabRename:))]
+        fn tab_rename(&self, _sender: &AnyObject) {
+            send_action(MenuAction::TabRename);
         }
 
         #[unsafe(method(llnzyUndo:))]
@@ -211,6 +235,44 @@ pub fn setup_menu_bar(proxy: winit::event_loop::EventLoopProxy<UserEvent>) {
     let edit_item = NSMenuItem::new(mtm);
     edit_item.setSubmenu(Some(&edit_menu));
     main_menu.addItem(&edit_item);
+
+    // Tab menu
+    let tab_menu = NSMenu::initWithTitle(mtm.alloc(), &NSString::from_str("Tab"));
+    tab_menu.setAutoenablesItems(false);
+    tab_menu.addItem(&make_app_item(mtm, target, "New", sel!(llnzyNewTab:), ""));
+    tab_menu.addItem(&make_app_item(mtm, target, "Join", sel!(llnzyTabJoin:), ""));
+    tab_menu.addItem(&make_app_item(
+        mtm,
+        target,
+        "Separate",
+        sel!(llnzyTabSeparate:),
+        "",
+    ));
+    tab_menu.addItem(&make_app_item(
+        mtm,
+        target,
+        "Split",
+        sel!(llnzyTabSplit:),
+        "",
+    ));
+    tab_menu.addItem(&NSMenuItem::separatorItem(mtm));
+    tab_menu.addItem(&make_app_item(
+        mtm,
+        target,
+        "Close",
+        sel!(llnzyCloseTab:),
+        "w",
+    ));
+    tab_menu.addItem(&make_app_item(
+        mtm,
+        target,
+        "Rename",
+        sel!(llnzyTabRename:),
+        "",
+    ));
+    let tab_item = NSMenuItem::new(mtm);
+    tab_item.setSubmenu(Some(&tab_menu));
+    main_menu.addItem(&tab_item);
 
     // View menu
     let view_menu = NSMenu::initWithTitle(mtm.alloc(), &NSString::from_str("View"));

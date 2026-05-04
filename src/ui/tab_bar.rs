@@ -404,66 +404,51 @@ fn render_immediate_tab_context_menu(
     let menu_pos = tab_context_menu_pos(menu);
     let menu_width = menu.width.max(1.0);
     let mut keep_open = false;
-    let menu_rect = egui::Area::new(menu_id)
-        .order(egui::Order::Tooltip)
-        .fixed_pos(menu_pos)
-        .show(ctx, |ui| {
-            let frame = egui::Frame::none()
-                .fill(egui::Color32::from_rgb(18, 18, 20))
-                .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(76, 82, 96)))
-                .rounding(egui::Rounding::same(6.0))
-                .shadow(egui::epaint::Shadow {
-                    offset: egui::vec2(0.0, 8.0),
-                    blur: 16.0,
-                    spread: 0.0,
-                    color: egui::Color32::from_black_alpha(120),
-                })
-                .inner_margin(egui::Margin::symmetric(0.0, 6.0));
-            frame
-                .show(ui, |ui| {
-                    ui.set_min_width(menu_width);
-                    ui.set_max_width(menu_width);
-                    ui.spacing_mut().item_spacing.y = 0.0;
-                    ui.visuals_mut().override_text_color =
-                        Some(egui::Color32::from_rgb(232, 236, 244));
-                    match menu.view {
-                        TabContextMenuView::Main => {
-                            if input.joined_tabs.is_some() {
-                                if menu_button(ui, "Separate Tabs").clicked() {
-                                    action.separate_tabs = true;
-                                }
-                            } else if menu_button(ui, "Join Tabs").clicked() {
-                                edit_state.context_menu = Some(TabContextMenuState {
-                                    view: TabContextMenuView::JoinTargets,
-                                    ..menu
-                                });
-                                keep_open = true;
-                            }
-                            render_tab_context_menu(ui, tab, menu.tab_idx, edit_state, action)
-                        }
-                        TabContextMenuView::JoinTargets => {
-                            let result = render_tab_join_targets_menu(
-                                ui,
-                                input.tabs,
-                                menu.tab_idx,
-                                input.joined_tabs,
-                                action,
-                            );
-                            if result.back {
-                                edit_state.context_menu = Some(TabContextMenuState {
-                                    view: TabContextMenuView::Main,
-                                    ..menu
-                                });
-                                keep_open = true;
-                            }
-                            result.close
-                        }
-                    }
-                })
-                .response
-                .rect
-        })
-        .inner;
+    let mut show_join_targets = menu.view == TabContextMenuView::JoinTargets;
+    let main_rect = render_tab_menu_area(ctx, menu_id, menu_pos, menu_width, |ui| {
+        if input.joined_tabs.is_some() {
+            if menu_button(ui, "Separate Tabs").clicked() {
+                action.separate_tabs = true;
+            }
+        } else if menu_button(ui, "Join Tabs").clicked() {
+            edit_state.context_menu = Some(TabContextMenuState {
+                view: TabContextMenuView::JoinTargets,
+                ..menu
+            });
+            show_join_targets = true;
+            keep_open = true;
+        }
+        render_tab_context_menu(ui, tab, menu.tab_idx, edit_state, action)
+    });
+
+    let mut menu_rect = main_rect;
+    if show_join_targets {
+        let join_rect = render_tab_menu_area(
+            ctx,
+            egui::Id::new("workspace_tab_join_targets_menu"),
+            join_targets_menu_pos(main_rect),
+            menu_width,
+            |ui| {
+                let result = render_tab_join_targets_menu(
+                    ui,
+                    input.tabs,
+                    menu.tab_idx,
+                    input.joined_tabs,
+                    action,
+                );
+                if result.back {
+                    edit_state.context_menu = Some(TabContextMenuState {
+                        view: TabContextMenuView::Main,
+                        ..menu
+                    });
+                    show_join_targets = false;
+                    keep_open = true;
+                }
+                result.close
+            },
+        );
+        menu_rect = union_rects(main_rect, join_rect);
+    }
 
     let escape_pressed = ctx.input(|input| input.key_pressed(egui::Key::Escape));
     let clicked_outside = ctx.input(|input| {
@@ -489,6 +474,57 @@ fn render_immediate_tab_context_menu(
 
 fn tab_context_menu_pos(menu: TabContextMenuState) -> egui::Pos2 {
     egui::pos2(menu.pos.x, menu.pos.y + TAB_MENU_MARGIN * 0.5)
+}
+
+fn join_targets_menu_pos(main_rect: egui::Rect) -> egui::Pos2 {
+    egui::pos2(main_rect.right() + TAB_MENU_MARGIN * 0.5, main_rect.top())
+}
+
+fn render_tab_menu_area(
+    ctx: &egui::Context,
+    id: egui::Id,
+    pos: egui::Pos2,
+    width: f32,
+    add_contents: impl FnOnce(&mut egui::Ui) -> bool,
+) -> egui::Rect {
+    egui::Area::new(id)
+        .order(egui::Order::Tooltip)
+        .fixed_pos(pos)
+        .show(ctx, |ui| {
+            tab_menu_frame()
+                .show(ui, |ui| {
+                    ui.set_min_width(width);
+                    ui.set_max_width(width);
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    ui.visuals_mut().override_text_color =
+                        Some(egui::Color32::from_rgb(232, 236, 244));
+                    add_contents(ui)
+                })
+                .response
+                .rect
+        })
+        .inner
+}
+
+fn tab_menu_frame() -> egui::Frame {
+    egui::Frame::none()
+        .fill(egui::Color32::from_rgb(18, 18, 20))
+        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(76, 82, 96)))
+        .rounding(egui::Rounding::same(6.0))
+        .shadow(egui::epaint::Shadow {
+            offset: egui::vec2(0.0, 8.0),
+            blur: 16.0,
+            spread: 0.0,
+            color: egui::Color32::from_black_alpha(120),
+        })
+        .inner_margin(egui::Margin::symmetric(0.0, 6.0))
+}
+
+fn union_rects(a: egui::Rect, b: egui::Rect) -> egui::Rect {
+    egui::Rect::from_min_max(
+        egui::pos2(a.min.x.min(b.min.x), a.min.y.min(b.min.y)),
+        egui::pos2(a.max.x.max(b.max.x), a.max.y.max(b.max.y)),
+    )
 }
 
 fn menu_button(ui: &mut egui::Ui, label: &str) -> egui::Response {

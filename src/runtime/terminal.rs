@@ -33,6 +33,20 @@ impl App {
         }
     }
 
+    pub(crate) fn session_for_tab(&self, tab_idx: usize) -> Option<&Session> {
+        match self.tabs.get(tab_idx)?.content {
+            TabContent::Terminal(ref s) => Some(s),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn session_for_tab_mut(&mut self, tab_idx: usize) -> Option<&mut Session> {
+        match self.tabs.get_mut(tab_idx)?.content {
+            TabContent::Terminal(ref mut s) => Some(s),
+            _ => None,
+        }
+    }
+
     pub(crate) fn process_all_output(&mut self) {
         let mut any_changed = false;
         let mut exited = Vec::new();

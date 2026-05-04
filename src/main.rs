@@ -27,10 +27,16 @@ use llnzy::ui::command_palette::CommandId;
 use llnzy::ui::{ActiveView, PendingClose, UiFrameOutput, UiState, BUMPER_WIDTH};
 use llnzy::workspace::{TabContent, TabKind, WorkspaceTab};
 use llnzy::workspace_layout::{
-    joined_content_rects, joined_terminal_content_rects, terminal_effect_rect, valid_joined_tabs,
-    JoinedTabs,
+    joined_terminal_content_rects, terminal_effect_rect, valid_joined_tabs, JoinedTabs,
 };
 use llnzy::UserEvent;
+
+#[derive(Clone, Copy)]
+struct TerminalPaneHit {
+    tab_idx: usize,
+    row: usize,
+    col: usize,
+}
 
 struct App {
     config: Config,
@@ -133,33 +139,63 @@ impl App {
     }
 
     fn joined_terminal_tab_at_cursor(&self) -> Option<usize> {
+        self.terminal_pane_hit_at_cursor().map(|hit| hit.tab_idx)
+    }
+
+    fn terminal_pane_hit_at_cursor(&self) -> Option<TerminalPaneHit> {
         let layout = self.screen_layout.as_ref()?;
+        let x = self.cursor_pos.x as f32;
+        let y = self.cursor_pos.y as f32;
         let joined = self
             .ui
             .as_ref()
             .and_then(|ui| ui.joined_tabs)
-            .and_then(|joined| valid_joined_tabs(Some(joined), self.active_tab, self.tabs.len()))?;
-        let x = self.cursor_pos.x as f32;
-        let y = self.cursor_pos.y as f32;
-        let (left_rect, right_rect) = joined_content_rects(layout, joined.ratio);
+            .and_then(|joined| valid_joined_tabs(Some(joined), self.active_tab, self.tabs.len()));
 
-        for (idx, rect) in [(joined.primary, left_rect), (joined.secondary, right_rect)] {
-            let is_terminal = self
-                .tabs
-                .get(idx)
-                .is_some_and(|tab| tab.content.as_terminal().is_some());
-            if is_terminal
-                && x >= rect.x
-                && x < rect.x + rect.w
-                && y >= rect.y
-                && y < rect.y + rect.h
-            {
-                return Some(idx);
+        if let Some(joined) = joined {
+            let (left_rect, right_rect) = joined_terminal_content_rects(layout, joined.ratio);
+            for (idx, rect) in [(joined.primary, left_rect), (joined.secondary, right_rect)] {
+                if let Some(hit) = self.terminal_pane_hit(idx, rect, x, y) {
+                    return Some(hit);
+                }
             }
+            return None;
         }
 
-        None
+        let rect = llnzy::session::Rect {
+            x: layout.content.x,
+            y: layout.content.y,
+            w: layout.content.w,
+            h: layout.content.h,
+        };
+        self.terminal_pane_hit(self.active_tab, rect, x, y)
     }
+
+    fn terminal_pane_hit(
+        &self,
+        tab_idx: usize,
+        rect: llnzy::session::Rect,
+        x: f32,
+        y: f32,
+    ) -> Option<TerminalPaneHit> {
+        if !rect_contains(rect, x, y) {
+            return None;
+        }
+        let session = self.session_for_tab(tab_idx)?;
+        let layout = self.screen_layout.as_ref()?;
+        let (cols, rows) = session.terminal.size();
+        let col = ((x - rect.x) / layout.cell_w).max(0.0) as usize;
+        let row = ((y - rect.y) / layout.cell_h).max(0.0) as usize;
+        Some(TerminalPaneHit {
+            tab_idx,
+            row: row.min(rows.saturating_sub(1)),
+            col: col.min(cols.saturating_sub(1)),
+        })
+    }
+}
+
+fn rect_contains(rect: llnzy::session::Rect, x: f32, y: f32) -> bool {
+    x >= rect.x && x < rect.x + rect.w && y >= rect.y && y < rect.y + rect.h
 }
 
 fn local_terminal_selection_requested(
@@ -575,9 +611,17 @@ impl ApplicationHandler<UserEvent> for App {
                     self.request_redraw();
                     return;
                 }
-                if self.mouse_reporting() {
-                    let (row, col) = self.pixel_to_grid(self.cursor_pos);
-                    let sgr = self.sgr_mouse();
+                let Some(hit) = self.terminal_pane_hit_at_cursor() else {
+                    self.request_redraw();
+                    return;
+                };
+                let mouse_reporting = self
+                    .session_for_tab(hit.tab_idx)
+                    .is_some_and(|session| session.terminal.mouse_mode());
+                if mouse_reporting {
+                    let sgr = self
+                        .session_for_tab(hit.tab_idx)
+                        .is_some_and(|session| session.terminal.sgr_mouse());
                     let lines = match delta {
                         MouseScrollDelta::LineDelta(_, y) => y as i32,
                         MouseScrollDelta::PixelDelta(p) => {
@@ -591,9 +635,15 @@ impl ApplicationHandler<UserEvent> for App {
                     };
                     for _ in 0..lines.unsigned_abs() {
                         let button = if lines > 0 { 64 } else { 65 };
-                        let bytes =
-                            input::encode_mouse(button, col, row, true, sgr, &self.modifiers);
-                        self.write_to_active(&bytes);
+                        let bytes = input::encode_mouse(
+                            button,
+                            hit.col,
+                            hit.row,
+                            true,
+                            sgr,
+                            &self.modifiers,
+                        );
+                        self.write_to_terminal_tab(hit.tab_idx, &bytes);
                     }
                 } else {
                     let scroll_mult = self.config.scroll_lines as f32;
@@ -609,7 +659,7 @@ impl ApplicationHandler<UserEvent> for App {
                         }
                     };
                     if lines != 0 {
-                        if let Some(session) = self.active_session_mut() {
+                        if let Some(session) = self.session_for_tab_mut(hit.tab_idx) {
                             session.terminal.scroll(lines);
                         }
                         self.invalidate_and_redraw();
@@ -1200,6 +1250,19 @@ impl ApplicationHandler<UserEvent> for App {
                             AppCommand::CloseTab(self.active_tab),
                             &mut sidebar_changed,
                         );
+                    }
+                    MenuAction::TabJoin => {
+                        self.join_active_tab_with_next();
+                    }
+                    MenuAction::TabSeparate => {
+                        let mut sidebar_changed = false;
+                        self.handle_app_command(AppCommand::SeparateTabs, &mut sidebar_changed);
+                    }
+                    MenuAction::TabSplit => {
+                        self.split_active_tab();
+                    }
+                    MenuAction::TabRename => {
+                        self.start_renaming_active_tab();
                     }
                     MenuAction::Undo => {
                         self.route_code_editor_command(CommandId::Undo);

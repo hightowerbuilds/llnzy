@@ -2,6 +2,7 @@ use llnzy::editor::buffer::Buffer;
 use llnzy::session::Session;
 use llnzy::ui::{ActiveView, PendingClose};
 use llnzy::workspace::{TabContent, WorkspaceTab};
+use llnzy::workspace_layout::JoinedTabs;
 
 use crate::App;
 
@@ -60,6 +61,59 @@ impl App {
             }
         }
         self.force_close_tab();
+    }
+
+    pub(crate) fn join_active_tab_with_next(&mut self) -> bool {
+        if self.tabs.len() < 2 {
+            return false;
+        }
+        let primary = self.active_tab;
+        let secondary = (1..=self.tabs.len())
+            .map(|offset| (primary + offset) % self.tabs.len())
+            .find(|idx| *idx != primary);
+        let Some(secondary) = secondary else {
+            return false;
+        };
+
+        if let Some(ui) = &mut self.ui {
+            ui.joined_tabs = Some(JoinedTabs::new(primary, secondary));
+        }
+        self.resize_terminal_tabs();
+        self.clear_terminal_selection();
+        self.request_redraw();
+        true
+    }
+
+    pub(crate) fn split_active_tab(&mut self) -> bool {
+        let primary = self.active_tab;
+        let before = self.tabs.len();
+        self.new_tab();
+        if self.tabs.len() <= before {
+            return false;
+        }
+
+        let secondary = self.active_tab;
+        self.active_tab = primary;
+        if let Some(ui) = &mut self.ui {
+            ui.joined_tabs = Some(JoinedTabs::new(primary, secondary));
+        }
+        self.sync_active_tab_content();
+        self.resize_terminal_tabs();
+        self.clear_terminal_selection();
+        self.request_redraw();
+        true
+    }
+
+    pub(crate) fn start_renaming_active_tab(&mut self) -> bool {
+        let Some(tab) = self.tabs.get(self.active_tab) else {
+            return false;
+        };
+        let title = tab.display_name(self.active_tab);
+        if let Some(ui) = &mut self.ui {
+            ui.start_editing_tab(self.active_tab, Some(&title));
+        }
+        self.request_redraw();
+        true
     }
 
     pub(crate) fn kill_terminal_tab(&mut self, idx: usize) -> bool {

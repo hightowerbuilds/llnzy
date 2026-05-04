@@ -42,7 +42,7 @@ Acceptance: the two remaining smoke-test sidebar move checks can be marked compl
 
 Goal: give Stacker a surface-owned input engine that can handle normal paste, command routing, non-text editing keys, and future OS-level dictation/voice tools without relying on one-off app-shell patches.
 
-Audit note: Stacker input was split across `egui::TextEdit`, `main.rs` key routing, `runtime/terminal.rs` clipboard helpers, native menu dispatch, command palette dispatch, and formatting toolbar helpers. The first engine pass created `stacker::input` for pure insert, selection replacement, copy selection, select all, newline normalization, Backspace, and Delete operations. A second experiment added a terminal-like `CLI Pad` mode that stores text in Stacker state without using `egui::TextEdit`, but testing showed it did not improve Wispr Flow delivery and it lacked basic editor affordances such as selection deletion. The CLI Pad was removed, leaving the styled editor plus a macOS native text bridge for external text ingress. Formatting toolbar actions still mutate text locally and should be folded into the engine in the next pass.
+Audit note: Stacker input was split across `egui::TextEdit`, `main.rs` key routing, `runtime/terminal.rs` clipboard helpers, native menu dispatch, command palette dispatch, and formatting toolbar helpers. The first engine pass created `stacker::input` for pure insert, selection replacement, copy selection, select all, newline normalization, Backspace, and Delete operations. A second experiment added a terminal-like `CLI Pad` mode that stores text in Stacker state without using `egui::TextEdit`, but testing showed it did not improve Wispr Flow delivery and it lacked basic editor affordances such as selection deletion. The CLI Pad was removed, leaving the styled editor plus a macOS native text bridge for external text ingress. The first bridge optimization pass replaced full-buffer native text replacement with delta-style `StackerNativeEdit` events and stopped reactivating the AppKit responder on every redraw. Formatting toolbar actions still mutate text locally and should be folded into the engine in the next pass.
 
 - [x] Preserve the current styled Stacker prompt editor; the May 3, 2026 test showed the styling is not the Wispr Flow failure.
 - [x] Audit all Stacker command routing paths: keybindings, native menu actions, command palette actions, toolbar actions, clipboard paste, and egui `TextEdit` input.
@@ -64,7 +64,10 @@ Audit note: Stacker input was split across `egui::TextEdit`, `main.rs` key routi
 - [ ] Keep normal typing working in the styled editor.
 - [ ] Add an instrumentation flag or debug-only tracing point that can be enabled during future external input debugging without leaving noisy logs in normal development.
 - [x] Manually test and remove the experimental `CLI Pad` mode after it failed to improve Wispr Flow delivery or editing ergonomics.
-- [ ] Optimize AppKit bridge ingress latency while keeping Stacker's own input engine as the text mutation owner.
+- [x] Replace full-buffer AppKit bridge updates with delta-style native edit events routed into `StackerInputEngine`.
+- [x] Remove AppKit responder activation and native text reads from the redraw hot path.
+- [ ] Continue optimizing AppKit bridge ingress latency while keeping Stacker's own input engine as the text mutation owner.
+- [ ] Investigate the remaining roughly three-second Wispr Flow delay before AppKit commits text to the bridge.
 - [ ] Investigate why Wispr Flow queues text while Stacker is active and then delivers it through terminal paste after a terminal tab becomes active.
 - [ ] Decide whether the engine needs a native text-client bridge, a paste-command capture layer, or another platform integration point for external dictation tools.
 - [ ] Implement the chosen external text ingress path only after the current delivery mechanism is understood.
@@ -104,7 +107,13 @@ Acceptance: drag selection feels responsive enough for daily CLI/TUI work withou
 
 Goal: replace the current single joined-tab pair model with a real grouping engine that supports multiple joined tab groups and predictable context menus.
 
+Audit note: the desktop macOS menu bar now includes a top-level `Tab` menu with `New`, `Join`, `Separate`, `Split`, `Close`, and `Rename`. Those actions route through the existing active-tab runtime paths and are useful immediately, but they still sit on top of the current single joined-pair model. The next architectural pass should move the implementation underneath those menu actions to a stable-ID grouping engine rather than widening the current index-based `Option<JoinedTabs>`.
+
 - [ ] Audit current joined-tab state, rendering, divider handling, context menus, close behavior, reorder behavior, and persistence assumptions.
+- [x] Add a native desktop `Tab` menu beside File, Edit, and View.
+- [x] Route native `Tab > New`, `Join`, `Separate`, `Split`, `Close`, and `Rename` into app-level tab handlers.
+- [x] Remove `Duplicate` from the native `Tab` menu until the tab engine has a stronger duplicate semantics.
+- [x] Manually verify the native `Tab` menu appears and the basic actions work.
 - [ ] Define a tab layout model that can represent:
   - standalone tabs,
   - multiple joined groups,
@@ -118,11 +127,13 @@ Goal: replace the current single joined-tab pair model with a real grouping engi
 - [ ] Make joined group context menus open as one menu for the group, anchored to the joined tab width.
 - [ ] Use `Separate Tabs` when a tab/group is already joined.
 - [ ] Keep tab rename, close, switch, and context-menu behavior consistent between standalone tabs and grouped tabs.
+- [ ] Fix terminal scrollback routing inside joined tabs so shell panes can scroll when joined with code/Markdown panes or with another shell.
 - [ ] Make close and reorder operations remap groups by stable tab identity instead of stale indexes.
 - [ ] Preserve terminal pane sizing and editor pane buffer selection after group changes.
 - [ ] Add unit tests for group validation, close remapping, reorder remapping, and separate/join transitions.
 - [ ] Manually verify multiple joined groups.
 - [ ] Manually verify mixed groups such as Terminal + CodeFile, Git + Stacker, and CodeFile + Sketch.
+- [ ] Manually verify terminal scrollback in joined layouts: Terminal + Markdown, Terminal + CodeFile, and Terminal + Terminal.
 - [ ] Manually verify context menus, rename, close, switch, and divider behavior in grouped tabs.
 
 Acceptance: developers can rapidly join, separate, and manage multiple tab groups without menu flicker, stale indexes, or single-global-pair limitations.
