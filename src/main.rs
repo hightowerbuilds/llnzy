@@ -585,6 +585,19 @@ impl ApplicationHandler<UserEvent> for App {
                 }
             }
 
+            WindowEvent::Focused(focused) => {
+                #[cfg(target_os = "macos")]
+                {
+                    self.stacker_bridge_active = None;
+                    if focused {
+                        self.sync_macos_text_bridge();
+                    }
+                }
+                if focused {
+                    self.request_redraw();
+                }
+            }
+
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
                 if let Some(renderer) = &mut self.renderer {
                     renderer.set_scale_factor(scale_factor as f32);

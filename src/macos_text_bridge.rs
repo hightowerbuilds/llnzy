@@ -8,7 +8,7 @@ use objc2::runtime::{AnyObject, NSObjectProtocol};
 use objc2::{define_class, msg_send};
 use objc2::{MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{NSResponder, NSTextView};
-use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
+use objc2_foundation::{NSPoint, NSRange, NSRect, NSSize, NSString};
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::Window;
 
@@ -29,6 +29,11 @@ define_class!(
     struct StackerTextBridgeView;
 
     impl StackerTextBridgeView {
+        #[unsafe(method(acceptsFirstResponder))]
+        fn accepts_first_responder(&self) -> bool {
+            true
+        }
+
         #[unsafe(method(didChangeText))]
         fn did_change_text(&self) {
             if SYNCING_TEXT.load(Ordering::Relaxed) || !STACKER_ACTIVE.load(Ordering::Relaxed) {
@@ -135,6 +140,7 @@ fn sync_bridge_text(bridge: &AnyObject, text: &str) {
     {
         let mut cached = bridge_text().lock().unwrap();
         if cached.as_str() == text {
+            sync_bridge_selection_to_end(bridge, text);
             return;
         }
         *cached = text.to_string();
@@ -144,6 +150,15 @@ fn sync_bridge_text(bridge: &AnyObject, text: &str) {
         let text = NSString::from_str(text);
         let _: () = msg_send![bridge, setString: &*text];
         SYNCING_TEXT.store(false, Ordering::Relaxed);
+    }
+    sync_bridge_selection_to_end(bridge, text);
+}
+
+fn sync_bridge_selection_to_end(bridge: &AnyObject, text: &str) {
+    let location = text.encode_utf16().count();
+    unsafe {
+        let range = NSRange::new(location, 0);
+        let _: () = msg_send![bridge, setSelectedRange: range];
     }
 }
 
