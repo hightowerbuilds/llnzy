@@ -17,7 +17,7 @@ pub struct StackerPrompt {
 }
 
 pub fn stacker_path() -> Option<PathBuf> {
-    dirs::config_dir().map(|d| d.join("llnzy").join("stacker.json"))
+    crate::platform::paths::current_paths().map(|paths| paths.stacker_file())
 }
 
 pub fn prompt_label(text: &str) -> String {

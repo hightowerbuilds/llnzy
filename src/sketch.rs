@@ -570,7 +570,7 @@ impl SketchState {
 }
 
 pub fn sketch_path() -> Option<PathBuf> {
-    dirs::config_dir().map(|d| d.join("llnzy").join("sketches").join("scratch.json"))
+    crate::platform::paths::current_paths().map(|paths| paths.sketch_scratch_file())
 }
 
 pub fn load_document_from_path(path: &Path) -> Result<SketchDocument, String> {
@@ -595,7 +595,7 @@ pub fn save_default_document(document: &SketchDocument) -> Result<(), String> {
 
 /// Directory where named sketches are stored.
 pub fn sketches_dir() -> Option<PathBuf> {
-    dirs::config_dir().map(|d| d.join("llnzy").join("sketches"))
+    crate::platform::paths::current_paths().map(|paths| paths.sketches_dir())
 }
 
 /// Sanitize a user-provided sketch name into a safe filename stem.

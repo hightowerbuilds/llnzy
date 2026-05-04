@@ -589,7 +589,7 @@ mod tests {
 const MAX_RECENT: usize = 5;
 
 fn recent_projects_path() -> Option<PathBuf> {
-    dirs::config_dir().map(|d| d.join("llnzy").join("recent_projects.json"))
+    crate::platform::paths::current_paths().map(|paths| paths.recent_projects_file())
 }
 
 /// Load recent project paths from disk.

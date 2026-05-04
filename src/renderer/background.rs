@@ -239,9 +239,8 @@ impl BackgroundRenderer {
             }
         }
 
-        // Load custom shaders from ~/.config/llnzy/shaders/
-        if let Some(config_dir) = dirs::config_dir() {
-            let shader_dir = config_dir.join("llnzy").join("shaders");
+        if let Some(paths) = crate::platform::paths::current_paths() {
+            let shader_dir = paths.shaders_dir();
             if let Ok(entries) = std::fs::read_dir(&shader_dir) {
                 for entry in entries.flatten() {
                     let path = entry.path();

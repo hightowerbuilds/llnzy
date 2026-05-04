@@ -59,6 +59,11 @@ Implementation update:
 - Kept the old interactive Unix defaults intact: login shell argument, `TERM`,
   `COLORTERM`, configured shell program, cwd, PTY resize, process id, and exit
   reporting.
+- Added concrete `PlatformPathSet` resolution for config, data, cache, themes,
+  workspaces, logs, crash reports, exports, Stacker, Sketch, saved sessions,
+  recent projects, window state, backgrounds, and shaders.
+- Migrated app-owned `dirs::config_dir()` call sites behind `PlatformPaths`
+  while preserving the current on-disk `llnzy` directory layout.
 
 ## PlatformShell
 
@@ -282,7 +287,7 @@ behavior behind them.
 1. [x] Add `src/platform` with shared service types and OS-specific modules.
 2. [x] Move shell discovery and terminal spawning behind `PlatformShell` and
    `TerminalHost`.
-3. [ ] Route config, data, cache, logs, themes, and workspaces through
+3. [x] Route config, data, cache, logs, themes, and workspaces through
    `PlatformPaths`.
 4. [ ] Move open/reveal behavior behind `PlatformOpen`.
 5. [ ] Move clipboard imports behind `PlatformClipboard`.

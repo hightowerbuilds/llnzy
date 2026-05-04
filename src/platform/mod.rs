@@ -8,6 +8,7 @@ pub mod shell;
 pub mod terminal_host;
 
 pub use packaging::{BuildMode, PackageFormat, PlatformPackagingMetadata};
+pub use paths::PlatformPathSet;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PlatformFamily {
@@ -21,6 +22,7 @@ pub enum PlatformFamily {
 pub struct PlatformServices {
     pub family: PlatformFamily,
     pub packaging: PlatformPackagingMetadata,
+    pub paths: PlatformPathSet,
 }
 
 impl PlatformServices {
@@ -28,6 +30,7 @@ impl PlatformServices {
         Self {
             family: current_family(),
             packaging: PlatformPackagingMetadata::development(),
+            paths: PlatformPathSet::current_or_development(),
         }
     }
 }
@@ -56,6 +59,14 @@ mod tests {
         assert_eq!(
             services.packaging.package_format,
             PackageFormat::Development
+        );
+        assert_eq!(
+            services
+                .paths
+                .config_file()
+                .file_name()
+                .and_then(|name| name.to_str()),
+            Some("config.toml")
         );
     }
 }

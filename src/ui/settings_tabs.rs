@@ -35,10 +35,10 @@ fn push_mode(modes: &mut Vec<String>, name: &str) {
 }
 
 fn custom_shader_names() -> Vec<String> {
-    let Some(config_dir) = dirs::config_dir() else {
+    let Some(paths) = crate::platform::paths::current_paths() else {
         return Vec::new();
     };
-    let shader_dir = config_dir.join("llnzy").join("shaders");
+    let shader_dir = paths.shaders_dir();
     let Ok(entries) = std::fs::read_dir(shader_dir) else {
         return Vec::new();
     };

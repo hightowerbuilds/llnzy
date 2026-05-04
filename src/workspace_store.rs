@@ -59,7 +59,7 @@ impl TabEntry {
 
 /// Get the workspaces directory.
 fn workspaces_dir() -> Option<PathBuf> {
-    dirs::config_dir().map(|d| d.join("llnzy").join("workspaces"))
+    crate::platform::paths::current_paths().map(|paths| paths.workspaces_dir)
 }
 
 /// Save a workspace definition.
@@ -137,7 +137,7 @@ pub fn delete_workspace(name: &str) -> Result<(), String> {
 
 /// Path for the last session file.
 fn last_session_path() -> Option<PathBuf> {
-    dirs::config_dir().map(|d| d.join("llnzy").join("last_session.toml"))
+    crate::platform::paths::current_paths().map(|paths| paths.last_session_file())
 }
 
 /// A snapshot of the current session for auto-restore.

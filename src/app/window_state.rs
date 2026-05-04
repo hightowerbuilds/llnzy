@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 fn window_state_path() -> Option<PathBuf> {
-    Some(dirs::config_dir()?.join("llnzy").join("window_state.toml"))
+    crate::platform::paths::current_paths().map(|paths| paths.window_state_file())
 }
 
 pub fn save_window_placement(width: u32, height: u32, position: Option<(i32, i32)>) {

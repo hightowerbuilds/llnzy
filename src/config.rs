@@ -396,10 +396,10 @@ impl Config {
     pub fn load() -> Self {
         let mut config = Self::default();
 
-        let Some(config_dir) = dirs::config_dir() else {
+        let Some(paths) = crate::platform::paths::current_paths() else {
             return config;
         };
-        let path = config_dir.join("llnzy").join("config.toml");
+        let path = paths.config_file();
         config.config_path = Some(path.clone());
 
         config.reload_from_file();

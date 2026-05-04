@@ -3,16 +3,11 @@ use std::path::{Path, PathBuf};
 use crate::config::{ColorScheme, Config, CursorStyle, EffectsConfig};
 use crate::theme::VisualTheme;
 
-/// Get the llnzy config directory (~/.config/llnzy/).
-fn config_base() -> Option<PathBuf> {
-    dirs::config_dir().map(|d| d.join("llnzy"))
-}
-
 // ── Background Image Library ──
 
 /// Directory where saved background images live.
 pub fn backgrounds_dir() -> Option<PathBuf> {
-    config_base().map(|d| d.join("backgrounds"))
+    crate::platform::paths::current_paths().map(|paths| paths.backgrounds_dir())
 }
 
 /// Import an image file into the backgrounds library. Returns the new path.
@@ -80,7 +75,7 @@ pub fn delete_background(path: &Path) -> Result<(), String> {
 
 /// Directory where saved user themes live.
 fn themes_dir() -> Option<PathBuf> {
-    config_base().map(|d| d.join("themes"))
+    crate::platform::paths::current_paths().map(|paths| paths.themes_dir)
 }
 
 /// A serializable theme definition.

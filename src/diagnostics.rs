@@ -1,9 +1,7 @@
 use std::path::{Path, PathBuf};
 
 pub fn diagnostics_dir() -> PathBuf {
-    dirs::config_dir()
-        .map(|dir| dir.join("llnzy").join("logs"))
-        .unwrap_or_else(|| fallback_diagnostics_dir().join("llnzy").join("logs"))
+    crate::platform::paths::development_paths().logs_dir
 }
 
 pub fn diagnostics_path(filename: impl AsRef<Path>) -> PathBuf {
@@ -19,10 +17,6 @@ pub fn write_diagnostic(
         std::fs::create_dir_all(parent)?;
     }
     std::fs::write(path, contents)
-}
-
-fn fallback_diagnostics_dir() -> PathBuf {
-    std::env::current_dir().unwrap_or_else(|_| std::env::temp_dir())
 }
 
 #[cfg(test)]
