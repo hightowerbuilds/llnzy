@@ -64,6 +64,10 @@ Implementation update:
   recent projects, window state, backgrounds, and shaders.
 - Migrated app-owned `dirs::config_dir()` call sites behind `PlatformPaths`
   while preserving the current on-disk `llnzy` directory layout.
+- Added `PlatformOpen` execution helpers for URLs, files, folders, and reveal
+  requests with macOS, Windows, and Linux command policies.
+- Routed terminal hyperlink opening through `PlatformOpen` instead of calling
+  macOS `open` directly from the main app loop.
 
 ## PlatformShell
 
@@ -289,7 +293,7 @@ behavior behind them.
    `TerminalHost`.
 3. [x] Route config, data, cache, logs, themes, and workspaces through
    `PlatformPaths`.
-4. [ ] Move open/reveal behavior behind `PlatformOpen`.
+4. [x] Move open/reveal behavior behind `PlatformOpen`.
 5. [ ] Move clipboard imports behind `PlatformClipboard`.
 6. [ ] Route native menu callbacks through app command IDs via `PlatformMenu`.
 7. [ ] Normalize keyboard, IME, and terminal input through `PlatformInput`.

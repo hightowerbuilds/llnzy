@@ -1121,7 +1121,9 @@ impl ApplicationHandler<UserEvent> for App {
                                 }
                             });
                         if let Some(url) = url {
-                            let _ = std::process::Command::new("open").arg(&url).spawn();
+                            if let Err(error) = llnzy::platform::open::open_url(url) {
+                                log::warn!("Failed to open terminal URL: {error}");
+                            }
                         }
                     }
                     return;
