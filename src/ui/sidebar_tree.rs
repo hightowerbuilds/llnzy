@@ -187,29 +187,34 @@ fn wrapped_tree_label(
     text: &str,
     font_size: f32,
     color: egui::Color32,
-    strong: bool,
+    _strong: bool,
 ) -> egui::Response {
     let available_w = ui.available_width().max(48.0);
-    let approx_char_w = (font_size * 0.58).max(6.0);
-    let chars_per_line = (available_w / approx_char_w).floor().max(8.0) as usize;
-    let line_count = text.chars().count().div_ceil(chars_per_line).clamp(1, 2);
-    let height = if line_count > 1 {
-        font_size * 2.65
-    } else {
-        font_size * 1.45
-    };
+    let mut job = egui::text::LayoutJob::simple(
+        text.to_string(),
+        egui::FontId::proportional(font_size),
+        color,
+        available_w,
+    );
+    job.halign = egui::Align::LEFT;
+    job.justify = false;
+    job.wrap.max_rows = 2;
+    job.wrap.break_anywhere = true;
 
-    let mut rich = egui::RichText::new(text).size(font_size).color(color);
-    if strong {
-        rich = rich.strong();
+    let galley = ui.fonts(|fonts| fonts.layout_job(job));
+    let height = galley.size().y.max(font_size * 1.45) + 2.0;
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(available_w, height),
+        egui::Sense::click_and_drag(),
+    );
+    let text_y = rect.top() + ((rect.height() - galley.size().y) * 0.5).max(0.0);
+
+    if ui.is_rect_visible(rect) {
+        ui.painter()
+            .galley(egui::pos2(rect.left(), text_y), galley, color);
     }
 
-    ui.add_sized(
-        [available_w, height],
-        egui::Label::new(rich)
-            .wrap()
-            .sense(egui::Sense::click_and_drag()),
-    )
+    response
 }
 
 fn handle_file_drag(
