@@ -134,9 +134,7 @@ impl App {
         } else {
             String::new()
         };
-        if self.stacker_bridge_active == Some(active)
-            && (!active || self.stacker_bridge_text == text)
-        {
+        if !active && self.stacker_bridge_active == Some(false) {
             return;
         }
         llnzy::macos_text_bridge::set_stacker_active(window, active, &text);
