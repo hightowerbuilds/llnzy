@@ -2,6 +2,9 @@ use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize}
 use std::io::{self, Read, Write};
 use std::sync::mpsc;
 
+use crate::platform::shell::ShellProfile;
+use crate::platform::terminal_host::TerminalLaunchSpec;
+
 /// Result of a non-blocking PTY read.
 pub enum PtyReadResult {
     /// Data was available.
@@ -39,7 +42,14 @@ impl Pty {
         proxy: winit::event_loop::EventLoopProxy<crate::UserEvent>,
         cwd: Option<&str>,
     ) -> io::Result<Self> {
-        Self::spawn_in_with_proxy(shell, cols, rows, Some(proxy), cwd)
+        Self::spawn_with_proxy(launch_spec(shell, cols, rows, cwd), Some(proxy))
+    }
+
+    pub fn spawn_with_spec(
+        spec: TerminalLaunchSpec,
+        proxy: winit::event_loop::EventLoopProxy<crate::UserEvent>,
+    ) -> io::Result<Self> {
+        Self::spawn_with_proxy(spec, Some(proxy))
     }
 
     #[cfg(test)]
@@ -49,31 +59,31 @@ impl Pty {
         rows: u16,
         cwd: Option<&str>,
     ) -> io::Result<Self> {
-        Self::spawn_in_with_proxy(shell, cols, rows, None, cwd)
+        Self::spawn_with_proxy(launch_spec(shell, cols, rows, cwd), None)
     }
 
-    fn spawn_in_with_proxy(
-        shell: &str,
-        cols: u16,
-        rows: u16,
+    fn spawn_with_proxy(
+        spec: TerminalLaunchSpec,
         proxy: Option<winit::event_loop::EventLoopProxy<crate::UserEvent>>,
-        cwd: Option<&str>,
     ) -> io::Result<Self> {
         let pty_system = native_pty_system();
         let size = PtySize {
-            rows,
-            cols,
+            rows: spec.rows,
+            cols: spec.cols,
             pixel_width: 0,
             pixel_height: 0,
         };
 
         let pair = pty_system.openpty(size).map_err(io::Error::other)?;
 
-        let mut cmd = CommandBuilder::new(shell);
-        cmd.arg("-l");
-        cmd.env("TERM", "xterm-256color");
-        cmd.env("COLORTERM", "truecolor");
-        if let Some(dir) = cwd {
+        let mut cmd = CommandBuilder::new(spec.program.to_string_lossy().as_ref());
+        for arg in &spec.args {
+            cmd.arg(arg);
+        }
+        for (key, value) in &spec.env {
+            cmd.env(key, value);
+        }
+        if let Some(dir) = &spec.cwd {
             cmd.cwd(dir);
         }
 
@@ -192,6 +202,11 @@ impl Pty {
             pixel_height: 0,
         });
     }
+}
+
+fn launch_spec(shell: &str, cols: u16, rows: u16, cwd: Option<&str>) -> TerminalLaunchSpec {
+    let profile = ShellProfile::interactive_default(shell, cwd);
+    TerminalLaunchSpec::interactive_shell(&profile, cols, rows)
 }
 
 #[cfg(test)]

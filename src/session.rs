@@ -1,4 +1,6 @@
 use crate::config::Config;
+use crate::platform::shell::ShellProfile;
+use crate::platform::terminal_host::TerminalLaunchSpec;
 use crate::pty::{Pty, PtyReadResult};
 use crate::terminal::{Terminal, TerminalEvent};
 
@@ -30,7 +32,9 @@ impl Session {
         cwd: Option<&str>,
     ) -> std::io::Result<Self> {
         let terminal = Terminal::new(cols, rows);
-        let pty = Pty::spawn_in(&config.shell, cols, rows, proxy, cwd)?;
+        let shell_profile = ShellProfile::interactive_default(&config.shell, cwd);
+        let launch_spec = TerminalLaunchSpec::interactive_shell(&shell_profile, cols, rows);
+        let pty = Pty::spawn_with_spec(launch_spec, proxy)?;
         let process_id = pty.process_id();
         Ok(Session {
             terminal,

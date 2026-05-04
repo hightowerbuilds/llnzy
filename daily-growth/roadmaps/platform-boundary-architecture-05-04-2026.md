@@ -54,6 +54,11 @@ Implementation update:
 - The skeleton is intentionally not wired into runtime behavior yet; the next
   compatibility pass should migrate one platform-sensitive behavior at a time
   behind these types.
+- Routed terminal shell startup through `ShellProfile` and
+  `TerminalLaunchSpec` while preserving the existing portable-pty runtime.
+- Kept the old interactive Unix defaults intact: login shell argument, `TERM`,
+  `COLORTERM`, configured shell program, cwd, PTY resize, process id, and exit
+  reporting.
 
 ## PlatformShell
 
@@ -275,7 +280,7 @@ Start by introducing type definitions and no-surprise wrappers, then move
 behavior behind them.
 
 1. [x] Add `src/platform` with shared service types and OS-specific modules.
-2. [ ] Move shell discovery and terminal spawning behind `PlatformShell` and
+2. [x] Move shell discovery and terminal spawning behind `PlatformShell` and
    `TerminalHost`.
 3. [ ] Route config, data, cache, logs, themes, and workspaces through
    `PlatformPaths`.
