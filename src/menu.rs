@@ -1,5 +1,6 @@
 //! Native macOS menu bar setup.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
 
 use objc2::rc::Retained;
@@ -16,7 +17,10 @@ use crate::UserEvent;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MenuAction {
     NewTab,
+    Save,
     CloseTab,
+    Undo,
+    Redo,
     Copy,
     Paste,
     SelectAll,
@@ -31,6 +35,7 @@ pub enum MenuAction {
 
 static EVENT_PROXY: OnceLock<winit::event_loop::EventLoopProxy<UserEvent>> = OnceLock::new();
 static MENU_TARGET: OnceLock<usize> = OnceLock::new();
+static SAVE_MENU_ITEM: AtomicUsize = AtomicUsize::new(0);
 
 define_class!(
     #[unsafe(super(NSObject))]
@@ -43,9 +48,24 @@ define_class!(
             send_action(MenuAction::NewTab);
         }
 
+        #[unsafe(method(llnzySave:))]
+        fn save(&self, _sender: &AnyObject) {
+            send_action(MenuAction::Save);
+        }
+
         #[unsafe(method(llnzyCloseTab:))]
         fn close_tab(&self, _sender: &AnyObject) {
             send_action(MenuAction::CloseTab);
+        }
+
+        #[unsafe(method(llnzyUndo:))]
+        fn undo(&self, _sender: &AnyObject) {
+            send_action(MenuAction::Undo);
+        }
+
+        #[unsafe(method(llnzyRedo:))]
+        fn redo(&self, _sender: &AnyObject) {
+            send_action(MenuAction::Redo);
         }
 
         #[unsafe(method(copy:))]
@@ -134,6 +154,7 @@ pub fn setup_menu_bar(proxy: winit::event_loop::EventLoopProxy<UserEvent>) {
 
     // File menu
     let file_menu = NSMenu::initWithTitle(mtm.alloc(), &NSString::from_str("File"));
+    file_menu.setAutoenablesItems(false);
     file_menu.addItem(&make_app_item(
         mtm,
         target,
@@ -141,6 +162,10 @@ pub fn setup_menu_bar(proxy: winit::event_loop::EventLoopProxy<UserEvent>) {
         sel!(llnzyNewTab:),
         "t",
     ));
+    let save_item = make_app_item(mtm, target, "Save", sel!(llnzySave:), "s");
+    save_item.setEnabled(false);
+    SAVE_MENU_ITEM.store(&*save_item as *const NSMenuItem as usize, Ordering::Relaxed);
+    file_menu.addItem(&save_item);
     file_menu.addItem(&make_app_item(
         mtm,
         target,
@@ -169,6 +194,9 @@ pub fn setup_menu_bar(proxy: winit::event_loop::EventLoopProxy<UserEvent>) {
 
     // Edit menu
     let edit_menu = NSMenu::initWithTitle(mtm.alloc(), &NSString::from_str("Edit"));
+    edit_menu.addItem(&make_app_item(mtm, target, "Undo", sel!(llnzyUndo:), "z"));
+    edit_menu.addItem(&make_app_item(mtm, target, "Redo", sel!(llnzyRedo:), "Z"));
+    edit_menu.addItem(&NSMenuItem::separatorItem(mtm));
     edit_menu.addItem(&make_app_item(mtm, target, "Copy", sel!(copy:), "c"));
     edit_menu.addItem(&make_app_item(mtm, target, "Paste", sel!(paste:), "v"));
     edit_menu.addItem(&make_app_item(
@@ -205,6 +233,18 @@ pub fn setup_menu_bar(proxy: winit::event_loop::EventLoopProxy<UserEvent>) {
     main_menu.addItem(&view_item);
 
     app.setMainMenu(Some(&main_menu));
+}
+
+/// Enable Save only when the active surface can handle a file save.
+pub fn set_save_enabled(enabled: bool) {
+    let ptr = SAVE_MENU_ITEM.load(Ordering::Relaxed);
+    if ptr == 0 {
+        return;
+    }
+
+    unsafe {
+        (&*(ptr as *const NSMenuItem)).setEnabled(enabled);
+    }
 }
 
 fn make_system_item(

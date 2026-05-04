@@ -36,10 +36,13 @@ This document tracks the reliability and durability checks that still need human
   - May 3, 2026: Follow-up adjusted joined-tab context menus so already joined tabs show Separate Tabs directly instead of Join Tabs.
   - May 3, 2026: Follow-up adjusted tab context menu rows so each row is full-width clickable and Join Tabs stays open while switching to the join-target list.
   - May 3, 2026: Follow-up adjusted joined tabs to use one group-level context menu anchored to the full joined tab width instead of separate primary/secondary segment menus.
+- [x] Use menu actions and confirm they route through the same behavior as keybindings.
+  - May 3, 2026: Manual pass found File menu was missing Save even though Cmd+S worked. Added File > Save permanently, routed it through the same CodeFile save command as Cmd+S, and grayed it out outside code-file tabs.
+  - May 3, 2026: Follow-up found saving could prevent undoing back past the saved edit. Fixed the file watcher so LLNZY's own matching save event does not reload the clean buffer and wipe undo history.
+  - May 3, 2026: Added Edit > Undo and Edit > Redo to the native desktop Edit menu and routed them through the same editor commands as Cmd+Z and Cmd+Shift+Z. Manual retest confirmed Undo/Redo work from the menu.
 
 ### Next: Command Routing
 
-- [ ] Use menu actions and confirm they route through the same behavior as keybindings.
 - [ ] Confirm Settings hotkey legend entries match actual behavior for common shortcuts.
 
 ---

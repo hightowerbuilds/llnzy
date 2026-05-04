@@ -25,7 +25,7 @@ use llnzy::renderer::{RenderRequest, Renderer, TerminalPane};
 use llnzy::search::Search;
 use llnzy::ui::command_palette::CommandId;
 use llnzy::ui::{ActiveView, PendingClose, UiFrameOutput, UiState, BUMPER_WIDTH};
-use llnzy::workspace::{TabContent, WorkspaceTab};
+use llnzy::workspace::{TabContent, TabKind, WorkspaceTab};
 use llnzy::workspace_layout::{
     joined_content_rects, joined_terminal_content_rects, terminal_effect_rect, valid_joined_tabs,
     JoinedTabs,
@@ -508,6 +508,11 @@ impl ApplicationHandler<UserEvent> for App {
                             ui.set_tab_context(self.tabs.len(), self.active_tab);
                             ui.active_tab_kind =
                                 self.tabs.get(self.active_tab).map(|t| t.content.kind());
+                            #[cfg(target_os = "macos")]
+                            llnzy::menu::set_save_enabled(matches!(
+                                ui.active_tab_kind,
+                                Some(TabKind::CodeFile)
+                            ));
                             // Populate tab names for egui tab bar
                             ui.tab_names = tab_info.clone();
                             ui.tab_panes = tab_pane_info.clone();
@@ -1193,12 +1198,21 @@ impl ApplicationHandler<UserEvent> for App {
                         let mut sidebar_changed = false;
                         self.handle_app_command(AppCommand::NewTerminalTab, &mut sidebar_changed);
                     }
+                    MenuAction::Save => {
+                        self.route_code_editor_command(CommandId::Save);
+                    }
                     MenuAction::CloseTab => {
                         let mut sidebar_changed = false;
                         self.handle_app_command(
                             AppCommand::CloseTab(self.active_tab),
                             &mut sidebar_changed,
                         );
+                    }
+                    MenuAction::Undo => {
+                        self.route_code_editor_command(CommandId::Undo);
+                    }
+                    MenuAction::Redo => {
+                        self.route_code_editor_command(CommandId::Redo);
                     }
                     MenuAction::Copy => {
                         if self.route_code_editor_command(CommandId::Copy) {

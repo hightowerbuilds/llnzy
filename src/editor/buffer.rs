@@ -1010,6 +1010,24 @@ mod tests {
     }
 
     #[test]
+    fn save_preserves_undo_history() {
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("llnzy-undo-save-{}.txt", std::process::id()));
+        std::fs::write(&path, "hello").unwrap();
+
+        let mut buf = Buffer::from_file(&path).unwrap();
+        buf.insert(Position::new(0, 5), " world");
+        buf.save().unwrap();
+        assert!(!buf.is_modified());
+
+        assert!(buf.undo().is_some());
+        assert_eq!(buf.text(), "hello");
+        assert!(buf.is_modified());
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
     fn failed_save_keeps_buffer_modified() {
         let missing_parent =
             std::env::temp_dir().join(format!("llnzy-missing-parent-{}", std::process::id()));

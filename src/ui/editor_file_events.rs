@@ -103,6 +103,11 @@ pub(super) fn poll_file_watcher(editor_state: &mut EditorViewState) {
                 let Some(buffer_id) = editor_state.editor.buffer_id(idx) else {
                     continue;
                 };
+                if !editor_state.editor.buffers[idx].is_modified()
+                    && buffer_matches_file_content(&editor_state.editor.buffers[idx], &path)
+                {
+                    continue;
+                }
 
                 match plan_external_file_event(
                     &FileChange::Modified(path.clone()),
@@ -354,6 +359,13 @@ fn reload_buffer(
     }
 }
 
+fn buffer_matches_file_content(buffer: &Buffer, path: &std::path::Path) -> bool {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    text.replace("\r\n", "\n") == buffer.text()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -370,6 +382,27 @@ mod tests {
             plan_external_file_event(&change, false),
             ExternalFileDecision::ReloadCleanModified
         );
+    }
+
+    #[test]
+    fn matching_file_content_does_not_require_reload() {
+        let path = temp_file_path("matching-content");
+        std::fs::write(&path, "hello\nworld").unwrap();
+        let buffer = Buffer::from_file(&path).unwrap();
+
+        assert!(buffer_matches_file_content(&buffer, &path));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn different_file_content_requires_reload() {
+        let path = temp_file_path("different-content");
+        std::fs::write(&path, "hello").unwrap();
+        let buffer = Buffer::from_file(&path).unwrap();
+        std::fs::write(&path, "changed").unwrap();
+
+        assert!(!buffer_matches_file_content(&buffer, &path));
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]
