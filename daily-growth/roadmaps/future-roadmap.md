@@ -11,6 +11,8 @@ not need to block the current leftovers roadmap.
   open and multiple shell sessions running at the same time.
 - [ ] Verify Wispr Flow delivery when switching between grouped shells,
   standalone shells, Stacker, and editor tabs.
+- [ ] Manually verify Wispr Flow delivery in joined layouts where one pane is
+  Stacker, especially Terminal + Stacker and CodeFile + Stacker.
 - [x] Resolve Stacker-specific Wispr Flow delivery by moving Stacker text entry
   onto a WebView-backed native browser textarea while keeping the Rust document
   model as the durable source of saved prompt state.
@@ -22,7 +24,7 @@ not need to block the current leftovers roadmap.
   of those paths.
 - [x] Keep the Rust Stacker document model as the durable owner of saved prompt
   state while the WebView textarea owns live text entry.
-- [ ] Define the command handoff contract external tools need when they target
+- [x] Define the command handoff contract external tools need when they target
   Stacker or the code editor: insert text, replace selection, apply formatting,
   submit command, copy, paste, select all, undo, and redo.
 - [ ] Verify whether Wispr Flow sends text through IME commit, pasteboard paste,
@@ -72,7 +74,7 @@ not need to block the current leftovers roadmap.
 - [x] Make saved-prompt delete behavior safe around dirty drafts: deleting the
   currently edited prompt should either require saving/canceling the draft first
   or clearly discard the draft through the same warning modal pattern.
-- [ ] Manually verify saved-prompt edit and delete behavior, including queue
+- [x] Manually verify saved-prompt edit and delete behavior, including queue
   state, dirty draft state, persistence to `stacker.json`, and undo/redo
   expectations after loading another prompt.
 - [x] Add an instrumentation flag or debug-only tracing point for future
@@ -92,7 +94,7 @@ not need to block the current leftovers roadmap.
   prompt persistence, dirty draft tracking, and formatting command state.
 - [x] Sync Rust-side formatting/command edits back into the WebView textarea
   without resetting the user's cursor on every redraw.
-- [ ] Manually verify typing, copy, paste, select all, undo, redo, formatting
+- [x] Manually verify typing, copy, paste, select all, undo, redo, formatting
   toolbar actions, dirty-draft warning, save behavior, and queue actions.
 - [x] Manually verify Wispr Flow or a comparable OS-level dictation/paste tool
   after the external ingress path is implemented.
