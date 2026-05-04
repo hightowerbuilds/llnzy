@@ -1,11 +1,9 @@
 use std::time::{Duration, Instant};
 
+use llnzy::external_command::ExternalAction;
 use llnzy::external_input_trace;
-use llnzy::input::text_should_use_paste_path;
 use llnzy::session::Session;
-use llnzy::stacker::commands::{
-    execute_stacker_command_at, stacker_editor_command, StackerCommandId,
-};
+use llnzy::stacker::commands::StackerCommandId;
 use llnzy::stacker::input::StackerSelection;
 use llnzy::ui::{stacker_cursor, STACKER_PROMPT_EDITOR_ID};
 use llnzy::workspace::{TabContent, WorkspaceTab};
@@ -106,68 +104,20 @@ impl App {
         true
     }
 
-    pub(crate) fn paste_text(&mut self, text: &str) {
-        let bracketed = self
-            .active_session()
-            .is_some_and(|s| s.terminal.bracketed_paste());
-        external_input_trace::trace("terminal.paste_text", || {
-            format!("chars={}, bracketed={}", text.chars().count(), bracketed)
-        });
-        if bracketed {
-            let mut bytes = Vec::with_capacity(text.len() + 12);
-            bytes.extend_from_slice(b"\x1b[200~");
-            bytes.extend_from_slice(text.as_bytes());
-            bytes.extend_from_slice(b"\x1b[201~");
-            self.write_to_active(&bytes);
-        } else {
-            self.write_to_active(text.as_bytes());
-        }
-    }
-
     pub(crate) fn write_text_to_active(&mut self, text: &str) {
-        if text_should_use_paste_path(text) {
-            self.paste_text(text);
-        } else {
-            self.write_to_active(text.as_bytes());
-        }
+        self.dispatch_active_external_action(ExternalAction::InsertText {
+            text: text.to_string(),
+        });
     }
 
     pub(crate) fn append_text_to_stacker_editor(&mut self, text: &str) -> bool {
-        if text.is_empty() {
+        if !self.active_stacker_tab() {
             return false;
         }
-
-        let Some(tab) = self.active_tab() else {
-            return false;
-        };
-        if !matches!(tab.content, TabContent::Stacker) {
-            return false;
-        }
-
-        let Some(ui) = &mut self.ui else {
-            return false;
-        };
-
-        let selection = current_stacker_selection(ui);
-        let outcome = ui.stacker.editor.insert_text(selection, text);
-        if !outcome.changed {
-            return false;
-        }
-        external_input_trace::trace("stacker.append_text", || {
-            format!(
-                "chars={}, selection={}..{}, cursor={}",
-                text.chars().count(),
-                selection.start,
-                selection.end,
-                outcome.cursor
-            )
-        });
-        store_stacker_cursor(ui, outcome.cursor);
-        ui.stacker
-            .draft
-            .record_current_text(ui.stacker.editor.text().to_string());
-        self.request_redraw();
-        true
+        self.dispatch_active_external_action(ExternalAction::InsertText {
+            text: text.to_string(),
+        })
+        .was_handled()
     }
 
     #[cfg(target_os = "macos")]
@@ -219,24 +169,11 @@ impl App {
     }
 
     pub(crate) fn copy_stacker_editor_selection(&mut self) -> bool {
-        let Some(tab) = self.active_tab() else {
-            return false;
-        };
-        if !matches!(tab.content, TabContent::Stacker) {
+        if !self.active_stacker_tab() {
             return false;
         }
-
-        let selected = self.ui.as_ref().and_then(|ui| {
-            let selection = current_stacker_selection(ui);
-            ui.stacker.editor.selected_text(selection)
-        });
-
-        if let Some(text) = selected {
-            if let Some(clipboard) = &mut self.clipboard {
-                let _ = clipboard.set_text(text);
-            }
-        }
-        true
+        self.dispatch_active_external_action(ExternalAction::Copy)
+            .was_handled()
     }
 
     pub(crate) fn delete_stacker_editor_backward(&mut self) -> bool {
@@ -277,101 +214,43 @@ impl App {
     }
 
     pub(crate) fn select_all_stacker_editor(&mut self) -> bool {
-        let Some(tab) = self.active_tab() else {
-            return false;
-        };
-        if !matches!(tab.content, TabContent::Stacker) {
+        if !self.active_stacker_tab() {
             return false;
         }
-
-        let Some(ui) = &mut self.ui else {
-            return false;
-        };
-
-        let selection = ui.stacker.editor.select_all();
-        store_stacker_selection(ui, selection);
-        self.request_redraw();
-        true
+        self.dispatch_active_external_action(ExternalAction::SelectAll)
+            .was_handled()
     }
 
     pub(crate) fn undo_stacker_editor(&mut self) -> bool {
-        self.apply_stacker_history_edit(true)
+        if !self.active_stacker_tab() {
+            return false;
+        }
+        self.dispatch_active_external_action(ExternalAction::Undo)
+            .was_handled()
     }
 
     pub(crate) fn redo_stacker_editor(&mut self) -> bool {
-        self.apply_stacker_history_edit(false)
+        if !self.active_stacker_tab() {
+            return false;
+        }
+        self.dispatch_active_external_action(ExternalAction::Redo)
+            .was_handled()
     }
 
     pub(crate) fn apply_stacker_editor_command(&mut self, command_id: StackerCommandId) -> bool {
-        let Some(tab) = self.active_tab() else {
-            return false;
-        };
-        if !matches!(tab.content, TabContent::Stacker) {
+        if !self.active_stacker_tab() {
             return false;
         }
-
-        let Some(ui) = &mut self.ui else {
-            return false;
-        };
-
-        let selection = current_stacker_selection(ui);
-        let outcome = execute_stacker_command_at(
-            &mut ui.stacker.editor,
-            selection,
-            stacker_editor_command(command_id),
-        );
-        store_stacker_selection(ui, outcome.selection);
-        if outcome.changed {
-            ui.stacker
-                .draft
-                .record_current_text(ui.stacker.editor.text().to_string());
-            self.request_redraw();
-        }
-        outcome.changed
-    }
-
-    fn apply_stacker_history_edit(&mut self, undo: bool) -> bool {
-        let Some(tab) = self.active_tab() else {
-            return false;
-        };
-        if !matches!(tab.content, TabContent::Stacker) {
-            return false;
-        }
-
-        let Some(ui) = &mut self.ui else {
-            return false;
-        };
-
-        let changed = if undo {
-            ui.stacker.editor.undo()
-        } else {
-            ui.stacker.editor.redo()
-        };
-        if !changed {
-            return false;
-        }
-
-        let selection = ui.stacker.editor.selection();
-        store_stacker_selection(ui, selection);
-        ui.stacker
-            .draft
-            .record_current_text(ui.stacker.editor.text().to_string());
-        self.request_redraw();
-        true
+        self.dispatch_active_external_action(ExternalAction::ApplyFormatting(command_id))
+            .changed
     }
 
     pub(crate) fn copy_selection(&mut self) -> bool {
-        let Some(session) = self.active_session() else {
+        if self.active_session().is_none() {
             return false;
-        };
-        let Some(text) = session.terminal.selected_text() else {
-            return false;
-        };
-        let Some(cb) = &mut self.clipboard else {
-            return false;
-        };
-
-        cb.set_text(text).is_ok()
+        }
+        self.dispatch_active_external_action(ExternalAction::Copy)
+            .was_handled()
     }
 
     pub(crate) fn mouse_reporting(&self) -> bool {
@@ -390,23 +269,11 @@ impl App {
     }
 
     pub(crate) fn do_paste(&mut self) {
-        let text = self
-            .clipboard
-            .as_mut()
-            .and_then(|clipboard| clipboard.get_text().ok());
-        if let Some(text) = text {
-            if self.append_text_to_stacker_editor(&text) {
-                return;
-            }
-            self.paste_text(&text);
-        }
+        self.dispatch_active_external_action(ExternalAction::Paste);
     }
 
     pub(crate) fn do_select_all(&mut self) {
-        if let Some(s) = self.active_session_mut() {
-            s.terminal.select_all();
-        }
-        self.request_redraw();
+        self.dispatch_active_external_action(ExternalAction::SelectAll);
     }
 
     pub(crate) fn clear_terminal_selection(&mut self) {
@@ -421,7 +288,7 @@ impl App {
     }
 }
 
-fn current_stacker_selection(ui: &llnzy::ui::UiState) -> StackerSelection {
+pub(crate) fn current_stacker_selection(ui: &llnzy::ui::UiState) -> StackerSelection {
     let editor_id = egui::Id::new(STACKER_PROMPT_EDITOR_ID);
     stacker_cursor::current_selection(
         &ui.ctx,
@@ -431,12 +298,12 @@ fn current_stacker_selection(ui: &llnzy::ui::UiState) -> StackerSelection {
     )
 }
 
-fn store_stacker_cursor(ui: &mut llnzy::ui::UiState, cursor: usize) {
+pub(crate) fn store_stacker_cursor(ui: &mut llnzy::ui::UiState, cursor: usize) {
     let cursor = cursor.min(ui.stacker.editor.char_count());
     store_stacker_selection(ui, StackerSelection::collapsed(cursor));
 }
 
-fn store_stacker_selection(ui: &mut llnzy::ui::UiState, selection: StackerSelection) {
+pub(crate) fn store_stacker_selection(ui: &mut llnzy::ui::UiState, selection: StackerSelection) {
     let editor_id = egui::Id::new(STACKER_PROMPT_EDITOR_ID);
     let ctx = ui.ctx.clone();
     stacker_cursor::store_document_selection(&ctx, editor_id, &mut ui.stacker.editor, selection);

@@ -11,11 +11,7 @@ use crate::stacker::{
     stacker_path, StackerPrompt,
 };
 
-use super::{
-    stacker_cursor,
-    stacker_state::{PendingStackerDraftSwitch, StackerUiState},
-    STACKER_PROMPT_EDITOR_ID,
-};
+use super::{stacker_cursor, stacker_state::PendingStackerDraftSwitch, STACKER_PROMPT_EDITOR_ID};
 
 const S: f32 = 14.0;
 pub(crate) const DEFAULT_EDITOR_FONT_SIZE: f32 = 16.0;
@@ -47,20 +43,6 @@ fn small(text: &str) -> egui::RichText {
 
 fn stacker_editor_font(font_size: f32) -> egui::FontId {
     egui::FontId::new(font_size, egui::FontFamily::Name(ATKINSON.into()))
-}
-
-pub(crate) fn apply_registered_stacker_command(
-    ctx: &egui::Context,
-    stacker: &mut StackerUiState,
-    command_id: StackerCommandId,
-) -> bool {
-    apply_editor_command(
-        ctx,
-        egui::Id::new(STACKER_PROMPT_EDITOR_ID),
-        &mut stacker.editor,
-        &mut stacker.draft,
-        stacker_editor_command(command_id),
-    )
 }
 
 /// Render the Stacker (prompt queue) view -- minimalist flat-list design.

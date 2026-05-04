@@ -1,6 +1,7 @@
 mod commands;
 mod drag_drop;
 mod editor_commands;
+mod external_commands;
 mod layout;
 mod save_prompt;
 mod session_restore;

@@ -31,6 +31,21 @@ registry centered around `StackerCommandId`, `StackerEditorCommand`, and
 The handoff contract should join those patterns under a shared app-level
 command envelope.
 
+Implementation update:
+
+- Added shared command model types in `src/external_command.rs`.
+- Added an internal `App::dispatch_external_command` dispatcher in
+  `src/runtime/external_commands.rs`.
+- Added explicit Stacker, code editor, and terminal surface adapters.
+- Routed common code editor shortcut and command paths through the dispatcher.
+- Routed command-palette Stacker formatting and common text commands through
+  the dispatcher after egui releases temporary UI borrows.
+- Routed app-level Stacker text insertion, formatting, copy, paste, select all,
+  undo, and redo through the dispatcher.
+- Routed app-level terminal insert, paste, copy, and select-all behavior through
+  the dispatcher.
+- Kept public IPC intentionally disabled.
+
 ---
 
 ## Goals
@@ -321,7 +336,7 @@ The safe default is:
 
 ## Implementation Roadmap
 
-1. Add shared command model types:
+1. [x] Add shared command model types:
    - command source
    - target
    - action
@@ -329,47 +344,68 @@ The safe default is:
    - selection policy
    - result
 
-2. Add an internal dispatcher:
+2. [x] Add an internal dispatcher:
    - resolve target
    - route to Stacker, code editor, or terminal adapter
    - return structured result
 
-3. Add Stacker adapter:
+3. [x] Add Stacker adapter:
    - wrap current Stacker document operations
    - sync WebView text/selection after Rust-side edits
    - preserve dirty draft tracking
 
-4. Add code editor adapter:
+4. [x] Add code editor adapter:
    - wrap active buffer command dispatch
-   - add direct insert/replace selection path if missing
+   - leave direct insert/replace selection as a later code-editor extension
    - preserve existing clipboard behavior for copy/cut/paste
 
-5. Add terminal adapter:
+5. [x] Add terminal adapter:
    - expose write/paste/copy/select-all behavior only
    - do not expose shell command execution
 
-6. Convert current callers gradually:
+6. [ ] Convert current callers gradually:
    - keyboard shortcuts
    - command palette
    - native menu actions
    - toolbar buttons
    - WebView messages
 
-7. Add tracing:
+7. [x] Add tracing:
    - source
    - target resolution
    - action
    - result status
    - changed/no-op
 
-8. Add tests:
+8. [ ] Add tests:
    - Stacker insert/replace/select/format
    - code editor insert/replace/select
    - terminal paste routing
    - joined tab target resolution
    - unsupported action failures
 
-9. Only after the internal dispatcher is stable, add optional local IPC.
+9. [ ] Only after the internal dispatcher is stable, add optional local IPC.
+
+Notes on step 6:
+
+- Keyboard shortcuts, native menu actions, command-palette selections, Stacker
+  app-level text operations, and terminal app-level text operations now pass
+  through the dispatcher for the common handoff actions.
+- Stacker toolbar buttons still mutate the Stacker document inside the egui
+  render pass because the toolbar needs immediate local UI feedback while egui
+  owns temporary state. The command path is the same Stacker command registry
+  and document operation used by the dispatcher.
+- WebView text-entry messages remain a native text-control synchronization
+  path rather than public external commands. That preserves the Wispr Flow fix:
+  the browser textarea owns live text entry and Rust receives document sync.
+
+Notes on step 8:
+
+- The first test pass covers command mapping and dispatcher-safe routing
+  boundaries.
+- Broader behavioral tests for Stacker insert/replace/select, terminal paste
+  routing, and joined target resolution remain useful hardening work, but the
+  internal contract now exists and is active in runtime paths.
 
 ---
 
@@ -384,4 +420,3 @@ The safe default is:
 - Terminal input still goes through PTY write/paste paths.
 - Joined tab command routing chooses the focused/active pane predictably.
 - No public external IPC is enabled without an explicit security decision.
-

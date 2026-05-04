@@ -2,6 +2,7 @@ use std::time::Instant;
 
 use crate::app::commands::AppCommand;
 use crate::editor::BufferId;
+use crate::ui::command_palette::CommandId;
 use crate::workspace::TabKind;
 
 pub const SIDEBAR_WIDTH: f32 = 200.0;
@@ -59,6 +60,7 @@ pub enum SavePromptResponse {
 #[derive(Default)]
 pub struct UiFrameOutput {
     pub commands: Vec<AppCommand>,
+    pub palette_command: Option<CommandId>,
     pub save_prompt_response: Option<SavePromptResponse>,
 }
 

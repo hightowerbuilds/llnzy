@@ -1,6 +1,9 @@
 use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::Key;
 
+use llnzy::external_command::{
+    CommandSource, CommandTarget, ExternalAction, ExternalCommand, FocusPolicy, SelectionPolicy,
+};
 use llnzy::keybindings::primary_modifier;
 use llnzy::ui::command_palette::CommandId;
 use llnzy::workspace::TabContent;
@@ -28,10 +31,33 @@ impl App {
                 Some(command_id) => command_id,
                 None => return false,
             };
-        self.route_code_editor_command(command_id)
+        self.route_code_editor_command_from(command_id, CommandSource::KeyboardShortcut)
     }
 
     pub(crate) fn route_code_editor_command(&mut self, command_id: CommandId) -> bool {
+        self.route_code_editor_command_from(command_id, CommandSource::Internal)
+    }
+
+    pub(crate) fn route_code_editor_command_from(
+        &mut self,
+        command_id: CommandId,
+        source: CommandSource,
+    ) -> bool {
+        if self.active_code_file_buffer_id().is_none() {
+            return false;
+        }
+        if let Some(action) = external_action_for_code_editor_command(command_id) {
+            let result = self.dispatch_external_command(ExternalCommand {
+                source,
+                target: CommandTarget::ActiveTab,
+                action,
+                focus_policy: FocusPolicy::Preserve,
+                selection_policy: SelectionPolicy::UseCurrentSelection,
+                ..ExternalCommand::internal(CommandTarget::ActiveTab, ExternalAction::SelectAll)
+            });
+            return result.was_handled();
+        }
+
         let Some(buffer_id) = self.active_code_file_buffer_id() else {
             return false;
         };
@@ -71,6 +97,18 @@ impl App {
             TabContent::CodeFile { buffer_id, .. } => Some(*buffer_id),
             _ => None,
         }
+    }
+}
+
+fn external_action_for_code_editor_command(command_id: CommandId) -> Option<ExternalAction> {
+    match command_id {
+        CommandId::Save => Some(ExternalAction::Save),
+        CommandId::Undo => Some(ExternalAction::Undo),
+        CommandId::Redo => Some(ExternalAction::Redo),
+        CommandId::SelectAll => Some(ExternalAction::SelectAll),
+        CommandId::Copy => Some(ExternalAction::Copy),
+        CommandId::Paste => Some(ExternalAction::Paste),
+        _ => None,
     }
 }
 

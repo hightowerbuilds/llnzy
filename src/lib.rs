@@ -5,6 +5,7 @@ pub mod editor;
 pub mod engine;
 pub mod error_log;
 pub mod explorer;
+pub mod external_command;
 pub mod external_input_trace;
 pub mod git;
 pub mod input;
@@ -16,6 +17,7 @@ pub mod macos_text_bridge;
 #[cfg(target_os = "macos")]
 pub mod menu;
 pub mod path_utils;
+pub mod platform;
 pub mod pty;
 pub mod renderer;
 pub mod search;

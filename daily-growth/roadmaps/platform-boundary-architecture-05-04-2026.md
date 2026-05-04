@@ -44,6 +44,17 @@ The boundary should be concrete before it is clever. Do not build a broad
 "platform abstraction layer" that owns rendering, workspace state, or product
 commands. Put only OS-sensitive behavior here.
 
+Implementation update:
+
+- Added the initial `src/platform` module skeleton.
+- Added typed model files for shell profiles, terminal host launch specs,
+  platform paths, desktop open/reveal requests, clipboard status, menu
+  capability, input intent, and packaging metadata.
+- Added `PlatformServices::current()` as a development-mode service root.
+- The skeleton is intentionally not wired into runtime behavior yet; the next
+  compatibility pass should migrate one platform-sensitive behavior at a time
+  behind these types.
+
 ## PlatformShell
 
 `PlatformShell` owns shell discovery and command launch policy. It should return
@@ -263,16 +274,16 @@ once and rely on platform services for OS-specific behavior.
 Start by introducing type definitions and no-surprise wrappers, then move
 behavior behind them.
 
-1. Add `src/platform` with shared service types and OS-specific modules.
-2. Move shell discovery and terminal spawning behind `PlatformShell` and
+1. [x] Add `src/platform` with shared service types and OS-specific modules.
+2. [ ] Move shell discovery and terminal spawning behind `PlatformShell` and
    `TerminalHost`.
-3. Route config, data, cache, logs, themes, and workspaces through
+3. [ ] Route config, data, cache, logs, themes, and workspaces through
    `PlatformPaths`.
-4. Move open/reveal behavior behind `PlatformOpen`.
-5. Move clipboard imports behind `PlatformClipboard`.
-6. Route native menu callbacks through app command IDs via `PlatformMenu`.
-7. Normalize keyboard, IME, and terminal input through `PlatformInput`.
-8. Define packaging metadata and make build scripts consume the same values
+4. [ ] Move open/reveal behavior behind `PlatformOpen`.
+5. [ ] Move clipboard imports behind `PlatformClipboard`.
+6. [ ] Route native menu callbacks through app command IDs via `PlatformMenu`.
+7. [ ] Normalize keyboard, IME, and terminal input through `PlatformInput`.
+8. [ ] Define packaging metadata and make build scripts consume the same values
    where practical.
 
 This sequence keeps the terminal-hosting risk visible while avoiding a large

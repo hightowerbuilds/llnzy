@@ -5,7 +5,11 @@ use winit::event_loop::ActiveEventLoop;
 
 use llnzy::app::commands::AppCommand;
 use llnzy::editor::BufferId;
+use llnzy::external_command::{
+    CommandSource, CommandTarget, ExternalAction, ExternalCommand, FocusPolicy, SelectionPolicy,
+};
 use llnzy::session::Session;
+use llnzy::ui::command_palette::CommandId;
 use llnzy::ui::{ActiveView, UiFrameOutput};
 use llnzy::workspace::{find_singleton, TabContent, TabKind, WorkspaceTab};
 
@@ -412,6 +416,12 @@ impl App {
             need_redraw = true;
         }
 
+        if let Some(command_id) = output.palette_command {
+            if self.handle_external_palette_command(command_id) {
+                need_redraw = true;
+            }
+        }
+
         for command in output.commands {
             if self.handle_app_command(command, &mut sidebar_changed) {
                 need_redraw = true;
@@ -425,6 +435,34 @@ impl App {
         if need_redraw {
             self.request_redraw();
         }
+    }
+
+    fn handle_external_palette_command(&mut self, command_id: CommandId) -> bool {
+        let Some(action) = external_action_for_palette_command(command_id) else {
+            return false;
+        };
+        self.dispatch_external_command(ExternalCommand {
+            source: CommandSource::CommandPalette,
+            target: CommandTarget::ActiveTab,
+            action,
+            focus_policy: FocusPolicy::Preserve,
+            selection_policy: SelectionPolicy::UseCurrentSelection,
+            ..ExternalCommand::internal(CommandTarget::ActiveTab, ExternalAction::SelectAll)
+        })
+        .was_handled()
+    }
+}
+
+fn external_action_for_palette_command(command_id: CommandId) -> Option<ExternalAction> {
+    match command_id {
+        CommandId::Save => Some(ExternalAction::Save),
+        CommandId::Undo => Some(ExternalAction::Undo),
+        CommandId::Redo => Some(ExternalAction::Redo),
+        CommandId::SelectAll => Some(ExternalAction::SelectAll),
+        CommandId::Copy => Some(ExternalAction::Copy),
+        CommandId::Paste => Some(ExternalAction::Paste),
+        CommandId::Stacker(command_id) => Some(ExternalAction::ApplyFormatting(command_id)),
+        _ => None,
     }
 }
 

@@ -489,14 +489,11 @@ impl UiState {
         // Persist to disk when dirty
         stacker.persist_if_dirty();
 
+        let mut deferred_palette_command = None;
         if let Some(command_id) = palette_command {
             match command_id {
-                command_palette::CommandId::Stacker(command_id) => {
-                    stacker_view::apply_registered_stacker_command(
-                        &self.ctx,
-                        &mut stacker,
-                        command_id,
-                    );
+                command_id if app_dispatches_palette_command(command_id) => {
+                    deferred_palette_command = Some(command_id);
                 }
                 command_id => palette_command_dispatch::apply_palette_command(
                     command_id,
@@ -621,9 +618,23 @@ impl UiState {
 
         UiFrameOutput {
             commands: commands_out,
+            palette_command: deferred_palette_command,
             save_prompt_response,
         }
     }
+}
+
+fn app_dispatches_palette_command(command_id: command_palette::CommandId) -> bool {
+    matches!(
+        command_id,
+        command_palette::CommandId::Save
+            | command_palette::CommandId::Undo
+            | command_palette::CommandId::Redo
+            | command_palette::CommandId::SelectAll
+            | command_palette::CommandId::Copy
+            | command_palette::CommandId::Paste
+            | command_palette::CommandId::Stacker(_)
+    )
 }
 
 fn active_singleton_tab(
