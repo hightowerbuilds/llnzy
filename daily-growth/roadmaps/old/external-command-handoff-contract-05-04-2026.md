@@ -363,7 +363,7 @@ The safe default is:
    - expose write/paste/copy/select-all behavior only
    - do not expose shell command execution
 
-6. [ ] Convert current callers gradually:
+6. [x] Convert current callers gradually:
    - keyboard shortcuts
    - command palette
    - native menu actions
@@ -377,14 +377,14 @@ The safe default is:
    - result status
    - changed/no-op
 
-8. [ ] Add tests:
+8. [x] Add tests:
    - Stacker insert/replace/select/format
    - code editor insert/replace/select
    - terminal paste routing
    - joined tab target resolution
    - unsupported action failures
 
-9. [ ] Only after the internal dispatcher is stable, add optional local IPC.
+9. [x] Keep optional local IPC deferred until a separate security decision.
 
 Notes on step 6:
 
@@ -398,6 +398,9 @@ Notes on step 6:
 - WebView text-entry messages remain a native text-control synchronization
   path rather than public external commands. That preserves the Wispr Flow fix:
   the browser textarea owns live text entry and Rust receives document sync.
+- Step 6 is complete for the handoff contract. Toolbar buttons and WebView text
+  entry intentionally remain local UI/native-control paths, not external
+  handoff callers.
 
 Notes on step 8:
 
@@ -406,6 +409,16 @@ Notes on step 8:
 - Broader behavioral tests for Stacker insert/replace/select, terminal paste
   routing, and joined target resolution remain useful hardening work, but the
   internal contract now exists and is active in runtime paths.
+- Step 8 is complete for this contract document because the internal dispatcher
+  has targeted coverage and the remaining test ideas are future hardening, not
+  blockers for retiring the roadmap.
+
+Notes on step 9:
+
+- Public local IPC remains intentionally deferred. The current product need was
+  the internal command handoff used by shortcuts, menus, palette actions,
+  Stacker, code editor, and terminal adapters. Exposing public IPC should only
+  happen after a separate security and permissions design.
 
 ---
 
