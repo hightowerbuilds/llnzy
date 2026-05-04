@@ -55,6 +55,10 @@ pub(super) fn apply_palette_command(
         CommandId::ToggleSidebar => {
             commands.push(AppCommand::ToggleSidebar);
         }
+        CommandId::ToggleWordWrap => {
+            config.editor.word_wrap = !config.editor.word_wrap;
+            commands.push(AppCommand::ApplyConfig(config.clone()));
+        }
         CommandId::ToggleFps => {
             commands.push(AppCommand::ToggleFps);
         }
@@ -86,6 +90,13 @@ pub(super) fn apply_palette_command(
         | CommandId::ProjectSearch
         | CommandId::RunTask
         | CommandId::FindFile
+        | CommandId::ToggleLineComment
+        | CommandId::ToggleBlockComment
+        | CommandId::JumpToMatchingBracket
+        | CommandId::FoldCurrent
+        | CommandId::UnfoldCurrent
+        | CommandId::FoldAll
+        | CommandId::UnfoldAll
         | CommandId::ToggleMarkdownMode
         | CommandId::MarkdownSource
         | CommandId::MarkdownPreview
@@ -165,6 +176,16 @@ mod tests {
         assert!(matches!(
             &commands[..],
             [AppCommand::ApplyConfig(config)] if !config.effects.enabled
+        ));
+    }
+
+    #[test]
+    fn word_wrap_palette_command_emits_updated_editor_config() {
+        let commands = apply_for_test(CommandId::ToggleWordWrap, 0, 1);
+
+        assert!(matches!(
+            &commands[..],
+            [AppCommand::ApplyConfig(config)] if config.editor.word_wrap
         ));
     }
 }

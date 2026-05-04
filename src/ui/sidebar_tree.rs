@@ -194,17 +194,7 @@ fn wrapped_tree_label(
     _strong: bool,
 ) -> egui::Response {
     let available_w = ui.available_width().max(48.0);
-    let mut job = egui::text::LayoutJob::simple(
-        text.to_string(),
-        egui::FontId::proportional(font_size),
-        color,
-        available_w,
-    );
-    job.halign = egui::Align::LEFT;
-    job.justify = false;
-    job.wrap.max_rows = 2;
-    job.wrap.break_anywhere = true;
-
+    let job = wrapped_tree_label_job(text, font_size, color, available_w);
     let galley = ui.fonts(|fonts| fonts.layout_job(job));
     let height = galley.size().y.max(font_size * 1.45) + 2.0;
     let (rect, response) = ui.allocate_exact_size(
@@ -219,6 +209,25 @@ fn wrapped_tree_label(
     }
 
     response
+}
+
+fn wrapped_tree_label_job(
+    text: &str,
+    font_size: f32,
+    color: egui::Color32,
+    available_w: f32,
+) -> egui::text::LayoutJob {
+    let mut job = egui::text::LayoutJob::simple(
+        text.to_string(),
+        egui::FontId::proportional(font_size),
+        color,
+        available_w,
+    );
+    job.halign = egui::Align::LEFT;
+    job.justify = false;
+    job.wrap.max_rows = 2;
+    job.wrap.break_anywhere = true;
+    job
 }
 
 fn handle_node_drag(
@@ -487,5 +496,23 @@ pub(crate) fn render_sidebar_tree(
             }));
         }
         None => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sidebar_tree_label_layout_wraps_long_names_to_two_rows() {
+        let job = wrapped_tree_label_job(
+            "a-very-long-file-name-that-should-wrap.tsx",
+            13.0,
+            egui::Color32::WHITE,
+            72.0,
+        );
+
+        assert_eq!(job.wrap.max_rows, 2);
+        assert!(job.wrap.break_anywhere);
     }
 }

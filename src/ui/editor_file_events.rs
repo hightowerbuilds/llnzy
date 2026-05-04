@@ -95,84 +95,88 @@ pub(super) fn poll_file_watcher(editor_state: &mut EditorViewState) {
     };
 
     for change in watcher.poll() {
-        match change {
-            FileChange::Modified(path) => {
-                let Some(idx) = find_buffer_index_for_path(editor_state, &path) else {
-                    continue;
-                };
-                let Some(buffer_id) = editor_state.editor.buffer_id(idx) else {
-                    continue;
-                };
-                if !editor_state.editor.buffers[idx].is_modified()
-                    && buffer_matches_file_content(&editor_state.editor.buffers[idx], &path)
-                {
-                    continue;
-                }
+        handle_external_file_change(editor_state, change);
+    }
+}
 
-                match plan_external_file_event(
-                    &FileChange::Modified(path.clone()),
-                    editor_state.editor.buffers[idx].is_modified(),
-                ) {
-                    ExternalFileDecision::ReloadCleanModified => {
-                        reload_buffer(editor_state, idx, &path, "File reloaded (external change)");
-                    }
-                    ExternalFileDecision::PromptDirtyModified => {
-                        editor_state.reload_prompt = Some(ExternalFilePrompt {
-                            buffer_id,
-                            path,
-                            moved_to: None,
-                            kind: ExternalFilePromptKind::Modified,
-                        });
-                    }
-                    ExternalFileDecision::NoAction
-                    | ExternalFileDecision::PromptDeleted
-                    | ExternalFileDecision::PromptMoved => {}
-                }
+fn handle_external_file_change(editor_state: &mut EditorViewState, change: FileChange) {
+    match change {
+        FileChange::Modified(path) => {
+            let Some(idx) = find_buffer_index_for_path(editor_state, &path) else {
+                return;
+            };
+            let Some(buffer_id) = editor_state.editor.buffer_id(idx) else {
+                return;
+            };
+            if !editor_state.editor.buffers[idx].is_modified()
+                && buffer_matches_file_content(&editor_state.editor.buffers[idx], &path)
+            {
+                return;
             }
-            FileChange::Deleted(path) => {
-                let Some(idx) = find_buffer_index_for_path(editor_state, &path) else {
-                    continue;
-                };
-                let Some(buffer_id) = editor_state.editor.buffer_id(idx) else {
-                    continue;
-                };
 
-                if plan_external_file_event(
-                    &FileChange::Deleted(path.clone()),
-                    editor_state.editor.buffers[idx].is_modified(),
-                ) == ExternalFileDecision::PromptDeleted
-                {
+            match plan_external_file_event(
+                &FileChange::Modified(path.clone()),
+                editor_state.editor.buffers[idx].is_modified(),
+            ) {
+                ExternalFileDecision::ReloadCleanModified => {
+                    reload_buffer(editor_state, idx, &path, "File reloaded (external change)");
+                }
+                ExternalFileDecision::PromptDirtyModified => {
                     editor_state.reload_prompt = Some(ExternalFilePrompt {
                         buffer_id,
                         path,
                         moved_to: None,
-                        kind: ExternalFilePromptKind::Deleted,
+                        kind: ExternalFilePromptKind::Modified,
                     });
                 }
+                ExternalFileDecision::NoAction
+                | ExternalFileDecision::PromptDeleted
+                | ExternalFileDecision::PromptMoved => {}
             }
-            FileChange::Moved { from, to } => {
-                let Some(idx) = find_buffer_index_for_path(editor_state, &from) else {
-                    continue;
-                };
-                let Some(buffer_id) = editor_state.editor.buffer_id(idx) else {
-                    continue;
-                };
+        }
+        FileChange::Deleted(path) => {
+            let Some(idx) = find_buffer_index_for_path(editor_state, &path) else {
+                return;
+            };
+            let Some(buffer_id) = editor_state.editor.buffer_id(idx) else {
+                return;
+            };
 
-                if plan_external_file_event(
-                    &FileChange::Moved {
-                        from: from.clone(),
-                        to: to.clone(),
-                    },
-                    editor_state.editor.buffers[idx].is_modified(),
-                ) == ExternalFileDecision::PromptMoved
-                {
-                    editor_state.reload_prompt = Some(ExternalFilePrompt {
-                        buffer_id,
-                        path: from,
-                        moved_to: to,
-                        kind: ExternalFilePromptKind::Moved,
-                    });
-                }
+            if plan_external_file_event(
+                &FileChange::Deleted(path.clone()),
+                editor_state.editor.buffers[idx].is_modified(),
+            ) == ExternalFileDecision::PromptDeleted
+            {
+                editor_state.reload_prompt = Some(ExternalFilePrompt {
+                    buffer_id,
+                    path,
+                    moved_to: None,
+                    kind: ExternalFilePromptKind::Deleted,
+                });
+            }
+        }
+        FileChange::Moved { from, to } => {
+            let Some(idx) = find_buffer_index_for_path(editor_state, &from) else {
+                return;
+            };
+            let Some(buffer_id) = editor_state.editor.buffer_id(idx) else {
+                return;
+            };
+
+            if plan_external_file_event(
+                &FileChange::Moved {
+                    from: from.clone(),
+                    to: to.clone(),
+                },
+                editor_state.editor.buffers[idx].is_modified(),
+            ) == ExternalFileDecision::PromptMoved
+            {
+                editor_state.reload_prompt = Some(ExternalFilePrompt {
+                    buffer_id,
+                    path: from,
+                    moved_to: to,
+                    kind: ExternalFilePromptKind::Moved,
+                });
             }
         }
     }
@@ -369,6 +373,7 @@ fn buffer_matches_file_content(buffer: &Buffer, path: &std::path::Path) -> bool 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::editor::buffer::Position;
 
     #[test]
     fn clean_external_modification_reloads_without_prompt() {
@@ -476,6 +481,112 @@ mod tests {
             plan_external_file_event(&change, true),
             ExternalFileDecision::PromptMoved
         );
+    }
+
+    #[test]
+    fn external_modified_event_reloads_clean_open_buffer() {
+        let path = temp_file_path("handler-modified-clean");
+        std::fs::write(&path, "old").unwrap();
+        let mut editor_state = EditorViewState::default();
+        let buffer_id = editor_state.editor.open(path.clone()).unwrap();
+
+        std::fs::write(&path, "new").unwrap();
+        handle_external_file_change(&mut editor_state, FileChange::Modified(path.clone()));
+
+        let buffer = editor_state.editor.buffer_for_id(buffer_id).unwrap();
+        assert_eq!(buffer.text(), "new");
+        assert!(!buffer.is_modified());
+        assert_eq!(
+            editor_state.status_msg.as_deref(),
+            Some("File reloaded (external change)")
+        );
+        assert!(editor_state.reload_prompt.is_none());
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn external_modified_event_prompts_for_dirty_open_buffer_by_id() {
+        let path = temp_file_path("handler-modified-dirty");
+        std::fs::write(&path, "old").unwrap();
+        let mut editor_state = EditorViewState::default();
+        let buffer_id = editor_state.editor.open(path.clone()).unwrap();
+        editor_state
+            .editor
+            .buffer_for_id_mut(buffer_id)
+            .unwrap()
+            .insert(Position::new(0, 3), " local");
+
+        std::fs::write(&path, "external").unwrap();
+        handle_external_file_change(&mut editor_state, FileChange::Modified(path.clone()));
+
+        assert_eq!(
+            editor_state.reload_prompt,
+            Some(ExternalFilePrompt {
+                buffer_id,
+                path: path.clone(),
+                moved_to: None,
+                kind: ExternalFilePromptKind::Modified,
+            })
+        );
+        assert!(editor_state
+            .editor
+            .buffer_for_id(buffer_id)
+            .unwrap()
+            .is_modified());
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn external_deleted_event_prompts_for_open_buffer_by_id() {
+        let path = temp_file_path("handler-deleted");
+        std::fs::write(&path, "old").unwrap();
+        let mut editor_state = EditorViewState::default();
+        let buffer_id = editor_state.editor.open(path.clone()).unwrap();
+        let _ = std::fs::remove_file(&path);
+
+        handle_external_file_change(&mut editor_state, FileChange::Deleted(path.clone()));
+
+        assert_eq!(
+            editor_state.reload_prompt,
+            Some(ExternalFilePrompt {
+                buffer_id,
+                path,
+                moved_to: None,
+                kind: ExternalFilePromptKind::Deleted,
+            })
+        );
+    }
+
+    #[test]
+    fn external_moved_event_prompts_for_open_buffer_by_id() {
+        let old_path = temp_file_path("handler-move-old");
+        let new_path = temp_file_path("handler-move-new");
+        std::fs::write(&old_path, "old").unwrap();
+        let mut editor_state = EditorViewState::default();
+        let buffer_id = editor_state.editor.open(old_path.clone()).unwrap();
+        std::fs::rename(&old_path, &new_path).unwrap();
+
+        handle_external_file_change(
+            &mut editor_state,
+            FileChange::Moved {
+                from: old_path.clone(),
+                to: Some(new_path.clone()),
+            },
+        );
+
+        assert_eq!(
+            editor_state.reload_prompt,
+            Some(ExternalFilePrompt {
+                buffer_id,
+                path: old_path,
+                moved_to: Some(new_path.clone()),
+                kind: ExternalFilePromptKind::Moved,
+            })
+        );
+
+        let _ = std::fs::remove_file(new_path);
     }
 
     #[test]

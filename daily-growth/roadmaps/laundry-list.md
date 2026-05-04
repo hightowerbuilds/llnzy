@@ -10,6 +10,14 @@ Treat this as a parking lot, not a current sprint plan. Many entries came from o
 
 - [x] Durable editor foundation: hardened dirty-buffer close prompts around stable `tab_id` and `BufferId`, added corrupt session restore handling, ran the focused smoke/regression pass, and archived the completed slice. Source: `old/durable-editor-foundation.md`.
 - [x] File lifecycle foundation: verified clean sidebar moves, dirty open-file blocking, folder rename policy, selection/focus restoration, clean tab path remaps, and dirty-tab safety around move/rename/delete behavior. Sources: `manual-smoke-checklist.md`, `reliability-manual-testing-05-02-2026.md`, `sidebar-file-explorer-hardening-05-03-2026.md`.
+- [x] Editor command routing foundation: smoke-tested command palette editor actions and verified save, undo, redo, copy, paste, select all, and find behavior route through the active editor command path. Source: manual smoke test on 2026-05-04.
+- [x] External file change foundation: verified clean external modifications, dirty modification prompts, deleted-file handling, moved-file handling, stable `BufferId` prompt targets, and prompt responses; added focused handler tests for modified, deleted, and moved file events. Source: `llnzy-source-editor-roadmap.md`.
+- [x] Find command smoke check: verified the Find command opens and closes the editor find UI consistently. Replacement behavior remains deferred. Source: manual smoke test on 2026-05-04.
+- [x] Per-language comment toggle foundation: routed comment toggles through `EditorCommand`, added command palette entries for line and block comments, expanded language-aware comment styles, and covered Rust, Python, SQL, Ruby, block-comment, missing-style, shortcut, and undo behavior with focused tests. Source: `llnzy-source-editor-roadmap.md`.
+- [x] Bracket matching foundation: verified pair detection, active-pair highlighting, and jump-to-match behavior; routed the jump command through `EditorCommand`, exposed it in the command palette, and added focused command dispatch tests. Source: `llnzy-source-editor-roadmap.md`.
+- [x] Code folding foundation: verified tree-sitter fold range detection, gutter folding, visible-line snapping, placeholder rendering, fold shortcuts, and command palette folding actions; added focused dispatch coverage for fold current, unfold current, fold all, and unfold all. Source: `llnzy-source-editor-roadmap.md`.
+- [x] Word wrap foundation: verified editor wrap row computation, wrapped cursor hit testing, wrapped terminal output behavior, sidebar filename wrapping, Settings and native-menu toggles, and added a command palette toggle that updates editor config. Sources: `tweaks.md`, `tweaks-2.md`.
+- [x] Multi-file search foundation: verified project search opens from shortcuts and command palette, searches asynchronously across searchable text files, supports regex mode, skips heavy dependency/build folders, includes searchable dotfiles, and opens result matches through the normal file-tab handoff. Source: `llnzy-source-editor-roadmap.md`.
 
 ## Cross-Platform Compatibility
 
@@ -57,17 +65,17 @@ Treat this as a parking lot, not a current sprint plan. Many entries came from o
 
 - [x] Introduce or verify a stable `BufferId` model for editor buffers. Source: `llnzy-reliability-durability-roadmap-05-01-2026.md`.
 - [x] Introduce or verify `EditorCommand` as the command boundary for editor actions. Source: `llnzy-reliability-durability-roadmap-05-01-2026.md`.
-- [ ] Wire command palette actions into real editor commands instead of ad hoc handlers. Source: `llnzy-reliability-durability-roadmap-05-01-2026.md`.
+- [x] Wire command palette actions into real editor commands instead of ad hoc handlers. Source: `llnzy-reliability-durability-roadmap-05-01-2026.md`.
 - [x] Add prompt-before-close and prompt-before-quit handling for modified buffers. Source: `llnzy-source-editor-roadmap.md`.
-- [ ] Add file watching and external file reload prompts. Source: `llnzy-source-editor-roadmap.md`.
-- [ ] Add find and replace. Source: `llnzy-source-editor-roadmap.md`.
-- [ ] Add per-language comment toggle behavior. Source: `llnzy-source-editor-roadmap.md`.
+- [x] Add file watching and external file reload prompts. Source: `llnzy-source-editor-roadmap.md`.
+- [ ] Add find and replace. Find opens/closes consistently; replacement behavior and tests remain deferred. Source: `llnzy-source-editor-roadmap.md`.
+- [x] Add per-language comment toggle behavior. Source: `llnzy-source-editor-roadmap.md`.
 - [ ] Add indentation guides. Source: `llnzy-source-editor-roadmap.md`.
-- [ ] Add bracket matching. Source: `llnzy-source-editor-roadmap.md`.
-- [ ] Add code folding. Source: `llnzy-source-editor-roadmap.md`.
-- [ ] Add multi-file search. Source: `llnzy-source-editor-roadmap.md`.
+- [x] Add bracket matching. Source: `llnzy-source-editor-roadmap.md`.
+- [x] Add code folding. Source: `llnzy-source-editor-roadmap.md`.
+- [x] Add multi-file search. Source: `llnzy-source-editor-roadmap.md`.
 - [ ] Add multi-cursor commands such as Cmd+D and Cmd+Shift+L. Source: `tweaks.md`.
-- [ ] Add word wrap rendering and verify sidebar word wrap separately. Sources: `tweaks.md`, `tweaks-2.md`.
+- [x] Add word wrap rendering and verify sidebar word wrap separately. Sources: `tweaks.md`, `tweaks-2.md`.
 - [ ] Add minimap click-to-scroll. Source: `tweaks.md`.
 - [ ] Add smooth scrolling and caret animation only after measuring interaction quality. Source: `tweaks.md`.
 - [ ] Add configurable editor keybinding presets. Sources: `llnzy-source-editor-roadmap.md`, `leftovers-code-editor.md`, `tweaks.md`.

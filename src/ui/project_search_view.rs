@@ -170,20 +170,61 @@ pub(super) fn render_project_search(
     }
     if let Some((path, line, col)) = navigate_to {
         editor_state.project_search.close();
-        match editor_state.open_file(path) {
-            Ok(buffer_id) => {
-                let Some(idx) = editor_state.editor.index_for_id(buffer_id) else {
-                    editor_state.status_msg =
-                        Some("Opened search result buffer is missing".to_string());
-                    return;
-                };
-                let view = &mut editor_state.editor.views[idx];
-                view.cursor.pos = crate::editor::buffer::Position::new(line, col);
-                view.cursor.clear_selection();
-                view.cursor.desired_col = None;
-                editor_state.status_msg = None;
-            }
-            Err(e) => editor_state.status_msg = Some(format!("Failed to open: {e}")),
+        open_project_search_match(editor_state, path, line, col);
+    }
+}
+
+fn open_project_search_match(
+    editor_state: &mut EditorViewState,
+    path: PathBuf,
+    line: usize,
+    col: usize,
+) {
+    match editor_state.open_file(path.clone()) {
+        Ok(buffer_id) => {
+            let Some(idx) = editor_state.editor.index_for_id(buffer_id) else {
+                editor_state.status_msg =
+                    Some("Opened search result buffer is missing".to_string());
+                return;
+            };
+            let view = &mut editor_state.editor.views[idx];
+            view.cursor.pos = crate::editor::buffer::Position::new(line, col);
+            view.cursor.clear_selection();
+            view.cursor.desired_col = None;
+            editor_state.pending_file_tab = Some((path, buffer_id));
+            editor_state.status_msg = None;
         }
+        Err(e) => editor_state.status_msg = Some(format!("Failed to open: {e}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn opening_search_match_requests_file_tab_and_positions_cursor() {
+        let dir =
+            std::env::temp_dir().join(format!("llnzy_project_search_view_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("result.rs");
+        std::fs::write(&path, "fn main() {\n    println!(\"hit\");\n}\n").unwrap();
+        let mut state = EditorViewState::default();
+
+        open_project_search_match(&mut state, path.clone(), 1, 4);
+
+        let (tab_path, buffer_id) = state
+            .pending_file_tab
+            .clone()
+            .expect("search result should request a file tab");
+        assert_eq!(tab_path, path);
+        let idx = state.editor.index_for_id(buffer_id).unwrap();
+        assert_eq!(
+            state.editor.views[idx].cursor.pos,
+            crate::editor::buffer::Position::new(1, 4)
+        );
+        assert_eq!(state.status_msg, None);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

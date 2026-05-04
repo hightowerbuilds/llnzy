@@ -2,6 +2,14 @@ use crate::editor::keymap::KeyAction;
 use crate::editor::syntax::FoldRange;
 use crate::editor::BufferView;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum FoldingCommand {
+    FoldCurrent,
+    UnfoldCurrent,
+    FoldAll,
+    UnfoldAll,
+}
+
 pub(super) fn apply_folding_actions(
     action: &KeyAction,
     view: &mut BufferView,
@@ -9,15 +17,47 @@ pub(super) fn apply_folding_actions(
     line_count: usize,
 ) {
     if action.fold_all {
-        view.folded_ranges = top_level_fold_ranges(foldable_ranges);
+        apply_folding_command(view, foldable_ranges, line_count, FoldingCommand::FoldAll);
     } else if action.unfold_all {
-        view.folded_ranges.clear();
+        apply_folding_command(view, foldable_ranges, line_count, FoldingCommand::UnfoldAll);
     } else if action.fold_current {
-        if let Some(range) = best_fold_range_containing(foldable_ranges, view.cursor.pos.line) {
-            add_fold_range(&mut view.folded_ranges, range);
-        }
+        apply_folding_command(
+            view,
+            foldable_ranges,
+            line_count,
+            FoldingCommand::FoldCurrent,
+        );
     } else if action.unfold_current {
-        unfold_at_line(&mut view.folded_ranges, view.cursor.pos.line);
+        apply_folding_command(
+            view,
+            foldable_ranges,
+            line_count,
+            FoldingCommand::UnfoldCurrent,
+        );
+    }
+}
+
+pub(super) fn apply_folding_command(
+    view: &mut BufferView,
+    foldable_ranges: &[FoldRange],
+    line_count: usize,
+    command: FoldingCommand,
+) {
+    match command {
+        FoldingCommand::FoldAll => {
+            view.folded_ranges = top_level_fold_ranges(foldable_ranges);
+        }
+        FoldingCommand::UnfoldAll => {
+            view.folded_ranges.clear();
+        }
+        FoldingCommand::FoldCurrent => {
+            if let Some(range) = best_fold_range_containing(foldable_ranges, view.cursor.pos.line) {
+                add_fold_range(&mut view.folded_ranges, range);
+            }
+        }
+        FoldingCommand::UnfoldCurrent => {
+            unfold_at_line(&mut view.folded_ranges, view.cursor.pos.line);
+        }
     }
 
     view.folded_ranges

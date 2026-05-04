@@ -1,7 +1,6 @@
 use crate::editor::buffer::Position;
 use crate::editor::{BufferView, EditorKeyChord};
 use crate::keybindings::{KeybindingPreset, VimMode};
-use std::path::Path;
 
 /// Special actions that the key handler requests from the editor host.
 #[derive(Default)]
@@ -41,6 +40,9 @@ pub struct KeyAction {
     pub run_task: bool,
     pub add_cursor_next: bool,
     pub select_all_occurrences: bool,
+    pub toggle_line_comment: bool,
+    pub toggle_block_comment: bool,
+    pub jump_to_matching_bracket: bool,
 }
 
 /// Auto-closing bracket pairs.
@@ -305,61 +307,16 @@ pub fn handle_editor_keys(
         }
 
         if cmd && input.key_pressed(egui::Key::Slash) {
-            *status_msg = None;
-            let style = comment_style(view.lang_id, buf.path());
             if shift {
-                if let Some((open, close)) = style.block {
-                    let had_selection = view.cursor.has_selection();
-                    let (start, end) = view.cursor.selection().unwrap_or_else(|| {
-                        let line = view.cursor.pos.line;
-                        (
-                            Position::new(line, 0),
-                            Position::new(line, buf.line_len(line)),
-                        )
-                    });
-                    let (new_start, new_end) = buf.toggle_block_comment(start, end, open, close);
-                    if had_selection {
-                        view.cursor.anchor = Some(new_start);
-                        view.cursor.pos = new_end;
-                    } else {
-                        view.cursor.clear_selection();
-                        view.cursor.pos = new_end;
-                    }
-                    view.cursor.desired_col = None;
-                } else {
-                    *status_msg = Some("No block comment style for this file".to_string());
-                }
-            } else if let Some(prefix) = style.line {
-                let (start_line, end_line) = selected_line_range(view, buf);
-                buf.toggle_line_comments(start_line, end_line, prefix);
-                view.cursor.desired_col = None;
-            } else if let Some((open, close)) = style.block {
-                let (start_line, end_line) = selected_line_range(view, buf);
-                for line in (start_line..=end_line).rev() {
-                    let start = Position::new(line, 0);
-                    let end = Position::new(line, buf.line_len(line));
-                    buf.toggle_block_comment(start, end, open, close);
-                }
-                view.cursor.desired_col = None;
+                action.toggle_block_comment = true;
             } else {
-                *status_msg = Some("No comment style for this file".to_string());
+                action.toggle_line_comment = true;
             }
             return;
         }
 
         if cmd && shift && input.key_pressed(egui::Key::Backslash) {
-            *status_msg = None;
-            if let Some((at, matching)) = buf.matching_bracket(view.cursor.pos) {
-                view.cursor.clear_selection();
-                view.cursor.pos = if view.cursor.pos == matching {
-                    at
-                } else {
-                    matching
-                };
-                view.cursor.desired_col = None;
-            } else {
-                *status_msg = Some("No matching bracket".to_string());
-            }
+            action.jump_to_matching_bracket = true;
             return;
         }
 
@@ -706,72 +663,6 @@ pub fn handle_editor_keys(
         }
     });
     action
-}
-
-#[derive(Clone, Copy)]
-struct CommentStyle {
-    line: Option<&'static str>,
-    block: Option<(&'static str, &'static str)>,
-}
-
-fn selected_line_range(view: &BufferView, buf: &crate::editor::buffer::Buffer) -> (usize, usize) {
-    if let Some((start, end)) = view.cursor.selection() {
-        let mut end_line = end.line;
-        if end.col == 0 && end.line > start.line {
-            end_line -= 1;
-        }
-        (
-            start.line.min(buf.line_count().saturating_sub(1)),
-            end_line.min(buf.line_count().saturating_sub(1)),
-        )
-    } else {
-        let line = view.cursor.pos.line.min(buf.line_count().saturating_sub(1));
-        (line, line)
-    }
-}
-
-fn comment_style(lang_id: Option<&'static str>, path: Option<&Path>) -> CommentStyle {
-    let ext = path
-        .and_then(|p| p.extension())
-        .and_then(|e| e.to_str())
-        .map(str::to_ascii_lowercase);
-    let lang = lang_id.or_else(|| match ext.as_deref() {
-        Some("rs") => Some("rust"),
-        Some("js" | "mjs" | "cjs" | "jsx") => Some("javascript"),
-        Some("ts" | "mts" | "cts") => Some("typescript"),
-        Some("tsx") => Some("tsx"),
-        Some("py" | "pyi") => Some("python"),
-        Some("go") => Some("go"),
-        Some("c" | "h") => Some("c"),
-        Some("html" | "htm") => Some("html"),
-        Some("css" | "scss") => Some("css"),
-        Some("sh" | "bash" | "zsh") => Some("bash"),
-        Some("toml") => Some("toml"),
-        _ => None,
-    });
-
-    match lang {
-        Some("rust" | "javascript" | "typescript" | "tsx" | "go" | "c") => CommentStyle {
-            line: Some("//"),
-            block: Some(("/*", "*/")),
-        },
-        Some("python" | "bash" | "toml") => CommentStyle {
-            line: Some("#"),
-            block: None,
-        },
-        Some("html") => CommentStyle {
-            line: None,
-            block: Some(("<!--", "-->")),
-        },
-        Some("css") => CommentStyle {
-            line: None,
-            block: Some(("/*", "*/")),
-        },
-        _ => CommentStyle {
-            line: Some("//"),
-            block: Some(("/*", "*/")),
-        },
-    }
 }
 
 // ── Vim mode key handling ──

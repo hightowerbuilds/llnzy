@@ -1,9 +1,12 @@
 use std::path::Path;
 
 use crate::editor::keymap::KeyAction;
+use crate::editor::syntax::SyntaxEngine;
 use crate::editor::MarkdownViewMode;
+use crate::editor::{buffer::Position, BufferView};
 
 use super::command_palette::CommandId;
+use super::editor_folding::{self, FoldingCommand};
 use super::explorer_view::EditorViewState;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -19,6 +22,13 @@ pub(crate) enum EditorCommand {
     DuplicateLine,
     MoveLineUp,
     MoveLineDown,
+    ToggleLineComment,
+    ToggleBlockComment,
+    JumpToMatchingBracket,
+    FoldCurrent,
+    UnfoldCurrent,
+    FoldAll,
+    UnfoldAll,
     FormatDocument,
     RenameSymbol,
     GoToDefinition,
@@ -57,6 +67,13 @@ impl EditorCommand {
             CommandId::DuplicateLine => Self::DuplicateLine,
             CommandId::MoveLineUp => Self::MoveLineUp,
             CommandId::MoveLineDown => Self::MoveLineDown,
+            CommandId::ToggleLineComment => Self::ToggleLineComment,
+            CommandId::ToggleBlockComment => Self::ToggleBlockComment,
+            CommandId::JumpToMatchingBracket => Self::JumpToMatchingBracket,
+            CommandId::FoldCurrent => Self::FoldCurrent,
+            CommandId::UnfoldCurrent => Self::UnfoldCurrent,
+            CommandId::FoldAll => Self::FoldAll,
+            CommandId::UnfoldAll => Self::UnfoldAll,
             CommandId::FormatDocument => Self::FormatDocument,
             CommandId::RenameSymbol => Self::RenameSymbol,
             CommandId::GoToDefinition => Self::GoToDefinition,
@@ -81,6 +98,7 @@ impl EditorCommand {
             | CommandId::CloseTab
             | CommandId::NextTab
             | CommandId::PrevTab
+            | CommandId::ToggleWordWrap
             | CommandId::ToggleEffects
             | CommandId::ToggleFps
             | CommandId::Stacker(_) => return None,
@@ -125,6 +143,19 @@ impl EditorViewState {
             EditorCommand::MoveLineDown => {
                 outcome.changed_buffer = self.command_move_line_down();
             }
+            EditorCommand::ToggleLineComment => {
+                outcome.changed_buffer = self.command_toggle_line_comment();
+            }
+            EditorCommand::ToggleBlockComment => {
+                outcome.changed_buffer = self.command_toggle_block_comment();
+            }
+            EditorCommand::JumpToMatchingBracket => self.command_jump_to_matching_bracket(),
+            EditorCommand::FoldCurrent => self.command_apply_folding(FoldingCommand::FoldCurrent),
+            EditorCommand::UnfoldCurrent => {
+                self.command_apply_folding(FoldingCommand::UnfoldCurrent)
+            }
+            EditorCommand::FoldAll => self.command_apply_folding(FoldingCommand::FoldAll),
+            EditorCommand::UnfoldAll => self.command_apply_folding(FoldingCommand::UnfoldAll),
             EditorCommand::FormatDocument => self.format_document(),
             EditorCommand::RenameSymbol => self.open_rename_input(),
             EditorCommand::GoToDefinition => self.request_goto_definition(),
@@ -343,6 +374,127 @@ impl EditorViewState {
         changed
     }
 
+    fn command_toggle_line_comment(&mut self) -> bool {
+        let mut changed = false;
+        let mut status = None;
+        self.with_active_buf_view(|buf, view| {
+            let style = comment_style(view.lang_id, buf.path());
+            if let Some(prefix) = style.line {
+                let (start_line, end_line) = selected_line_range(view, buf);
+                changed = toggle_line_comments_as_command(buf, start_line, end_line, prefix);
+                if changed {
+                    view.cursor.desired_col = None;
+                }
+            } else if let Some((open, close)) = style.block {
+                let (start_line, end_line) = selected_line_range(view, buf);
+                let before = buf.text();
+                for line in (start_line..=end_line).rev() {
+                    let start = Position::new(line, 0);
+                    let end = Position::new(line, buf.line_len(line));
+                    buf.toggle_block_comment(start, end, open, close);
+                }
+                changed = before != buf.text();
+                if changed {
+                    view.cursor.desired_col = None;
+                }
+            } else {
+                status = Some("No comment style for this file".to_string());
+            }
+        });
+        self.status_msg = status;
+        changed
+    }
+
+    fn command_toggle_block_comment(&mut self) -> bool {
+        let mut changed = false;
+        let mut status = None;
+        self.with_active_buf_view(|buf, view| {
+            let style = comment_style(view.lang_id, buf.path());
+            let Some((open, close)) = style.block else {
+                status = Some("No block comment style for this file".to_string());
+                return;
+            };
+
+            let before = buf.text();
+            let had_selection = view.cursor.has_selection();
+            let (start, end) = view.cursor.selection().unwrap_or_else(|| {
+                let line = view.cursor.pos.line;
+                (
+                    Position::new(line, 0),
+                    Position::new(line, buf.line_len(line)),
+                )
+            });
+            let (new_start, new_end) = buf.toggle_block_comment(start, end, open, close);
+            changed = before != buf.text();
+            if changed {
+                if had_selection {
+                    view.cursor.anchor = Some(new_start);
+                    view.cursor.pos = new_end;
+                } else {
+                    view.cursor.clear_selection();
+                    view.cursor.pos = new_end;
+                }
+                view.cursor.desired_col = None;
+            }
+        });
+        self.status_msg = status;
+        changed
+    }
+
+    fn command_jump_to_matching_bracket(&mut self) {
+        let mut status = None;
+        self.with_active_buf_view(|buf, view| {
+            if let Some((at, matching)) = buf.matching_bracket(view.cursor.pos) {
+                view.cursor.clear_selection();
+                view.cursor.pos = if view.cursor.pos == matching {
+                    at
+                } else {
+                    matching
+                };
+                view.cursor.desired_col = None;
+            } else {
+                status = Some("No matching bracket".to_string());
+            }
+        });
+        self.status_msg = status;
+    }
+
+    fn command_apply_folding(&mut self, command: FoldingCommand) {
+        let mut status = None;
+        self.with_active_buf_view(|buf, view| {
+            if matches!(
+                command,
+                FoldingCommand::UnfoldCurrent | FoldingCommand::UnfoldAll
+            ) {
+                editor_folding::apply_folding_command(view, &[], buf.line_count(), command);
+                return;
+            }
+
+            let Some(tree) = view.tree.as_ref() else {
+                status = Some("No foldable syntax tree for this file".to_string());
+                return;
+            };
+            let syntax = SyntaxEngine::default();
+            let foldable_ranges = syntax.foldable_ranges(tree);
+            if foldable_ranges.is_empty()
+                && matches!(
+                    command,
+                    FoldingCommand::FoldCurrent | FoldingCommand::FoldAll
+                )
+            {
+                status = Some("No foldable ranges for this file".to_string());
+                return;
+            }
+            editor_folding::apply_folding_command(
+                view,
+                &foldable_ranges,
+                buf.line_count(),
+                command,
+            );
+        });
+        self.status_msg = status;
+    }
+
     fn open_rename_input(&mut self) {
         if self.rename_input.is_some() {
             return;
@@ -425,6 +577,15 @@ fn key_action_commands(action: &KeyAction) -> impl Iterator<Item = EditorCommand
         (action.duplicate_line, EditorCommand::DuplicateLine),
         (action.move_line_up, EditorCommand::MoveLineUp),
         (action.move_line_down, EditorCommand::MoveLineDown),
+        (action.toggle_line_comment, EditorCommand::ToggleLineComment),
+        (
+            action.toggle_block_comment,
+            EditorCommand::ToggleBlockComment,
+        ),
+        (
+            action.jump_to_matching_bracket,
+            EditorCommand::JumpToMatchingBracket,
+        ),
         (action.goto_definition, EditorCommand::GoToDefinition),
         (action.request_hover, EditorCommand::ShowHover),
         (action.request_completion, EditorCommand::RequestCompletion),
@@ -442,6 +603,153 @@ fn key_action_commands(action: &KeyAction) -> impl Iterator<Item = EditorCommand
     ]
     .into_iter()
     .filter_map(|(enabled, command)| enabled.then_some(command))
+}
+
+#[derive(Clone, Copy)]
+struct CommentStyle {
+    line: Option<&'static str>,
+    block: Option<(&'static str, &'static str)>,
+}
+
+fn selected_line_range(view: &BufferView, buf: &crate::editor::buffer::Buffer) -> (usize, usize) {
+    if let Some((start, end)) = view.cursor.selection() {
+        let mut end_line = end.line;
+        if end.col == 0 && end.line > start.line {
+            end_line -= 1;
+        }
+        (
+            start.line.min(buf.line_count().saturating_sub(1)),
+            end_line.min(buf.line_count().saturating_sub(1)),
+        )
+    } else {
+        let line = view.cursor.pos.line.min(buf.line_count().saturating_sub(1));
+        (line, line)
+    }
+}
+
+fn toggle_line_comments_as_command(
+    buf: &mut crate::editor::buffer::Buffer,
+    start_line: usize,
+    end_line: usize,
+    prefix: &str,
+) -> bool {
+    if prefix.is_empty() || buf.line_count() == 0 {
+        return false;
+    }
+    let end_line = end_line.min(buf.line_count().saturating_sub(1));
+    if start_line > end_line {
+        return false;
+    }
+
+    let mut any_content = false;
+    let mut all_commented = true;
+    for line_idx in start_line..=end_line {
+        let line = buf.line(line_idx);
+        if line.trim().is_empty() {
+            continue;
+        }
+        any_content = true;
+        let indent = line_indent(line);
+        if !line[indent.len()..].starts_with(prefix) {
+            all_commented = false;
+            break;
+        }
+    }
+
+    if !any_content {
+        return false;
+    }
+
+    let replacement = (start_line..=end_line)
+        .map(|line_idx| {
+            let line = buf.line(line_idx);
+            if line.trim().is_empty() {
+                return line.to_string();
+            }
+
+            let indent = line_indent(line);
+            let after_indent = &line[indent.len()..];
+            if all_commented {
+                let after_prefix = &after_indent[prefix.len()..];
+                let after_prefix = after_prefix.strip_prefix(' ').unwrap_or(after_prefix);
+                format!("{indent}{after_prefix}")
+            } else {
+                format!("{indent}{prefix} {after_indent}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let start = Position::new(start_line, 0);
+    let end = Position::new(end_line, buf.line_len(end_line));
+    if buf.text_range(start, end) == replacement {
+        return false;
+    }
+    buf.replace(start, end, &replacement);
+    true
+}
+
+fn line_indent(line: &str) -> &str {
+    let trimmed = line.trim_start_matches(|c: char| c == ' ' || c == '\t');
+    &line[..line.len() - trimmed.len()]
+}
+
+fn comment_style(lang_id: Option<&'static str>, path: Option<&Path>) -> CommentStyle {
+    let ext = path
+        .and_then(|p| p.extension())
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase);
+    let lang = lang_id.or_else(|| match ext.as_deref() {
+        Some("rs") => Some("rust"),
+        Some("js" | "mjs" | "cjs" | "jsx") => Some("javascript"),
+        Some("ts" | "mts" | "cts") => Some("typescript"),
+        Some("tsx") => Some("tsx"),
+        Some("py" | "pyi") => Some("python"),
+        Some("rb") => Some("ruby"),
+        Some("go") => Some("go"),
+        Some("c" | "h") => Some("c"),
+        Some("cc" | "cpp" | "cxx" | "hpp" | "hh" | "hxx") => Some("cpp"),
+        Some("java") => Some("java"),
+        Some("kt" | "kts") => Some("kotlin"),
+        Some("swift") => Some("swift"),
+        Some("sql") => Some("sql"),
+        Some("lua") => Some("lua"),
+        Some("html" | "htm") => Some("html"),
+        Some("css" | "scss") => Some("css"),
+        Some("sh" | "bash" | "zsh") => Some("bash"),
+        Some("toml") => Some("toml"),
+        _ => None,
+    });
+
+    match lang {
+        Some(
+            "rust" | "javascript" | "typescript" | "tsx" | "go" | "c" | "cpp" | "java" | "kotlin"
+            | "swift",
+        ) => CommentStyle {
+            line: Some("//"),
+            block: Some(("/*", "*/")),
+        },
+        Some("python" | "ruby" | "bash" | "toml") => CommentStyle {
+            line: Some("#"),
+            block: None,
+        },
+        Some("sql" | "lua") => CommentStyle {
+            line: Some("--"),
+            block: None,
+        },
+        Some("html") => CommentStyle {
+            line: None,
+            block: Some(("<!--", "-->")),
+        },
+        Some("css") => CommentStyle {
+            line: None,
+            block: Some(("/*", "*/")),
+        },
+        _ => CommentStyle {
+            line: Some("//"),
+            block: Some(("/*", "*/")),
+        },
+    }
 }
 
 fn save_failed_status(error: &str) -> String {
@@ -464,6 +772,22 @@ mod tests {
         state
     }
 
+    fn state_with_text_path(text: &str, file_name: &str) -> EditorViewState {
+        let mut state = state_with_text(text);
+        let path = std::env::temp_dir().join(file_name);
+        state.editor.buffers[0].set_path(path);
+        state
+    }
+
+    fn state_with_rust_tree(text: &str) -> EditorViewState {
+        let mut state = state_with_text_path(text, "main.rs");
+        let mut syntax = SyntaxEngine::new();
+        state.editor.views[0].lang_id = Some("rust");
+        state.editor.views[0].tree = syntax.parse("rust", text);
+        assert!(state.editor.views[0].tree.is_some());
+        state
+    }
+
     #[test]
     fn palette_save_maps_to_editor_save_command() {
         assert_eq!(
@@ -476,6 +800,38 @@ mod tests {
     fn app_palette_commands_do_not_map_to_editor_commands() {
         assert_eq!(EditorCommand::from_palette(CommandId::NewTab), None);
         assert_eq!(EditorCommand::from_palette(CommandId::ToggleSidebar), None);
+    }
+
+    #[test]
+    fn palette_comment_commands_map_to_editor_commands() {
+        assert_eq!(
+            EditorCommand::from_palette(CommandId::ToggleLineComment),
+            Some(EditorCommand::ToggleLineComment)
+        );
+        assert_eq!(
+            EditorCommand::from_palette(CommandId::ToggleBlockComment),
+            Some(EditorCommand::ToggleBlockComment)
+        );
+        assert_eq!(
+            EditorCommand::from_palette(CommandId::JumpToMatchingBracket),
+            Some(EditorCommand::JumpToMatchingBracket)
+        );
+        assert_eq!(
+            EditorCommand::from_palette(CommandId::FoldCurrent),
+            Some(EditorCommand::FoldCurrent)
+        );
+        assert_eq!(
+            EditorCommand::from_palette(CommandId::UnfoldCurrent),
+            Some(EditorCommand::UnfoldCurrent)
+        );
+        assert_eq!(
+            EditorCommand::from_palette(CommandId::FoldAll),
+            Some(EditorCommand::FoldAll)
+        );
+        assert_eq!(
+            EditorCommand::from_palette(CommandId::UnfoldAll),
+            Some(EditorCommand::UnfoldAll)
+        );
     }
 
     #[test]
@@ -566,6 +922,193 @@ mod tests {
 
         assert!(outcome.changed_buffer);
         assert_eq!(state.editor.buffers[0].text(), "one\nthree");
+    }
+
+    #[test]
+    fn dispatch_toggle_line_comment_comments_selected_rust_lines() {
+        let mut state = state_with_text_path("fn main() {}\nlet x = 1;", "main.rs");
+        state.editor.views[0].cursor.anchor = Some(Position::new(0, 0));
+        state.editor.views[0].cursor.pos = Position::new(1, 10);
+
+        let outcome = state.dispatch_editor_command(EditorCommand::ToggleLineComment, None);
+
+        assert!(outcome.changed_buffer);
+        assert_eq!(
+            state.editor.buffers[0].text(),
+            "// fn main() {}\n// let x = 1;"
+        );
+
+        let undo = state.dispatch_editor_command(EditorCommand::Undo, None);
+        assert!(undo.changed_buffer);
+        assert_eq!(state.editor.buffers[0].text(), "fn main() {}\nlet x = 1;");
+    }
+
+    #[test]
+    fn dispatch_toggle_line_comment_uses_python_hash_prefix() {
+        let mut state = state_with_text_path("print('hi')", "script.py");
+
+        let outcome = state.dispatch_editor_command(EditorCommand::ToggleLineComment, None);
+
+        assert!(outcome.changed_buffer);
+        assert_eq!(state.editor.buffers[0].text(), "# print('hi')");
+    }
+
+    #[test]
+    fn dispatch_toggle_line_comment_uses_sql_dash_prefix() {
+        let mut state = state_with_text_path("select * from users;", "query.sql");
+
+        let outcome = state.dispatch_editor_command(EditorCommand::ToggleLineComment, None);
+
+        assert!(outcome.changed_buffer);
+        assert_eq!(state.editor.buffers[0].text(), "-- select * from users;");
+    }
+
+    #[test]
+    fn dispatch_toggle_block_comment_wraps_selected_rust_text() {
+        let mut state = state_with_text_path("let value = 1;", "main.rs");
+        state.editor.views[0].cursor.anchor = Some(Position::new(0, 4));
+        state.editor.views[0].cursor.pos = Position::new(0, 9);
+
+        let outcome = state.dispatch_editor_command(EditorCommand::ToggleBlockComment, None);
+
+        assert!(outcome.changed_buffer);
+        assert_eq!(state.editor.buffers[0].text(), "let /*value*/ = 1;");
+        assert_eq!(
+            state.editor.views[0].cursor.selection(),
+            Some((Position::new(0, 6), Position::new(0, 11)))
+        );
+    }
+
+    #[test]
+    fn dispatch_toggle_block_comment_reports_missing_style() {
+        let mut state = state_with_text_path("print('hi')", "script.py");
+
+        let outcome = state.dispatch_editor_command(EditorCommand::ToggleBlockComment, None);
+
+        assert!(!outcome.changed_buffer);
+        assert_eq!(
+            state.status_msg.as_deref(),
+            Some("No block comment style for this file")
+        );
+        assert_eq!(state.editor.buffers[0].text(), "print('hi')");
+    }
+
+    #[test]
+    fn key_action_toggle_comment_routes_through_command_dispatch() {
+        let mut state = state_with_text_path("puts 'hi'", "script.rb");
+        let action = KeyAction {
+            toggle_line_comment: true,
+            ..KeyAction::default()
+        };
+
+        let outcome = state.dispatch_key_action_commands(&action, None);
+
+        assert!(outcome.changed_buffer);
+        assert_eq!(state.editor.buffers[0].text(), "# puts 'hi'");
+    }
+
+    #[test]
+    fn dispatch_jump_to_matching_bracket_moves_cursor_to_pair() {
+        let mut state = state_with_text("fn main() { call(1); }");
+        state.editor.views[0].cursor.pos = Position::new(0, 10);
+        state.editor.views[0].cursor.anchor = Some(Position::new(0, 0));
+
+        let outcome = state.dispatch_editor_command(EditorCommand::JumpToMatchingBracket, None);
+
+        assert!(!outcome.changed_buffer);
+        assert_eq!(state.editor.views[0].cursor.pos, Position::new(0, 21));
+        assert!(!state.editor.views[0].cursor.has_selection());
+        assert_eq!(state.status_msg, None);
+    }
+
+    #[test]
+    fn dispatch_jump_to_matching_bracket_reports_missing_pair() {
+        let mut state = state_with_text("let value = 1;");
+        state.editor.views[0].cursor.pos = Position::new(0, 4);
+
+        let outcome = state.dispatch_editor_command(EditorCommand::JumpToMatchingBracket, None);
+
+        assert!(!outcome.changed_buffer);
+        assert_eq!(state.editor.views[0].cursor.pos, Position::new(0, 4));
+        assert_eq!(state.status_msg.as_deref(), Some("No matching bracket"));
+    }
+
+    #[test]
+    fn key_action_jump_to_matching_bracket_routes_through_command_dispatch() {
+        let mut state = state_with_text("{\n    value\n}");
+        let action = KeyAction {
+            jump_to_matching_bracket: true,
+            ..KeyAction::default()
+        };
+
+        let outcome = state.dispatch_key_action_commands(&action, None);
+
+        assert!(!outcome.changed_buffer);
+        assert_eq!(state.editor.views[0].cursor.pos, Position::new(2, 0));
+    }
+
+    #[test]
+    fn dispatch_fold_current_folds_innermost_syntax_range() {
+        let mut state = state_with_rust_tree(
+            "fn main() {\n    if true {\n        println!(\"x\");\n    }\n}\n",
+        );
+        state.editor.views[0].cursor.pos = Position::new(2, 0);
+
+        let outcome = state.dispatch_editor_command(EditorCommand::FoldCurrent, None);
+
+        assert!(!outcome.changed_buffer);
+        assert!(state.editor.views[0]
+            .folded_ranges
+            .iter()
+            .any(|range| range.start_line == 1 && range.end_line >= 3));
+        assert_eq!(state.status_msg, None);
+    }
+
+    #[test]
+    fn dispatch_fold_all_and_unfold_all_update_active_view() {
+        let mut state = state_with_rust_tree(
+            "fn main() {\n    if true {\n        println!(\"x\");\n    }\n}\n",
+        );
+
+        let fold = state.dispatch_editor_command(EditorCommand::FoldAll, None);
+
+        assert!(!fold.changed_buffer);
+        assert!(!state.editor.views[0].folded_ranges.is_empty());
+
+        let unfold = state.dispatch_editor_command(EditorCommand::UnfoldAll, None);
+
+        assert!(!unfold.changed_buffer);
+        assert!(state.editor.views[0].folded_ranges.is_empty());
+    }
+
+    #[test]
+    fn dispatch_unfold_current_removes_covering_fold() {
+        let mut state = state_with_rust_tree("fn main() {\n    println!(\"x\");\n}\n");
+        state.editor.views[0]
+            .folded_ranges
+            .push(crate::editor::syntax::FoldRange {
+                start_line: 0,
+                end_line: 2,
+            });
+        state.editor.views[0].cursor.pos = Position::new(1, 0);
+
+        let outcome = state.dispatch_editor_command(EditorCommand::UnfoldCurrent, None);
+
+        assert!(!outcome.changed_buffer);
+        assert!(state.editor.views[0].folded_ranges.is_empty());
+    }
+
+    #[test]
+    fn dispatch_fold_current_reports_missing_tree() {
+        let mut state = state_with_text("plain text");
+
+        let outcome = state.dispatch_editor_command(EditorCommand::FoldCurrent, None);
+
+        assert!(!outcome.changed_buffer);
+        assert_eq!(
+            state.status_msg.as_deref(),
+            Some("No foldable syntax tree for this file")
+        );
     }
 
     #[test]

@@ -169,11 +169,10 @@ fn search_files(root: &Path, query: &str, regex_mode: bool) -> Vec<ProjectMatch>
             let name = entry.file_name();
             let name_str = name.to_string_lossy();
 
-            if name_str.starts_with('.') {
-                continue;
-            }
-
             if path.is_dir() {
+                if name_str.starts_with('.') {
+                    continue;
+                }
                 if !IGNORED_DIRS.contains(&name_str.as_ref()) {
                     stack.push(path);
                 }
@@ -339,6 +338,26 @@ mod tests {
 
         let results = search_files(&dir, "hello", false);
         assert_eq!(results.len(), 1); // Only main.js, not node_modules/lib.js
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn search_includes_searchable_dotfiles() {
+        let dir = std::env::temp_dir().join(format!(
+            "llnzy_project_search_dotfile_{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(".gitignore"), "target\nsearchable-cache\n").unwrap();
+
+        let results = search_files(&dir, "searchable-cache", false);
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(
+            results[0].path.file_name().and_then(|name| name.to_str()),
+            Some(".gitignore")
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

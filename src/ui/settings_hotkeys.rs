@@ -124,26 +124,6 @@ fn hotkey_entries() -> Vec<HotkeyEntry> {
             group: "LSP",
         },
         HotkeyEntry {
-            action: "Fold Current",
-            keys: "Cmd+Shift+[",
-            group: "Editor",
-        },
-        HotkeyEntry {
-            action: "Unfold Current",
-            keys: "Cmd+Shift+]",
-            group: "Editor",
-        },
-        HotkeyEntry {
-            action: "Fold All",
-            keys: "Cmd+K, Cmd+0",
-            group: "Editor",
-        },
-        HotkeyEntry {
-            action: "Unfold All",
-            keys: "Cmd+K, Cmd+J",
-            group: "Editor",
-        },
-        HotkeyEntry {
             action: "Add Cursor To Next Match",
             keys: "Cmd+D",
             group: "Editor",
@@ -151,21 +131,6 @@ fn hotkey_entries() -> Vec<HotkeyEntry> {
         HotkeyEntry {
             action: "Select All Occurrences",
             keys: "Cmd+Shift+L",
-            group: "Editor",
-        },
-        HotkeyEntry {
-            action: "Toggle Line Comment",
-            keys: "Cmd+/",
-            group: "Editor",
-        },
-        HotkeyEntry {
-            action: "Toggle Block Comment",
-            keys: "Cmd+Shift+/",
-            group: "Editor",
-        },
-        HotkeyEntry {
-            action: "Jump To Matching Bracket",
-            keys: "Cmd+Shift+\\",
             group: "Editor",
         },
     ]);
@@ -186,6 +151,14 @@ fn group_for_command(id: command_palette::CommandId) -> &'static str {
         | command_palette::CommandId::DuplicateLine
         | command_palette::CommandId::MoveLineUp
         | command_palette::CommandId::MoveLineDown
+        | command_palette::CommandId::ToggleLineComment
+        | command_palette::CommandId::ToggleBlockComment
+        | command_palette::CommandId::JumpToMatchingBracket
+        | command_palette::CommandId::FoldCurrent
+        | command_palette::CommandId::UnfoldCurrent
+        | command_palette::CommandId::FoldAll
+        | command_palette::CommandId::UnfoldAll
+        | command_palette::CommandId::ToggleWordWrap
         | command_palette::CommandId::Find
         | command_palette::CommandId::FindReplace => "Editor",
         command_palette::CommandId::FormatDocument
