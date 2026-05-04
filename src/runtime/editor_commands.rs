@@ -63,9 +63,7 @@ impl App {
         };
 
         let clipboard_in = if matches!(command_id, CommandId::Paste) {
-            self.clipboard
-                .as_mut()
-                .and_then(|clipboard| clipboard.get_text().ok())
+            self.clipboard.get_text().ok()
         } else {
             None
         };
@@ -83,9 +81,7 @@ impl App {
             return false;
         }
         if let Some(text) = ui.editor_view.clipboard_out.take() {
-            if let Some(clipboard) = &mut self.clipboard {
-                let _ = clipboard.set_text(text);
-            }
+            let _ = self.clipboard.set_text(text);
         }
 
         self.request_redraw();

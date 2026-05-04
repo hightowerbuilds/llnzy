@@ -68,6 +68,8 @@ Implementation update:
   requests with macOS, Windows, and Linux command policies.
 - Routed terminal hyperlink opening through `PlatformOpen` instead of calling
   macOS `open` directly from the main app loop.
+- Added `PlatformClipboard` as the only direct `arboard` owner and routed app
+  clipboard reads/writes through plain-text platform helpers.
 
 ## PlatformShell
 
@@ -294,7 +296,7 @@ behavior behind them.
 3. [x] Route config, data, cache, logs, themes, and workspaces through
    `PlatformPaths`.
 4. [x] Move open/reveal behavior behind `PlatformOpen`.
-5. [ ] Move clipboard imports behind `PlatformClipboard`.
+5. [x] Move clipboard imports behind `PlatformClipboard`.
 6. [ ] Route native menu callbacks through app command IDs via `PlatformMenu`.
 7. [ ] Normalize keyboard, IME, and terminal input through `PlatformInput`.
 8. [ ] Define packaging metadata and make build scripts consume the same values

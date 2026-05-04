@@ -63,9 +63,7 @@ impl App {
                     self.visual_bell_until = Some(Instant::now() + Duration::from_millis(150));
                 }
                 if let Some(text) = clip {
-                    if let Some(cb) = &mut self.clipboard {
-                        let _ = cb.set_text(text);
-                    }
+                    let _ = self.clipboard.set_text(text);
                 }
                 if !was_exited {
                     if let Some(code) = session.exited {

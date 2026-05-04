@@ -155,16 +155,11 @@ impl App {
             }
             ExternalAction::Copy => {
                 if let Some(text) = ui.stacker.editor.selected_text(selection) {
-                    if let Some(clipboard) = &mut self.clipboard {
-                        let _ = clipboard.set_text(text);
-                    }
+                    let _ = self.clipboard.set_text(text);
                 }
             }
             ExternalAction::Paste => {
-                let text = self
-                    .clipboard
-                    .as_mut()
-                    .and_then(|clipboard| clipboard.get_text().ok());
+                let text = self.clipboard.get_text().ok();
                 let Some(text) = text else {
                     return ExternalCommandResult::handled(command.id, target, false);
                 };
@@ -259,9 +254,7 @@ impl App {
         };
 
         let clipboard_in = if matches!(command.action, ExternalAction::Paste) {
-            self.clipboard
-                .as_mut()
-                .and_then(|clipboard| clipboard.get_text().ok())
+            self.clipboard.get_text().ok()
         } else {
             None
         };
@@ -294,9 +287,7 @@ impl App {
             );
         }
         if let Some(text) = ui.editor_view.clipboard_out.take() {
-            if let Some(clipboard) = &mut self.clipboard {
-                let _ = clipboard.set_text(text);
-            }
+            let _ = self.clipboard.set_text(text);
         }
 
         self.request_redraw();
@@ -319,10 +310,7 @@ impl App {
                 ExternalCommandResult::handled(command.id, target, !text.is_empty())
             }
             ExternalAction::Paste => {
-                let text = self
-                    .clipboard
-                    .as_mut()
-                    .and_then(|clipboard| clipboard.get_text().ok());
+                let text = self.clipboard.get_text().ok();
                 let Some(text) = text else {
                     return ExternalCommandResult::handled(command.id, target, false);
                 };
@@ -336,9 +324,7 @@ impl App {
                 let Some(text) = text else {
                     return ExternalCommandResult::handled(command.id, target, false);
                 };
-                if let Some(clipboard) = &mut self.clipboard {
-                    let _ = clipboard.set_text(text);
-                }
+                let _ = self.clipboard.set_text(text);
                 ExternalCommandResult::handled(command.id, target, false)
             }
             ExternalAction::SelectAll => {

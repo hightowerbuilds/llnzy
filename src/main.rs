@@ -73,7 +73,7 @@ struct App {
     search: Search,
     error_log: ErrorLog,
     error_panel: ErrorPanel,
-    clipboard: Option<arboard::Clipboard>,
+    clipboard: llnzy::platform::clipboard::PlatformClipboard,
     cursor_pos: winit::dpi::PhysicalPosition<f64>,
     mouse_pressed: bool,
     terminal_selection_drag: bool,
@@ -97,7 +97,7 @@ struct App {
 
 impl App {
     fn new(proxy: winit::event_loop::EventLoopProxy<UserEvent>) -> Self {
-        let clipboard = arboard::Clipboard::new().ok();
+        let clipboard = llnzy::platform::clipboard::PlatformClipboard::current();
         Self {
             config: Config::load(),
             window: None,
@@ -935,10 +935,8 @@ impl ApplicationHandler<UserEvent> for App {
                     if let Some(layout) = &self.screen_layout {
                         // Supply clipboard content to editor for paste + init LSP
                         if let Some(ui) = self.ui.as_mut() {
-                            if let Some(cb) = &mut self.clipboard {
-                                if let Ok(text) = cb.get_text() {
-                                    ui.editor_view.clipboard_in = Some(text);
-                                }
+                            if let Ok(text) = self.clipboard.get_text() {
+                                ui.editor_view.clipboard_in = Some(text);
                             }
                             ui.editor_view.init_lsp(self.proxy.clone());
                         }

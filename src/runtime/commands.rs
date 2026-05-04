@@ -286,8 +286,8 @@ impl App {
                 true
             }
             AppCommand::CopyToClipboard(text) => {
-                if let Some(cb) = &mut self.clipboard {
-                    let _ = cb.set_text(text);
+                if let Err(error) = self.clipboard.set_text(text) {
+                    log::warn!("Failed to write clipboard text: {error}");
                 }
                 false
             }
