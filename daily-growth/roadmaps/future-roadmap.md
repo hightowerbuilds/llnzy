@@ -11,11 +11,17 @@ not need to block the current leftovers roadmap.
   open and multiple shell sessions running at the same time.
 - [ ] Verify Wispr Flow delivery when switching between grouped shells,
   standalone shells, Stacker, and editor tabs.
-- [ ] Investigate whether delayed Wispr Flow delivery is tied to active tab
+- [x] Resolve Stacker-specific Wispr Flow delivery by moving Stacker text entry
+  onto a WebView-backed native browser textarea while keeping the Rust document
+  model as the durable source of saved prompt state.
+- [x] Stabilize cursor and selection sync after voice dictation so the WebView
+  textarea and Rust Stacker document state do not fight each other during
+  normal editing.
+- [x] Investigate whether delayed Wispr Flow delivery is tied to active tab
   focus, AppKit text bridge ownership, terminal paste routing, or a combination
   of those paths.
-- [ ] Keep the Stacker input engine as the owner of Stacker text mutation while
-  improving external text ingress.
+- [x] Keep the Rust Stacker document model as the durable owner of saved prompt
+  state while the WebView textarea owns live text entry.
 - [ ] Define the command handoff contract external tools need when they target
   Stacker or the code editor: insert text, replace selection, apply formatting,
   submit command, copy, paste, select all, undo, and redo.
@@ -78,9 +84,17 @@ not need to block the current leftovers roadmap.
   platform integration point.
 - [x] Implement the chosen external text ingress path only after the current
   delivery mechanism is understood.
+- [x] Replace the fragile hidden AppKit text bridge experiment with a
+  WebView-backed native textarea for the Stacker prompt editor.
+- [x] Preserve Stacker toolbar, command palette, undo/redo, saved prompt
+  lifecycle, and queue behavior while the WebView textarea owns live text entry.
+- [x] Sync WebView text changes back into `StackerDocumentEditor` for saved
+  prompt persistence, dirty draft tracking, and formatting command state.
+- [x] Sync Rust-side formatting/command edits back into the WebView textarea
+  without resetting the user's cursor on every redraw.
 - [ ] Manually verify typing, copy, paste, select all, undo, redo, formatting
   toolbar actions, dirty-draft warning, save behavior, and queue actions.
-- [ ] Manually verify Wispr Flow or a comparable OS-level dictation/paste tool
+- [x] Manually verify Wispr Flow or a comparable OS-level dictation/paste tool
   after the external ingress path is implemented.
 
 ---
