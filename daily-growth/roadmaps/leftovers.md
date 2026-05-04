@@ -22,3 +22,11 @@ This document tracks follow-up work that is real but should not block the curren
 - [ ] Fix Stacker Backspace inserting question marks.
   - Context: During the Stacker input-routing pass, Backspace was observed inserting question-mark replacement characters instead of deleting text.
   - Direction: ensure Backspace/Delete and other non-text editing keys are command operations, never committed text payloads.
+
+---
+
+## Tab Engine
+
+- [ ] Replace the current single joined-tab pair model with a tab grouping engine.
+  - Context: The current joined-tabs implementation supports one special pair. The product direction needs developers to quickly create, separate, and manage multiple joined tab groups, such as two joined tabs in one area and two joined tabs elsewhere.
+  - Direction: model tab groups as first-class layout state instead of one global joined pair. The engine should support multiple groups, fast join/separate actions, stable tab identity through reorder/close, and predictable context-menu behavior for each group.

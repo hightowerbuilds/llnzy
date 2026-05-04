@@ -126,18 +126,18 @@ pub(super) fn render_joined_tab(
         );
     }
 
-    if group_response.secondary_clicked() {
-        let pointer_pos = ctx
-            .input(|input| input.pointer.latest_pos())
-            .unwrap_or(rect.center());
-        let tab_idx = if pointer_pos.x >= secondary_rect.left() {
-            secondary
+    let secondary_pressed_on_group = group_response.hovered()
+        && ctx.input(|input| input.pointer.button_pressed(egui::PointerButton::Secondary));
+    if secondary_pressed_on_group || group_response.secondary_clicked() {
+        let tab_idx = if joined.contains(active_tab_index) {
+            active_tab_index
         } else {
             primary
         };
         edit_state.context_menu = Some(TabContextMenuState {
             tab_idx,
-            pos: pointer_pos,
+            pos: rect.left_bottom(),
+            width: rect.width(),
             view: super::tab_bar::TabContextMenuView::Main,
         });
     }
@@ -191,7 +191,7 @@ fn paint_joined_segment(
             ui.id().with(("workspace_joined_tab_name", tab_idx)),
             egui::Sense::click(),
         )
-        .on_hover_text("Double-click to rename tab");
+        .on_hover_text("Right-click to rename tab");
 
     if edit_state.editing_tab == Some(tab_idx) {
         render_tab_name_editor(ui, rect, close_rect, tab_idx, edit_state, action);
@@ -225,11 +225,6 @@ fn paint_joined_segment(
 
     if close_response.clicked() {
         action.close_tab = Some(tab_idx);
-        return true;
-    } else if name_response.double_clicked() {
-        edit_state.editing_tab = Some(tab_idx);
-        edit_state.editing_tab_text = tab.title.clone();
-        action.switch_to = Some(tab_idx);
         return true;
     } else if name_response.clicked() {
         action.switch_to = Some(tab_idx);

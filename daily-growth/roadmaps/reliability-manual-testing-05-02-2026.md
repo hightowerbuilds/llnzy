@@ -27,10 +27,18 @@ This document tracks the reliability and durability checks that still need human
   - May 3, 2026: Follow-up pass found terminal copy could collapse to the final selected character. Repair applied at the Alacritty selection layer so drag direction uses the correct selection sides, and mouse release refreshes the final emulator selection endpoint before copying.
   - May 3, 2026: Follow-up pass found mouse-reporting TUIs such as Codex, Gemini, and Claude Code could still show TUI-owned highlight while LLNZY copied only stale emulator text. Repair applied so normal drags in mouse-reporting TUIs become LLNZY/Alacritty selections after the pointer leaves the press cell, plain clicks are still delivered to the TUI, and copied text is rebuilt from the emulator's selected grid range.
   - May 3, 2026: Manual retest confirmed the copy bug is fixed in the target CLI/TUI workflow. Remaining follow-up: selection drag still has noticeable latency and should get a focused performance pass.
+- [x] Tab navigation keybindings work across active tabs.
+  - May 3, 2026: Manual retest confirmed Cmd+T creates tabs, Cmd+1/Cmd+2 style numbered tab shortcuts work, and Cmd+bracket previous/next tab navigation works.
+  - May 3, 2026: Follow-up found double-click tab rename stayed open after clicking into terminal content. Repair applied so clicking outside the tab rename editor commits the rename like pressing Enter.
+  - May 3, 2026: Follow-up changed tab rename entry from double-click to the tab context menu. Right-click a tab and choose Edit Tab Name to edit, then Enter or click away to save.
+  - May 3, 2026: Follow-up adjusted the tab context menu so it drops directly below the clicked tab/segment and uses that tab/segment width instead of opening at the pointer position.
+  - May 3, 2026: Follow-up adjusted the tab context menu to open on right-button press over any tab, active or inactive, without requiring a prior left-click selection.
+  - May 3, 2026: Follow-up adjusted joined-tab context menus so already joined tabs show Separate Tabs directly instead of Join Tabs.
+  - May 3, 2026: Follow-up adjusted tab context menu rows so each row is full-width clickable and Join Tabs stays open while switching to the join-target list.
+  - May 3, 2026: Follow-up adjusted joined tabs to use one group-level context menu anchored to the full joined tab width instead of separate primary/secondary segment menus.
 
 ### Next: Command Routing
 
-- [ ] Use tab navigation keybindings with terminal, code, and singleton tabs.
 - [ ] Use menu actions and confirm they route through the same behavior as keybindings.
 - [ ] Confirm Settings hotkey legend entries match actual behavior for common shortcuts.
 

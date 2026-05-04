@@ -13,9 +13,8 @@ pub(super) const TAB_HEIGHT: f32 = 32.0;
 pub(super) const TAB_MIN_WIDTH: f32 = 104.0;
 pub(super) const TAB_MAX_WIDTH: f32 = 220.0;
 const TAB_GHOST_ALPHA: u8 = 210;
-const TAB_MENU_WIDTH: f32 = 190.0;
-const TAB_MENU_ROW_HEIGHT: f32 = 28.0;
 const TAB_MENU_MARGIN: f32 = 8.0;
+const TAB_MENU_ROW_HEIGHT: f32 = 28.0;
 
 #[derive(Default)]
 pub struct TabBarAction {
@@ -80,6 +79,7 @@ pub struct TabBarEditState {
 pub struct TabContextMenuState {
     pub tab_idx: usize,
     pub pos: egui::Pos2,
+    pub width: f32,
     pub view: TabContextMenuView,
 }
 
@@ -231,9 +231,6 @@ pub fn render_workspace_tab_bar(
 
                     if close_response.clicked() {
                         action.close_tab = Some(i);
-                    } else if tab_response.double_clicked() {
-                        edit_state.editing_tab = Some(i);
-                        edit_state.editing_tab_text = tab.title.clone();
                     } else if tab_response.clicked() && !editing {
                         action.switch_to = Some(i);
                     }
@@ -275,12 +272,15 @@ pub fn render_workspace_tab_bar(
                         paint_drag_ghost(ctx, &tab.title, active, rect);
                     }
 
-                    if tab_response.secondary_clicked() {
+                    let secondary_pressed_on_tab = tab_response.hovered()
+                        && ctx.input(|input| {
+                            input.pointer.button_pressed(egui::PointerButton::Secondary)
+                        });
+                    if secondary_pressed_on_tab || tab_response.secondary_clicked() {
                         edit_state.context_menu = Some(TabContextMenuState {
                             tab_idx: i,
-                            pos: ctx
-                                .input(|input| input.pointer.latest_pos())
-                                .unwrap_or(tab_response.rect.left_bottom()),
+                            pos: tab_response.rect.left_bottom(),
+                            width: tab_response.rect.width(),
                             view: TabContextMenuView::Main,
                         });
                     }
@@ -297,30 +297,37 @@ pub(super) fn render_tab_context_menu(
     ui: &mut egui::Ui,
     tab: &UiTabInfo,
     tab_idx: usize,
+    edit_state: &mut TabBarEditState,
     action: &mut TabBarAction,
 ) -> bool {
     let mut close = false;
+    if menu_button(ui, "Edit Tab Name").clicked() {
+        edit_state.editing_tab = Some(tab_idx);
+        edit_state.editing_tab_text = tab.title.clone();
+        edit_state.context_menu = None;
+        close = true;
+    }
+    ui.separator();
     if tab.kind == TabKind::Terminal {
-        ui.separator();
-        if !tab.exited && ui.button("Kill Process").clicked() {
+        if !tab.exited && menu_button(ui, "Kill Process").clicked() {
             action.kill_terminal = Some(tab_idx);
             close = true;
         }
-        if ui.button("Restart Terminal").clicked() {
+        if menu_button(ui, "Restart Terminal").clicked() {
             action.restart_terminal = Some(tab_idx);
             close = true;
         }
         ui.separator();
     }
-    if ui.button("Close").clicked() {
+    if menu_button(ui, "Close").clicked() {
         action.close_tab = Some(tab_idx);
         close = true;
     }
-    if ui.button("Close Others").clicked() {
+    if menu_button(ui, "Close Others").clicked() {
         action.close_others = Some(tab_idx);
         close = true;
     }
-    if ui.button("Close to the Right").clicked() {
+    if menu_button(ui, "Close to the Right").clicked() {
         action.close_to_right = Some(tab_idx);
         close = true;
     }
@@ -335,14 +342,14 @@ fn render_tab_join_targets_menu(
     action: &mut TabBarAction,
 ) -> JoinMenuResult {
     let mut result = JoinMenuResult::default();
-    if ui.button("< Back").clicked() {
+    if menu_button(ui, "< Back").clicked() {
         result.back = true;
         return result;
     }
 
     ui.separator();
     if joined_tabs.is_some() {
-        if ui.button("Separate Tabs").clicked() {
+        if menu_button(ui, "Separate Tabs").clicked() {
             action.separate_tabs = true;
             result.close = true;
         }
@@ -361,7 +368,7 @@ fn render_tab_join_targets_menu(
         }
         had_target = true;
         let label = format!("Join with {}", target.title);
-        if ui.button(label).clicked() {
+        if menu_button(ui, &label).clicked() {
             action.join_tabs = Some((tab_idx, target_idx));
             result.close = true;
         }
@@ -394,7 +401,8 @@ fn render_immediate_tab_context_menu(
     };
 
     let menu_id = egui::Id::new("workspace_tab_context_menu");
-    let menu_pos = clamped_tab_context_menu_pos(ctx, menu, tab, input);
+    let menu_pos = tab_context_menu_pos(menu);
+    let menu_width = menu.width.max(1.0);
     let mut keep_open = false;
     let menu_rect = egui::Area::new(menu_id)
         .order(egui::Order::Tooltip)
@@ -410,22 +418,28 @@ fn render_immediate_tab_context_menu(
                     spread: 0.0,
                     color: egui::Color32::from_black_alpha(120),
                 })
-                .inner_margin(egui::Margin::symmetric(8.0, 6.0));
+                .inner_margin(egui::Margin::symmetric(0.0, 6.0));
             frame
                 .show(ui, |ui| {
-                    ui.set_min_width(TAB_MENU_WIDTH);
+                    ui.set_min_width(menu_width);
+                    ui.set_max_width(menu_width);
+                    ui.spacing_mut().item_spacing.y = 0.0;
                     ui.visuals_mut().override_text_color =
                         Some(egui::Color32::from_rgb(232, 236, 244));
                     match menu.view {
                         TabContextMenuView::Main => {
-                            if ui.button("Join").clicked() {
+                            if input.joined_tabs.is_some() {
+                                if menu_button(ui, "Separate Tabs").clicked() {
+                                    action.separate_tabs = true;
+                                }
+                            } else if menu_button(ui, "Join Tabs").clicked() {
                                 edit_state.context_menu = Some(TabContextMenuState {
                                     view: TabContextMenuView::JoinTargets,
                                     ..menu
                                 });
                                 keep_open = true;
                             }
-                            render_tab_context_menu(ui, tab, menu.tab_idx, action)
+                            render_tab_context_menu(ui, tab, menu.tab_idx, edit_state, action)
                         }
                         TabContextMenuView::JoinTargets => {
                             let result = render_tab_join_targets_menu(
@@ -453,7 +467,7 @@ fn render_immediate_tab_context_menu(
 
     let escape_pressed = ctx.input(|input| input.key_pressed(egui::Key::Escape));
     let clicked_outside = ctx.input(|input| {
-        input.pointer.any_pressed()
+        input.pointer.button_pressed(egui::PointerButton::Primary)
             && input
                 .pointer
                 .latest_pos()
@@ -473,45 +487,16 @@ fn render_immediate_tab_context_menu(
     }
 }
 
-fn clamped_tab_context_menu_pos(
-    ctx: &egui::Context,
-    menu: TabContextMenuState,
-    tab: &UiTabInfo,
-    input: &TabBarRenderInput<'_>,
-) -> egui::Pos2 {
-    let screen = ctx.screen_rect();
-    let estimated_h = estimated_tab_context_menu_height(menu, tab, input);
-    let min_y = TAB_BAR_HEIGHT + TAB_MENU_MARGIN;
-    let max_x = (screen.right() - TAB_MENU_WIDTH - TAB_MENU_MARGIN).max(TAB_MENU_MARGIN);
-    let max_y = (screen.bottom() - estimated_h - TAB_MENU_MARGIN).max(min_y);
-    egui::pos2(
-        menu.pos.x.clamp(TAB_MENU_MARGIN, max_x),
-        menu.pos.y.max(min_y).clamp(min_y, max_y),
-    )
+fn tab_context_menu_pos(menu: TabContextMenuState) -> egui::Pos2 {
+    egui::pos2(menu.pos.x, menu.pos.y + TAB_MENU_MARGIN * 0.5)
 }
 
-fn estimated_tab_context_menu_height(
-    menu: TabContextMenuState,
-    tab: &UiTabInfo,
-    input: &TabBarRenderInput<'_>,
-) -> f32 {
-    let rows = match menu.view {
-        TabContextMenuView::Main => {
-            let mut rows = 4.0; // join, close, close others, close to right
-            if tab.kind == TabKind::Terminal {
-                rows += if tab.exited { 1.0 } else { 2.0 };
-            }
-            rows
-        }
-        TabContextMenuView::JoinTargets => {
-            if input.joined_tabs.is_some() {
-                4.0
-            } else {
-                (input.tabs.len().saturating_sub(1) as f32 + 2.0).max(3.0)
-            }
-        }
-    };
-    rows * TAB_MENU_ROW_HEIGHT + 28.0
+fn menu_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
+    let width = ui.available_width().max(1.0);
+    ui.add_sized(
+        [width, TAB_MENU_ROW_HEIGHT],
+        egui::Button::new(egui::RichText::new(label).size(12.0)),
+    )
 }
 
 pub(super) fn render_tab_name_editor(
@@ -546,7 +531,7 @@ pub(super) fn render_tab_name_editor(
                 .unwrap_or(tab_rect.center()),
         );
 
-    if enter_pressed || response.lost_focus() && clicked_elsewhere {
+    if enter_pressed || clicked_elsewhere {
         action.saved_tab_name = Some((tab_idx, state.editing_tab_text.clone()));
         state.editing_tab = None;
         state.editing_tab_text.clear();
