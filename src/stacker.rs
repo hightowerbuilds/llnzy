@@ -1,5 +1,8 @@
 use std::path::{Path, PathBuf};
 
+pub mod commands;
+pub mod document;
+pub mod draft;
 pub mod formatting;
 pub mod input;
 pub mod queue;

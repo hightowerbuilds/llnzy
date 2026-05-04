@@ -1,19 +1,32 @@
 use super::stacker_view;
 use super::types::CopyGhost;
+use crate::editor::MarkdownViewMode;
 use crate::stacker::{
+    document::StackerDocumentEditor,
+    draft::StackerDraft,
     load_stacker_prompts,
     queue::{self, QueuedPrompt},
     save_stacker_prompts, StackerPrompt,
 };
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PendingStackerDraftSwitch {
+    Scratch,
+    SavedPrompt(usize),
+}
+
 pub struct StackerUiState {
     pub prompts: Vec<StackerPrompt>,
-    pub input: String,
+    pub editor: StackerDocumentEditor,
+    pub draft: StackerDraft,
+    pub pending_draft_switch: Option<PendingStackerDraftSwitch>,
+    pub pending_prompt_delete: Option<usize>,
     pub editing: Option<usize>,
     pub edit_text: String,
     pub dirty: bool,
     pub copy_ghosts: Vec<CopyGhost>,
     pub editor_font_size: f32,
+    pub preview_mode: MarkdownViewMode,
     pub queued_prompts: Vec<QueuedPrompt>,
 }
 
@@ -21,12 +34,16 @@ impl Default for StackerUiState {
     fn default() -> Self {
         Self {
             prompts: Vec::new(),
-            input: String::new(),
+            editor: StackerDocumentEditor::new(),
+            draft: StackerDraft::new(),
+            pending_draft_switch: None,
+            pending_prompt_delete: None,
             editing: None,
             edit_text: String::new(),
             dirty: false,
             copy_ghosts: Vec::new(),
             editor_font_size: stacker_view::DEFAULT_EDITOR_FONT_SIZE,
+            preview_mode: MarkdownViewMode::Source,
             queued_prompts: Vec::new(),
         }
     }

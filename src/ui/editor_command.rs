@@ -82,7 +82,8 @@ impl EditorCommand {
             | CommandId::NextTab
             | CommandId::PrevTab
             | CommandId::ToggleEffects
-            | CommandId::ToggleFps => return None,
+            | CommandId::ToggleFps
+            | CommandId::Stacker(_) => return None,
         })
     }
 }

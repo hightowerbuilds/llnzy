@@ -247,12 +247,16 @@ fn render_joined_pane(
                     stacker_view::render_stacker_view(
                         ui,
                         &mut state.stacker.prompts,
-                        &mut state.stacker.input,
+                        &mut state.stacker.editor,
+                        &mut state.stacker.draft,
+                        &mut state.stacker.pending_draft_switch,
+                        &mut state.stacker.pending_prompt_delete,
                         &mut state.stacker.editing,
                         &mut state.stacker.edit_text,
                         &mut state.stacker.dirty,
                         state.saved_edit_idx,
                         &mut state.stacker.editor_font_size,
+                        &mut state.stacker.preview_mode,
                         &mut state.stacker.queued_prompts,
                     );
                 },
@@ -363,12 +367,16 @@ fn render_stacker(ctx: &egui::Context, state: TabContentState<'_>) {
             stacker_view::render_stacker_view(
                 ui,
                 &mut state.stacker.prompts,
-                &mut state.stacker.input,
+                &mut state.stacker.editor,
+                &mut state.stacker.draft,
+                &mut state.stacker.pending_draft_switch,
+                &mut state.stacker.pending_prompt_delete,
                 &mut state.stacker.editing,
                 &mut state.stacker.edit_text,
                 &mut state.stacker.dirty,
                 state.saved_edit_idx,
                 &mut state.stacker.editor_font_size,
+                &mut state.stacker.preview_mode,
                 &mut state.stacker.queued_prompts,
             );
         });

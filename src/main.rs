@@ -19,10 +19,11 @@ use llnzy::config::Config;
 use llnzy::diagnostics::write_diagnostic;
 use llnzy::error_log::{ErrorLog, ErrorPanel};
 use llnzy::input;
-use llnzy::keybindings::Action;
+use llnzy::keybindings::{primary_modifier, Action};
 use llnzy::layout::{LayoutInputs, ScreenLayout};
 use llnzy::renderer::{RenderRequest, Renderer, TerminalPane};
 use llnzy::search::Search;
+use llnzy::stacker::commands::StackerCommandId;
 use llnzy::ui::command_palette::CommandId;
 use llnzy::ui::{ActiveView, PendingClose, UiFrameOutput, UiState, BUMPER_WIDTH};
 use llnzy::workspace::{TabContent, TabKind, WorkspaceTab};
@@ -36,6 +37,11 @@ struct TerminalPaneHit {
     tab_idx: usize,
     row: usize,
     col: usize,
+}
+
+enum StackerHistoryCommand {
+    Undo,
+    Redo,
 }
 
 struct App {
@@ -122,7 +128,7 @@ impl App {
         let text = if active {
             self.ui
                 .as_ref()
-                .map(|ui| ui.stacker.input.as_str())
+                .map(|ui| ui.stacker.editor.text())
                 .unwrap_or("")
                 .to_string()
         } else {
@@ -268,6 +274,38 @@ fn local_terminal_selection_requested(
     mouse_reporting && (shift_key || terminal_selection_drag)
 }
 
+fn stacker_history_shortcut(key: &Key, modifiers: ModifiersState) -> Option<StackerHistoryCommand> {
+    if !primary_modifier(modifiers) || modifiers.alt_key() {
+        return None;
+    }
+
+    let Key::Character(key) = key else {
+        return None;
+    };
+
+    match (key.to_lowercase().as_str(), modifiers.shift_key()) {
+        ("z", false) => Some(StackerHistoryCommand::Undo),
+        ("z", true) | ("y", false) => Some(StackerHistoryCommand::Redo),
+        _ => None,
+    }
+}
+
+fn stacker_editor_shortcut(key: &Key, modifiers: ModifiersState) -> Option<StackerCommandId> {
+    if !primary_modifier(modifiers) || modifiers.alt_key() {
+        return None;
+    }
+
+    let Key::Character(key) = key else {
+        return None;
+    };
+
+    match (key.to_lowercase().as_str(), modifiers.shift_key()) {
+        ("b", _) => Some(StackerCommandId::Bold),
+        ("`", _) => Some(StackerCommandId::InlineCode),
+        _ => None,
+    }
+}
+
 fn terminal_mouse_drag_exceeded(start: (usize, usize), row: usize, col: usize) -> bool {
     start != (row, col)
 }
@@ -389,6 +427,25 @@ impl ApplicationHandler<UserEvent> for App {
             }
 
             if self.active_stacker_tab() && key_event.state == ElementState::Pressed {
+                if let Some(command) =
+                    stacker_editor_shortcut(&key_event.logical_key, self.modifiers)
+                {
+                    self.apply_stacker_editor_command(command);
+                    return;
+                }
+
+                if let Some(history_command) =
+                    stacker_history_shortcut(&key_event.logical_key, self.modifiers)
+                {
+                    let handled = match history_command {
+                        StackerHistoryCommand::Undo => self.undo_stacker_editor(),
+                        StackerHistoryCommand::Redo => self.redo_stacker_editor(),
+                    };
+                    if handled {
+                        return;
+                    }
+                }
+
                 if let Some(action) = self.config.keybindings.match_key(key_event, self.modifiers) {
                     match action {
                         Action::Copy => {
@@ -435,14 +492,15 @@ impl ApplicationHandler<UserEvent> for App {
 
         // Route events to egui first
         if let (Some(window), Some(ui)) = (&self.window, &mut self.ui) {
-            let stacker_input_before_egui = stacker_ime_commit.then(|| ui.stacker.input.clone());
+            let stacker_input_before_egui =
+                stacker_ime_commit.then(|| ui.stacker.editor.text().to_string());
             let response = ui.handle_event(window, &event);
             let terminal_should_receive_consumed_ime = terminal_ime_commit
                 && !ui.captures_terminal_input()
                 && !ui.ctx.wants_keyboard_input();
             let stacker_should_receive_consumed_ime = stacker_input_before_egui
                 .as_ref()
-                .is_some_and(|input_before| input_before == &ui.stacker.input);
+                .is_some_and(|input_before| input_before == ui.stacker.editor.text());
             match &event {
                 WindowEvent::HoveredFile(path) => {
                     ui.drag_drop.hover_native_file(path.clone());
@@ -1277,10 +1335,14 @@ impl ApplicationHandler<UserEvent> for App {
                         self.start_renaming_active_tab();
                     }
                     MenuAction::Undo => {
-                        self.route_code_editor_command(CommandId::Undo);
+                        if !self.undo_stacker_editor() {
+                            self.route_code_editor_command(CommandId::Undo);
+                        }
                     }
                     MenuAction::Redo => {
-                        self.route_code_editor_command(CommandId::Redo);
+                        if !self.redo_stacker_editor() {
+                            self.route_code_editor_command(CommandId::Redo);
+                        }
                     }
                     MenuAction::Copy => {
                         if self.route_code_editor_command(CommandId::Copy) {

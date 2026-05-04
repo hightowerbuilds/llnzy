@@ -78,6 +78,17 @@ pub(crate) fn render_markdown_preview(
     buf: &Buffer,
     theme: MarkdownPreviewTheme,
 ) {
+    let text = buf.text();
+    let base_dir = buf.path().and_then(|path| path.parent());
+    render_markdown_text(ui, &text, base_dir, theme);
+}
+
+pub(crate) fn render_markdown_text(
+    ui: &mut egui::Ui,
+    text: &str,
+    base_dir: Option<&Path>,
+    theme: MarkdownPreviewTheme,
+) {
     egui::Frame::none().fill(theme.background).show(ui, |ui| {
         egui::ScrollArea::vertical()
             .auto_shrink([false; 2])
@@ -92,9 +103,7 @@ pub(crate) fn render_markdown_preview(
                         .inner_margin(egui::Margin::symmetric(34.0, 30.0))
                         .show(ui, |ui| {
                             ui.set_width(page_width);
-                            let text = buf.text();
-                            let blocks = parse_markdown_blocks(&text);
-                            let base_dir = buf.path().and_then(|path| path.parent());
+                            let blocks = parse_markdown_blocks(text);
                             ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
                                 render_markdown_blocks(ui, &blocks, base_dir, theme);
                             });

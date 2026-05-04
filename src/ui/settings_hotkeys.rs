@@ -213,5 +213,6 @@ fn group_for_command(id: command_palette::CommandId) -> &'static str {
         command_palette::CommandId::OpenWorkspace
         | command_palette::CommandId::ToggleEffects
         | command_palette::CommandId::ToggleFps => "System",
+        command_palette::CommandId::Stacker(_) => "Stacker",
     }
 }

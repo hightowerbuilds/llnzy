@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use super::command_palette::{self, CommandId, PaletteState};
+use super::command_palette::{self, CommandId, CommandPaletteContext, PaletteState};
 use super::types::{CopyGhost, PendingClose, SavePromptResponse};
 use super::types::{GHOST_DURATION_SECS, GHOST_FLOAT_PX};
 use crate::app::drag_drop::{DragDropState, DropTarget};
@@ -87,8 +87,10 @@ pub fn render_drag_drop_overlay(ctx: &egui::Context, drag_drop: &DragDropState) 
 pub fn render_command_palette(
     ctx: &egui::Context,
     palette: &mut PaletteState,
+    context: CommandPaletteContext,
 ) -> Option<CommandId> {
     let mut result: Option<CommandId> = None;
+    palette.set_context(context);
 
     if palette.open {
         egui::Area::new(egui::Id::new("command_palette"))

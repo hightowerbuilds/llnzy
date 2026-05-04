@@ -89,7 +89,8 @@ pub(super) fn apply_palette_command(
         | CommandId::ToggleMarkdownMode
         | CommandId::MarkdownSource
         | CommandId::MarkdownPreview
-        | CommandId::MarkdownSplit => {}
+        | CommandId::MarkdownSplit
+        | CommandId::Stacker(_) => {}
     }
 }
 

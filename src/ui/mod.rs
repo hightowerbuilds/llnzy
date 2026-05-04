@@ -41,6 +41,7 @@ mod sidebar_state;
 mod sidebar_tree;
 mod sketch_state;
 mod sketch_view;
+pub mod stacker_cursor;
 mod stacker_state;
 mod stacker_view;
 pub mod tab_bar;
@@ -460,7 +461,13 @@ impl UiState {
             // ── Overlays ──
             overlays::render_drag_drop_overlay(ctx, &drag_drop);
             overlays::render_copy_ghosts(ctx, &mut stacker.copy_ghosts);
-            palette_command = overlays::render_command_palette(ctx, &mut palette);
+            let palette_context =
+                if matches!(active_tab_kind, Some(crate::workspace::TabKind::Stacker)) {
+                    command_palette::CommandPaletteContext::Stacker
+                } else {
+                    command_palette::CommandPaletteContext::Default
+                };
+            palette_command = overlays::render_command_palette(ctx, &mut palette, palette_context);
             if let Some((fps, ms)) = fps_info {
                 overlays::render_fps_overlay(ctx, fps, ms, perf_summary.as_deref());
             }
@@ -483,16 +490,25 @@ impl UiState {
         stacker.persist_if_dirty();
 
         if let Some(command_id) = palette_command {
-            palette_command_dispatch::apply_palette_command(
-                command_id,
-                &mut editor_view,
-                &mut explorer,
-                &mut sidebar_state,
-                &mut config_clone,
-                active_tab_index,
-                tab_names.len(),
-                &mut commands_out,
-            );
+            match command_id {
+                command_palette::CommandId::Stacker(command_id) => {
+                    stacker_view::apply_registered_stacker_command(
+                        &self.ctx,
+                        &mut stacker,
+                        command_id,
+                    );
+                }
+                command_id => palette_command_dispatch::apply_palette_command(
+                    command_id,
+                    &mut editor_view,
+                    &mut explorer,
+                    &mut sidebar_state,
+                    &mut config_clone,
+                    active_tab_index,
+                    tab_names.len(),
+                    &mut commands_out,
+                ),
+            }
         }
 
         // Apply state changes

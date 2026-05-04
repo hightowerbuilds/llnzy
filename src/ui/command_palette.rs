@@ -1,3 +1,5 @@
+use crate::stacker::commands::{stacker_command_registry, StackerCommandId};
+
 /// A command that can be executed from the palette.
 #[derive(Clone)]
 pub struct Command {
@@ -46,10 +48,30 @@ pub enum CommandId {
     PrevTab,
     ToggleEffects,
     ToggleFps,
+    Stacker(StackerCommandId),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CommandPaletteContext {
+    Default,
+    Stacker,
 }
 
 /// All registered commands.
 pub fn all_commands() -> Vec<Command> {
+    all_commands_for_context(CommandPaletteContext::Default)
+}
+
+/// Registered commands for the active UI context.
+pub fn all_commands_for_context(context: CommandPaletteContext) -> Vec<Command> {
+    let mut commands = core_commands();
+    if context == CommandPaletteContext::Stacker {
+        commands.extend(stacker_palette_commands());
+    }
+    commands
+}
+
+fn core_commands() -> Vec<Command> {
     vec![
         Command {
             name: "Save",
@@ -239,12 +261,21 @@ pub fn all_commands() -> Vec<Command> {
     ]
 }
 
+fn stacker_palette_commands() -> impl Iterator<Item = Command> {
+    stacker_command_registry().iter().map(|command| Command {
+        name: command.name,
+        keybinding: command.keybinding,
+        id: CommandId::Stacker(command.id),
+    })
+}
+
 /// Command palette state.
 pub struct PaletteState {
     pub open: bool,
     pub query: String,
     pub selected: usize,
     pub filtered: Vec<Command>,
+    context: CommandPaletteContext,
 }
 
 impl Default for PaletteState {
@@ -253,17 +284,26 @@ impl Default for PaletteState {
             open: false,
             query: String::new(),
             selected: 0,
-            filtered: all_commands(),
+            filtered: all_commands_for_context(CommandPaletteContext::Default),
+            context: CommandPaletteContext::Default,
         }
     }
 }
 
 impl PaletteState {
+    pub fn set_context(&mut self, context: CommandPaletteContext) {
+        if self.context == context {
+            return;
+        }
+        self.context = context;
+        self.update_filter();
+    }
+
     pub fn open(&mut self) {
         self.open = true;
         self.query.clear();
         self.selected = 0;
-        self.filtered = all_commands();
+        self.filtered = all_commands_for_context(self.context);
     }
 
     pub fn close(&mut self) {
@@ -274,9 +314,9 @@ impl PaletteState {
     pub fn update_filter(&mut self) {
         let q = self.query.to_lowercase();
         if q.is_empty() {
-            self.filtered = all_commands();
+            self.filtered = all_commands_for_context(self.context);
         } else {
-            self.filtered = all_commands()
+            self.filtered = all_commands_for_context(self.context)
                 .into_iter()
                 .filter(|c| fuzzy_match(&q, &c.name.to_lowercase()))
                 .collect();
@@ -302,6 +342,25 @@ fn fuzzy_match(query: &str, target: &str) -> bool {
         }
     }
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_context_excludes_stacker_commands() {
+        assert!(!all_commands_for_context(CommandPaletteContext::Default)
+            .iter()
+            .any(|command| matches!(command.id, CommandId::Stacker(_))));
+    }
+
+    #[test]
+    fn stacker_context_includes_stacker_commands() {
+        assert!(all_commands_for_context(CommandPaletteContext::Stacker)
+            .iter()
+            .any(|command| matches!(command.id, CommandId::Stacker(StackerCommandId::Bold))));
+    }
 }
 
 /// Render the command palette overlay. Returns the selected CommandId if the user confirms.
