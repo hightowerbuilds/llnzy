@@ -96,60 +96,9 @@ impl App {
         id
     }
 
-    fn wispr_flow_mode(&self) -> bool {
-        self.ui.as_ref().is_some_and(|ui| ui.wispr_flow_mode)
-    }
-
     fn active_stacker_tab(&self) -> bool {
         self.active_tab()
             .is_some_and(|tab| matches!(tab.content, TabContent::Stacker))
-    }
-
-    fn route_wispr_flow_text(&mut self, text: &str) -> bool {
-        if !self.wispr_flow_mode() || !input::text_should_use_paste_path(text) {
-            return false;
-        }
-
-        if self.active_stacker_tab() {
-            return self.append_text_to_stacker_editor(text);
-        }
-
-        if self.active_session().is_none() || self.search.active {
-            return false;
-        }
-        self.last_keypress = Instant::now();
-        self.clear_terminal_selection();
-        self.paste_text(text);
-        self.request_redraw();
-        true
-    }
-
-    fn route_wispr_flow_paste_command(&mut self, key_event: &winit::event::KeyEvent) -> bool {
-        if !self.wispr_flow_mode() || key_event.state != ElementState::Pressed {
-            return false;
-        }
-
-        let is_paste = matches!(
-            self.config.keybindings.match_key(key_event, self.modifiers),
-            Some(Action::Paste)
-        );
-        if !is_paste {
-            return false;
-        }
-
-        if self.active_stacker_tab() {
-            self.do_paste();
-            return true;
-        }
-
-        if self.active_session().is_none() || self.search.active {
-            return false;
-        }
-        self.last_keypress = Instant::now();
-        self.clear_terminal_selection();
-        self.do_paste();
-        self.request_redraw();
-        true
     }
 
     fn joined_terminal_tab_at_cursor(&self) -> Option<usize> {
@@ -223,8 +172,8 @@ impl ApplicationHandler<UserEvent> for App {
         }
 
         let window = Arc::new(event_loop.create_window(attrs).unwrap());
-        // Wispr Flow and input methods can deliver text through AppKit's IME/text-input path.
-        // winit disables that by default, so opt in for terminal text entry.
+        // Input methods can deliver text through AppKit's IME/text-input path.
+        // winit disables that by default, so opt in for terminal and Stacker text entry.
         window.set_ime_allowed(true);
         let renderer = pollster::block_on(Renderer::new(window.clone(), self.config.clone()));
 
@@ -276,33 +225,6 @@ impl ApplicationHandler<UserEvent> for App {
         };
         let terminal_ime_commit =
             matches!(&event, WindowEvent::Ime(Ime::Commit(_))) && self.active_session().is_some();
-
-        if let WindowEvent::Ime(Ime::Commit(text)) = &event {
-            if self.route_wispr_flow_text(text) {
-                return;
-            }
-        }
-
-        if let WindowEvent::KeyboardInput {
-            event: key_event, ..
-        } = &event
-        {
-            if self.route_wispr_flow_paste_command(key_event) {
-                return;
-            }
-
-            if key_event.state == ElementState::Pressed
-                && !self.modifiers.control_key()
-                && !self.modifiers.alt_key()
-                && !self.modifiers.super_key()
-            {
-                if let Some(text) = &key_event.text {
-                    if self.route_wispr_flow_text(text.as_str()) {
-                        return;
-                    }
-                }
-            }
-        }
 
         if let WindowEvent::KeyboardInput {
             event: key_event, ..

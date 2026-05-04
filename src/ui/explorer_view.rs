@@ -122,6 +122,25 @@ pub struct EditorViewState {
     pub sidebar_delete_confirm: Option<std::path::PathBuf>,
     /// Sidebar new file/folder input: (parent dir, input text, is_folder).
     pub sidebar_new_entry: Option<(std::path::PathBuf, String, bool)>,
+    /// Sidebar move picker state.
+    pub sidebar_move_picker: Option<SidebarMovePickerState>,
+}
+
+#[derive(Clone, Debug)]
+pub struct SidebarMovePickerState {
+    pub sources: Vec<std::path::PathBuf>,
+    pub filter: String,
+    pub selected: usize,
+}
+
+impl SidebarMovePickerState {
+    pub fn new(sources: Vec<std::path::PathBuf>) -> Self {
+        Self {
+            sources,
+            filter: String::new(),
+            selected: 0,
+        }
+    }
 }
 
 /// State for the auto-completion popup.
@@ -179,6 +198,7 @@ impl Default for EditorViewState {
             sidebar_rename: None,
             sidebar_delete_confirm: None,
             sidebar_new_entry: None,
+            sidebar_move_picker: None,
         }
     }
 }

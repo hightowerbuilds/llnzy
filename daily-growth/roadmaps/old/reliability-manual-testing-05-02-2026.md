@@ -45,22 +45,22 @@ This document tracks the reliability and durability checks that still need human
 
 ### Next: Baseline Smoke Test
 
-- [ ] Launch the desktop app.
-- [ ] Open a project folder.
-- [ ] Open a source file.
-- [ ] Edit and save the file.
-- [ ] Edit the file again, close it, and cancel the close prompt.
-- [ ] Reopen the modified file and confirm the edit is still present.
-- [ ] Open a Markdown file.
-- [ ] Switch Markdown source, preview, and split modes.
-- [ ] Confirm Markdown preview headings, margins, tables, nested lists, images, and code blocks render acceptably.
-- [ ] Open a terminal tab.
-- [ ] Paste multi-line text into the terminal.
-- [ ] Open Stacker and paste text.
-- [ ] Open the Git tab.
+- [x] Launch the desktop app.
+- [x] Open a project folder.
+- [x] Open a source file.
+- [x] Edit and save the file.
+- [x] Edit the file again, close it, and cancel the close prompt.
+- [x] Reopen the modified file and confirm the edit is still present.
+- [x] Open a Markdown file.
+- [x] Switch Markdown source, preview, and split modes.
+- [x] Confirm Markdown preview headings, margins, tables, nested lists, images, and code blocks render acceptably.
+- [x] Open a terminal tab.
+- [x] Paste multi-line text into the terminal.
+- [x] Open Stacker and paste text.
+- [x] Open the Git tab.
 - [ ] Move a clean file in the sidebar.
 - [ ] Try to move a dirty open file and confirm the app blocks it.
-- [ ] Relaunch the app and confirm useful session restore behavior.
+- [x] Relaunch the app and confirm useful session restore behavior.
 
 ---
 

@@ -1,6 +1,9 @@
 use super::explorer_view::EditorViewState;
+use crate::app::commands::AppCommand;
+use crate::app::drag_drop::DragDropCommand;
 use crate::explorer::ExplorerState;
 use crate::path_utils::{path_contains, same_path};
+use crate::sidebar_move::collect_sidebar_move_destinations;
 use std::fs::OpenOptions;
 use std::path::Path;
 
@@ -8,10 +11,12 @@ pub(super) fn render_sidebar_file_modals(
     ui: &mut egui::Ui,
     explorer: &mut ExplorerState,
     editor_state: &mut EditorViewState,
+    commands: &mut Vec<AppCommand>,
 ) {
     render_rename_modal(ui, explorer, editor_state);
     render_delete_modal(ui, explorer, editor_state);
     render_new_entry_modal(ui, explorer, editor_state);
+    render_move_picker(ui, explorer, editor_state, commands);
 }
 
 fn render_rename_modal(
@@ -344,6 +349,187 @@ fn render_new_entry_modal(
     } else if !cancel {
         editor_state.sidebar_new_entry = Some((parent_dir, input_text, is_folder));
     }
+}
+
+fn render_move_picker(
+    ui: &mut egui::Ui,
+    explorer: &ExplorerState,
+    editor_state: &mut EditorViewState,
+    commands: &mut Vec<AppCommand>,
+) {
+    let Some(mut picker) = editor_state.sidebar_move_picker.take() else {
+        return;
+    };
+
+    let moving_label = move_sources_label(&picker.sources);
+    let mut close = false;
+    let mut selected_destination = None;
+    let destinations = collect_sidebar_move_destinations(&explorer.root, &picker.sources);
+    let filter = picker.filter.trim().to_lowercase();
+    let visible = destinations
+        .iter()
+        .filter(|destination| {
+            filter.is_empty()
+                || destination.label.to_lowercase().contains(&filter)
+                || destination
+                    .path
+                    .to_string_lossy()
+                    .to_lowercase()
+                    .contains(&filter)
+        })
+        .collect::<Vec<_>>();
+    if !visible.is_empty() && picker.selected >= visible.len() {
+        picker.selected = visible.len().saturating_sub(1);
+    }
+
+    egui::Window::new("Move")
+        .id(egui::Id::new("sidebar_move_picker_modal"))
+        .fixed_pos(egui::pos2(
+            ui.ctx().screen_rect().center().x - 210.0,
+            ui.ctx().screen_rect().center().y - 210.0,
+        ))
+        .fixed_size(egui::vec2(420.0, 420.0))
+        .resizable(false)
+        .show(ui.ctx(), |ui| {
+            ui.label(
+                egui::RichText::new(format!("Move {moving_label} to:"))
+                    .size(13.0)
+                    .color(egui::Color32::WHITE),
+            );
+            ui.add_space(6.0);
+            let filter_resp = ui.add(
+                egui::TextEdit::singleline(&mut picker.filter)
+                    .hint_text("Filter folders")
+                    .desired_width(f32::INFINITY)
+                    .text_color(egui::Color32::WHITE)
+                    .font(egui::TextStyle::Monospace),
+            );
+            filter_resp.request_focus();
+
+            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                close = true;
+            }
+            if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) && !visible.is_empty() {
+                picker.selected = (picker.selected + 1).min(visible.len() - 1);
+            }
+            if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
+                picker.selected = picker.selected.saturating_sub(1);
+            }
+            if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                if let Some(destination) = visible
+                    .get(picker.selected)
+                    .filter(|destination| destination.is_valid)
+                {
+                    selected_destination = Some(destination.path.clone());
+                }
+            }
+
+            ui.add_space(8.0);
+            egui::ScrollArea::vertical()
+                .id_salt("sidebar_move_picker_folders")
+                .max_height(300.0)
+                .auto_shrink([false; 2])
+                .show(ui, |ui| {
+                    if visible.is_empty() {
+                        ui.label(
+                            egui::RichText::new("No matching folders")
+                                .size(12.0)
+                                .color(egui::Color32::from_rgb(150, 155, 165)),
+                        );
+                        return;
+                    }
+
+                    for (idx, destination) in visible.iter().enumerate() {
+                        let is_selected = idx == picker.selected;
+                        let color = if destination.is_valid {
+                            egui::Color32::from_rgb(225, 230, 238)
+                        } else {
+                            egui::Color32::from_rgb(120, 125, 135)
+                        };
+                        let indent = destination.depth as f32 * 14.0;
+                        let label =
+                            format!("{}{}", " ".repeat(destination.depth * 2), destination.label);
+                        let response = ui
+                            .add_sized(
+                                [ui.available_width(), 24.0],
+                                egui::Button::new(
+                                    egui::RichText::new(label).size(12.0).color(color),
+                                )
+                                .fill(if is_selected {
+                                    egui::Color32::from_rgb(55, 70, 95)
+                                } else {
+                                    egui::Color32::TRANSPARENT
+                                })
+                                .rounding(egui::Rounding::same(3.0)),
+                            )
+                            .on_hover_text(
+                                destination
+                                    .reason
+                                    .clone()
+                                    .unwrap_or_else(|| destination.path.display().to_string()),
+                            );
+                        if response.hovered() {
+                            picker.selected = idx;
+                        }
+                        if response.clicked() && destination.is_valid {
+                            selected_destination = Some(destination.path.clone());
+                        }
+                        if indent > 0.0 {
+                            let rect = response.rect;
+                            ui.painter().line_segment(
+                                [
+                                    egui::pos2(
+                                        rect.left() + indent.min(rect.width() - 4.0),
+                                        rect.top() + 4.0,
+                                    ),
+                                    egui::pos2(
+                                        rect.left() + indent.min(rect.width() - 4.0),
+                                        rect.bottom() - 4.0,
+                                    ),
+                                ],
+                                egui::Stroke::new(1.0, egui::Color32::from_rgb(65, 70, 82)),
+                            );
+                        }
+                    }
+                });
+
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if ui
+                    .add(
+                        egui::Button::new(
+                            egui::RichText::new("Cancel")
+                                .size(12.0)
+                                .color(egui::Color32::WHITE),
+                        )
+                        .fill(egui::Color32::from_rgb(50, 52, 62)),
+                    )
+                    .clicked()
+                {
+                    close = true;
+                }
+            });
+        });
+
+    if let Some(folder) = selected_destination {
+        commands.push(AppCommand::DragDrop(DragDropCommand::MoveFilesToFolder {
+            files: picker.sources,
+            folder,
+        }));
+    } else if !close {
+        editor_state.sidebar_move_picker = Some(picker);
+    }
+}
+
+fn move_sources_label(sources: &[std::path::PathBuf]) -> String {
+    if sources.len() == 1 {
+        return sources[0]
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("item")
+            .to_string();
+    }
+    format!("{} items", sources.len())
 }
 
 #[derive(Debug)]

@@ -2,11 +2,13 @@ use std::path::{Path, PathBuf};
 
 use llnzy::app::commands::AppCommand;
 use llnzy::app::drag_drop::{
-    plan_file_moves, remap_index_after_reorder, tab_insert_index, terminal_paths_text,
-    DragDropCommand, FileMovePlan, TabDropZone,
+    remap_index_after_reorder, tab_insert_index, terminal_paths_text, DragDropCommand, TabDropZone,
 };
 use llnzy::editor::git_gutter::GitGutter;
-use llnzy::path_utils::comparable_path;
+use llnzy::path_utils::{comparable_path, path_contains, same_path};
+use llnzy::sidebar_move::{
+    plan_sidebar_move, MoveOrigin, SidebarMovePlan, SidebarMovePlanItem, SidebarMoveRequest,
+};
 use llnzy::workspace::remap_code_file_tab_paths;
 
 use crate::runtime::commands::remap_joined_tabs_after_reorder;
@@ -19,16 +21,15 @@ struct OpenFileMoveCandidate {
     modified: bool,
 }
 
-fn modified_open_file_move_message<I>(plan: &[FileMovePlan], open_files: I) -> Option<String>
+fn modified_open_file_move_message<I>(plan: &SidebarMovePlan, open_files: I) -> Option<String>
 where
     I: IntoIterator<Item = OpenFileMoveCandidate>,
 {
     let open_files: Vec<_> = open_files.into_iter().collect();
-    for item in plan {
-        let source_key = comparable_path(&item.source);
+    for item in &plan.items {
         let Some(file) = open_files
             .iter()
-            .find(|file| comparable_path(&file.path) == source_key)
+            .find(|file| move_plan_item_affects_path(item, &file.path))
         else {
             continue;
         };
@@ -136,7 +137,9 @@ impl App {
     }
 
     fn move_files_to_folder(&mut self, files: &[PathBuf], folder: &Path) -> bool {
-        let plan = match plan_file_moves(files, folder) {
+        let request =
+            SidebarMoveRequest::new(files.to_vec(), folder.to_path_buf(), MoveOrigin::DragDrop);
+        let plan = match plan_sidebar_move(&request) {
             Ok(plan) => plan,
             Err(message) => {
                 self.report_file_move_status(message.clone());
@@ -151,33 +154,30 @@ impl App {
             return false;
         }
 
-        let mut moved = Vec::with_capacity(plan.len());
-        for item in &plan {
-            let source_key = comparable_path(&item.source);
+        for item in &plan.items {
             if let Err(error) = std::fs::rename(&item.source, &item.destination) {
                 let message = format!("Move failed: {error}");
                 self.report_file_move_status(message.clone());
                 self.error_log.error(message);
                 return false;
             }
-            moved.push((source_key, item.clone()));
         }
 
-        self.remap_moved_open_files(&moved);
+        self.remap_moved_open_files(&plan.items);
         if let Some(ui) = &mut self.ui {
             ui.explorer
-                .refresh_preserving_expansion(&[folder.to_path_buf()]);
-            let moved_count = moved.len();
+                .refresh_preserving_expansion(&plan.refresh_paths());
+            let moved_count = plan.len();
             ui.editor_view.status_msg = Some(if moved_count == 1 {
-                "Moved file".to_string()
+                "Moved item".to_string()
             } else {
-                format!("Moved {moved_count} files")
+                format!("Moved {moved_count} items")
             });
         }
         true
     }
 
-    fn modified_open_file_move_error(&self, plan: &[FileMovePlan]) -> Option<String> {
+    fn modified_open_file_move_error(&self, plan: &SidebarMovePlan) -> Option<String> {
         let ui = self.ui.as_ref()?;
         modified_open_file_move_message(
             plan,
@@ -192,9 +192,30 @@ impl App {
         )
     }
 
-    fn remap_moved_open_files(&mut self, moved: &[(PathBuf, FileMovePlan)]) {
-        for (source_key, item) in moved {
-            self.remap_open_file_path(source_key, &item.destination);
+    fn remap_moved_open_files(&mut self, moved: &[SidebarMovePlanItem]) {
+        let Some(ui) = self.ui.as_ref() else { return };
+        let remaps = ui
+            .editor_view
+            .editor
+            .buffers
+            .iter()
+            .filter_map(|buffer| {
+                let buffer_path = buffer.path()?.to_path_buf();
+                let item = moved
+                    .iter()
+                    .find(|item| move_plan_item_affects_path(item, &buffer_path))?;
+                let new_path = if item.is_dir {
+                    let relative = buffer_path.strip_prefix(&item.source).ok()?;
+                    item.destination.join(relative)
+                } else {
+                    item.destination.clone()
+                };
+                Some((buffer_path, new_path))
+            })
+            .collect::<Vec<_>>();
+
+        for (old_path, new_path) in remaps {
+            self.remap_open_file_path(&old_path, &new_path);
         }
     }
 
@@ -239,15 +260,44 @@ impl App {
     }
 }
 
+fn move_plan_item_affects_path(item: &SidebarMovePlanItem, path: &Path) -> bool {
+    if item.is_dir {
+        path_contains(&item.source, path)
+    } else {
+        same_path(&item.source, path) || comparable_path(&item.source) == comparable_path(path)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn move_plan(source: &str, destination: &str) -> Vec<FileMovePlan> {
-        vec![FileMovePlan {
-            source: PathBuf::from(source),
-            destination: PathBuf::from(destination),
-        }]
+    fn move_plan(source: &str, destination: &str) -> SidebarMovePlan {
+        SidebarMovePlan {
+            destination_folder: PathBuf::from(destination)
+                .parent()
+                .unwrap_or(Path::new("/"))
+                .to_path_buf(),
+            items: vec![SidebarMovePlanItem {
+                source: PathBuf::from(source),
+                destination: PathBuf::from(destination),
+                is_dir: false,
+            }],
+        }
+    }
+
+    fn folder_move_plan(source: &str, destination: &str) -> SidebarMovePlan {
+        SidebarMovePlan {
+            destination_folder: PathBuf::from(destination)
+                .parent()
+                .unwrap_or(Path::new("/"))
+                .to_path_buf(),
+            items: vec![SidebarMovePlanItem {
+                source: PathBuf::from(source),
+                destination: PathBuf::from(destination),
+                is_dir: true,
+            }],
+        }
     }
 
     fn open_file(path: &str, file_name: &str, modified: bool) -> OpenFileMoveCandidate {
@@ -292,5 +342,19 @@ mod tests {
         );
 
         assert_eq!(message, None);
+    }
+
+    #[test]
+    fn dirty_open_file_inside_folder_move_is_blocked() {
+        let plan = folder_move_plan("/project/src", "/project/archive/src");
+        let message = modified_open_file_move_message(
+            &plan,
+            [open_file("/project/src/note.md", "note.md", true)],
+        );
+
+        assert_eq!(
+            message,
+            Some("Save or close note.md before moving it.".to_string())
+        );
     }
 }

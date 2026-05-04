@@ -1,6 +1,7 @@
 use crate::app::commands::AppCommand;
 use crate::app::drag_drop::{DragDropCommand, DragPayload};
 use crate::explorer::{format_size, ExplorerState};
+use crate::sidebar_move::{plan_sidebar_move, MoveOrigin, SidebarMoveRequest};
 
 use super::{
     explorer_view::EditorViewState,
@@ -17,6 +18,7 @@ pub(super) enum TreeAction {
     Delete(std::path::PathBuf),
     NewFile(std::path::PathBuf),
     NewFolder(std::path::PathBuf),
+    Move(std::path::PathBuf),
     MoveFilesToFolder {
         files: Vec<std::path::PathBuf>,
         folder: std::path::PathBuf,
@@ -80,9 +82,10 @@ pub(super) fn render_tree_nodes(
 
         let item_response = resp.inner;
         if node.is_dir {
+            handle_node_drag(ui.ctx(), &item_response, &node.path, &node.name);
             handle_folder_drop(&item_response, &node.path, action);
         } else {
-            handle_file_drag(ui.ctx(), &item_response, &node.path, &node.name);
+            handle_node_drag(ui.ctx(), &item_response, &node.path, &node.name);
         }
 
         let node_path = node.path.clone();
@@ -161,9 +164,10 @@ fn render_tree_children(
 
         let item_response = resp.inner;
         if node.is_dir {
+            handle_node_drag(ui.ctx(), &item_response, &node.path, &node.name);
             handle_folder_drop(&item_response, &node.path, action);
         } else {
-            handle_file_drag(ui.ctx(), &item_response, &node.path, &node.name);
+            handle_node_drag(ui.ctx(), &item_response, &node.path, &node.name);
         }
 
         let node_path = node.path.clone();
@@ -217,7 +221,7 @@ fn wrapped_tree_label(
     response
 }
 
-fn handle_file_drag(
+fn handle_node_drag(
     ctx: &egui::Context,
     response: &egui::Response,
     path: &std::path::Path,
@@ -238,9 +242,14 @@ fn handle_folder_drop(
     folder: &std::path::Path,
     action: &mut Option<TreeAction>,
 ) {
+    if let Some(payload) = response.dnd_hover_payload::<DragPayload>() {
+        if let Some(paths) = payload.explorer_item_paths() {
+            paint_folder_drop_target(response, paths, folder);
+        }
+    }
     if action.is_none() {
         if let Some(payload) = response.dnd_release_payload::<DragPayload>() {
-            if let Some(paths) = payload.explorer_file_paths() {
+            if let Some(paths) = payload.explorer_item_paths() {
                 *action = Some(TreeAction::MoveFilesToFolder {
                     files: paths.to_vec(),
                     folder: folder.to_path_buf(),
@@ -248,6 +257,62 @@ fn handle_folder_drop(
             }
         }
     }
+}
+
+fn render_root_drop_target(
+    ui: &mut egui::Ui,
+    root: &std::path::Path,
+    action: &mut Option<TreeAction>,
+    font_size: f32,
+) {
+    let label = root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("Project Root");
+    let response = ui
+        .add_sized(
+            [ui.available_width(), 24.0],
+            egui::Label::new(
+                egui::RichText::new(format!("v {label}"))
+                    .size(font_size)
+                    .color(egui::Color32::from_rgb(135, 205, 255))
+                    .strong(),
+            )
+            .sense(egui::Sense::click_and_drag()),
+        )
+        .on_hover_text(format!("Project root: {}", root.display()));
+    handle_folder_drop(&response, root, action);
+}
+
+fn paint_folder_drop_target(
+    response: &egui::Response,
+    paths: &[std::path::PathBuf],
+    folder: &std::path::Path,
+) {
+    response.ctx.request_repaint();
+    let request =
+        SidebarMoveRequest::new(paths.to_vec(), folder.to_path_buf(), MoveOrigin::DragDrop);
+    let is_valid = plan_sidebar_move(&request).is_ok();
+    let fill = if is_valid {
+        egui::Color32::from_rgba_unmultiplied(50, 130, 85, 90)
+    } else {
+        egui::Color32::from_rgba_unmultiplied(150, 65, 65, 75)
+    };
+    let stroke = if is_valid {
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(100, 220, 140))
+    } else {
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(220, 90, 90))
+    };
+    response.ctx.layer_painter(response.layer_id).rect_filled(
+        response.rect.expand(1.0),
+        egui::Rounding::same(3.0),
+        fill,
+    );
+    response.ctx.layer_painter(response.layer_id).rect_stroke(
+        response.rect.expand(1.0),
+        egui::Rounding::same(3.0),
+        stroke,
+    );
 }
 
 fn paint_file_drag_ghost(ctx: &egui::Context, title: &str, source_rect: egui::Rect) {
@@ -313,6 +378,10 @@ fn render_tree_context_menu(
         *action = Some(TreeAction::Rename(path.to_path_buf()));
         ui.close_menu();
     }
+    if ui.button("Move...").clicked() {
+        *action = Some(TreeAction::Move(path.to_path_buf()));
+        ui.close_menu();
+    }
     if !is_dir {
         if ui.button("Copy Absolute Path").clicked() {
             *action = Some(TreeAction::CopyAbsPath(path.to_path_buf()));
@@ -355,9 +424,10 @@ pub(crate) fn render_sidebar_tree(
     sidebar_font_size: f32,
     commands: &mut Vec<AppCommand>,
 ) {
-    sidebar_file_modals::render_sidebar_file_modals(ui, explorer, editor_state);
+    sidebar_file_modals::render_sidebar_file_modals(ui, explorer, editor_state, commands);
 
     let mut action: Option<TreeAction> = None;
+    render_root_drop_target(ui, &explorer.root, &mut action, sidebar_font_size);
     render_tree_nodes(ui, &explorer.tree, 0, &mut action, sidebar_font_size);
 
     match action {
@@ -403,6 +473,12 @@ pub(crate) fn render_sidebar_tree(
         }
         Some(TreeAction::NewFolder(parent_dir)) => {
             editor_state.sidebar_new_entry = Some((parent_dir, String::new(), true));
+        }
+        Some(TreeAction::Move(path)) => {
+            editor_state.sidebar_move_picker =
+                Some(super::explorer_view::SidebarMovePickerState::new(vec![
+                    path,
+                ]));
         }
         Some(TreeAction::MoveFilesToFolder { files, folder }) => {
             commands.push(AppCommand::DragDrop(DragDropCommand::MoveFilesToFolder {

@@ -108,9 +108,6 @@ pub struct UiState {
     pub recent_projects: Vec<std::path::PathBuf>,
     /// Active tab kind (set by main loop before render, used by footer highlighting)
     pub active_tab_kind: Option<crate::workspace::TabKind>,
-    /// Terminal voice input mode. When enabled, multi-character macOS text commits
-    /// are routed straight to the active PTY before egui handles them.
-    pub wispr_flow_mode: bool,
     /// Workspace tabs reference for egui tab bar rendering (set by main loop before render)
     pub tab_names: Vec<UiTabInfo>,
     /// Lightweight tab content metadata for joined-tab rendering.
@@ -201,7 +198,6 @@ impl UiState {
             palette_command: None,
             recent_projects: crate::explorer::load_recent_projects(),
             active_tab_kind: None,
-            wispr_flow_mode: false,
             tab_names: Vec::new(),
             tab_panes: Vec::new(),
             joined_tabs: None,
@@ -312,7 +308,6 @@ impl UiState {
         let mut nav_target: Option<ActiveView> = None;
         let mut commands_out: Vec<AppCommand> = Vec::new();
         let active_tab_kind = self.active_tab_kind;
-        let mut wispr_flow_mode = self.wispr_flow_mode;
         let mut config_clone = config.clone();
         let mut settings = std::mem::take(&mut self.settings);
 
@@ -393,7 +388,6 @@ impl UiState {
                 active_btn,
                 text_color,
                 &footer_queue_prompts,
-                &mut wispr_flow_mode,
             ) {
                 apply_footer_action(action, &mut nav_target, &mut commands_out);
             }
@@ -511,7 +505,6 @@ impl UiState {
         self.git = git;
         self.tab_panes = tab_panes;
         self.joined_tabs = joined_tabs;
-        self.wispr_flow_mode = wispr_flow_mode;
         if let Some((path, buffer_id)) = editor_view.pending_file_tab.take() {
             commands_out.push(AppCommand::OpenCodeFile { path, buffer_id });
         }
