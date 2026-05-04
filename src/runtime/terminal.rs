@@ -1,5 +1,6 @@
 use std::time::{Duration, Instant};
 
+use llnzy::external_input_trace;
 use llnzy::input::text_should_use_paste_path;
 use llnzy::session::Session;
 use llnzy::stacker::commands::{
@@ -109,6 +110,9 @@ impl App {
         let bracketed = self
             .active_session()
             .is_some_and(|s| s.terminal.bracketed_paste());
+        external_input_trace::trace("terminal.paste_text", || {
+            format!("chars={}, bracketed={}", text.chars().count(), bracketed)
+        });
         if bracketed {
             let mut bytes = Vec::with_capacity(text.len() + 12);
             bytes.extend_from_slice(b"\x1b[200~");
@@ -149,6 +153,15 @@ impl App {
         if !outcome.changed {
             return false;
         }
+        external_input_trace::trace("stacker.append_text", || {
+            format!(
+                "chars={}, selection={}..{}, cursor={}",
+                text.chars().count(),
+                selection.start,
+                selection.end,
+                outcome.cursor
+            )
+        });
         store_stacker_cursor(ui, outcome.cursor);
         ui.stacker
             .draft
@@ -188,6 +201,15 @@ impl App {
                 .replace_all_with_history(edit.result, StackerSelection::collapsed(cursor));
             cursor
         };
+        external_input_trace::trace("stacker.native_edit", || {
+            format!(
+                "replacement={}..{}, chars={}, cursor={}",
+                selection.start,
+                selection.end,
+                edit.text.chars().count(),
+                cursor
+            )
+        });
         store_stacker_cursor(ui, cursor);
         ui.stacker
             .draft

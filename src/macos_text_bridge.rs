@@ -12,7 +12,7 @@ use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::Window;
 
-use crate::{StackerNativeEdit, UserEvent};
+use crate::{external_input_trace, StackerNativeEdit, UserEvent};
 
 static EVENT_PROXY: OnceLock<winit::event_loop::EventLoopProxy<UserEvent>> = OnceLock::new();
 static BRIDGE_VIEW: AtomicUsize = AtomicUsize::new(0);
@@ -42,6 +42,15 @@ define_class!(
             let Some(edit) = update_bridge_text_from_native(result) else {
                 return;
             };
+            external_input_trace::trace("macos_text_bridge.did_change_text", || {
+                format!(
+                    "replacement={}..{}, chars={}, result_chars={}",
+                    edit.start,
+                    edit.end,
+                    edit.text.chars().count(),
+                    edit.result.chars().count()
+                )
+            });
             if let Some(proxy) = EVENT_PROXY.get() {
                 let _ = proxy.send_event(UserEvent::StackerNativeEdit(edit));
             }
@@ -102,13 +111,22 @@ pub fn set_stacker_active(window: &Window, active: bool, text: &str) {
     unsafe {
         if active {
             sync_bridge_text(bridge, text);
-            if !FIRST_RESPONDER_ACTIVE.swap(true, Ordering::Relaxed) {
+            FIRST_RESPONDER_ACTIVE.store(true, Ordering::Relaxed);
+            if !bridge_is_first_responder(window_obj, bridge) {
                 let responder = bridge as *const AnyObject as *const NSResponder;
                 let _: bool = msg_send![window_obj, makeFirstResponder: Some(&*responder)];
             }
-        } else if FIRST_RESPONDER_ACTIVE.swap(false, Ordering::Relaxed) {
+            external_input_trace::trace("macos_text_bridge.set_active", || {
+                format!("active=true, synced_chars={}", text.chars().count())
+            });
+        } else if FIRST_RESPONDER_ACTIVE.swap(false, Ordering::Relaxed)
+            || bridge_is_first_responder(window_obj, bridge)
+        {
             let responder = winit_view as *const AnyObject as *const NSResponder;
             let _: bool = msg_send![window_obj, makeFirstResponder: Some(&*responder)];
+            external_input_trace::trace("macos_text_bridge.set_active", || {
+                "active=false, restored_winit_responder=true".to_string()
+            });
         }
     }
 }
@@ -144,11 +162,28 @@ fn update_bridge_text_from_native(result: String) -> Option<StackerNativeEdit> {
     })
 }
 
+fn bridge_is_first_responder(window_obj: &AnyObject, bridge: &AnyObject) -> bool {
+    let first_responder: *mut AnyObject = unsafe { msg_send![window_obj, firstResponder] };
+    std::ptr::eq(
+        first_responder as *const AnyObject,
+        bridge as *const AnyObject,
+    )
+}
+
 fn bridge_text() -> &'static Mutex<String> {
     BRIDGE_TEXT.get_or_init(|| Mutex::new(String::new()))
 }
 
 fn replacement_delta(old: &str, new: &str) -> (usize, usize, String) {
+    if let Some(appended) = new.strip_prefix(old) {
+        let cursor = old.chars().count();
+        return (cursor, cursor, appended.to_string());
+    }
+
+    if old.starts_with(new) {
+        return (new.chars().count(), old.chars().count(), String::new());
+    }
+
     let old_chars: Vec<char> = old.chars().collect();
     let new_chars: Vec<char> = new.chars().collect();
 

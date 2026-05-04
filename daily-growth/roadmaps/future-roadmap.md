@@ -21,9 +21,9 @@ not need to block the current leftovers roadmap.
   submit command, copy, paste, select all, undo, and redo.
 - [ ] Verify whether Wispr Flow sends text through IME commit, pasteboard paste,
   accessibility insertion, synthetic key events, or a mix of those paths.
-- [ ] Route external text delivery through the same editor command/document
+- [x] Route external text delivery through the same editor command/document
   mutation path as keyboard and toolbar actions.
-- [ ] Add a narrow debug trace for external ingress events so Wispr Flow can be
+- [x] Add a narrow debug trace for external ingress events so Wispr Flow can be
   diagnosed without noisy normal logs.
 
 ---
@@ -69,14 +69,14 @@ not need to block the current leftovers roadmap.
 - [ ] Manually verify saved-prompt edit and delete behavior, including queue
   state, dirty draft state, persistence to `stacker.json`, and undo/redo
   expectations after loading another prompt.
-- [ ] Add an instrumentation flag or debug-only tracing point for future
+- [x] Add an instrumentation flag or debug-only tracing point for future
   external input debugging without noisy logs in normal development.
-- [ ] Continue optimizing AppKit bridge ingress latency while keeping Stacker's
+- [x] Continue optimizing AppKit bridge ingress latency while keeping Stacker's
   own document editor as the text mutation owner.
-- [ ] Decide whether external text ingress needs a native text-client bridge, a
+- [x] Decide whether external text ingress needs a native text-client bridge, a
   paste-command capture layer, an accessibility-command bridge, or another
   platform integration point.
-- [ ] Implement the chosen external text ingress path only after the current
+- [x] Implement the chosen external text ingress path only after the current
   delivery mechanism is understood.
 - [ ] Manually verify typing, copy, paste, select all, undo, redo, formatting
   toolbar actions, dirty-draft warning, save behavior, and queue actions.

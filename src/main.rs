@@ -1229,6 +1229,9 @@ impl ApplicationHandler<UserEvent> for App {
                         && !self.modifiers.super_key()
                         && self.append_text_to_stacker_editor(s)
                     {
+                        llnzy::external_input_trace::trace("stacker.keyboard_text", || {
+                            format!("chars={}", s.chars().count())
+                        });
                         return;
                     }
                 }
@@ -1269,6 +1272,9 @@ impl ApplicationHandler<UserEvent> for App {
             WindowEvent::Ime(ime) => {
                 if let Ime::Commit(text) = &ime {
                     if self.append_text_to_stacker_editor(text) {
+                        llnzy::external_input_trace::trace("stacker.ime_commit", || {
+                            format!("chars={}", text.chars().count())
+                        });
                         return;
                     }
                 }
