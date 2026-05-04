@@ -577,10 +577,7 @@ impl Renderer {
                 .draw_rects(&self.gpu, target, encoder, &deco_rects);
         }
 
-        let mut highlight_rects = Vec::new();
-        highlight_rects.extend_from_slice(search_rects);
-        highlight_rects.extend_from_slice(selection_rects);
-        offset_rects(&mut highlight_rects, rect.x, rect.y);
+        let highlight_rects = offset_highlight_rects(search_rects, selection_rects, rect.x, rect.y);
         if !highlight_rects.is_empty() {
             self.rects
                 .draw_rects(&self.gpu, target, encoder, &highlight_rects);
@@ -907,6 +904,29 @@ fn offset_rects(rects: &mut [(f32, f32, f32, f32, [f32; 4])], offset_x: f32, off
     }
 }
 
+fn offset_highlight_rects(
+    search_rects: &[(f32, f32, f32, f32, [f32; 4])],
+    selection_rects: &[(f32, f32, f32, f32, [f32; 4])],
+    offset_x: f32,
+    offset_y: f32,
+) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+    let total = search_rects.len() + selection_rects.len();
+    if total == 0 {
+        return Vec::new();
+    }
+
+    let mut rects = Vec::with_capacity(total);
+    rects.extend(
+        search_rects
+            .iter()
+            .chain(selection_rects)
+            .map(|&(x, y, width, height, color)| {
+                (x + offset_x, y + offset_y, width, height, color)
+            }),
+    );
+    rects
+}
+
 fn terminal_render_config(config: &Config) -> Config {
     let mut terminal_config = config.clone();
     terminal_config.colors.background = TERMINAL_MINIMAL_BG;
@@ -1036,5 +1056,30 @@ mod tests {
 
         assert_eq!(text_layer(&frame, "label").len(), 1);
         assert!(text_layer(&frame, "missing").is_empty());
+    }
+
+    #[test]
+    fn offset_highlight_rects_skips_allocation_when_empty() {
+        let rects = offset_highlight_rects(&[], &[], 10.0, 20.0);
+
+        assert!(rects.is_empty());
+        assert_eq!(rects.capacity(), 0);
+    }
+
+    #[test]
+    fn offset_highlight_rects_offsets_search_and_selection_in_order() {
+        let search_rects = [(2.0, 3.0, 16.0, 16.0, [1.0, 0.0, 0.0, 0.5])];
+        let selection_rects = [(5.0, 7.0, 24.0, 16.0, [0.0, 0.0, 1.0, 0.35])];
+
+        let rects = offset_highlight_rects(&search_rects, &selection_rects, 10.0, 40.0);
+
+        assert_eq!(
+            rects,
+            vec![
+                (12.0, 43.0, 16.0, 16.0, [1.0, 0.0, 0.0, 0.5]),
+                (15.0, 47.0, 24.0, 16.0, [0.0, 0.0, 1.0, 0.35]),
+            ]
+        );
+        assert!(rects.capacity() >= rects.len());
     }
 }

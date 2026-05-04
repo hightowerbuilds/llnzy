@@ -160,7 +160,7 @@ impl Search {
     /// Generate highlight rects for all matches.
     /// Focused match gets a brighter color.
     pub fn highlight_rects(&self, cell_w: f32, cell_h: f32) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
-        let mut rects = Vec::new();
+        let mut rects = Vec::with_capacity(self.matches.len());
 
         for (i, m) in self.matches.iter().enumerate() {
             let color = if i == self.focus {
@@ -525,5 +525,33 @@ mod tests {
         let s = Search::new();
         let rects = s.highlight_rects(10.0, 20.0);
         assert!(rects.is_empty());
+        assert_eq!(rects.capacity(), 0);
+    }
+
+    #[test]
+    fn highlight_rects_presizes_for_matches() {
+        let mut s = Search::new();
+        s.matches = vec![
+            SearchMatch {
+                row: 0,
+                col_start: 0,
+                col_end: 0,
+            },
+            SearchMatch {
+                row: 1,
+                col_start: 2,
+                col_end: 4,
+            },
+            SearchMatch {
+                row: 3,
+                col_start: 1,
+                col_end: 1,
+            },
+        ];
+
+        let rects = s.highlight_rects(8.0, 16.0);
+
+        assert_eq!(rects.len(), 3);
+        assert!(rects.capacity() >= rects.len());
     }
 }

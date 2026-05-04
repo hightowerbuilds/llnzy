@@ -694,3 +694,55 @@ fn word_selection_on_terminal() {
     let text = sel.text(&t);
     assert_eq!(text, "world");
 }
+
+#[test]
+fn terminal_forward_drag_selection_copies_selected_text() {
+    let mut t = Terminal::new(40, 5);
+    t.process(b"Hello World");
+
+    t.start_selection(0, 0);
+    t.update_selection(0, 10);
+
+    assert_eq!(t.selected_text().as_deref(), Some("Hello World"));
+}
+
+#[test]
+fn terminal_backward_drag_selection_copies_selected_text() {
+    let mut t = Terminal::new(40, 5);
+    t.process(b"Hello World");
+
+    t.start_selection(0, 10);
+    t.update_selection(0, 0);
+
+    assert_eq!(t.selected_text().as_deref(), Some("Hello World"));
+}
+
+#[test]
+fn terminal_word_selection_copies_semantic_word() {
+    let mut t = Terminal::new(40, 5);
+    t.process(b"hello world foo");
+
+    t.select_word(0, 7);
+
+    assert_eq!(t.selected_text().as_deref(), Some("world"));
+}
+
+#[test]
+fn terminal_line_selection_copies_trimmed_line() {
+    let mut t = Terminal::new(40, 5);
+    t.process(b"alpha\r\nselected line\r\nomega");
+
+    t.select_line(1);
+
+    assert_eq!(t.selected_text().as_deref(), Some("selected line"));
+}
+
+#[test]
+fn terminal_select_all_copies_visible_grid_text() {
+    let mut t = Terminal::new(40, 3);
+    t.process(b"alpha\r\nbeta\r\ngamma");
+
+    t.select_all();
+
+    assert_eq!(t.selected_text().as_deref(), Some("alpha\nbeta\ngamma"));
+}

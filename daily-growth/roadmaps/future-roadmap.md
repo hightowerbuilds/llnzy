@@ -105,27 +105,27 @@ not need to block the current leftovers roadmap.
 
 ## Terminal Selection Drag Performance
 
-- [ ] Profile the drag path while selecting in a mouse-reporting TUI.
-- [ ] Manually verify copy correctness after forward drag, backward drag, word
+- [x] Profile the drag path while selecting in a mouse-reporting TUI.
+- [x] Manually verify copy correctness after forward drag, backward drag, word
   selection, line selection, and select all.
 
 ---
 
 ## Terminal Highlighting Performance
 
-- [ ] Continue improving terminal highlighting performance for selection,
+- [x] Continue improving terminal highlighting performance for selection,
   search matches, URL underlines, and other terminal overlay rectangles.
-- [ ] Profile highlight generation and rendering cost in large scrollback
+- [x] Profile highlight generation and rendering cost in large scrollback
   sessions and busy TUI apps.
-- [ ] Cache or incrementally rebuild highlight geometry where safe.
-- [ ] Verify highlighting remains visually correct after resize, scrollback,
+- [x] Cache or incrementally rebuild highlight geometry where safe.
+- [x] Verify highlighting remains visually correct after resize, scrollback,
   selection changes, search updates, and joined-tab layout changes.
 
 ---
 
 ## Tab Grouping Manual Verification
 
-- [ ] Manually verify mixed joined groups such as Terminal + CodeFile, Git +
+- [x] Manually verify mixed joined groups such as Terminal + CodeFile, Git +
   Stacker, and CodeFile + Sketch.
 
 ---
@@ -134,6 +134,9 @@ not need to block the current leftovers roadmap.
 
 Source foundation:
 `daily-growth/roadmaps/cross-platform-compatibility-roadmap-05-04-2026.md`
+
+Implementation foundation:
+`daily-growth/roadmaps/platform-boundary-architecture-05-04-2026.md`
 
 ### Compatibility Contract
 
@@ -148,24 +151,24 @@ Source foundation:
 
 ### Platform Boundary
 
-- [ ] Audit every `cfg(target_os = "...")` platform-specific path in the app.
-- [ ] Define a `PlatformShell` boundary for default shell detection, shell
+- [x] Audit every `cfg(target_os = "...")` platform-specific path in the app.
+- [x] Define a `PlatformShell` boundary for default shell detection, shell
   arguments, interactive/login behavior, task execution, and environment setup.
-- [ ] Define a `TerminalHost` boundary for spawn, read, write, resize, process
+- [x] Define a `TerminalHost` boundary for spawn, read, write, resize, process
   id, terminate, and exit reporting.
-- [ ] Define a `PlatformPaths` boundary for config, data, cache, themes,
+- [x] Define a `PlatformPaths` boundary for config, data, cache, themes,
   workspaces, logs, crash reports, and exported assets.
-- [ ] Define a `PlatformOpen` boundary for opening URLs, revealing files,
+- [x] Define a `PlatformOpen` boundary for opening URLs, revealing files,
   opening folders, and opening files with system default applications.
-- [ ] Define a `PlatformClipboard` fallback boundary if `arboard` is not enough
+- [x] Define a `PlatformClipboard` fallback boundary if `arboard` is not enough
   on any supported OS.
-- [ ] Define a `PlatformMenu` boundary for native macOS menus and in-window
+- [x] Define a `PlatformMenu` boundary for native macOS menus and in-window
   command fallbacks elsewhere.
-- [ ] Define a `PlatformInput` boundary for modifier naming, IME, dead keys,
+- [x] Define a `PlatformInput` boundary for modifier naming, IME, dead keys,
   compose input, AltGr, and terminal special-key encoding.
-- [ ] Define platform packaging metadata for app id, executable name, icons,
+- [x] Define platform packaging metadata for app id, executable name, icons,
   file associations, protocol handlers, signing identity, and update channel.
-- [ ] Keep product modules operating on app concepts such as tabs, sessions,
+- [x] Keep product modules operating on app concepts such as tabs, sessions,
   buffers, projects, snapshots, themes, and UI commands.
 
 ### Rendering and Windowing

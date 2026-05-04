@@ -100,17 +100,20 @@ pub(super) fn engine_frame_from_request(
         }
     }
 
-    let mut highlight_primitives = Vec::new();
-    highlight_primitives.extend(rect_primitives(
-        request.search_rects,
-        request.screen_layout.content.x,
-        request.screen_layout.content.y,
-    ));
-    highlight_primitives.extend(rect_primitives(
-        request.selection_rects,
-        request.screen_layout.content.x,
-        request.screen_layout.content.y,
-    ));
+    let highlight_count = request.search_rects.len() + request.selection_rects.len();
+    let mut highlight_primitives = Vec::with_capacity(highlight_count);
+    if highlight_count > 0 {
+        highlight_primitives.extend(rect_primitives(
+            request.search_rects,
+            request.screen_layout.content.x,
+            request.screen_layout.content.y,
+        ));
+        highlight_primitives.extend(rect_primitives(
+            request.selection_rects,
+            request.screen_layout.content.x,
+            request.screen_layout.content.y,
+        ));
+    }
     if !highlight_primitives.is_empty() {
         frame.push_layer(Layer::new(
             "terminal-highlights",
@@ -309,12 +312,13 @@ mod tests {
     fn adapter_offsets_terminal_highlight_rects_into_content_area() {
         let layout = layout();
         let search_rects = [(2.0, 3.0, 16.0, 16.0, [1.0, 0.0, 0.0, 0.5])];
+        let selection_rects = [(5.0, 7.0, 24.0, 16.0, [0.0, 0.0, 1.0, 0.35])];
         let request = RenderRequest {
             terminal: None,
             tab_id: 1,
             terminal_panes: &[],
             tab_titles: &[],
-            selection_rects: &[],
+            selection_rects: &selection_rects,
             search_rects: &search_rects,
             search_bar: None,
             error_panel: None,
@@ -351,6 +355,47 @@ mod tests {
                 color: Color::rgba(1.0, 0.0, 0.0, 0.5),
             }
         );
+        assert_eq!(
+            primitives[1],
+            Primitive::Rect {
+                rect: Rect::new(15.0, 47.0, 24.0, 16.0),
+                color: Color::rgba(0.0, 0.0, 1.0, 0.35),
+            }
+        );
+    }
+
+    #[test]
+    fn adapter_omits_terminal_highlight_layer_when_rects_are_empty() {
+        let layout = layout();
+        let request = RenderRequest {
+            terminal: None,
+            tab_id: 1,
+            terminal_panes: &[],
+            tab_titles: &[],
+            selection_rects: &[],
+            search_rects: &[],
+            search_bar: None,
+            error_panel: None,
+            visual_bell: false,
+            screen_layout: &layout,
+            egui_render: None,
+            effects_enabled: false,
+            apply_effects_to_ui: false,
+            effects_mask: None,
+        };
+
+        let frame = engine_frame_from_request(
+            &request,
+            &Config::default(),
+            Size::new(800.0, 600.0),
+            false,
+            16.0,
+        );
+
+        assert!(frame
+            .layers
+            .iter()
+            .all(|layer| layer.id.as_str() != "terminal-highlights"));
     }
 
     #[test]
