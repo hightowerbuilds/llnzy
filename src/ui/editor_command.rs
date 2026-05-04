@@ -132,8 +132,12 @@ impl EditorViewState {
             EditorCommand::CodeActions => self.request_code_actions(),
             EditorCommand::DocumentSymbols => self.request_document_symbols(),
             EditorCommand::Find => {
-                self.editor_search.open_find();
-                self.editor_search.mark_dirty();
+                if self.editor_search.active && !self.editor_search.replace_mode {
+                    self.editor_search.close();
+                } else {
+                    self.editor_search.open_find();
+                    self.editor_search.mark_dirty();
+                }
             }
             EditorCommand::FindReplace => {
                 self.editor_search.open_replace();
@@ -474,11 +478,14 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_find_opens_editor_search() {
+    fn dispatch_find_toggles_editor_search() {
         let mut state = state_with_text("hello");
         state.dispatch_editor_command(EditorCommand::Find, None);
         assert!(state.editor_search.active);
         assert!(!state.editor_search.replace_mode);
+
+        state.dispatch_editor_command(EditorCommand::Find, None);
+        assert!(!state.editor_search.active);
     }
 
     #[test]

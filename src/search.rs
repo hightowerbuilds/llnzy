@@ -47,6 +47,14 @@ impl Search {
         self.focus = 0;
     }
 
+    pub fn toggle(&mut self) {
+        if self.active {
+            self.close();
+        } else {
+            self.open();
+        }
+    }
+
     pub fn close(&mut self) {
         self.active = false;
         self.query.clear();
@@ -225,6 +233,15 @@ mod tests {
         assert!(!s.active);
         assert!(s.query.is_empty());
         assert!(s.matches.is_empty());
+    }
+
+    #[test]
+    fn toggle_opens_and_closes() {
+        let mut s = Search::new();
+        s.toggle();
+        assert!(s.active);
+        s.toggle();
+        assert!(!s.active);
     }
 
     #[test]

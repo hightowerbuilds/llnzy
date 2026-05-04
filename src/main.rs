@@ -979,7 +979,7 @@ impl ApplicationHandler<UserEvent> for App {
                             }
                             // Search only works on terminal tabs
                             if self.active_session().is_some() {
-                                self.search.open();
+                                self.search.toggle();
                                 self.request_redraw();
                             }
                         }
@@ -1240,7 +1240,7 @@ impl ApplicationHandler<UserEvent> for App {
                         if self.route_code_editor_command(CommandId::Find) {
                             return;
                         }
-                        self.search.open();
+                        self.search.toggle();
                         self.request_redraw();
                     }
                     MenuAction::ToggleFullscreen => {

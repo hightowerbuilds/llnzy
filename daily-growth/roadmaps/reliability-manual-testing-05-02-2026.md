@@ -40,10 +40,27 @@ This document tracks the reliability and durability checks that still need human
   - May 3, 2026: Manual pass found File menu was missing Save even though Cmd+S worked. Added File > Save permanently, routed it through the same CodeFile save command as Cmd+S, and grayed it out outside code-file tabs.
   - May 3, 2026: Follow-up found saving could prevent undoing back past the saved edit. Fixed the file watcher so LLNZY's own matching save event does not reload the clean buffer and wipe undo history.
   - May 3, 2026: Added Edit > Undo and Edit > Redo to the native desktop Edit menu and routed them through the same editor commands as Cmd+Z and Cmd+Shift+Z. Manual retest confirmed Undo/Redo work from the menu.
+- [x] Confirm Settings hotkey legend entries match actual behavior for common shortcuts.
+  - May 3, 2026: Manual retest confirmed the common Settings hotkey legend entries match behavior. Follow-up request changed Cmd+F/Edit > Find to toggle the active find UI open and closed instead of only opening it.
 
-### Next: Command Routing
+### Next: Baseline Smoke Test
 
-- [ ] Confirm Settings hotkey legend entries match actual behavior for common shortcuts.
+- [ ] Launch the desktop app.
+- [ ] Open a project folder.
+- [ ] Open a source file.
+- [ ] Edit and save the file.
+- [ ] Edit the file again, close it, and cancel the close prompt.
+- [ ] Reopen the modified file and confirm the edit is still present.
+- [ ] Open a Markdown file.
+- [ ] Switch Markdown source, preview, and split modes.
+- [ ] Confirm Markdown preview headings, margins, tables, nested lists, images, and code blocks render acceptably.
+- [ ] Open a terminal tab.
+- [ ] Paste multi-line text into the terminal.
+- [ ] Open Stacker and paste text.
+- [ ] Open the Git tab.
+- [ ] Move a clean file in the sidebar.
+- [ ] Try to move a dirty open file and confirm the app blocks it.
+- [ ] Relaunch the app and confirm useful session restore behavior.
 
 ---
 
