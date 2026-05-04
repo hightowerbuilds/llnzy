@@ -42,11 +42,19 @@ pub(crate) const GHOST_DURATION_SECS: f32 = 0.9;
 pub(crate) const GHOST_FLOAT_PX: f32 = 50.0;
 
 /// A pending close confirmation for unsaved buffers.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PendingCloseFile {
+    pub tab_id: u64,
+    pub buffer_id: BufferId,
+    pub name: String,
+}
+
+/// A pending close confirmation for unsaved buffers.
 pub enum PendingClose {
-    /// Asking about a single tab (tab_index, file_name).
-    Tab(usize, String),
-    /// Asking about window close (list of modified tab indices and file names).
-    Window(Vec<(usize, String)>),
+    /// Asking about a single code-file tab.
+    Tab(PendingCloseFile),
+    /// Asking about window close.
+    Window(Vec<PendingCloseFile>),
 }
 
 /// Response from the save prompt dialog.

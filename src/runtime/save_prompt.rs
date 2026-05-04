@@ -16,26 +16,24 @@ impl App {
 
         let pending = self.ui.as_mut().and_then(|u| u.pending_close.take());
         match (response, pending) {
-            (SavePromptResponse::Save, Some(PendingClose::Tab(idx, name))) => {
-                match self.save_code_tab_for_close(idx) {
+            (SavePromptResponse::Save, Some(PendingClose::Tab(file))) => {
+                match self.save_code_buffer_for_close(file.buffer_id) {
                     Ok(()) => {
                         self.clear_save_prompt_error();
-                        self.active_tab = idx;
-                        self.force_close_tab();
+                        self.force_close_tab_id(file.tab_id);
                     }
                     Err(e) => {
                         if let Some(ui) = &mut self.ui {
-                            ui.pending_close = Some(PendingClose::Tab(idx, name));
+                            ui.pending_close = Some(PendingClose::Tab(file));
                         }
                         self.report_save_failure(e);
                     }
                 }
                 true
             }
-            (SavePromptResponse::DontSave, Some(PendingClose::Tab(idx, _))) => {
+            (SavePromptResponse::DontSave, Some(PendingClose::Tab(file))) => {
                 self.clear_save_prompt_error();
-                self.active_tab = idx;
-                self.force_close_tab();
+                self.force_close_tab_id(file.tab_id);
                 true
             }
             (SavePromptResponse::Save, Some(PendingClose::Window(tabs))) => {

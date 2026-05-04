@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use llnzy::app::drag_drop::{tab_drop_zone_at_x, tab_index_at_x, DropTarget, TerminalDropMode};
-use llnzy::layout::{LayoutInputs, ScreenLayout};
+use llnzy::layout::{logical_to_physical_width, LayoutInputs, ScreenLayout};
 use llnzy::session::Rect as PaneRect;
 use llnzy::ui::ActiveView;
 use llnzy::workspace::TabContent;
@@ -24,7 +24,7 @@ impl App {
                 .as_ref()
                 .map(|w| w.inner_size().height as f32)
                 .unwrap_or(600.0);
-            let sidebar_w = self.ui.as_ref().map(|u| u.sidebar_width()).unwrap_or(0.0);
+            let sidebar_w = self.sidebar_width_px();
             self.screen_layout = Some(ScreenLayout::compute(LayoutInputs {
                 window_w: w,
                 window_h: h,
@@ -88,7 +88,7 @@ impl App {
         };
         let x = self.cursor_pos.x as f32;
         let y = self.cursor_pos.y as f32;
-        let sidebar_w = self.ui.as_ref().map(|ui| ui.sidebar_width()).unwrap_or(0.0);
+        let sidebar_w = self.sidebar_width_px();
         x < sidebar_w
             || layout.tab_bar.contains(x, y)
             || y >= layout.window_h - llnzy::layout::FOOTER_HEIGHT
@@ -144,7 +144,7 @@ impl App {
         if self
             .ui
             .as_ref()
-            .is_some_and(|ui| x < ui.sidebar_width() && ui.sidebar.open)
+            .is_some_and(|ui| x < self.sidebar_width_px() && ui.sidebar.open)
         {
             return Some(DropTarget::Home);
         }
@@ -259,5 +259,15 @@ impl App {
             r.invalidate_text_cache();
         }
         self.request_redraw();
+    }
+
+    pub(crate) fn sidebar_width_px(&self) -> f32 {
+        let logical_width = self.ui.as_ref().map(|ui| ui.sidebar_width()).unwrap_or(0.0);
+        let scale_factor = self
+            .window
+            .as_ref()
+            .map(|window| window.scale_factor())
+            .unwrap_or(1.0);
+        logical_to_physical_width(logical_width, scale_factor)
     }
 }

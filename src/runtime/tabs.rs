@@ -1,6 +1,6 @@
-use llnzy::editor::buffer::Buffer;
+use llnzy::editor::{buffer::Buffer, BufferId};
 use llnzy::session::Session;
-use llnzy::ui::{ActiveView, PendingClose};
+use llnzy::ui::{ActiveView, PendingClose, PendingCloseFile};
 use llnzy::workspace::{TabContent, WorkspaceTab};
 
 use crate::App;
@@ -49,9 +49,9 @@ impl App {
                         self.force_close_tab();
                         return;
                     }
-                    let name = buffer.file_name().to_string();
+                    let file = pending_close_file(&self.tabs[self.active_tab], *buffer_id, buffer);
                     if let Some(ui) = &mut self.ui {
-                        ui.pending_close = Some(PendingClose::Tab(self.active_tab, name));
+                        ui.pending_close = Some(PendingClose::Tab(file));
                         ui.save_prompt_error = None;
                     }
                     self.request_redraw();
@@ -241,17 +241,25 @@ impl App {
         self.request_redraw();
     }
 
-    pub(crate) fn modified_code_tabs(&self) -> Vec<(usize, String)> {
+    pub(crate) fn force_close_tab_id(&mut self, tab_id: u64) -> bool {
+        let Some(idx) = self.tabs.iter().position(|tab| tab.id == tab_id) else {
+            return false;
+        };
+        self.active_tab = idx;
+        self.force_close_tab();
+        true
+    }
+
+    pub(crate) fn modified_code_tabs(&self) -> Vec<PendingCloseFile> {
         let mut modified = Vec::new();
         if let Some(ui) = &self.ui {
-            for (i, tab) in self.tabs.iter().enumerate() {
+            for tab in &self.tabs {
                 if let TabContent::CodeFile { buffer_id, .. } = &tab.content {
                     if let Some(buffer) = ui.editor_view.editor.buffer_for_id(*buffer_id) {
                         if !buffer.is_modified() {
                             continue;
                         }
-                        let name = buffer.file_name().to_string();
-                        modified.push((i, name));
+                        modified.push(pending_close_file(tab, *buffer_id, buffer));
                     }
                 }
             }
@@ -259,21 +267,13 @@ impl App {
         modified
     }
 
-    pub(crate) fn save_code_tab_for_close(&mut self, idx: usize) -> Result<(), String> {
-        let Some(TabContent::CodeFile { buffer_id, .. }) =
-            self.tabs.get(idx).map(|tab| &tab.content)
-        else {
-            return Ok(());
-        };
-        let buffer_id = *buffer_id;
+    pub(crate) fn save_code_buffer_for_close(&mut self, buffer_id: BufferId) -> Result<(), String> {
         let Some(ui) = &mut self.ui else {
             return Ok(());
         };
         let Some(buf) = ui.editor_view.editor.buffer_for_id_mut(buffer_id) else {
-            return Err(format!(
-                "Cannot save tab {}: editor buffer is missing",
-                idx + 1
-            ));
+            let target = format!("buffer {}", buffer_id.raw());
+            return Err(format!("Cannot save {target}: editor buffer is missing"));
         };
         if !buf.is_modified() {
             return Ok(());
@@ -288,10 +288,10 @@ impl App {
 
     pub(crate) fn save_modified_tabs_for_close(
         &mut self,
-        tabs: &[(usize, String)],
+        tabs: &[PendingCloseFile],
     ) -> Result<(), String> {
-        for (idx, _) in tabs {
-            self.save_code_tab_for_close(*idx)?;
+        for file in tabs {
+            self.save_code_buffer_for_close(file.buffer_id)?;
         }
         Ok(())
     }
@@ -403,6 +403,18 @@ fn save_modified_buffer_for_close(buf: &mut Buffer, label: String) -> Result<(),
         .map_err(|err| save_for_close_failed_status(&label, &err))
 }
 
+fn pending_close_file(
+    tab: &WorkspaceTab,
+    buffer_id: BufferId,
+    buffer: &Buffer,
+) -> PendingCloseFile {
+    PendingCloseFile {
+        tab_id: tab.id,
+        buffer_id,
+        name: buffer.file_name().to_string(),
+    }
+}
+
 fn save_for_close_failed_status(label: &str, error: &str) -> String {
     format!("Save failed for {label}: {error}")
 }
@@ -453,7 +465,8 @@ fn save_failure_status(message: String) -> SaveFailureStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use llnzy::editor::buffer::Position;
+    use llnzy::editor::{buffer::Position, EditorState};
+    use std::path::PathBuf;
 
     #[test]
     fn save_for_close_failure_keeps_buffer_dirty_and_formats_error() {
@@ -479,6 +492,34 @@ mod tests {
         assert_eq!(status.log_message, "Save failed for file.txt: disk full");
         assert_eq!(status.prompt_error, status.log_message);
         assert_eq!(status.editor_status, status.log_message);
+    }
+
+    #[test]
+    fn pending_close_file_uses_stable_tab_and_buffer_identity() {
+        let path = std::env::temp_dir().join(format!(
+            "llnzy-pending-close-target-{}.rs",
+            std::process::id()
+        ));
+        std::fs::write(&path, "fn main() {}\n").unwrap();
+        let mut editor = EditorState::new();
+        let buffer_id = editor.open(path.clone()).unwrap();
+        let buf = editor.buffer_for_id(buffer_id).unwrap();
+        let tab = WorkspaceTab {
+            content: TabContent::CodeFile {
+                path: PathBuf::from("/stale/tab/path.rs"),
+                buffer_id,
+            },
+            name: None,
+            id: 99,
+        };
+
+        let target = pending_close_file(&tab, buffer_id, &buf);
+
+        assert_eq!(target.tab_id, 99);
+        assert_eq!(target.buffer_id, buffer_id);
+        assert_eq!(target.name, path.file_name().unwrap().to_string_lossy());
+
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]

@@ -140,12 +140,12 @@ pub fn render_save_prompt(
     let mut response: Option<SavePromptResponse> = None;
 
     let (title, body) = match pending {
-        PendingClose::Tab(_, name) => (
+        PendingClose::Tab(file) => (
             "Unsaved Changes".to_string(),
-            format!("\"{}\" has unsaved changes.", name),
+            format!("\"{}\" has unsaved changes.", file.name),
         ),
-        PendingClose::Window(tabs) => {
-            let names: Vec<&str> = tabs.iter().map(|(_, n)| n.as_str()).collect();
+        PendingClose::Window(files) => {
+            let names: Vec<&str> = files.iter().map(|file| file.name.as_str()).collect();
             (
                 "Unsaved Changes".to_string(),
                 if names.len() == 1 {

@@ -19,7 +19,7 @@ use llnzy::config::Config;
 use llnzy::diagnostics::write_diagnostic;
 use llnzy::error_log::{ErrorLog, ErrorPanel};
 use llnzy::keybindings::{primary_modifier, Action};
-use llnzy::layout::{LayoutInputs, ScreenLayout};
+use llnzy::layout::{logical_to_physical_width, LayoutInputs, ScreenLayout};
 use llnzy::renderer::{RenderRequest, Renderer, TerminalPane};
 use llnzy::search::Search;
 use llnzy::stacker::commands::StackerCommandId;
@@ -747,7 +747,7 @@ impl ApplicationHandler<UserEvent> for App {
             padding_x: self.config.padding_x,
             padding_y: self.config.padding_y,
             glyph_offset_x: gox,
-            sidebar_w: BUMPER_WIDTH, // bumper always visible
+            sidebar_w: logical_to_physical_width(BUMPER_WIDTH, window.scale_factor()), // bumper always visible
         });
         self.screen_layout = Some(layout);
 
@@ -1046,7 +1046,7 @@ impl ApplicationHandler<UserEvent> for App {
                 };
 
                 // Snapshot sidebar width before egui render so we can detect bumper clicks
-                let sidebar_w_before = self.ui.as_ref().map(|u| u.sidebar_width()).unwrap_or(0.0);
+                let sidebar_w_before = self.sidebar_width_px();
 
                 if let Some(renderer) = &mut self.renderer {
                     if let Some(layout) = &self.screen_layout {
@@ -1140,7 +1140,7 @@ impl ApplicationHandler<UserEvent> for App {
                 }
 
                 // Detect sidebar state change from bumper click and recompute layout
-                let sidebar_w_after = self.ui.as_ref().map(|u| u.sidebar_width()).unwrap_or(0.0);
+                let sidebar_w_after = self.sidebar_width_px();
                 if (sidebar_w_after - sidebar_w_before).abs() > 0.1 {
                     self.recompute_layout();
                     self.resize_terminal_tabs();

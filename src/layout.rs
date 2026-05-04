@@ -50,6 +50,15 @@ pub struct LayoutInputs {
     pub sidebar_w: f32,
 }
 
+pub fn logical_to_physical_width(logical_width: f32, scale_factor: f64) -> f32 {
+    let scale_factor = if scale_factor.is_finite() && scale_factor > 0.0 {
+        scale_factor as f32
+    } else {
+        1.0
+    };
+    logical_width * scale_factor
+}
+
 impl ScreenLayout {
     /// Compute the full screen layout using Taffy flexbox.
     pub fn compute(input: LayoutInputs) -> Self {
@@ -205,5 +214,17 @@ mod tests {
 
         assert_eq!(layout.content_padding_y, 90.0);
         assert_eq!(layout.content.y, TAB_BAR_HEIGHT + 90.0);
+    }
+
+    #[test]
+    fn logical_sidebar_width_scales_to_physical_pixels() {
+        assert_eq!(logical_to_physical_width(200.0, 2.0), 400.0);
+        assert_eq!(logical_to_physical_width(200.0, 1.5), 300.0);
+    }
+
+    #[test]
+    fn invalid_scale_factor_falls_back_to_one() {
+        assert_eq!(logical_to_physical_width(200.0, 0.0), 200.0);
+        assert_eq!(logical_to_physical_width(200.0, f64::NAN), 200.0);
     }
 }

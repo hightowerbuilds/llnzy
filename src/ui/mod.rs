@@ -62,8 +62,8 @@ use crate::workspace_layout::tab_bar_entries;
 
 pub use footer::FooterAction;
 pub use types::{
-    ActiveView, CopyGhost, PendingClose, SavePromptResponse, UiFrameOutput, UiTabInfo,
-    UiTabPaneInfo, BUMPER_WIDTH, SIDEBAR_WIDTH,
+    ActiveView, CopyGhost, PendingClose, PendingCloseFile, SavePromptResponse, UiFrameOutput,
+    UiTabInfo, UiTabPaneInfo, BUMPER_WIDTH, SIDEBAR_WIDTH,
 };
 
 pub const STACKER_PROMPT_EDITOR_ID: &str = "stacker_prompt_editor";

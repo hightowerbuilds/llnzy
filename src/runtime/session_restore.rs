@@ -1,12 +1,26 @@
 use llnzy::workspace_store;
+use llnzy::workspace_store::LastSessionLoad;
 use llnzy::workspace_store::SessionRestorePlan;
 
 use crate::App;
 
 impl App {
     pub(crate) fn restore_last_session(&mut self) {
-        let Some(snapshot) = workspace_store::load_last_session() else {
-            return;
+        let snapshot = match workspace_store::load_last_session_checked() {
+            LastSessionLoad::Loaded(snapshot) => snapshot,
+            LastSessionLoad::Missing => return,
+            LastSessionLoad::Corrupt { path, error } => {
+                let message = format!(
+                    "Session restore skipped corrupt session file: {} ({error})",
+                    path.display()
+                );
+                self.error_log.warn(message.clone());
+                if let Some(ui) = &mut self.ui {
+                    ui.editor_view.status_msg = Some(message);
+                }
+                workspace_store::clear_last_session();
+                return;
+            }
         };
 
         let plan = workspace_store::plan_session_restore(snapshot);

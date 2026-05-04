@@ -141,7 +141,7 @@ fn last_session_path() -> Option<PathBuf> {
 }
 
 /// A snapshot of the current session for auto-restore.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SessionSnapshot {
     pub theme: Option<String>,
     pub project_path: Option<PathBuf>,
@@ -158,6 +158,13 @@ pub struct SessionRestorePlan {
     pub active_tab: Option<usize>,
     pub tabs: Vec<TabEntry>,
     pub skipped_files: Vec<PathBuf>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LastSessionLoad {
+    Missing,
+    Loaded(SessionSnapshot),
+    Corrupt { path: PathBuf, error: String },
 }
 
 impl SessionRestorePlan {
@@ -239,9 +246,38 @@ pub fn save_session(snapshot: &SessionSnapshot) -> Result<(), String> {
 
 /// Load the last session snapshot, if any.
 pub fn load_last_session() -> Option<SessionSnapshot> {
-    let path = last_session_path()?;
-    let text = std::fs::read_to_string(&path).ok()?;
-    toml::from_str(&text).ok()
+    match load_last_session_checked() {
+        LastSessionLoad::Loaded(snapshot) => Some(snapshot),
+        LastSessionLoad::Missing | LastSessionLoad::Corrupt { .. } => None,
+    }
+}
+
+pub fn load_last_session_checked() -> LastSessionLoad {
+    let Some(path) = last_session_path() else {
+        return LastSessionLoad::Missing;
+    };
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return LastSessionLoad::Missing,
+        Err(err) => {
+            return LastSessionLoad::Corrupt {
+                path,
+                error: format!("Read failed: {err}"),
+            };
+        }
+    };
+
+    parse_last_session_text(path, &text)
+}
+
+fn parse_last_session_text(path: PathBuf, text: &str) -> LastSessionLoad {
+    match toml::from_str(text) {
+        Ok(snapshot) => LastSessionLoad::Loaded(snapshot),
+        Err(err) => LastSessionLoad::Corrupt {
+            path,
+            error: format!("Parse failed: {err}"),
+        },
+    }
 }
 
 /// Clear the last session file.
@@ -450,6 +486,24 @@ Stacker = {}
             plan.status_message().as_deref(),
             Some("Session restore skipped a missing project folder and 2 missing files.")
         );
+    }
+
+    #[test]
+    fn corrupt_session_snapshot_reports_parse_failure() {
+        let path = PathBuf::from("/tmp/last_session.toml");
+
+        let loaded = parse_last_session_text(path.clone(), "this is not toml =");
+
+        match loaded {
+            LastSessionLoad::Corrupt {
+                path: actual,
+                error,
+            } => {
+                assert_eq!(actual, path);
+                assert!(error.starts_with("Parse failed: "));
+            }
+            other => panic!("expected corrupt session load, got {other:?}"),
+        }
     }
 
     #[test]
