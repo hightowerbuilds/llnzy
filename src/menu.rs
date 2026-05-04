@@ -11,32 +11,8 @@ use objc2::{define_class, msg_send, sel, AnyThread};
 use objc2_app_kit::{NSApplication, NSMenu, NSMenuItem};
 use objc2_foundation::NSString;
 
+use crate::platform::menu::{command_id_for_native_action, PlatformMenuAction};
 use crate::UserEvent;
-
-/// Menu action identifiers, sent via UserEvent.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MenuAction {
-    NewTab,
-    Save,
-    CloseTab,
-    Undo,
-    Redo,
-    Copy,
-    Paste,
-    SelectAll,
-    Find,
-    ToggleFullscreen,
-    TabJoin,
-    TabSeparate,
-    TabSplit,
-    TabRename,
-    SplitVertical,
-    SplitHorizontal,
-    ToggleWordWrap,
-    ToggleEffects,
-    OpenProject,
-    CloseProject,
-}
 
 static EVENT_PROXY: OnceLock<winit::event_loop::EventLoopProxy<UserEvent>> = OnceLock::new();
 static MENU_TARGET: OnceLock<usize> = OnceLock::new();
@@ -50,101 +26,103 @@ define_class!(
     impl MenuTarget {
         #[unsafe(method(llnzyNewTab:))]
         fn new_tab(&self, _sender: &AnyObject) {
-            send_action(MenuAction::NewTab);
+            send_action(PlatformMenuAction::NewTab);
         }
 
         #[unsafe(method(llnzySave:))]
         fn save(&self, _sender: &AnyObject) {
-            send_action(MenuAction::Save);
+            send_action(PlatformMenuAction::Save);
         }
 
         #[unsafe(method(llnzyCloseTab:))]
         fn close_tab(&self, _sender: &AnyObject) {
-            send_action(MenuAction::CloseTab);
+            send_action(PlatformMenuAction::CloseTab);
         }
 
         #[unsafe(method(llnzyTabJoin:))]
         fn tab_join(&self, _sender: &AnyObject) {
-            send_action(MenuAction::TabJoin);
+            send_action(PlatformMenuAction::TabJoin);
         }
 
         #[unsafe(method(llnzyTabSeparate:))]
         fn tab_separate(&self, _sender: &AnyObject) {
-            send_action(MenuAction::TabSeparate);
+            send_action(PlatformMenuAction::TabSeparate);
         }
 
         #[unsafe(method(llnzyTabSplit:))]
         fn tab_split(&self, _sender: &AnyObject) {
-            send_action(MenuAction::TabSplit);
+            send_action(PlatformMenuAction::TabSplit);
         }
 
         #[unsafe(method(llnzyTabRename:))]
         fn tab_rename(&self, _sender: &AnyObject) {
-            send_action(MenuAction::TabRename);
+            send_action(PlatformMenuAction::TabRename);
         }
 
         #[unsafe(method(llnzyUndo:))]
         fn undo(&self, _sender: &AnyObject) {
-            send_action(MenuAction::Undo);
+            send_action(PlatformMenuAction::Undo);
         }
 
         #[unsafe(method(llnzyRedo:))]
         fn redo(&self, _sender: &AnyObject) {
-            send_action(MenuAction::Redo);
+            send_action(PlatformMenuAction::Redo);
         }
 
         #[unsafe(method(copy:))]
         fn copy(&self, _sender: &AnyObject) {
-            send_action(MenuAction::Copy);
+            send_action(PlatformMenuAction::Copy);
         }
 
         #[unsafe(method(paste:))]
         fn paste(&self, _sender: &AnyObject) {
-            send_action(MenuAction::Paste);
+            send_action(PlatformMenuAction::Paste);
         }
 
         #[unsafe(method(selectAll:))]
         fn select_all(&self, _sender: &AnyObject) {
-            send_action(MenuAction::SelectAll);
+            send_action(PlatformMenuAction::SelectAll);
         }
 
         #[unsafe(method(llnzyFind:))]
         fn find(&self, _sender: &AnyObject) {
-            send_action(MenuAction::Find);
+            send_action(PlatformMenuAction::Find);
         }
 
         #[unsafe(method(llnzySplitVertical:))]
         fn split_vertical(&self, _sender: &AnyObject) {
-            send_action(MenuAction::SplitVertical);
+            send_action(PlatformMenuAction::SplitVertical);
         }
 
         #[unsafe(method(llnzySplitHorizontal:))]
         fn split_horizontal(&self, _sender: &AnyObject) {
-            send_action(MenuAction::SplitHorizontal);
+            send_action(PlatformMenuAction::SplitHorizontal);
         }
 
         #[unsafe(method(llnzyToggleWordWrap:))]
         fn toggle_word_wrap(&self, _sender: &AnyObject) {
-            send_action(MenuAction::ToggleWordWrap);
+            send_action(PlatformMenuAction::ToggleWordWrap);
         }
 
         #[unsafe(method(llnzyOpenProject:))]
         fn open_project(&self, _sender: &AnyObject) {
-            send_action(MenuAction::OpenProject);
+            send_action(PlatformMenuAction::OpenProject);
         }
 
         #[unsafe(method(llnzyCloseProject:))]
         fn close_project(&self, _sender: &AnyObject) {
-            send_action(MenuAction::CloseProject);
+            send_action(PlatformMenuAction::CloseProject);
         }
     }
 
     unsafe impl NSObjectProtocol for MenuTarget {}
 );
 
-fn send_action(action: MenuAction) {
+fn send_action(action: PlatformMenuAction) {
     if let Some(proxy) = EVENT_PROXY.get() {
-        let _ = proxy.send_event(UserEvent::MenuAction(action));
+        let _ = proxy.send_event(UserEvent::MenuCommand(
+            command_id_for_native_action(action).to_string(),
+        ));
     }
 }
 

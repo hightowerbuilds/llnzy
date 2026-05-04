@@ -3,7 +3,7 @@ use llnzy::external_command::{
     FocusPolicy, ResolvedTarget, SelectionPolicy, SurfaceKind, TextSelection,
 };
 use llnzy::external_input_trace;
-use llnzy::input::text_should_use_paste_path;
+use llnzy::platform::input::paste_like_text_input;
 use llnzy::stacker::commands::{execute_stacker_command_at, stacker_editor_command};
 use llnzy::stacker::input::StackerSelection;
 use llnzy::ui::command_palette::CommandId;
@@ -302,7 +302,7 @@ impl App {
     ) -> ExternalCommandResult {
         match &command.action {
             ExternalAction::InsertText { text } | ExternalAction::ReplaceSelection { text } => {
-                if text_should_use_paste_path(text) {
+                if paste_like_text_input(text, winit::keyboard::ModifiersState::empty()).is_some() {
                     self.paste_text_to_terminal_tab(tab_idx, text);
                 } else {
                     self.write_to_terminal_tab(tab_idx, text.as_bytes());

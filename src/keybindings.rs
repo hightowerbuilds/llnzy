@@ -40,11 +40,7 @@ pub enum VimMode {
 /// Returns true if the "primary" modifier is held: Cmd on macOS, Ctrl on Linux/Windows.
 /// This allows the same keybinding config to work cross-platform.
 pub fn primary_modifier(mods: ModifiersState) -> bool {
-    if cfg!(target_os = "macos") {
-        mods.super_key()
-    } else {
-        mods.control_key()
-    }
+    crate::platform::input::primary_modifier_pressed(mods)
 }
 
 /// All actions the user can bind to keys.

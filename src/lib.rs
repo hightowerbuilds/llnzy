@@ -55,5 +55,5 @@ pub enum UserEvent {
     #[cfg(target_os = "macos")]
     StackerNativeEdit(StackerNativeEdit),
     #[cfg(target_os = "macos")]
-    MenuAction(menu::MenuAction),
+    MenuCommand(String),
 }

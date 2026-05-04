@@ -18,7 +18,6 @@ use llnzy::app::window_state;
 use llnzy::config::Config;
 use llnzy::diagnostics::write_diagnostic;
 use llnzy::error_log::{ErrorLog, ErrorPanel};
-use llnzy::input;
 use llnzy::keybindings::{primary_modifier, Action};
 use llnzy::layout::{LayoutInputs, ScreenLayout};
 use llnzy::renderer::{RenderRequest, Renderer, TerminalPane};
@@ -460,9 +459,17 @@ impl App {
             let lines = self.wheel_lines(delta, 1.0);
             for _ in 0..lines.unsigned_abs() {
                 let button = if lines > 0 { 64 } else { 65 };
-                let bytes =
-                    input::encode_mouse(button, hit.col, hit.row, true, sgr, &self.modifiers);
-                self.write_to_terminal_tab(hit.tab_idx, &bytes);
+                let intent = llnzy::platform::input::mouse_report_intent(
+                    button,
+                    hit.col,
+                    hit.row,
+                    true,
+                    sgr,
+                    &self.modifiers,
+                );
+                if let llnzy::platform::input::PlatformInputIntent::MouseReport(bytes) = intent {
+                    self.write_to_terminal_tab(hit.tab_idx, &bytes);
+                }
             }
             self.request_redraw();
             return true;
@@ -495,6 +502,117 @@ impl App {
                 } else {
                     lines
                 }
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn handle_platform_menu_command(&mut self, command_id: &str) {
+        use llnzy::platform::menu;
+
+        match command_id {
+            menu::COMMAND_NEW_TAB => {
+                let mut sidebar_changed = false;
+                self.handle_app_command(AppCommand::NewTerminalTab, &mut sidebar_changed);
+            }
+            menu::COMMAND_SAVE => {
+                self.route_code_editor_command(CommandId::Save);
+            }
+            menu::COMMAND_CLOSE_TAB => {
+                let mut sidebar_changed = false;
+                self.handle_app_command(
+                    AppCommand::CloseTab(self.active_tab),
+                    &mut sidebar_changed,
+                );
+            }
+            menu::COMMAND_TAB_JOIN => {
+                self.join_active_tab_with_next();
+            }
+            menu::COMMAND_TAB_SEPARATE => {
+                let mut sidebar_changed = false;
+                self.handle_app_command(AppCommand::SeparateTabs, &mut sidebar_changed);
+            }
+            menu::COMMAND_TAB_SPLIT => {
+                self.split_active_tab();
+            }
+            menu::COMMAND_TAB_RENAME => {
+                self.start_renaming_active_tab();
+            }
+            menu::COMMAND_UNDO => {
+                if !self.undo_stacker_editor() {
+                    self.route_code_editor_command(CommandId::Undo);
+                }
+            }
+            menu::COMMAND_REDO => {
+                if !self.redo_stacker_editor() {
+                    self.route_code_editor_command(CommandId::Redo);
+                }
+            }
+            menu::COMMAND_COPY => {
+                if self.route_code_editor_command(CommandId::Copy) {
+                    return;
+                }
+                if !self.copy_stacker_editor_selection() {
+                    self.copy_selection();
+                }
+            }
+            menu::COMMAND_PASTE => {
+                if self.route_code_editor_command(CommandId::Paste) {
+                    return;
+                }
+                self.do_paste();
+            }
+            menu::COMMAND_SELECT_ALL => {
+                if self.route_code_editor_command(CommandId::SelectAll) {
+                    return;
+                }
+                if !self.select_all_stacker_editor() {
+                    self.do_select_all();
+                }
+            }
+            menu::COMMAND_FIND => {
+                if self.route_code_editor_command(CommandId::Find) {
+                    return;
+                }
+                self.search.toggle();
+                self.request_redraw();
+            }
+            menu::COMMAND_TOGGLE_FULLSCREEN => {
+                let mut sidebar_changed = false;
+                self.handle_app_command(AppCommand::ToggleFullscreen, &mut sidebar_changed);
+            }
+            menu::COMMAND_SPLIT_VERTICAL | menu::COMMAND_SPLIT_HORIZONTAL => {
+                let mut sidebar_changed = false;
+                self.handle_app_command(AppCommand::NewTerminalTab, &mut sidebar_changed);
+            }
+            menu::COMMAND_TOGGLE_WORD_WRAP => {
+                self.toggle_editor_word_wrap();
+            }
+            menu::COMMAND_TOGGLE_EFFECTS => {
+                let mut sidebar_changed = false;
+                self.handle_app_command(AppCommand::ToggleEffects, &mut sidebar_changed);
+            }
+            menu::COMMAND_OPEN_PROJECT => {
+                let mut sidebar_changed = false;
+                if self.handle_app_command(AppCommand::PickOpenProject, &mut sidebar_changed) {
+                    if sidebar_changed {
+                        self.recompute_layout();
+                        self.resize_terminal_tabs();
+                    }
+                    self.request_redraw();
+                }
+            }
+            menu::COMMAND_CLOSE_PROJECT => {
+                if let Some(ui) = &mut self.ui {
+                    ui.explorer.clear();
+                    ui.sidebar.open = false;
+                    ui.active_view = ActiveView::Shells;
+                }
+                self.recompute_layout();
+                self.request_redraw();
+            }
+            _ => {
+                log::warn!("Unknown platform menu command: {command_id}");
             }
         }
     }
@@ -575,10 +693,9 @@ fn stacker_keyboard_text_fallback_candidate(
     {
         return false;
     }
-    key_event
-        .text
-        .as_ref()
-        .is_some_and(|text| input::text_should_use_paste_path(text.as_str()))
+    key_event.text.as_ref().is_some_and(|text| {
+        llnzy::platform::input::paste_like_text_input(text.as_str(), modifiers).is_some()
+    })
 }
 
 fn terminal_mouse_drag_exceeded(start: (usize, usize), row: usize, col: usize) -> bool {
@@ -1149,7 +1266,7 @@ impl ApplicationHandler<UserEvent> for App {
                                 self.terminal_pending_mouse_press.take()
                             {
                                 let sgr = self.sgr_mouse();
-                                let press = input::encode_mouse(
+                                let press = llnzy::platform::input::mouse_report_intent(
                                     0,
                                     press_col,
                                     press_row,
@@ -1157,10 +1274,26 @@ impl ApplicationHandler<UserEvent> for App {
                                     sgr,
                                     &self.modifiers,
                                 );
-                                let release =
-                                    input::encode_mouse(0, col, row, false, sgr, &self.modifiers);
-                                self.write_to_active(&press);
-                                self.write_to_active(&release);
+                                let release = llnzy::platform::input::mouse_report_intent(
+                                    0,
+                                    col,
+                                    row,
+                                    false,
+                                    sgr,
+                                    &self.modifiers,
+                                );
+                                if let llnzy::platform::input::PlatformInputIntent::MouseReport(
+                                    press,
+                                ) = press
+                                {
+                                    self.write_to_active(&press);
+                                }
+                                if let llnzy::platform::input::PlatformInputIntent::MouseReport(
+                                    release,
+                                ) = release
+                                {
+                                    self.write_to_active(&release);
+                                }
                             } else if self.terminal_selection_drag {
                                 if self.update_active_terminal_selection(row, col) {
                                     self.request_redraw();
@@ -1505,7 +1638,7 @@ impl ApplicationHandler<UserEvent> for App {
 
                 // Only send raw keys to PTY if active tab is a terminal
                 if self.active_session().is_some() {
-                    if input::is_modifier_only_key(&key_event) {
+                    if llnzy::platform::input::is_modifier_only_key(&key_event) {
                         return;
                     }
 
@@ -1515,21 +1648,21 @@ impl ApplicationHandler<UserEvent> for App {
                     }
 
                     self.last_keypress = Instant::now();
-                    if let Some(ref text) = key_event.text {
-                        let s = text.as_str();
-                        if !s.is_empty()
-                            && !self.modifiers.control_key()
-                            && !self.modifiers.alt_key()
-                            && !self.modifiers.super_key()
-                            && input::text_should_use_paste_path(s)
-                        {
-                            self.write_text_to_active(s);
-                            return;
-                        }
-                    }
                     let app_cursor = self.app_cursor();
-                    if let Some(bytes) = input::encode_key(&key_event, self.modifiers, app_cursor) {
-                        self.write_to_active(&bytes);
+                    if let Some(intent) = llnzy::platform::input::keyboard_intent(
+                        &key_event,
+                        self.modifiers,
+                        app_cursor,
+                    ) {
+                        match intent {
+                            llnzy::platform::input::PlatformInputIntent::TextInput(text) => {
+                                self.write_text_to_active(&text);
+                            }
+                            llnzy::platform::input::PlatformInputIntent::TerminalInput(bytes) => {
+                                self.write_to_active(&bytes);
+                            }
+                            _ => {}
+                        }
                     }
                 }
             }
@@ -1616,112 +1749,8 @@ impl ApplicationHandler<UserEvent> for App {
                 self.apply_stacker_native_edit(edit);
             }
             #[cfg(target_os = "macos")]
-            UserEvent::MenuAction(action) => {
-                use llnzy::menu::MenuAction;
-                match action {
-                    MenuAction::NewTab => {
-                        let mut sidebar_changed = false;
-                        self.handle_app_command(AppCommand::NewTerminalTab, &mut sidebar_changed);
-                    }
-                    MenuAction::Save => {
-                        self.route_code_editor_command(CommandId::Save);
-                    }
-                    MenuAction::CloseTab => {
-                        let mut sidebar_changed = false;
-                        self.handle_app_command(
-                            AppCommand::CloseTab(self.active_tab),
-                            &mut sidebar_changed,
-                        );
-                    }
-                    MenuAction::TabJoin => {
-                        self.join_active_tab_with_next();
-                    }
-                    MenuAction::TabSeparate => {
-                        let mut sidebar_changed = false;
-                        self.handle_app_command(AppCommand::SeparateTabs, &mut sidebar_changed);
-                    }
-                    MenuAction::TabSplit => {
-                        self.split_active_tab();
-                    }
-                    MenuAction::TabRename => {
-                        self.start_renaming_active_tab();
-                    }
-                    MenuAction::Undo => {
-                        if !self.undo_stacker_editor() {
-                            self.route_code_editor_command(CommandId::Undo);
-                        }
-                    }
-                    MenuAction::Redo => {
-                        if !self.redo_stacker_editor() {
-                            self.route_code_editor_command(CommandId::Redo);
-                        }
-                    }
-                    MenuAction::Copy => {
-                        if self.route_code_editor_command(CommandId::Copy) {
-                            return;
-                        }
-                        if !self.copy_stacker_editor_selection() {
-                            self.copy_selection();
-                        }
-                    }
-                    MenuAction::Paste => {
-                        if self.route_code_editor_command(CommandId::Paste) {
-                            return;
-                        }
-                        self.do_paste();
-                    }
-                    MenuAction::SelectAll => {
-                        if self.route_code_editor_command(CommandId::SelectAll) {
-                            return;
-                        }
-                        if !self.select_all_stacker_editor() {
-                            self.do_select_all();
-                        }
-                    }
-                    MenuAction::Find => {
-                        if self.route_code_editor_command(CommandId::Find) {
-                            return;
-                        }
-                        self.search.toggle();
-                        self.request_redraw();
-                    }
-                    MenuAction::ToggleFullscreen => {
-                        let mut sidebar_changed = false;
-                        self.handle_app_command(AppCommand::ToggleFullscreen, &mut sidebar_changed);
-                    }
-                    MenuAction::SplitVertical | MenuAction::SplitHorizontal => {
-                        let mut sidebar_changed = false;
-                        self.handle_app_command(AppCommand::NewTerminalTab, &mut sidebar_changed);
-                    }
-                    MenuAction::ToggleWordWrap => {
-                        self.toggle_editor_word_wrap();
-                    }
-                    MenuAction::ToggleEffects => {
-                        let mut sidebar_changed = false;
-                        self.handle_app_command(AppCommand::ToggleEffects, &mut sidebar_changed);
-                    }
-                    MenuAction::OpenProject => {
-                        let mut sidebar_changed = false;
-                        if self
-                            .handle_app_command(AppCommand::PickOpenProject, &mut sidebar_changed)
-                        {
-                            if sidebar_changed {
-                                self.recompute_layout();
-                                self.resize_terminal_tabs();
-                            }
-                            self.request_redraw();
-                        }
-                    }
-                    MenuAction::CloseProject => {
-                        if let Some(ui) = &mut self.ui {
-                            ui.explorer.clear();
-                            ui.sidebar.open = false;
-                            ui.active_view = ActiveView::Shells;
-                        }
-                        self.recompute_layout();
-                        self.request_redraw();
-                    }
-                }
+            UserEvent::MenuCommand(command_id) => {
+                self.handle_platform_menu_command(&command_id);
             }
         }
     }

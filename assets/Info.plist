@@ -7,7 +7,7 @@
     <key>CFBundleDisplayName</key>
     <string>LLNZY</string>
     <key>CFBundleIdentifier</key>
-    <string>com.llnzy.terminal</string>
+    <string>com.hightowerbuilds.llnzy</string>
     <key>CFBundleVersion</key>
     <string>0.1.0</string>
     <key>CFBundleShortVersionString</key>

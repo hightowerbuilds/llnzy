@@ -70,6 +70,13 @@ Implementation update:
   macOS `open` directly from the main app loop.
 - Added `PlatformClipboard` as the only direct `arboard` owner and routed app
   clipboard reads/writes through plain-text platform helpers.
+- Routed macOS native menu callbacks through stable `PlatformMenu` command IDs
+  before app dispatch.
+- Added `PlatformInput` intent helpers for primary modifiers, paste-like text
+  input, terminal keyboard bytes, mouse reports, and declared text-input
+  capabilities.
+- Added shared packaging metadata in `assets/packaging.env`, consumed by Rust
+  packaging metadata and the macOS bundle script.
 
 ## PlatformShell
 
@@ -297,9 +304,9 @@ behavior behind them.
    `PlatformPaths`.
 4. [x] Move open/reveal behavior behind `PlatformOpen`.
 5. [x] Move clipboard imports behind `PlatformClipboard`.
-6. [ ] Route native menu callbacks through app command IDs via `PlatformMenu`.
-7. [ ] Normalize keyboard, IME, and terminal input through `PlatformInput`.
-8. [ ] Define packaging metadata and make build scripts consume the same values
+6. [x] Route native menu callbacks through app command IDs via `PlatformMenu`.
+7. [x] Normalize keyboard, IME, and terminal input through `PlatformInput`.
+8. [x] Define packaging metadata and make build scripts consume the same values
    where practical.
 
 This sequence keeps the terminal-hosting risk visible while avoiding a large
