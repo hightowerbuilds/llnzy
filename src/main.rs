@@ -24,7 +24,10 @@ use llnzy::layout::{LayoutInputs, ScreenLayout};
 use llnzy::renderer::{RenderRequest, Renderer, TerminalPane};
 use llnzy::search::Search;
 use llnzy::stacker::commands::StackerCommandId;
+use llnzy::stacker::input::StackerSelection;
+use llnzy::stacker_webview::{StackerWebView, StackerWebViewMessage};
 use llnzy::ui::command_palette::CommandId;
+use llnzy::ui::{stacker_cursor, STACKER_PROMPT_EDITOR_ID};
 use llnzy::ui::{ActiveView, PendingClose, UiFrameOutput, UiState, BUMPER_WIDTH};
 use llnzy::workspace::{TabContent, TabKind, WorkspaceTab};
 use llnzy::workspace_layout::{
@@ -62,6 +65,7 @@ struct App {
     terminal_selection_drag: bool,
     terminal_pending_mouse_press: Option<(usize, usize)>,
     click_state: ClickState,
+    stacker_webview: Option<StackerWebView>,
     ui: Option<UiState>,
     screen_layout: Option<ScreenLayout>,
     visual_bell_until: Option<Instant>,
@@ -96,6 +100,7 @@ impl App {
             terminal_selection_drag: false,
             terminal_pending_mouse_press: None,
             click_state: ClickState::new(),
+            stacker_webview: None,
             ui: None,
             screen_layout: None,
             visual_bell_until: None,
@@ -121,9 +126,123 @@ impl App {
             .is_some_and(|tab| matches!(tab.content, TabContent::Stacker))
     }
 
+    fn create_stacker_webview(&mut self) {
+        if self.stacker_webview.is_some() {
+            return;
+        }
+        let Some(window) = &self.window else { return };
+        match StackerWebView::new(window.as_ref(), self.proxy.clone()) {
+            Ok(webview) => {
+                self.stacker_webview = Some(webview);
+                self.error_log
+                    .info("Stacker WebView editor initialized for native text input");
+            }
+            Err(err) => {
+                self.error_log.error(err);
+            }
+        }
+    }
+
+    fn sync_stacker_webview(&mut self) {
+        let active = self.active_stacker_tab();
+        let Some(webview) = &mut self.stacker_webview else {
+            return;
+        };
+        if !active {
+            webview.set_visible(false);
+            return;
+        }
+
+        let Some(ui) = &self.ui else {
+            webview.set_visible(false);
+            return;
+        };
+        let modal_open = ui.stacker.pending_draft_switch.is_some()
+            || ui.stacker.pending_prompt_delete.is_some()
+            || ui.pending_close.is_some();
+        let Some(rect) = ui.stacker.web_editor_rect else {
+            webview.set_visible(false);
+            return;
+        };
+        if modal_open {
+            webview.set_visible(false);
+            return;
+        }
+
+        webview.set_bounds(rect);
+        webview.set_font_size(ui.stacker.editor_font_size);
+        webview.set_document(ui.stacker.editor.text(), ui.stacker.editor.selection());
+        webview.set_visible(true);
+        webview.focus();
+    }
+
+    fn apply_stacker_webview_message(&mut self, raw: String) -> bool {
+        let Ok(message) = serde_json::from_str::<StackerWebViewMessage>(&raw) else {
+            self.error_log
+                .error(format!("Invalid Stacker WebView message: {raw}"));
+            return false;
+        };
+        let Some(tab) = self.active_tab() else {
+            return false;
+        };
+        if !matches!(tab.content, TabContent::Stacker) {
+            return false;
+        }
+
+        let Some(ui) = &mut self.ui else {
+            return false;
+        };
+        let selection = StackerSelection {
+            start: llnzy::stacker_webview::utf16_index_to_char_index(
+                &message.text,
+                message.selection_start,
+            ),
+            end: llnzy::stacker_webview::utf16_index_to_char_index(
+                &message.text,
+                message.selection_end,
+            ),
+        };
+
+        match message.message_type.as_str() {
+            "textChanged" => {
+                let changed = ui
+                    .stacker
+                    .editor
+                    .replace_all_with_history(message.text.clone(), selection);
+                store_stacker_webview_selection(ui, selection);
+                ui.stacker
+                    .draft
+                    .record_current_text(ui.stacker.editor.text().to_string());
+                if let Some(webview) = &mut self.stacker_webview {
+                    webview.note_webview_text(ui.stacker.editor.text());
+                }
+                if changed {
+                    llnzy::external_input_trace::trace("stacker.webview_text_changed", || {
+                        format!("chars={}", ui.stacker.editor.text().chars().count())
+                    });
+                }
+                self.request_redraw();
+                true
+            }
+            "selectionChanged" | "focus" => {
+                store_stacker_webview_selection(ui, selection);
+                true
+            }
+            _ => false,
+        }
+    }
+
     #[cfg(target_os = "macos")]
     fn sync_macos_text_bridge(&mut self) {
         let Some(window) = &self.window else { return };
+        if self.stacker_webview.is_some() {
+            if self.stacker_bridge_active != Some(false) {
+                llnzy::macos_text_bridge::set_stacker_active(window, false, "");
+                self.stacker_bridge_active = Some(false);
+                self.stacker_bridge_text.clear();
+            }
+            return;
+        }
         let active = self.active_stacker_tab();
         let text = if active {
             self.ui
@@ -264,6 +383,12 @@ fn rect_contains(rect: llnzy::session::Rect, x: f32, y: f32) -> bool {
     x >= rect.x && x < rect.x + rect.w && y >= rect.y && y < rect.y + rect.h
 }
 
+fn store_stacker_webview_selection(ui: &mut UiState, selection: StackerSelection) {
+    let editor_id = egui::Id::new(STACKER_PROMPT_EDITOR_ID);
+    let ctx = ui.ctx.clone();
+    stacker_cursor::store_document_selection(&ctx, editor_id, &mut ui.stacker.editor, selection);
+}
+
 fn local_terminal_selection_requested(
     mouse_reporting: bool,
     shift_key: bool,
@@ -389,6 +514,7 @@ impl ApplicationHandler<UserEvent> for App {
         self.window = Some(window);
         self.renderer = Some(renderer);
         self.ui = Some(ui_state);
+        self.create_stacker_webview();
         self.restore_last_session();
         if self.tabs.is_empty() {
             self.open_singleton_tab(llnzy::workspace::TabKind::Home);
@@ -400,8 +526,10 @@ impl ApplicationHandler<UserEvent> for App {
         #[cfg(target_os = "macos")]
         {
             llnzy::macos_text_bridge::setup(self.proxy.clone());
-            if let Some(window) = &self.window {
-                llnzy::macos_text_bridge::install(window);
+            if self.stacker_webview.is_none() {
+                if let Some(window) = &self.window {
+                    llnzy::macos_text_bridge::install(window);
+                }
             }
         }
     }
@@ -762,6 +890,7 @@ impl ApplicationHandler<UserEvent> for App {
                             effects_mask,
                         });
                         self.handle_ui_frame_output(ui_frame_output, event_loop);
+                        self.sync_stacker_webview();
                     }
                 }
 
@@ -1352,6 +1481,9 @@ impl ApplicationHandler<UserEvent> for App {
             UserEvent::PtyOutput => self.request_redraw(),
             UserEvent::LspMessage => self.request_redraw(),
             UserEvent::FileChanged(_) => self.request_redraw(),
+            UserEvent::StackerWebViewMessage(raw) => {
+                self.apply_stacker_webview_message(raw);
+            }
             #[cfg(target_os = "macos")]
             UserEvent::StackerNativeEdit(edit) => {
                 self.apply_stacker_native_edit(edit);

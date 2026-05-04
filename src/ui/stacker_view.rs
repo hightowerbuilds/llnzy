@@ -80,8 +80,11 @@ pub(crate) fn render_stacker_view(
     dirty: &mut bool,
     _saved_edit_idx: &mut Option<usize>,
     editor_font_size: &mut f32,
+    web_editor_rect: &mut Option<egui::Rect>,
     queued_prompts: &mut Vec<QueuedPrompt>,
 ) {
+    *web_editor_rect = None;
+
     if let Some(idx) = *editing {
         if idx >= prompts.len() {
             *editing = None;
@@ -138,6 +141,7 @@ pub(crate) fn render_stacker_view(
         editing,
         dirty,
         editor_font_size,
+        web_editor_rect,
     );
 
     render_discard_draft_modal(ui.ctx(), prompts, editor, draft, pending_switch, editing);
@@ -406,6 +410,7 @@ fn render_prompt_editor_panel(
     editing: &mut Option<usize>,
     dirty: &mut bool,
     editor_font_size: &mut f32,
+    web_editor_rect: &mut Option<egui::Rect>,
 ) {
     let editor_id = egui::Id::new(STACKER_PROMPT_EDITOR_ID);
 
@@ -537,7 +542,14 @@ fn render_prompt_editor_panel(
 
             render_editor_status(ui, editor, draft, *editing);
             ui.add_space(6.0);
-            render_text_edit_prompt(ui, editor_id, editor, draft, *editor_font_size);
+            render_text_edit_prompt(
+                ui,
+                editor_id,
+                editor,
+                draft,
+                *editor_font_size,
+                web_editor_rect,
+            );
         },
     );
 }
@@ -548,9 +560,10 @@ fn render_text_edit_prompt(
     editor: &mut StackerDocumentEditor,
     draft: &mut StackerDraft,
     editor_font_size: f32,
+    web_editor_rect: &mut Option<egui::Rect>,
 ) {
     let note_h = ui.available_height().max(1.0);
-    egui::Frame::none()
+    let frame_output = egui::Frame::none()
         .fill(NOTE_BG)
         .rounding(egui::Rounding::same(3.0))
         .inner_margin(egui::Margin::same(NOTE_PADDING))
@@ -603,6 +616,7 @@ fn render_text_edit_prompt(
                 }
             });
         });
+    *web_editor_rect = Some(frame_output.response.rect);
 }
 
 fn stacker_toolbar_button(

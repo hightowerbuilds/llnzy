@@ -25,6 +25,7 @@ pub struct StackerUiState {
     pub dirty: bool,
     pub copy_ghosts: Vec<CopyGhost>,
     pub editor_font_size: f32,
+    pub web_editor_rect: Option<egui::Rect>,
     pub queued_prompts: Vec<QueuedPrompt>,
 }
 
@@ -41,6 +42,7 @@ impl Default for StackerUiState {
             dirty: false,
             copy_ghosts: Vec::new(),
             editor_font_size: stacker_view::DEFAULT_EDITOR_FONT_SIZE,
+            web_editor_rect: None,
             queued_prompts: Vec::new(),
         }
     }

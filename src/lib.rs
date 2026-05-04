@@ -24,6 +24,7 @@ pub mod session;
 pub mod sidebar_move;
 pub mod sketch;
 pub mod stacker;
+pub mod stacker_webview;
 pub mod tab_groups;
 pub mod tasks;
 pub mod terminal;
@@ -48,6 +49,7 @@ pub enum UserEvent {
     PtyOutput,
     LspMessage,
     FileChanged(std::path::PathBuf),
+    StackerWebViewMessage(String),
     #[cfg(target_os = "macos")]
     StackerNativeEdit(StackerNativeEdit),
     #[cfg(target_os = "macos")]
