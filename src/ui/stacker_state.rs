@@ -1,6 +1,5 @@
 use super::stacker_view;
 use super::types::CopyGhost;
-use crate::editor::MarkdownViewMode;
 use crate::stacker::{
     document::StackerDocumentEditor,
     draft::StackerDraft,
@@ -26,7 +25,6 @@ pub struct StackerUiState {
     pub dirty: bool,
     pub copy_ghosts: Vec<CopyGhost>,
     pub editor_font_size: f32,
-    pub preview_mode: MarkdownViewMode,
     pub queued_prompts: Vec<QueuedPrompt>,
 }
 
@@ -43,7 +41,6 @@ impl Default for StackerUiState {
             dirty: false,
             copy_ghosts: Vec::new(),
             editor_font_size: stacker_view::DEFAULT_EDITOR_FONT_SIZE,
-            preview_mode: MarkdownViewMode::Source,
             queued_prompts: Vec::new(),
         }
     }

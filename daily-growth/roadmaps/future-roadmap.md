@@ -54,8 +54,8 @@ not need to block the current leftovers roadmap.
   external input tools.
 - [x] Add command-palette entries for Stacker formatting commands when Stacker is
   the active tab.
-- [x] Add optional Markdown preview or split preview if prompt authoring starts
-  needing rendered inspection.
+- [x] Keep Stacker as a focused prompt editor without Source/Split/Preview
+  rendering modes.
 - [x] Add explicit saved-prompt management actions for editing and deleting saved
   prompts.
 - [x] Define saved-prompt edit behavior: click loads a prompt into the editor,

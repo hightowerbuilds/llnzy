@@ -11,10 +11,8 @@ use crate::stacker::{
     stacker_path, StackerPrompt,
 };
 
-use crate::editor::MarkdownViewMode;
-
 use super::{
-    markdown_preview, stacker_cursor,
+    stacker_cursor,
     stacker_state::{PendingStackerDraftSwitch, StackerUiState},
     STACKER_PROMPT_EDITOR_ID,
 };
@@ -82,7 +80,6 @@ pub(crate) fn render_stacker_view(
     dirty: &mut bool,
     _saved_edit_idx: &mut Option<usize>,
     editor_font_size: &mut f32,
-    preview_mode: &mut MarkdownViewMode,
     queued_prompts: &mut Vec<QueuedPrompt>,
 ) {
     if let Some(idx) = *editing {
@@ -141,7 +138,6 @@ pub(crate) fn render_stacker_view(
         editing,
         dirty,
         editor_font_size,
-        preview_mode,
     );
 
     render_discard_draft_modal(ui.ctx(), prompts, editor, draft, pending_switch, editing);
@@ -410,7 +406,6 @@ fn render_prompt_editor_panel(
     editing: &mut Option<usize>,
     dirty: &mut bool,
     editor_font_size: &mut f32,
-    preview_mode: &mut MarkdownViewMode,
 ) {
     let editor_id = egui::Id::new(STACKER_PROMPT_EDITOR_ID);
 
@@ -493,10 +488,6 @@ fn render_prompt_editor_panel(
                         (*editor_font_size + 1.0).clamp(MIN_EDITOR_FONT_SIZE, MAX_EDITOR_FONT_SIZE);
                 }
                 ui.add_space(8.0);
-                mode_button(ui, preview_mode, MarkdownViewMode::Source, "Source");
-                mode_button(ui, preview_mode, MarkdownViewMode::Split, "Split");
-                mode_button(ui, preview_mode, MarkdownViewMode::Preview, "Preview");
-                ui.add_space(8.0);
                 if ui.button(small("New")).clicked() {
                     if draft.is_dirty() {
                         *pending_switch = Some(PendingStackerDraftSwitch::Scratch);
@@ -546,41 +537,9 @@ fn render_prompt_editor_panel(
 
             render_editor_status(ui, editor, draft, *editing);
             ui.add_space(6.0);
-            render_prompt_body(
-                ui,
-                editor_id,
-                editor,
-                draft,
-                *editor_font_size,
-                *preview_mode,
-            );
+            render_text_edit_prompt(ui, editor_id, editor, draft, *editor_font_size);
         },
     );
-}
-
-fn render_prompt_body(
-    ui: &mut egui::Ui,
-    editor_id: egui::Id,
-    editor: &mut StackerDocumentEditor,
-    draft: &mut StackerDraft,
-    editor_font_size: f32,
-    preview_mode: MarkdownViewMode,
-) {
-    match preview_mode {
-        MarkdownViewMode::Source => {
-            render_text_edit_prompt(ui, editor_id, editor, draft, editor_font_size);
-        }
-        MarkdownViewMode::Preview => {
-            render_stacker_markdown_preview(ui, editor.text());
-        }
-        MarkdownViewMode::Split => {
-            ui.columns(2, |columns| {
-                let (left, right) = columns.split_at_mut(1);
-                render_text_edit_prompt(&mut left[0], editor_id, editor, draft, editor_font_size);
-                render_stacker_markdown_preview(&mut right[0], editor.text());
-            });
-        }
-    }
 }
 
 fn render_text_edit_prompt(
@@ -644,41 +603,6 @@ fn render_text_edit_prompt(
                 }
             });
         });
-}
-
-fn render_stacker_markdown_preview(ui: &mut egui::Ui, text: &str) {
-    let theme = markdown_preview::MarkdownPreviewTheme {
-        background: NOTE_BG,
-        surface: egui::Color32::from_rgb(31, 31, 34),
-        text: NOTE_TEXT,
-        muted: MUTED,
-        accent: QUEUE_GREEN,
-    };
-    markdown_preview::render_markdown_text(ui, text, None, theme);
-}
-
-fn mode_button(
-    ui: &mut egui::Ui,
-    mode: &mut MarkdownViewMode,
-    button_mode: MarkdownViewMode,
-    label: &str,
-) {
-    let active = *mode == button_mode;
-    let fill = if active {
-        egui::Color32::from_rgb(60, 75, 96)
-    } else {
-        egui::Color32::from_rgb(38, 40, 48)
-    };
-    if ui
-        .add(
-            egui::Button::new(egui::RichText::new(label).size(12.0).color(NOTE_TEXT))
-                .fill(fill)
-                .min_size(egui::vec2(62.0, 24.0)),
-        )
-        .clicked()
-    {
-        *mode = button_mode;
-    }
 }
 
 fn stacker_toolbar_button(
