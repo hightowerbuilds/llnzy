@@ -306,6 +306,29 @@ fn stacker_editor_shortcut(key: &Key, modifiers: ModifiersState) -> Option<Stack
     }
 }
 
+fn stacker_keyboard_text_fallback_candidate(
+    event: &WindowEvent,
+    modifiers: ModifiersState,
+) -> bool {
+    let WindowEvent::KeyboardInput {
+        event: key_event, ..
+    } = event
+    else {
+        return false;
+    };
+    if key_event.state != ElementState::Pressed
+        || modifiers.control_key()
+        || modifiers.alt_key()
+        || modifiers.super_key()
+    {
+        return false;
+    }
+    key_event
+        .text
+        .as_ref()
+        .is_some_and(|text| input::text_should_use_paste_path(text.as_str()))
+}
+
 fn terminal_mouse_drag_exceeded(start: (usize, usize), row: usize, col: usize) -> bool {
     start != (row, col)
 }
@@ -401,6 +424,8 @@ impl ApplicationHandler<UserEvent> for App {
             matches!(&event, WindowEvent::Ime(Ime::Commit(_))) && self.active_session().is_some();
         let stacker_ime_commit =
             matches!(&event, WindowEvent::Ime(Ime::Commit(_))) && self.active_stacker_tab();
+        let stacker_keyboard_text_commit = self.active_stacker_tab()
+            && stacker_keyboard_text_fallback_candidate(&event, self.modifiers);
 
         if let WindowEvent::KeyboardInput {
             event: key_event, ..
@@ -494,6 +519,8 @@ impl ApplicationHandler<UserEvent> for App {
         if let (Some(window), Some(ui)) = (&self.window, &mut self.ui) {
             let stacker_input_before_egui =
                 stacker_ime_commit.then(|| ui.stacker.editor.text().to_string());
+            let stacker_keyboard_text_before_egui =
+                stacker_keyboard_text_commit.then(|| ui.stacker.editor.text().to_string());
             let response = ui.handle_event(window, &event);
             let terminal_should_receive_consumed_ime = terminal_ime_commit
                 && !ui.captures_terminal_input()
@@ -501,6 +528,14 @@ impl ApplicationHandler<UserEvent> for App {
             let stacker_should_receive_consumed_ime = stacker_input_before_egui
                 .as_ref()
                 .is_some_and(|input_before| input_before == ui.stacker.editor.text());
+            let stacker_prompt_editor_focused = ui.ctx.memory(|memory| {
+                memory.has_focus(egui::Id::new(llnzy::ui::STACKER_PROMPT_EDITOR_ID))
+            });
+            let stacker_should_receive_consumed_key_text = stacker_keyboard_text_before_egui
+                .as_ref()
+                .is_some_and(|input_before| {
+                    stacker_prompt_editor_focused && input_before == ui.stacker.editor.text()
+                });
             match &event {
                 WindowEvent::HoveredFile(path) => {
                     ui.drag_drop.hover_native_file(path.clone());
@@ -525,6 +560,7 @@ impl ApplicationHandler<UserEvent> for App {
             if response
                 && !terminal_should_receive_consumed_ime
                 && !stacker_should_receive_consumed_ime
+                && !stacker_should_receive_consumed_key_text
             {
                 self.request_redraw();
                 match &event {
