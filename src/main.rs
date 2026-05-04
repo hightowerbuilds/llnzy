@@ -57,6 +57,10 @@ struct App {
     last_blink_toggle: Instant,
     last_keypress: Instant,
     last_config_check: Instant,
+    #[cfg(target_os = "macos")]
+    stacker_bridge_active: Option<bool>,
+    #[cfg(target_os = "macos")]
+    stacker_bridge_text: String,
 }
 
 impl App {
@@ -87,6 +91,10 @@ impl App {
             last_blink_toggle: Instant::now(),
             last_keypress: Instant::now(),
             last_config_check: Instant::now(),
+            #[cfg(target_os = "macos")]
+            stacker_bridge_active: None,
+            #[cfg(target_os = "macos")]
+            stacker_bridge_text: String::new(),
         }
     }
 
@@ -99,6 +107,29 @@ impl App {
     fn active_stacker_tab(&self) -> bool {
         self.active_tab()
             .is_some_and(|tab| matches!(tab.content, TabContent::Stacker))
+    }
+
+    #[cfg(target_os = "macos")]
+    fn sync_macos_text_bridge(&mut self) {
+        let Some(window) = &self.window else { return };
+        let active = self.active_stacker_tab();
+        let text = if active {
+            self.ui
+                .as_ref()
+                .map(|ui| ui.stacker.input.as_str())
+                .unwrap_or("")
+                .to_string()
+        } else {
+            String::new()
+        };
+        if self.stacker_bridge_active == Some(active)
+            && (!active || self.stacker_bridge_text == text)
+        {
+            return;
+        }
+        llnzy::macos_text_bridge::set_stacker_active(window, active, &text);
+        self.stacker_bridge_active = Some(active);
+        self.stacker_bridge_text = text;
     }
 
     fn joined_terminal_tab_at_cursor(&self) -> Option<usize> {
@@ -209,6 +240,13 @@ impl ApplicationHandler<UserEvent> for App {
         // Set up native macOS menu bar
         #[cfg(target_os = "macos")]
         llnzy::menu::setup_menu_bar(self.proxy.clone());
+        #[cfg(target_os = "macos")]
+        {
+            llnzy::macos_text_bridge::setup(self.proxy.clone());
+            if let Some(window) = &self.window {
+                llnzy::macos_text_bridge::install(window);
+            }
+        }
     }
 
     fn window_event(
@@ -225,6 +263,8 @@ impl ApplicationHandler<UserEvent> for App {
         };
         let terminal_ime_commit =
             matches!(&event, WindowEvent::Ime(Ime::Commit(_))) && self.active_session().is_some();
+        let stacker_ime_commit =
+            matches!(&event, WindowEvent::Ime(Ime::Commit(_))) && self.active_stacker_tab();
 
         if let WindowEvent::KeyboardInput {
             event: key_event, ..
@@ -291,10 +331,14 @@ impl ApplicationHandler<UserEvent> for App {
 
         // Route events to egui first
         if let (Some(window), Some(ui)) = (&self.window, &mut self.ui) {
+            let stacker_input_before_egui = stacker_ime_commit.then(|| ui.stacker.input.clone());
             let response = ui.handle_event(window, &event);
             let terminal_should_receive_consumed_ime = terminal_ime_commit
                 && !ui.captures_terminal_input()
                 && !ui.ctx.wants_keyboard_input();
+            let stacker_should_receive_consumed_ime = stacker_input_before_egui
+                .as_ref()
+                .is_some_and(|input_before| input_before == &ui.stacker.input);
             match &event {
                 WindowEvent::HoveredFile(path) => {
                     ui.drag_drop.hover_native_file(path.clone());
@@ -316,7 +360,10 @@ impl ApplicationHandler<UserEvent> for App {
             // If egui consumed a mouse/keyboard event, don't pass to terminal.
             // The footer and bumper are always visible, so any egui-consumed
             // event must be respected regardless of which view is active.
-            if response && !terminal_should_receive_consumed_ime {
+            if response
+                && !terminal_should_receive_consumed_ime
+                && !stacker_should_receive_consumed_ime
+            {
                 self.request_redraw();
                 match &event {
                     WindowEvent::CloseRequested | WindowEvent::Resized(_) => {}
@@ -362,6 +409,8 @@ impl ApplicationHandler<UserEvent> for App {
             WindowEvent::RedrawRequested => {
                 self.process_all_output();
                 self.update_ime_cursor_area();
+                #[cfg(target_os = "macos")]
+                self.sync_macos_text_bridge();
 
                 // Feed frame time to UI for FPS overlay
                 if let (Some(renderer), Some(ui)) = (&self.renderer, &mut self.ui) {
@@ -998,6 +1047,24 @@ impl ApplicationHandler<UserEvent> for App {
                     return;
                 }
 
+                if self.active_stacker_tab()
+                    && !self.modifiers.control_key()
+                    && !self.modifiers.alt_key()
+                    && !self.modifiers.super_key()
+                {
+                    match key_event.logical_key {
+                        Key::Named(NamedKey::Backspace) => {
+                            self.delete_stacker_editor_backward();
+                            return;
+                        }
+                        Key::Named(NamedKey::Delete) => {
+                            self.delete_stacker_editor_forward();
+                            return;
+                        }
+                        _ => {}
+                    }
+                }
+
                 if let Some(ref text) = key_event.text {
                     let s = text.as_str();
                     if !s.is_empty()
@@ -1112,6 +1179,10 @@ impl ApplicationHandler<UserEvent> for App {
             UserEvent::PtyOutput => self.request_redraw(),
             UserEvent::LspMessage => self.request_redraw(),
             UserEvent::FileChanged(_) => self.request_redraw(),
+            #[cfg(target_os = "macos")]
+            UserEvent::StackerNativeEdit(edit) => {
+                self.apply_stacker_native_edit(edit);
+            }
             #[cfg(target_os = "macos")]
             UserEvent::MenuAction(action) => {
                 use llnzy::menu::MenuAction;

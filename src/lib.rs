@@ -11,6 +11,8 @@ pub mod keybindings;
 pub mod layout;
 pub mod lsp;
 #[cfg(target_os = "macos")]
+pub mod macos_text_bridge;
+#[cfg(target_os = "macos")]
 pub mod menu;
 pub mod path_utils;
 pub mod pty;
@@ -30,11 +32,22 @@ pub mod workspace;
 pub mod workspace_layout;
 pub mod workspace_store;
 
+#[cfg(target_os = "macos")]
+#[derive(Clone, Debug)]
+pub struct StackerNativeEdit {
+    pub start: usize,
+    pub end: usize,
+    pub text: String,
+    pub result: String,
+}
+
 #[derive(Debug)]
 pub enum UserEvent {
     PtyOutput,
     LspMessage,
     FileChanged(std::path::PathBuf),
+    #[cfg(target_os = "macos")]
+    StackerNativeEdit(StackerNativeEdit),
     #[cfg(target_os = "macos")]
     MenuAction(menu::MenuAction),
 }

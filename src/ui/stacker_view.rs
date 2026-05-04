@@ -349,6 +349,7 @@ fn render_prompt_editor_panel(
                 if ui.button(small("Reset Cache")).clicked() {
                     reset_prompt_editor_cache(ui.ctx(), editor_id);
                 }
+                ui.add_space(8.0);
                 if ui.button(small("Import")).clicked() {
                     import_prompt_file(prompts, dirty);
                 }
@@ -380,53 +381,61 @@ fn render_prompt_editor_panel(
             });
 
             ui.add_space(8.0);
-
-            let note_h = ui.available_height().max(1.0);
-            egui::Frame::none()
-                .fill(NOTE_BG)
-                .rounding(egui::Rounding::same(3.0))
-                .inner_margin(egui::Margin::same(NOTE_PADDING))
-                .show(ui, |ui| {
-                    ui.set_height(note_h);
-                    ui.scope(|ui| {
-                        let before_edit = input.clone();
-                        ui.visuals_mut().extreme_bg_color = egui::Color32::TRANSPARENT;
-                        ui.visuals_mut().widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
-                        ui.visuals_mut().widgets.hovered.bg_fill = egui::Color32::TRANSPARENT;
-                        ui.visuals_mut().widgets.active.bg_fill = egui::Color32::TRANSPARENT;
-                        ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::NONE;
-                        ui.visuals_mut().widgets.hovered.bg_stroke = egui::Stroke::NONE;
-                        ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::NONE;
-                        ui.set_min_size(egui::vec2(ui.available_width(), ui.available_height()));
-                        let mut output = egui::TextEdit::multiline(input)
-                            .id(editor_id)
-                            .desired_rows(32)
-                            .desired_width(f32::INFINITY)
-                            .hint_text("Write your prompt here...")
-                            .font(stacker_editor_font(*editor_font_size))
-                            .text_color(NOTE_TEXT)
-                            .frame(false)
-                            .show(ui);
-
-                        if output.response.changed() {
-                            if let Some(cursor_range) = output.cursor_range {
-                                let cursor_idx = cursor_range.as_ccursor_range().primary.index;
-                                if let Some(new_cursor_idx) =
-                                    maybe_continue_list(&before_edit, input, cursor_idx)
-                                {
-                                    output.state.cursor.set_char_range(Some(
-                                        egui::text::CCursorRange::one(egui::text::CCursor::new(
-                                            new_cursor_idx,
-                                        )),
-                                    ));
-                                    output.state.clone().store(ui.ctx(), editor_id);
-                                }
-                            }
-                        }
-                    });
-                });
+            render_text_edit_prompt(ui, editor_id, input, *editor_font_size);
         },
     );
+}
+
+fn render_text_edit_prompt(
+    ui: &mut egui::Ui,
+    editor_id: egui::Id,
+    input: &mut String,
+    editor_font_size: f32,
+) {
+    let note_h = ui.available_height().max(1.0);
+    egui::Frame::none()
+        .fill(NOTE_BG)
+        .rounding(egui::Rounding::same(3.0))
+        .inner_margin(egui::Margin::same(NOTE_PADDING))
+        .show(ui, |ui| {
+            ui.set_height(note_h);
+            ui.scope(|ui| {
+                let before_edit = input.clone();
+                ui.visuals_mut().extreme_bg_color = egui::Color32::TRANSPARENT;
+                ui.visuals_mut().widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
+                ui.visuals_mut().widgets.hovered.bg_fill = egui::Color32::TRANSPARENT;
+                ui.visuals_mut().widgets.active.bg_fill = egui::Color32::TRANSPARENT;
+                ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::NONE;
+                ui.visuals_mut().widgets.hovered.bg_stroke = egui::Stroke::NONE;
+                ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::NONE;
+                ui.set_min_size(egui::vec2(ui.available_width(), ui.available_height()));
+                let mut output = egui::TextEdit::multiline(input)
+                    .id(editor_id)
+                    .desired_rows(32)
+                    .desired_width(f32::INFINITY)
+                    .hint_text("Write your prompt here...")
+                    .font(stacker_editor_font(editor_font_size))
+                    .text_color(NOTE_TEXT)
+                    .frame(false)
+                    .show(ui);
+
+                if output.response.changed() {
+                    if let Some(cursor_range) = output.cursor_range {
+                        let cursor_idx = cursor_range.as_ccursor_range().primary.index;
+                        if let Some(new_cursor_idx) =
+                            maybe_continue_list(&before_edit, input, cursor_idx)
+                        {
+                            output.state.cursor.set_char_range(Some(
+                                egui::text::CCursorRange::one(egui::text::CCursor::new(
+                                    new_cursor_idx,
+                                )),
+                            ));
+                            output.state.clone().store(ui.ctx(), editor_id);
+                        }
+                    }
+                }
+            });
+        });
 }
 
 fn import_prompt_file(prompts: &mut Vec<StackerPrompt>, dirty: &mut bool) {

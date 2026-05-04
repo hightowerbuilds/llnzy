@@ -1,10 +1,12 @@
 use std::time::{Duration, Instant};
 
-use egui::TextBuffer;
 use llnzy::input::text_should_use_paste_path;
 use llnzy::session::Session;
+use llnzy::stacker::input::{StackerInputEngine, StackerSelection};
 use llnzy::ui::STACKER_PROMPT_EDITOR_ID;
 use llnzy::workspace::{TabContent, WorkspaceTab};
+#[cfg(target_os = "macos")]
+use llnzy::StackerNativeEdit;
 
 use crate::App;
 
@@ -125,29 +127,45 @@ impl App {
             return false;
         };
 
-        let text = normalize_stacker_editor_text(text);
-        let editor_id = egui::Id::new(STACKER_PROMPT_EDITOR_ID);
-        let char_count = ui.stacker.input.chars().count();
-        let mut state =
-            egui::text_edit::TextEditState::load(&ui.ctx, editor_id).unwrap_or_default();
-        let range = state.cursor.char_range().unwrap_or_else(|| {
-            let cursor = egui::text::CCursor::new(char_count);
-            egui::text::CCursorRange::one(cursor)
-        });
-        let [start, end] = range.sorted();
-        let start = start.index.min(char_count);
-        let end = end.index.min(char_count);
-
-        if start < end {
-            ui.stacker.input.delete_char_range(start..end);
+        let selection = current_stacker_selection(ui);
+        let outcome = StackerInputEngine::insert_text(&mut ui.stacker.input, selection, text);
+        if !outcome.changed {
+            return false;
         }
-        let inserted = ui.stacker.input.insert_text(&text, start);
-        let cursor = egui::text::CCursor::new(start + inserted);
-        state
-            .cursor
-            .set_char_range(Some(egui::text::CCursorRange::one(cursor)));
-        state.store(&ui.ctx, editor_id);
-        ui.ctx.memory_mut(|memory| memory.request_focus(editor_id));
+        store_stacker_cursor(ui, outcome.cursor);
+        self.request_redraw();
+        true
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn apply_stacker_native_edit(&mut self, edit: StackerNativeEdit) -> bool {
+        let Some(tab) = self.active_tab() else {
+            return false;
+        };
+        if !matches!(tab.content, TabContent::Stacker) {
+            return false;
+        }
+
+        let Some(ui) = &mut self.ui else {
+            return false;
+        };
+
+        if ui.stacker.input == edit.result {
+            return true;
+        }
+
+        let selection = StackerSelection {
+            start: edit.start,
+            end: edit.end,
+        };
+        let outcome = StackerInputEngine::insert_text(&mut ui.stacker.input, selection, &edit.text);
+        let cursor = if ui.stacker.input == edit.result {
+            outcome.cursor
+        } else {
+            ui.stacker.input = edit.result;
+            ui.stacker.input.chars().count()
+        };
+        store_stacker_cursor(ui, cursor);
         self.request_redraw();
         true
     }
@@ -161,17 +179,8 @@ impl App {
         }
 
         let selected = self.ui.as_ref().and_then(|ui| {
-            let editor_id = egui::Id::new(STACKER_PROMPT_EDITOR_ID);
-            let state = egui::text_edit::TextEditState::load(&ui.ctx, editor_id)?;
-            let range = state.cursor.char_range()?;
-            let [start, end] = range.sorted();
-            let char_count = ui.stacker.input.chars().count();
-            let start = start.index.min(char_count);
-            let end = end.index.min(char_count);
-            if start == end {
-                return None;
-            }
-            Some(ui.stacker.input.char_range(start..end).to_string())
+            let selection = current_stacker_selection(ui);
+            StackerInputEngine::selected_text(&ui.stacker.input, selection)
         });
 
         if let Some(text) = selected {
@@ -179,6 +188,37 @@ impl App {
                 let _ = clipboard.set_text(text);
             }
         }
+        true
+    }
+
+    pub(crate) fn delete_stacker_editor_backward(&mut self) -> bool {
+        self.delete_stacker_editor_text(true)
+    }
+
+    pub(crate) fn delete_stacker_editor_forward(&mut self) -> bool {
+        self.delete_stacker_editor_text(false)
+    }
+
+    fn delete_stacker_editor_text(&mut self, backward: bool) -> bool {
+        let Some(tab) = self.active_tab() else {
+            return false;
+        };
+        if !matches!(tab.content, TabContent::Stacker) {
+            return false;
+        }
+
+        let Some(ui) = &mut self.ui else {
+            return false;
+        };
+
+        let selection = current_stacker_selection(ui);
+        let outcome = if backward {
+            StackerInputEngine::delete_backward(&mut ui.stacker.input, selection)
+        } else {
+            StackerInputEngine::delete_forward(&mut ui.stacker.input, selection)
+        };
+        store_stacker_cursor(ui, outcome.cursor);
+        self.request_redraw();
         true
     }
 
@@ -194,11 +234,11 @@ impl App {
             return false;
         };
 
+        let selection = StackerInputEngine::select_all(&ui.stacker.input);
         let editor_id = egui::Id::new(STACKER_PROMPT_EDITOR_ID);
-        let end = ui.stacker.input.chars().count();
         let range = egui::text::CCursorRange::two(
-            egui::text::CCursor::new(0),
-            egui::text::CCursor::new(end),
+            egui::text::CCursor::new(selection.start),
+            egui::text::CCursor::new(selection.end),
         );
         let mut state =
             egui::text_edit::TextEditState::load(&ui.ctx, editor_id).unwrap_or_default();
@@ -270,11 +310,37 @@ impl App {
     }
 }
 
-fn normalize_stacker_editor_text(text: &str) -> String {
-    if text.contains('\r') {
-        text.replace("\r\n", "\n").replace('\r', "\n")
-    } else {
-        text.to_string()
+fn current_stacker_selection(ui: &llnzy::ui::UiState) -> StackerSelection {
+    let char_count = ui.stacker.input.chars().count();
+    let editor_id = egui::Id::new(STACKER_PROMPT_EDITOR_ID);
+    let state = egui::text_edit::TextEditState::load(&ui.ctx, editor_id).unwrap_or_default();
+    stacker_selection_from_state(&state, char_count)
+}
+
+fn store_stacker_cursor(ui: &mut llnzy::ui::UiState, cursor: usize) {
+    let cursor = cursor.min(ui.stacker.input.chars().count());
+    let editor_id = egui::Id::new(STACKER_PROMPT_EDITOR_ID);
+    let mut state = egui::text_edit::TextEditState::load(&ui.ctx, editor_id).unwrap_or_default();
+    state
+        .cursor
+        .set_char_range(Some(egui::text::CCursorRange::one(
+            egui::text::CCursor::new(cursor),
+        )));
+    state.store(&ui.ctx, editor_id);
+    ui.ctx.memory_mut(|memory| memory.request_focus(editor_id));
+}
+
+fn stacker_selection_from_state(
+    state: &egui::text_edit::TextEditState,
+    fallback_cursor: usize,
+) -> StackerSelection {
+    let Some(range) = state.cursor.char_range() else {
+        return StackerSelection::collapsed(fallback_cursor);
+    };
+    let [start, end] = range.sorted();
+    StackerSelection {
+        start: start.index,
+        end: end.index,
     }
 }
 
@@ -288,18 +354,16 @@ fn terminal_process_exit_message(process_id: Option<u32>, code: i32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use llnzy::stacker::input::normalize_input_text;
 
     #[test]
     fn stacker_editor_text_normalization_preserves_unix_newlines() {
-        assert_eq!(normalize_stacker_editor_text("one\ntwo"), "one\ntwo");
+        assert_eq!(normalize_input_text("one\ntwo"), "one\ntwo");
     }
 
     #[test]
     fn stacker_editor_text_normalization_converts_crlf_and_cr() {
-        assert_eq!(
-            normalize_stacker_editor_text("one\r\ntwo\rthree"),
-            "one\ntwo\nthree"
-        );
+        assert_eq!(normalize_input_text("one\r\ntwo\rthree"), "one\ntwo\nthree");
     }
 
     #[test]

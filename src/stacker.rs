@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 pub mod formatting;
+pub mod input;
 pub mod queue;
 
 /// A saved prompt in the Stacker queue.
