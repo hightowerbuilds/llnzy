@@ -27,7 +27,7 @@ use llnzy::ui::command_palette::CommandId;
 use llnzy::ui::{ActiveView, PendingClose, UiFrameOutput, UiState, BUMPER_WIDTH};
 use llnzy::workspace::{TabContent, TabKind, WorkspaceTab};
 use llnzy::workspace_layout::{
-    joined_terminal_content_rects, terminal_effect_rect, valid_joined_tabs, JoinedTabs,
+    active_joined_tabs, joined_terminal_content_rects, terminal_effect_rect, JoinedTabs,
 };
 use llnzy::UserEvent;
 
@@ -149,8 +149,7 @@ impl App {
         let joined = self
             .ui
             .as_ref()
-            .and_then(|ui| ui.joined_tabs)
-            .and_then(|joined| valid_joined_tabs(Some(joined), self.active_tab, self.tabs.len()));
+            .and_then(|ui| active_joined_tabs(&self.tabs, self.active_tab, &ui.tab_groups));
 
         if let Some(joined) = joined {
             let (left_rect, right_rect) = joined_terminal_content_rects(layout, joined.ratio);
@@ -191,6 +190,69 @@ impl App {
             row: row.min(rows.saturating_sub(1)),
             col: col.min(cols.saturating_sub(1)),
         })
+    }
+
+    fn route_terminal_mouse_wheel(&mut self, delta: &MouseScrollDelta) -> bool {
+        if self.cursor_over_non_terminal_chrome() {
+            return false;
+        }
+        let Some(hit) = self.terminal_pane_hit_at_cursor() else {
+            return false;
+        };
+
+        let Some(session) = self.session_for_tab(hit.tab_idx) else {
+            return false;
+        };
+        if session.terminal.mouse_mode() {
+            let sgr = session.terminal.sgr_mouse();
+            let lines = self.wheel_lines(delta, 1.0);
+            for _ in 0..lines.unsigned_abs() {
+                let button = if lines > 0 { 64 } else { 65 };
+                let bytes =
+                    input::encode_mouse(button, hit.col, hit.row, true, sgr, &self.modifiers);
+                self.write_to_terminal_tab(hit.tab_idx, &bytes);
+            }
+            self.request_redraw();
+            return true;
+        }
+
+        let lines = self.wheel_lines(delta, self.config.scroll_lines as f32);
+        if lines != 0 {
+            if let Some(session) = self.session_for_tab_mut(hit.tab_idx) {
+                session.terminal.scroll(lines);
+            }
+            self.invalidate_and_redraw();
+        } else {
+            self.request_redraw();
+        }
+        true
+    }
+
+    fn wheel_lines(&self, delta: &MouseScrollDelta, line_multiplier: f32) -> i32 {
+        match delta {
+            MouseScrollDelta::LineDelta(_, y) => (y * line_multiplier) as i32,
+            MouseScrollDelta::PixelDelta(pos) => {
+                let (_, ch) = self
+                    .renderer
+                    .as_ref()
+                    .map(|r| r.cell_dimensions())
+                    .unwrap_or((1.0, 1.0));
+                let lines = (pos.y / ch as f64) as i32;
+                if lines == 0 && pos.y != 0.0 {
+                    pos.y.signum() as i32
+                } else {
+                    lines
+                }
+            }
+        }
+    }
+
+    fn toggle_editor_word_wrap(&mut self) {
+        self.config.editor.word_wrap = !self.config.editor.word_wrap;
+        if let Some(renderer) = &mut self.renderer {
+            renderer.update_config(self.config.clone());
+        }
+        self.request_redraw();
     }
 }
 
@@ -365,6 +427,12 @@ impl ApplicationHandler<UserEvent> for App {
             }
         }
 
+        if let WindowEvent::MouseWheel { delta, .. } = &event {
+            if self.route_terminal_mouse_wheel(delta) {
+                return;
+            }
+        }
+
         // Route events to egui first
         if let (Some(window), Some(ui)) = (&self.window, &mut self.ui) {
             let stacker_input_before_egui = stacker_ime_commit.then(|| ui.stacker.input.clone());
@@ -528,14 +596,9 @@ impl ApplicationHandler<UserEvent> for App {
                         // Get the active terminal session (if any) for the renderer
                         let active_tab = self.tabs.get(self.active_tab);
                         let tab_id = active_tab.map(|t| t.id).unwrap_or(0);
-                        let joined_tabs = self
-                            .ui
-                            .as_ref()
-                            .and_then(|ui| ui.joined_tabs)
-                            .map(JoinedTabs::clamped)
-                            .and_then(|joined| {
-                                valid_joined_tabs(Some(joined), self.active_tab, self.tabs.len())
-                            });
+                        let joined_tabs = self.ui.as_ref().and_then(|ui| {
+                            active_joined_tabs(&self.tabs, self.active_tab, &ui.tab_groups)
+                        });
                         let terminal_panes = joined_tabs
                             .map(|joined| {
                                 joined_terminal_panes(&self.tabs, self.active_tab, layout, joined)
@@ -546,8 +609,14 @@ impl ApplicationHandler<UserEvent> for App {
                         } else {
                             None
                         };
-                        let terminal_effect_rect =
-                            terminal_effect_rect(&self.tabs, layout, joined_tabs, self.active_tab);
+                        let terminal_effect_rect = self.ui.as_ref().and_then(|ui| {
+                            terminal_effect_rect(
+                                &self.tabs,
+                                layout,
+                                &ui.tab_groups,
+                                self.active_tab,
+                            )
+                        });
                         let terminal_effects_enabled = terminal_effect_rect.is_some();
                         let effects_mask = terminal_effect_rect.and_then(|rect| {
                             self.window
@@ -607,64 +676,7 @@ impl ApplicationHandler<UserEvent> for App {
 
             // --- Mouse wheel ---
             WindowEvent::MouseWheel { delta, .. } => {
-                if self.cursor_over_non_terminal_chrome() {
-                    self.request_redraw();
-                    return;
-                }
-                let Some(hit) = self.terminal_pane_hit_at_cursor() else {
-                    self.request_redraw();
-                    return;
-                };
-                let mouse_reporting = self
-                    .session_for_tab(hit.tab_idx)
-                    .is_some_and(|session| session.terminal.mouse_mode());
-                if mouse_reporting {
-                    let sgr = self
-                        .session_for_tab(hit.tab_idx)
-                        .is_some_and(|session| session.terminal.sgr_mouse());
-                    let lines = match delta {
-                        MouseScrollDelta::LineDelta(_, y) => y as i32,
-                        MouseScrollDelta::PixelDelta(p) => {
-                            let (_, ch) = self
-                                .renderer
-                                .as_ref()
-                                .map(|r| r.cell_dimensions())
-                                .unwrap_or((1.0, 1.0));
-                            (p.y / ch as f64) as i32
-                        }
-                    };
-                    for _ in 0..lines.unsigned_abs() {
-                        let button = if lines > 0 { 64 } else { 65 };
-                        let bytes = input::encode_mouse(
-                            button,
-                            hit.col,
-                            hit.row,
-                            true,
-                            sgr,
-                            &self.modifiers,
-                        );
-                        self.write_to_terminal_tab(hit.tab_idx, &bytes);
-                    }
-                } else {
-                    let scroll_mult = self.config.scroll_lines as f32;
-                    let lines = match delta {
-                        MouseScrollDelta::LineDelta(_, y) => (y * scroll_mult) as i32,
-                        MouseScrollDelta::PixelDelta(pos) => {
-                            let (_, ch) = self
-                                .renderer
-                                .as_ref()
-                                .map(|r| r.cell_dimensions())
-                                .unwrap_or((1.0, 1.0));
-                            (pos.y / ch as f64) as i32
-                        }
-                    };
-                    if lines != 0 {
-                        if let Some(session) = self.session_for_tab_mut(hit.tab_idx) {
-                            session.terminal.scroll(lines);
-                        }
-                        self.invalidate_and_redraw();
-                    }
-                }
+                let _ = self.route_terminal_mouse_wheel(&delta);
             }
 
             // --- Mouse buttons ---
@@ -1307,6 +1319,9 @@ impl ApplicationHandler<UserEvent> for App {
                         let mut sidebar_changed = false;
                         self.handle_app_command(AppCommand::NewTerminalTab, &mut sidebar_changed);
                     }
+                    MenuAction::ToggleWordWrap => {
+                        self.toggle_editor_word_wrap();
+                    }
                     MenuAction::ToggleEffects => {
                         let mut sidebar_changed = false;
                         self.handle_app_command(AppCommand::ToggleEffects, &mut sidebar_changed);
@@ -1408,13 +1423,9 @@ impl ApplicationHandler<UserEvent> for App {
 
         // Continuous animation mode — only when effects actually need it
         let terminal_active = self.screen_layout.as_ref().is_some_and(|layout| {
-            terminal_effect_rect(
-                &self.tabs,
-                layout,
-                self.ui.as_ref().and_then(|ui| ui.joined_tabs),
-                self.active_tab,
-            )
-            .is_some()
+            self.ui.as_ref().is_some_and(|ui| {
+                terminal_effect_rect(&self.tabs, layout, &ui.tab_groups, self.active_tab).is_some()
+            })
         });
         let ui_active = self.ui.as_ref().is_some_and(|u| u.settings_open());
         if (terminal_active && self.config.effects.any_active()) || ui_active {

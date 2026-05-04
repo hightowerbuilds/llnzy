@@ -2,7 +2,6 @@ use llnzy::editor::buffer::Buffer;
 use llnzy::session::Session;
 use llnzy::ui::{ActiveView, PendingClose};
 use llnzy::workspace::{TabContent, WorkspaceTab};
-use llnzy::workspace_layout::JoinedTabs;
 
 use crate::App;
 
@@ -76,7 +75,10 @@ impl App {
         };
 
         if let Some(ui) = &mut self.ui {
-            ui.joined_tabs = Some(JoinedTabs::new(primary, secondary));
+            let primary_id = self.tabs[primary].id;
+            let secondary_id = self.tabs[secondary].id;
+            ui.tab_groups.join_pair(primary_id, secondary_id);
+            ui.tab_groups.set_active_tab(primary_id);
         }
         self.resize_terminal_tabs();
         self.clear_terminal_selection();
@@ -95,7 +97,10 @@ impl App {
         let secondary = self.active_tab;
         self.active_tab = primary;
         if let Some(ui) = &mut self.ui {
-            ui.joined_tabs = Some(JoinedTabs::new(primary, secondary));
+            let primary_id = self.tabs[primary].id;
+            let secondary_id = self.tabs[secondary].id;
+            ui.tab_groups.join_pair(primary_id, secondary_id);
+            ui.tab_groups.set_active_tab(primary_id);
         }
         self.sync_active_tab_content();
         self.resize_terminal_tabs();
@@ -217,19 +222,10 @@ impl App {
             return;
         }
         let removed_idx = self.active_tab;
+        let removed_id = self.tabs[removed_idx].id;
         self.tabs.remove(removed_idx);
         if let Some(ui) = &mut self.ui {
-            if let Some(joined) = ui.joined_tabs {
-                if joined.contains(removed_idx) {
-                    ui.joined_tabs = None;
-                } else {
-                    ui.joined_tabs = Some(llnzy::workspace_layout::JoinedTabs {
-                        primary: remap_index_after_remove(joined.primary, removed_idx),
-                        secondary: remap_index_after_remove(joined.secondary, removed_idx),
-                        ratio: joined.ratio,
-                    });
-                }
-            }
+            ui.tab_groups.remove_tab(removed_id);
         }
         if self.tabs.is_empty() {
             self.active_tab = 0;
@@ -362,9 +358,7 @@ impl App {
             let changed = idx != self.active_tab;
             self.active_tab = idx;
             if let Some(ui) = &mut self.ui {
-                if ui.joined_tabs.is_some_and(|joined| !joined.contains(idx)) {
-                    ui.joined_tabs = None;
-                }
+                ui.tab_groups.set_active_tab(self.tabs[idx].id);
             }
             self.sync_active_tab_content();
             if changed {
@@ -450,14 +444,6 @@ fn save_failure_status(message: String) -> SaveFailureStatus {
         log_message: message.clone(),
         prompt_error: message.clone(),
         editor_status: message,
-    }
-}
-
-fn remap_index_after_remove(index: usize, removed_idx: usize) -> usize {
-    if index > removed_idx {
-        index - 1
-    } else {
-        index
     }
 }
 

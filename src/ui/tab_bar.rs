@@ -2,6 +2,7 @@ use super::tab_bar_joined::render_joined_tab;
 use super::types::UiTabInfo;
 use crate::app::commands::AppCommand;
 use crate::app::drag_drop::{tab_reorder_destination, DragDropCommand, DragPayload, TabDropZone};
+use crate::tab_groups::TabGroupState;
 use crate::workspace::TabKind;
 use crate::workspace_layout::{JoinedTabs, TabBarEntry};
 
@@ -23,6 +24,7 @@ pub struct TabBarAction {
     pub join_tab: Option<usize>,
     pub join_tabs: Option<(usize, usize)>,
     pub separate_tabs: bool,
+    pub swap_joined_tabs: Option<usize>,
     pub close_others: Option<usize>,
     pub close_to_right: Option<usize>,
     pub kill_terminal: Option<usize>,
@@ -47,6 +49,9 @@ impl TabBarAction {
         }
         if self.separate_tabs {
             commands.push(AppCommand::SeparateTabs);
+        }
+        if let Some(idx) = self.swap_joined_tabs {
+            commands.push(AppCommand::SwapJoinedTabs(idx));
         }
         if let Some(idx) = self.close_others {
             commands.push(AppCommand::CloseOtherTabs(idx));
@@ -93,7 +98,7 @@ pub struct TabBarRenderInput<'a> {
     pub tabs: &'a [UiTabInfo],
     pub entries: &'a [TabBarEntry],
     pub active_tab_index: usize,
-    pub joined_tabs: Option<JoinedTabs>,
+    pub tab_groups: &'a TabGroupState,
     pub bar_bg: egui::Color32,
 }
 
@@ -121,7 +126,11 @@ pub fn render_workspace_tab_bar(
                 for entry in input.entries {
                     let i = match *entry {
                         TabBarEntry::Single { tab_idx } => tab_idx,
-                        TabBarEntry::Joined { primary, secondary } => {
+                        TabBarEntry::Joined {
+                            primary,
+                            secondary,
+                            ratio,
+                        } => {
                             render_joined_tab(
                                 ui,
                                 ctx,
@@ -130,7 +139,7 @@ pub fn render_workspace_tab_bar(
                                 JoinedTabs {
                                     primary,
                                     secondary,
-                                    ratio: input.joined_tabs.map_or(0.5, |joined| joined.ratio),
+                                    ratio,
                                 }
                                 .clamped(),
                                 edit_state,
@@ -143,7 +152,7 @@ pub fn render_workspace_tab_bar(
                         continue;
                     };
                     let active = i == input.active_tab_index;
-                    let joined = input.joined_tabs.is_some_and(|joined| joined.contains(i));
+                    let joined = input.tab_groups.group_for_tab(tab.tab_id).is_some();
                     let editing = edit_state.editing_tab == Some(i);
                     let tab_bg = if active {
                         egui::Color32::from_rgb(22, 22, 22)
@@ -297,14 +306,27 @@ pub(super) fn render_tab_context_menu(
     ui: &mut egui::Ui,
     tab: &UiTabInfo,
     tab_idx: usize,
+    edit_targets: Option<(usize, usize)>,
+    tabs: &[UiTabInfo],
     edit_state: &mut TabBarEditState,
     action: &mut TabBarAction,
 ) -> bool {
     let mut close = false;
-    if menu_button(ui, "Edit Tab Name").clicked() {
-        edit_state.editing_tab = Some(tab_idx);
-        edit_state.editing_tab_text = tab.title.clone();
-        edit_state.context_menu = None;
+    if let Some((left_idx, right_idx)) = edit_targets {
+        ui.horizontal(|ui| {
+            let gap = ui.spacing().item_spacing.x;
+            let button_w = ((ui.available_width() - gap) * 0.5).max(1.0);
+            if inline_menu_button(ui, "Edit Left Tab Name", button_w).clicked() {
+                start_tab_name_edit(left_idx, tabs, edit_state);
+                close = true;
+            }
+            if inline_menu_button(ui, "Edit Right Tab Name", button_w).clicked() {
+                start_tab_name_edit(right_idx, tabs, edit_state);
+                close = true;
+            }
+        });
+    } else if menu_button(ui, "Edit Tab Name").clicked() {
+        start_tab_name_edit(tab_idx, tabs, edit_state);
         close = true;
     }
     ui.separator();
@@ -334,11 +356,31 @@ pub(super) fn render_tab_context_menu(
     close
 }
 
+fn start_tab_name_edit(tab_idx: usize, tabs: &[UiTabInfo], edit_state: &mut TabBarEditState) {
+    let Some(tab) = tabs.get(tab_idx) else {
+        return;
+    };
+    edit_state.editing_tab = Some(tab_idx);
+    edit_state.editing_tab_text = tab.title.clone();
+    edit_state.context_menu = None;
+}
+
+fn joined_edit_targets(
+    tabs: &[UiTabInfo],
+    tab_groups: &TabGroupState,
+    tab_id: u64,
+) -> Option<(usize, usize)> {
+    let group = tab_groups.group_for_tab(tab_id)?;
+    let left_idx = tabs.iter().position(|tab| tab.tab_id == group.primary)?;
+    let right_idx = tabs.iter().position(|tab| tab.tab_id == group.secondary)?;
+    Some((left_idx, right_idx))
+}
+
 fn render_tab_join_targets_menu(
     ui: &mut egui::Ui,
     tabs: &[UiTabInfo],
     tab_idx: usize,
-    joined_tabs: Option<JoinedTabs>,
+    tab_groups: &TabGroupState,
     action: &mut TabBarAction,
 ) -> JoinMenuResult {
     let mut result = JoinMenuResult::default();
@@ -348,22 +390,28 @@ fn render_tab_join_targets_menu(
     }
 
     ui.separator();
-    if joined_tabs.is_some() {
+    let tab_grouped = tabs
+        .get(tab_idx)
+        .is_some_and(|tab| tab_groups.group_for_tab(tab.tab_id).is_some());
+    if tab_grouped {
+        if menu_button(ui, "Swap Tabs").clicked() {
+            action.swap_joined_tabs = Some(tab_idx);
+            result.close = true;
+        }
         if menu_button(ui, "Separate Tabs").clicked() {
+            action.switch_to = Some(tab_idx);
             action.separate_tabs = true;
             result.close = true;
         }
         ui.separator();
     }
 
-    if joined_tabs.is_some() {
-        ui.label("Separate current joined tabs before joining another pair.");
-        return result;
-    }
-
     let mut had_target = false;
     for (target_idx, target) in tabs.iter().enumerate() {
         if target_idx == tab_idx {
+            continue;
+        }
+        if tab_groups.group_for_tab(target.tab_id).is_some() {
             continue;
         }
         had_target = true;
@@ -406,9 +454,26 @@ fn render_immediate_tab_context_menu(
     let mut keep_open = false;
     let mut show_join_targets = menu.view == TabContextMenuView::JoinTargets;
     let main_rect = render_tab_menu_area(ctx, menu_id, menu_pos, menu_width, |ui| {
-        if input.joined_tabs.is_some() {
+        let edit_targets = joined_edit_targets(input.tabs, input.tab_groups, tab.tab_id);
+        let mut close = render_tab_context_menu(
+            ui,
+            tab,
+            menu.tab_idx,
+            edit_targets,
+            input.tabs,
+            edit_state,
+            action,
+        );
+        if edit_targets.is_some() {
+            ui.separator();
+            if menu_button(ui, "Swap Tabs").clicked() {
+                action.swap_joined_tabs = Some(menu.tab_idx);
+                close = true;
+            }
             if menu_button(ui, "Separate Tabs").clicked() {
+                action.switch_to = Some(menu.tab_idx);
                 action.separate_tabs = true;
+                close = true;
             }
         } else if menu_button(ui, "Join Tabs").clicked() {
             edit_state.context_menu = Some(TabContextMenuState {
@@ -418,7 +483,7 @@ fn render_immediate_tab_context_menu(
             show_join_targets = true;
             keep_open = true;
         }
-        render_tab_context_menu(ui, tab, menu.tab_idx, edit_state, action)
+        close
     });
 
     let mut menu_rect = main_rect;
@@ -433,7 +498,7 @@ fn render_immediate_tab_context_menu(
                     ui,
                     input.tabs,
                     menu.tab_idx,
-                    input.joined_tabs,
+                    input.tab_groups,
                     action,
                 );
                 if result.back {
@@ -461,6 +526,7 @@ fn render_immediate_tab_context_menu(
     let action_selected = action.join_tab.is_some()
         || action.join_tabs.is_some()
         || action.separate_tabs
+        || action.swap_joined_tabs.is_some()
         || action.close_tab.is_some()
         || action.close_others.is_some()
         || action.close_to_right.is_some()
@@ -529,6 +595,13 @@ fn union_rects(a: egui::Rect, b: egui::Rect) -> egui::Rect {
 
 fn menu_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
     let width = ui.available_width().max(1.0);
+    ui.add_sized(
+        [width, TAB_MENU_ROW_HEIGHT],
+        egui::Button::new(egui::RichText::new(label).size(12.0)),
+    )
+}
+
+fn inline_menu_button(ui: &mut egui::Ui, label: &str, width: f32) -> egui::Response {
     ui.add_sized(
         [width, TAB_MENU_ROW_HEIGHT],
         egui::Button::new(egui::RichText::new(label).size(12.0)),

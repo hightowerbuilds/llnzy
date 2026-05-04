@@ -56,7 +56,8 @@ use crate::app::drag_drop::DragDropState;
 use crate::config::Config;
 use crate::explorer::ExplorerState;
 use crate::stacker::apply_prompt_edit;
-use crate::workspace_layout::{tab_bar_entries, JoinedTabs};
+use crate::tab_groups::TabGroupState;
+use crate::workspace_layout::tab_bar_entries;
 
 pub use footer::FooterAction;
 pub use types::{
@@ -112,8 +113,8 @@ pub struct UiState {
     pub tab_names: Vec<UiTabInfo>,
     /// Lightweight tab content metadata for joined-tab rendering.
     pub tab_panes: Vec<UiTabPaneInfo>,
-    /// Joined-tab pair rendered side by side.
-    pub joined_tabs: Option<JoinedTabs>,
+    /// Workspace tab grouping state.
+    pub tab_groups: TabGroupState,
     /// App-wide drag and drop state. Phase 1 uses this for native file drops;
     /// later phases will let each surface register typed payloads and targets.
     pub drag_drop: DragDropState,
@@ -200,7 +201,7 @@ impl UiState {
             active_tab_kind: None,
             tab_names: Vec::new(),
             tab_panes: Vec::new(),
-            joined_tabs: None,
+            tab_groups: TabGroupState::default(),
             drag_drop: DragDropState::default(),
             pending_close: None,
             save_prompt_error: None,
@@ -354,8 +355,8 @@ impl UiState {
             context_menu: self.tab_context_menu,
         };
         let mut tab_bar_action = tab_bar::TabBarAction::default();
-        let mut joined_tabs = self.joined_tabs.map(JoinedTabs::clamped);
-        let tab_bar_entries = tab_bar_entries(tab_names.len(), joined_tabs);
+        let mut tab_groups = std::mem::take(&mut self.tab_groups);
+        let tab_bar_entries = tab_bar_entries_from_ui_tabs(&tab_names, &tab_groups);
         let tab_panes = std::mem::take(&mut self.tab_panes);
         let drag_drop = self.drag_drop.clone();
 
@@ -399,7 +400,7 @@ impl UiState {
                     tabs: &tab_names,
                     entries: &tab_bar_entries,
                     active_tab_index,
-                    joined_tabs,
+                    tab_groups: &tab_groups,
                     bar_bg: egui::Color32::from_rgb(36, 36, 36),
                 },
                 &mut tab_bar_state,
@@ -435,7 +436,7 @@ impl UiState {
                 ctx,
                 active_tab_kind,
                 active_tab_index,
-                &mut joined_tabs,
+                &mut tab_groups,
                 &tab_panes,
                 &mut config_clone,
                 tab_content::TabContentAppearance {
@@ -504,7 +505,7 @@ impl UiState {
         self.explorer = explorer;
         self.git = git;
         self.tab_panes = tab_panes;
-        self.joined_tabs = joined_tabs;
+        self.tab_groups = tab_groups;
         if let Some((path, buffer_id)) = editor_view.pending_file_tab.take() {
             commands_out.push(AppCommand::OpenCodeFile { path, buffer_id });
         }
@@ -617,6 +618,21 @@ fn active_singleton_tab(
                 | crate::workspace::TabKind::Git
         )
     })
+}
+
+fn tab_bar_entries_from_ui_tabs(
+    tabs: &[UiTabInfo],
+    groups: &TabGroupState,
+) -> Vec<crate::workspace_layout::TabBarEntry> {
+    let workspace_tabs = tabs
+        .iter()
+        .map(|tab| crate::workspace::WorkspaceTab {
+            content: crate::workspace::TabContent::Home,
+            name: None,
+            id: tab.tab_id,
+        })
+        .collect::<Vec<_>>();
+    tab_bar_entries(&workspace_tabs, groups)
 }
 
 fn apply_footer_action(

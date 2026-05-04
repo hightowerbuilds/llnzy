@@ -32,6 +32,7 @@ pub enum MenuAction {
     TabRename,
     SplitVertical,
     SplitHorizontal,
+    ToggleWordWrap,
     ToggleEffects,
     OpenProject,
     CloseProject,
@@ -120,6 +121,11 @@ define_class!(
         #[unsafe(method(llnzySplitHorizontal:))]
         fn split_horizontal(&self, _sender: &AnyObject) {
             send_action(MenuAction::SplitHorizontal);
+        }
+
+        #[unsafe(method(llnzyToggleWordWrap:))]
+        fn toggle_word_wrap(&self, _sender: &AnyObject) {
+            send_action(MenuAction::ToggleWordWrap);
         }
 
         #[unsafe(method(llnzyOpenProject:))]
@@ -289,6 +295,14 @@ pub fn setup_menu_bar(proxy: winit::event_loop::EventLoopProxy<UserEvent>) {
         "Split Horizontally",
         sel!(llnzySplitHorizontal:),
         "D",
+    ));
+    view_menu.addItem(&NSMenuItem::separatorItem(mtm));
+    view_menu.addItem(&make_app_item(
+        mtm,
+        target,
+        "Toggle Word Wrap",
+        sel!(llnzyToggleWordWrap:),
+        "",
     ));
     let view_item = NSMenuItem::new(mtm);
     view_item.setSubmenu(Some(&view_menu));

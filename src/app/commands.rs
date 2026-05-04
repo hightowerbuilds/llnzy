@@ -28,6 +28,7 @@ pub enum AppCommand {
         secondary: usize,
     },
     SeparateTabs,
+    SwapJoinedTabs(usize),
     ResizeTerminalTabs,
     CloseOtherTabs(usize),
     CloseTabsToRight(usize),

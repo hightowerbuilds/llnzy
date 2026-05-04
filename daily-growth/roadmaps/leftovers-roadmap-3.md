@@ -114,27 +114,27 @@ Audit note: the desktop macOS menu bar now includes a top-level `Tab` menu with 
 - [x] Route native `Tab > New`, `Join`, `Separate`, `Split`, `Close`, and `Rename` into app-level tab handlers.
 - [x] Remove `Duplicate` from the native `Tab` menu until the tab engine has a stronger duplicate semantics.
 - [x] Manually verify the native `Tab` menu appears and the basic actions work.
-- [ ] Define a tab layout model that can represent:
+- [x] Define a tab layout model that can represent:
   - standalone tabs,
   - multiple joined groups,
   - group membership by stable tab identity,
   - group-local active member,
   - group-local divider ratio.
-- [ ] Replace global joined-pair state with a first-class tab grouping state.
+- [x] Replace global joined-pair state with a first-class tab grouping state.
 - [ ] Support joining any eligible tab into a group.
-- [ ] Support multiple groups at once, such as two joined tabs in one area and two joined tabs elsewhere.
-- [ ] Support separating one group without affecting other groups.
-- [ ] Make joined group context menus open as one menu for the group, anchored to the joined tab width.
-- [ ] Use `Separate Tabs` when a tab/group is already joined.
-- [ ] Keep tab rename, close, switch, and context-menu behavior consistent between standalone tabs and grouped tabs.
-- [ ] Fix terminal scrollback routing inside joined tabs so shell panes can scroll when joined with code/Markdown panes or with another shell.
-- [ ] Make close and reorder operations remap groups by stable tab identity instead of stale indexes.
+- [x] Support multiple groups at once, such as two joined tabs in one area and two joined tabs elsewhere.
+- [x] Support separating one group without affecting other groups.
+- [x] Make joined group context menus open as one menu for the group, anchored to the joined tab width.
+- [x] Use `Separate Tabs` when a tab/group is already joined.
+- [x] Keep tab rename, close, switch, and context-menu behavior consistent between standalone tabs and grouped tabs.
+- [x] Fix terminal scrollback routing inside joined tabs so shell panes can scroll when joined with code/Markdown panes or with another shell.
+- [x] Make close and reorder operations remap groups by stable tab identity instead of stale indexes.
 - [ ] Preserve terminal pane sizing and editor pane buffer selection after group changes.
 - [ ] Add unit tests for group validation, close remapping, reorder remapping, and separate/join transitions.
 - [ ] Manually verify multiple joined groups.
 - [ ] Manually verify mixed groups such as Terminal + CodeFile, Git + Stacker, and CodeFile + Sketch.
-- [ ] Manually verify terminal scrollback in joined layouts: Terminal + Markdown, Terminal + CodeFile, and Terminal + Terminal.
-- [ ] Manually verify context menus, rename, close, switch, and divider behavior in grouped tabs.
+- [x] Manually verify terminal scrollback in joined layouts: Terminal + Markdown, Terminal + CodeFile, and Terminal + Terminal.
+- [x] Manually verify context menus, rename, close, switch, and divider behavior in grouped tabs.
 
 Acceptance: developers can rapidly join, separate, and manage multiple tab groups without menu flicker, stale indexes, or single-global-pair limitations.
 

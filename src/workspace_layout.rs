@@ -1,5 +1,6 @@
 use crate::layout::ScreenLayout;
 use crate::session::Rect;
+use crate::tab_groups::TabGroupState;
 use crate::workspace::WorkspaceTab;
 
 pub const JOINED_DIVIDER_GAP: f32 = 8.0;
@@ -35,55 +36,79 @@ impl JoinedTabs {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum TabBarEntry {
-    Single { tab_idx: usize },
-    Joined { primary: usize, secondary: usize },
+    Single {
+        tab_idx: usize,
+    },
+    Joined {
+        primary: usize,
+        secondary: usize,
+        ratio: f32,
+    },
 }
 
-pub fn valid_joined_tabs(
-    joined: Option<JoinedTabs>,
+pub fn active_joined_tabs(
+    tabs: &[WorkspaceTab],
     active_tab: usize,
-    tab_count: usize,
+    groups: &TabGroupState,
 ) -> Option<JoinedTabs> {
-    let joined = joined?.clamped();
-    (joined.primary < tab_count
-        && joined.secondary < tab_count
-        && joined.primary != joined.secondary
-        && joined.contains(active_tab))
-    .then_some(joined)
+    let active_id = tabs.get(active_tab)?.id;
+    let group = groups.group_for_tab(active_id)?.clamped();
+    let primary = tab_index_for_id(tabs, group.primary)?;
+    let secondary = tab_index_for_id(tabs, group.secondary)?;
+    (primary != secondary).then_some(JoinedTabs {
+        primary,
+        secondary,
+        ratio: group.ratio,
+    })
 }
 
-pub fn tab_bar_entries(tab_count: usize, joined: Option<JoinedTabs>) -> Vec<TabBarEntry> {
-    let Some(joined) = joined.map(JoinedTabs::clamped) else {
-        return (0..tab_count)
-            .map(|tab_idx| TabBarEntry::Single { tab_idx })
-            .collect();
-    };
+pub fn tab_bar_entries(tabs: &[WorkspaceTab], groups: &TabGroupState) -> Vec<TabBarEntry> {
+    let tab_count = tabs.len();
+    let mut grouped = std::collections::HashSet::new();
+    let mut group_starts = std::collections::HashMap::new();
 
-    if joined.primary >= tab_count
-        || joined.secondary >= tab_count
-        || joined.primary == joined.secondary
-    {
-        return (0..tab_count)
-            .map(|tab_idx| TabBarEntry::Single { tab_idx })
-            .collect();
+    for group in groups.groups() {
+        let group = group.clamped();
+        let Some(primary) = tab_index_for_id(tabs, group.primary) else {
+            continue;
+        };
+        let Some(secondary) = tab_index_for_id(tabs, group.secondary) else {
+            continue;
+        };
+        if primary == secondary {
+            continue;
+        }
+        grouped.insert(primary);
+        grouped.insert(secondary);
+        group_starts.insert(
+            primary.min(secondary),
+            JoinedTabs {
+                primary,
+                secondary,
+                ratio: group.ratio,
+            },
+        );
     }
 
-    let first = joined.primary.min(joined.secondary);
-    let second = joined.primary.max(joined.secondary);
-    let mut entries = Vec::with_capacity(tab_count.saturating_sub(1));
+    let mut entries = Vec::with_capacity(tab_count);
     for idx in 0..tab_count {
-        if idx == first {
+        if let Some(joined) = group_starts.get(&idx).copied() {
             entries.push(TabBarEntry::Joined {
                 primary: joined.primary,
                 secondary: joined.secondary,
+                ratio: joined.ratio,
             });
-        } else if idx != second {
+        } else if !grouped.contains(&idx) {
             entries.push(TabBarEntry::Single { tab_idx: idx });
         }
     }
     entries
+}
+
+pub fn tab_index_for_id(tabs: &[WorkspaceTab], tab_id: u64) -> Option<usize> {
+    tabs.iter().position(|tab| tab.id == tab_id)
 }
 
 pub fn joined_content_rects(layout: &ScreenLayout, ratio: f32) -> (Rect, Rect) {
@@ -123,10 +148,10 @@ pub fn joined_terminal_content_rects(layout: &ScreenLayout, ratio: f32) -> (Rect
 pub fn terminal_effect_rect(
     tabs: &[WorkspaceTab],
     layout: &ScreenLayout,
-    joined: Option<JoinedTabs>,
+    groups: &TabGroupState,
     active_tab: usize,
 ) -> Option<Rect> {
-    if let Some(joined) = valid_joined_tabs(joined, active_tab, tabs.len()) {
+    if let Some(joined) = active_joined_tabs(tabs, active_tab, groups) {
         let (left, right) = joined_content_rects(layout, joined.ratio);
         let primary_terminal = tabs
             .get(joined.primary)
@@ -164,17 +189,59 @@ mod tests {
 
     #[test]
     fn tab_bar_entries_group_joined_tabs_once() {
-        let entries = tab_bar_entries(4, Some(JoinedTabs::new(2, 0)));
+        let tabs = tabs_with_ids(&[10, 11, 12, 13]);
+        let mut groups = TabGroupState::default();
+        groups.join_pair(12, 10);
+        let entries = tab_bar_entries(&tabs, &groups);
         assert_eq!(
             entries,
             vec![
                 TabBarEntry::Joined {
                     primary: 2,
-                    secondary: 0
+                    secondary: 0,
+                    ratio: 0.5
                 },
                 TabBarEntry::Single { tab_idx: 1 },
                 TabBarEntry::Single { tab_idx: 3 },
             ]
         );
+    }
+
+    #[test]
+    fn tab_bar_entries_allow_multiple_groups() {
+        let tabs = tabs_with_ids(&[10, 11, 12, 13, 14]);
+        let mut groups = TabGroupState::default();
+        groups.join_pair(10, 11);
+        groups.join_pair(13, 14);
+
+        let entries = tab_bar_entries(&tabs, &groups);
+
+        assert_eq!(
+            entries,
+            vec![
+                TabBarEntry::Joined {
+                    primary: 0,
+                    secondary: 1,
+                    ratio: 0.5
+                },
+                TabBarEntry::Single { tab_idx: 2 },
+                TabBarEntry::Joined {
+                    primary: 3,
+                    secondary: 4,
+                    ratio: 0.5
+                },
+            ]
+        );
+    }
+
+    fn tabs_with_ids(ids: &[u64]) -> Vec<WorkspaceTab> {
+        ids.iter()
+            .copied()
+            .map(|id| WorkspaceTab {
+                content: crate::workspace::TabContent::Home,
+                name: None,
+                id,
+            })
+            .collect()
     }
 }

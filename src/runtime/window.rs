@@ -73,6 +73,7 @@ impl App {
                     .as_terminal()
                     .is_some_and(|session| session.exited.is_some());
                 UiTabInfo {
+                    tab_id: tab.id,
                     title,
                     kind: tab.content.kind(),
                     exited,
@@ -85,6 +86,7 @@ impl App {
         self.tabs
             .iter()
             .map(|tab| UiTabPaneInfo {
+                tab_id: tab.id,
                 kind: tab.content.kind(),
                 buffer_id: match &tab.content {
                     TabContent::CodeFile { buffer_id, .. } => Some(*buffer_id),

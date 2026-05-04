@@ -64,6 +64,7 @@ pub struct UiFrameOutput {
 
 #[derive(Clone)]
 pub struct UiTabInfo {
+    pub tab_id: u64,
     pub title: String,
     pub kind: TabKind,
     pub exited: bool,
@@ -71,6 +72,7 @@ pub struct UiTabInfo {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct UiTabPaneInfo {
+    pub tab_id: u64,
     pub kind: TabKind,
     pub buffer_id: Option<BufferId>,
 }

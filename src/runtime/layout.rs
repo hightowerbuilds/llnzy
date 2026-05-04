@@ -5,7 +5,7 @@ use llnzy::layout::{LayoutInputs, ScreenLayout};
 use llnzy::session::Rect as PaneRect;
 use llnzy::ui::ActiveView;
 use llnzy::workspace::TabContent;
-use llnzy::workspace_layout::joined_terminal_content_rects;
+use llnzy::workspace_layout::{active_joined_tabs, joined_terminal_content_rects};
 
 use crate::App;
 
@@ -98,8 +98,7 @@ impl App {
         let joined = self
             .ui
             .as_ref()
-            .and_then(|ui| ui.joined_tabs)
-            .filter(|joined| joined.contains(self.active_tab))?;
+            .and_then(|ui| active_joined_tabs(&self.tabs, self.active_tab, &ui.tab_groups))?;
         let (left, right) = joined_terminal_content_rects(layout, joined.ratio);
 
         if joined.primary == self.active_tab {
@@ -204,20 +203,37 @@ impl App {
     pub(crate) fn resize_terminal_tabs(&mut self) {
         if let Some(layout) = &self.screen_layout {
             let (cols, rows) = (layout.grid_cols, layout.grid_rows);
-            let joined = self.ui.as_ref().and_then(|ui| ui.joined_tabs);
-            let joined_sizes = joined.map(|joined| self.joined_terminal_grid_sizes(joined.ratio));
+            let joined_sizes = self
+                .ui
+                .as_ref()
+                .map(|ui| {
+                    ui.tab_groups
+                        .groups()
+                        .iter()
+                        .filter_map(|group| {
+                            let primary =
+                                self.tabs.iter().position(|tab| tab.id == group.primary)?;
+                            let secondary =
+                                self.tabs.iter().position(|tab| tab.id == group.secondary)?;
+                            let sizes = self.joined_terminal_grid_sizes(group.ratio);
+                            Some((primary, secondary, sizes))
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
             for (idx, tab) in self.tabs.iter_mut().enumerate() {
                 if let TabContent::Terminal(ref mut session) = tab.content {
-                    if let Some(joined) = joined {
-                        if idx == joined.primary {
-                            let ((joined_cols, joined_rows), _) =
-                                joined_sizes.unwrap_or(((cols, rows), (cols, rows)));
+                    if let Some((primary, secondary, sizes)) = joined_sizes
+                        .iter()
+                        .find(|(primary, secondary, _)| idx == *primary || idx == *secondary)
+                    {
+                        if idx == *primary {
+                            let ((joined_cols, joined_rows), _) = *sizes;
                             session.resize(joined_cols, joined_rows);
                             continue;
                         }
-                        if idx == joined.secondary {
-                            let (_, (joined_cols, joined_rows)) =
-                                joined_sizes.unwrap_or(((cols, rows), (cols, rows)));
+                        if idx == *secondary {
+                            let (_, (joined_cols, joined_rows)) = *sizes;
                             session.resize(joined_cols, joined_rows);
                             continue;
                         }

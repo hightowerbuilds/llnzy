@@ -23,6 +23,7 @@ pub mod session;
 pub mod sidebar_move;
 pub mod sketch;
 pub mod stacker;
+pub mod tab_groups;
 pub mod tasks;
 pub mod terminal;
 pub mod theme;

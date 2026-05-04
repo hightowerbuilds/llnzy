@@ -5,6 +5,7 @@ use super::{
 use crate::app::commands::AppCommand;
 use crate::config::Config;
 use crate::explorer::ExplorerState;
+use crate::tab_groups::TabGroupState;
 use crate::ui::UiTabPaneInfo;
 use crate::workspace::TabKind;
 use crate::workspace_layout::{joined_split_widths, JoinedTabs, JOINED_DIVIDER_GAP};
@@ -31,17 +32,17 @@ pub(super) fn render_tab_content(
     ctx: &egui::Context,
     active_tab_kind: Option<TabKind>,
     active_tab_index: usize,
-    joined_tabs: &mut Option<JoinedTabs>,
+    tab_groups: &mut TabGroupState,
     tab_panes: &[UiTabPaneInfo],
     config: &mut Config,
     appearance: TabContentAppearance,
     mut state: TabContentState<'_>,
 ) {
-    if let Some(joined) = valid_joined_tabs(*joined_tabs, active_tab_index, tab_panes) {
+    if let Some(joined) = active_joined_tabs(tab_groups, active_tab_index, tab_panes) {
         render_joined_tabs(
             ctx,
             joined,
-            joined_tabs,
+            tab_groups,
             active_tab_index,
             tab_panes,
             config,
@@ -81,18 +82,30 @@ pub(super) fn render_tab_content(
     }
 }
 
-fn valid_joined_tabs(
-    joined_tabs: Option<JoinedTabs>,
+fn active_joined_tabs(
+    tab_groups: &TabGroupState,
     active_tab_index: usize,
     tab_panes: &[UiTabPaneInfo],
 ) -> Option<JoinedTabs> {
-    crate::workspace_layout::valid_joined_tabs(joined_tabs, active_tab_index, tab_panes.len())
+    let active_id = tab_panes.get(active_tab_index)?.tab_id;
+    let group = tab_groups.group_for_tab(active_id)?.clamped();
+    let primary = tab_panes
+        .iter()
+        .position(|pane| pane.tab_id == group.primary)?;
+    let secondary = tab_panes
+        .iter()
+        .position(|pane| pane.tab_id == group.secondary)?;
+    (primary != secondary).then_some(JoinedTabs {
+        primary,
+        secondary,
+        ratio: group.ratio,
+    })
 }
 
 fn render_joined_tabs(
     ctx: &egui::Context,
     joined: JoinedTabs,
-    joined_tabs: &mut Option<JoinedTabs>,
+    tab_groups: &mut TabGroupState,
     active_tab_index: usize,
     tab_panes: &[UiTabPaneInfo],
     config: &mut Config,
@@ -129,13 +142,9 @@ fn render_joined_tabs(
                     let new_ratio = ((pointer_pos.x - rect.left()) / usable_w)
                         .clamp(JoinedTabs::MIN_RATIO, JoinedTabs::MAX_RATIO);
                     if (new_ratio - ratio).abs() > f32::EPSILON {
-                        *joined_tabs = Some(
-                            JoinedTabs {
-                                ratio: new_ratio,
-                                ..joined
-                            }
-                            .clamped(),
-                        );
+                        if let Some(active_pane) = tab_panes.get(active_tab_index) {
+                            tab_groups.set_ratio_for_tab(active_pane.tab_id, new_ratio);
+                        }
                         state.commands.push(AppCommand::ResizeTerminalTabs);
                         ui.ctx().request_repaint();
                     }

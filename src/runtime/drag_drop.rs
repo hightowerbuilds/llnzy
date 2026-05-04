@@ -11,7 +11,6 @@ use llnzy::sidebar_move::{
 };
 use llnzy::workspace::remap_code_file_tab_paths;
 
-use crate::runtime::commands::remap_joined_tabs_after_reorder;
 use crate::App;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -78,7 +77,6 @@ impl App {
                 let tab = self.tabs.remove(from);
                 self.tabs.insert(to, tab);
                 self.active_tab = remap_index_after_reorder(self.active_tab, from, to);
-                remap_joined_tabs_after_reorder(self.ui.as_mut(), from, to);
                 true
             }
             DragDropCommand::MoveFilesToFolder { files, folder } => {

@@ -4,7 +4,6 @@ use std::time::Instant;
 use winit::event_loop::ActiveEventLoop;
 
 use llnzy::app::commands::AppCommand;
-use llnzy::app::drag_drop::{remap_index_after_insert, remap_index_after_reorder};
 use llnzy::editor::BufferId;
 use llnzy::session::Session;
 use llnzy::ui::{ActiveView, UiFrameOutput};
@@ -81,7 +80,6 @@ impl App {
                     id,
                 },
             );
-            remap_joined_tabs_after_insert(self.ui.as_mut(), insert_at);
             self.active_tab = insert_at;
         }
         if let Some(ui) = &mut self.ui {
@@ -178,10 +176,10 @@ impl App {
                     return false;
                 }
                 if let Some(ui) = &mut self.ui {
-                    ui.joined_tabs = Some(llnzy::workspace_layout::JoinedTabs::new(
-                        self.active_tab,
-                        idx,
-                    ));
+                    let primary_id = self.tabs[self.active_tab].id;
+                    let secondary_id = self.tabs[idx].id;
+                    ui.tab_groups.join_pair(primary_id, secondary_id);
+                    ui.tab_groups.set_active_tab(primary_id);
                 }
                 self.resize_terminal_tabs();
                 self.clear_terminal_selection();
@@ -197,8 +195,10 @@ impl App {
                 }
                 self.active_tab = primary;
                 if let Some(ui) = &mut self.ui {
-                    ui.joined_tabs =
-                        Some(llnzy::workspace_layout::JoinedTabs::new(primary, secondary));
+                    let primary_id = self.tabs[primary].id;
+                    let secondary_id = self.tabs[secondary].id;
+                    ui.tab_groups.join_pair(primary_id, secondary_id);
+                    ui.tab_groups.set_active_tab(primary_id);
                 }
                 self.resize_terminal_tabs();
                 self.clear_terminal_selection();
@@ -207,7 +207,23 @@ impl App {
             }
             AppCommand::SeparateTabs => {
                 if let Some(ui) = &mut self.ui {
-                    ui.joined_tabs = None;
+                    if let Some(tab) = self.tabs.get(self.active_tab) {
+                        ui.tab_groups.separate_tab(tab.id);
+                    }
+                }
+                self.resize_terminal_tabs();
+                self.clear_terminal_selection();
+                self.request_redraw();
+                true
+            }
+            AppCommand::SwapJoinedTabs(idx) => {
+                let Some(tab) = self.tabs.get(idx) else {
+                    return false;
+                };
+                if let Some(ui) = &mut self.ui {
+                    if !ui.tab_groups.swap_tabs_for_tab(tab.id) {
+                        return false;
+                    }
                 }
                 self.resize_terminal_tabs();
                 self.clear_terminal_selection();
@@ -233,7 +249,7 @@ impl App {
                 self.tabs.clear();
                 self.tabs.push(kept);
                 self.active_tab = 0;
-                clear_joined_tabs(self.ui.as_mut());
+                retain_tab_groups_for_open_tabs(self.ui.as_mut(), &self.tabs);
                 self.sync_active_tab_content();
                 self.clear_terminal_selection();
                 true
@@ -250,9 +266,7 @@ impl App {
                 if self.active_tab > idx {
                     self.active_tab = idx;
                 }
-                clear_joined_tabs_if(self.ui.as_mut(), |joined| {
-                    joined.primary > idx || joined.secondary > idx
-                });
+                retain_tab_groups_for_open_tabs(self.ui.as_mut(), &self.tabs);
                 self.sync_active_tab_content();
                 self.clear_terminal_selection();
                 true
@@ -414,50 +428,12 @@ impl App {
     }
 }
 
-fn clear_joined_tabs(ui: Option<&mut llnzy::ui::UiState>) {
-    if let Some(ui) = ui {
-        ui.joined_tabs = None;
-    }
-}
-
-fn clear_joined_tabs_if(
+pub(crate) fn retain_tab_groups_for_open_tabs(
     ui: Option<&mut llnzy::ui::UiState>,
-    predicate: impl FnOnce(llnzy::workspace_layout::JoinedTabs) -> bool,
+    tabs: &[llnzy::workspace::WorkspaceTab],
 ) {
     if let Some(ui) = ui {
-        if ui.joined_tabs.is_some_and(predicate) {
-            ui.joined_tabs = None;
-        }
-    }
-}
-
-pub(crate) fn remap_joined_tabs_after_insert(
-    ui: Option<&mut llnzy::ui::UiState>,
-    insert_at: usize,
-) {
-    if let Some(ui) = ui {
-        if let Some(joined) = ui.joined_tabs {
-            ui.joined_tabs = Some(llnzy::workspace_layout::JoinedTabs {
-                primary: remap_index_after_insert(joined.primary, insert_at),
-                secondary: remap_index_after_insert(joined.secondary, insert_at),
-                ratio: joined.ratio,
-            });
-        }
-    }
-}
-
-pub(crate) fn remap_joined_tabs_after_reorder(
-    ui: Option<&mut llnzy::ui::UiState>,
-    from: usize,
-    to: usize,
-) {
-    if let Some(ui) = ui {
-        if let Some(joined) = ui.joined_tabs {
-            ui.joined_tabs = Some(llnzy::workspace_layout::JoinedTabs {
-                primary: remap_index_after_reorder(joined.primary, from, to),
-                secondary: remap_index_after_reorder(joined.secondary, from, to),
-                ratio: joined.ratio,
-            });
-        }
+        ui.tab_groups
+            .retain_tabs(|tab_id| tabs.iter().any(|tab| tab.id == tab_id));
     }
 }
