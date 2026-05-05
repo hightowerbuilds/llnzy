@@ -3,6 +3,7 @@ use std::time::Instant;
 
 use crate::editor::file_watcher::FileWatcher;
 use crate::editor::perf;
+use crate::editor::recovery;
 use crate::editor::BufferId;
 use crate::lsp::{LspEnsureStatus, LspManager};
 
@@ -27,6 +28,26 @@ impl EditorViewState {
             .editor
             .index_for_id(buffer_id)
             .ok_or_else(|| "Opened buffer is missing from editor registry".to_string())?;
+        let mut recovered = false;
+
+        match recovery::load_snapshot(&path) {
+            Ok(Some(snapshot)) => {
+                let buf = &mut self.editor.buffers[idx];
+                if snapshot.content == buf.text() {
+                    let _ = recovery::clear_path_snapshot(&path);
+                } else {
+                    buf.restore_unsaved_text(&snapshot.content);
+                    self.editor.views[idx].tree_dirty = self.editor.views[idx].lang_id.is_some();
+                    self.status_msg =
+                        Some(format!("Recovered unsaved edits for {}", buf.file_name()));
+                    recovered = true;
+                }
+            }
+            Ok(None) => {}
+            Err(err) => {
+                self.status_msg = Some(err);
+            }
+        }
 
         if let Some(watcher) = &mut self.file_watcher {
             watcher.watch(&path);
@@ -60,6 +81,9 @@ impl EditorViewState {
         }
 
         self.request_hints_and_lenses();
+        if recovered {
+            self.lsp_did_change_for_buffer_id(buffer_id);
+        }
 
         Ok(buffer_id)
     }
@@ -86,7 +110,7 @@ impl EditorViewState {
         };
         let buf = &self.editor.buffers[idx];
         let view = &self.editor.views[idx];
-        if buf.line_count() > perf::LSP_CHANGE_LINE_LIMIT {
+        if !perf::live_lsp_enabled(buf.line_count()) {
             return;
         }
         if let (Some(lang_id), Some(path)) = (view.lang_id, buf.path()) {
@@ -384,6 +408,13 @@ impl EditorViewState {
         let Some((buffer_id, buf, view)) = self.editor.active_buffer_view() else {
             return;
         };
+        if buf.line_count() > perf::LSP_CHANGE_LINE_LIMIT {
+            self.inlay_hints.clear();
+            self.code_lenses.clear();
+            self.pending.inlay_hints = None;
+            self.pending.code_lens = None;
+            return;
+        }
         if let (Some(lang_id), Some(path)) = (view.lang_id, buf.path()) {
             let line_count = buf.line_count() as u32;
             if let Some(rx) = lsp.inlay_hints_async(path, lang_id, 0, line_count) {

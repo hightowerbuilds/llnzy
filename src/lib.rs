@@ -1,4 +1,5 @@
 pub mod app;
+pub mod async_guard;
 pub mod config;
 pub mod diagnostics;
 pub mod editor;

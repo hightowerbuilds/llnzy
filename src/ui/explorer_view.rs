@@ -126,6 +126,8 @@ pub struct EditorViewState {
     pub sidebar_new_entry: Option<(std::path::PathBuf, String, bool)>,
     /// Sidebar move picker state.
     pub sidebar_move_picker: Option<SidebarMovePickerState>,
+    /// Dirty editor recovery snapshots should be flushed on the next idle tick.
+    pub recovery_dirty: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -202,6 +204,7 @@ impl Default for EditorViewState {
             sidebar_delete_confirm: None,
             sidebar_new_entry: None,
             sidebar_move_picker: None,
+            recovery_dirty: false,
         }
     }
 }
@@ -346,6 +349,7 @@ pub(crate) fn render_explorer_view(
             if editor_state.editor_search.active {
                 editor_state.editor_search.mark_dirty();
             }
+            editor_state.recovery_dirty = true;
             if let Some(gutter) = &mut editor_state.editor.views[active].git_gutter {
                 gutter.mark_dirty();
             }
@@ -411,6 +415,7 @@ pub(crate) fn render_explorer_view(
                     view.cursor.desired_col = None;
                     view.tree_dirty = true;
                     editor_state.lsp_did_change();
+                    editor_state.recovery_dirty = true;
                 }
                 editor_state.completion = None;
             }

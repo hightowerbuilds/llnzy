@@ -3,17 +3,18 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::thread;
 use std::time::Instant;
 
+use crate::async_guard::{is_current_request, AsyncRequestCounter, AsyncRequestToken};
 use crate::git::{self, CommitDetail, GitError, GitErrorKind, GitSnapshot};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct RefreshRequest {
-    id: u64,
+    token: AsyncRequestToken,
     candidate: PathBuf,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct DetailRequest {
-    id: u64,
+    token: AsyncRequestToken,
     repo_root: PathBuf,
     oid: String,
 }
@@ -46,7 +47,7 @@ pub struct GitUiState {
     pub readme_text: Option<String>,
     pub readme_error: Option<String>,
     pub last_refresh: Option<Instant>,
-    next_request_id: u64,
+    request_counter: AsyncRequestCounter,
 }
 
 impl Default for GitUiState {
@@ -73,7 +74,7 @@ impl Default for GitUiState {
             readme_text: None,
             readme_error: None,
             last_refresh: None,
-            next_request_id: 0,
+            request_counter: AsyncRequestCounter::default(),
         }
     }
 }
@@ -148,7 +149,7 @@ impl GitUiState {
 
         let (tx, rx) = mpsc::channel();
         let request = DetailRequest {
-            id: self.next_request_id(),
+            token: self.next_request_token(),
             repo_root: repo_root.clone(),
             oid: oid.clone(),
         };
@@ -212,7 +213,7 @@ impl GitUiState {
         }
         let (tx, rx) = mpsc::channel();
         let request = RefreshRequest {
-            id: self.next_request_id(),
+            token: self.next_request_token(),
             candidate: candidate.clone(),
         };
         self.loading = true;
@@ -319,18 +320,17 @@ impl GitUiState {
     }
 
     fn refresh_result_is_current(&self, request: &RefreshRequest) -> bool {
-        self.refresh_requested.as_ref() == Some(request)
+        is_current_request(self.refresh_requested.as_ref(), request)
     }
 
     fn detail_result_is_current(&self, request: &DetailRequest) -> bool {
         self.repo_root.as_ref() == Some(&request.repo_root)
             && self.selected_commit.as_deref() == Some(request.oid.as_str())
-            && self.detail_requested.as_ref() == Some(request)
+            && is_current_request(self.detail_requested.as_ref(), request)
     }
 
-    fn next_request_id(&mut self) -> u64 {
-        self.next_request_id = self.next_request_id.wrapping_add(1);
-        self.next_request_id
+    fn next_request_token(&mut self) -> AsyncRequestToken {
+        self.request_counter.next_token()
     }
 }
 
@@ -339,16 +339,25 @@ mod tests {
     use super::*;
     use crate::git::GitCommitNode;
 
+    fn token(id: u64) -> AsyncRequestToken {
+        let mut counter = AsyncRequestCounter::default();
+        let mut latest = counter.next_token();
+        for _ in 1..id {
+            latest = counter.next_token();
+        }
+        latest
+    }
+
     fn refresh_request(id: u64, candidate: &str) -> RefreshRequest {
         RefreshRequest {
-            id,
+            token: token(id),
             candidate: PathBuf::from(candidate),
         }
     }
 
     fn detail_request(id: u64, repo_root: &str, oid: &str) -> DetailRequest {
         DetailRequest {
-            id,
+            token: token(id),
             repo_root: PathBuf::from(repo_root),
             oid: oid.to_string(),
         }

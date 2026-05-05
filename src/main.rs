@@ -27,7 +27,7 @@ use llnzy::stacker::input::StackerSelection;
 use llnzy::stacker_webview::{StackerWebView, StackerWebViewMessage};
 use llnzy::ui::command_palette::CommandId;
 use llnzy::ui::{stacker_cursor, STACKER_PROMPT_EDITOR_ID};
-use llnzy::ui::{ActiveView, PendingClose, UiFrameOutput, UiState, BUMPER_WIDTH};
+use llnzy::ui::{ActiveView, UiFrameOutput, UiState, BUMPER_WIDTH};
 use llnzy::workspace::{TabContent, TabKind, WorkspaceTab};
 use llnzy::workspace_layout::{
     active_joined_tabs, joined_content_rects, joined_terminal_content_rects, terminal_effect_rect,
@@ -88,6 +88,7 @@ struct App {
     last_blink_toggle: Instant,
     last_keypress: Instant,
     last_config_check: Instant,
+    last_editor_recovery_save: Instant,
     #[cfg(target_os = "macos")]
     stacker_bridge_active: Option<bool>,
     #[cfg(target_os = "macos")]
@@ -125,6 +126,7 @@ impl App {
             last_blink_toggle: Instant::now(),
             last_keypress: Instant::now(),
             last_config_check: Instant::now(),
+            last_editor_recovery_save: Instant::now(),
             #[cfg(target_os = "macos")]
             stacker_bridge_active: None,
             #[cfg(target_os = "macos")]
@@ -964,15 +966,8 @@ impl ApplicationHandler<UserEvent> for App {
 
         match event {
             WindowEvent::CloseRequested => {
-                // Check for unsaved CodeFile buffers before quitting
-                let modified = self.modified_code_tabs();
-                if !modified.is_empty() {
-                    if let Some(ui) = &mut self.ui {
-                        ui.pending_close = Some(PendingClose::Window(modified));
-                        ui.save_prompt_error = None;
-                    }
-                    self.request_redraw();
-                } else {
+                // Check for unsaved CodeFile buffers before quitting.
+                if self.begin_window_close() {
                     self.error_log.info("Close requested");
                     self.save_window_state();
                     event_loop.exit();
@@ -1773,6 +1768,20 @@ impl ApplicationHandler<UserEvent> for App {
         self.process_all_output();
 
         let now = Instant::now();
+
+        let editor_recovery_dirty = self
+            .ui
+            .as_ref()
+            .is_some_and(|ui| ui.editor_view.recovery_dirty);
+        if editor_recovery_dirty
+            || now.duration_since(self.last_editor_recovery_save).as_secs() >= 5
+        {
+            self.save_editor_recovery_snapshots();
+            if let Some(ui) = &mut self.ui {
+                ui.editor_view.recovery_dirty = false;
+            }
+            self.last_editor_recovery_save = now;
+        }
 
         // Cursor blink
         let blink_ms = self.config.cursor_blink_ms;

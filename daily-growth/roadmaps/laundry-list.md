@@ -49,14 +49,14 @@ Treat this as a parking lot, not a current sprint plan. Many entries came from o
 
 ## Reliability And Data Safety
 
-- [ ] Add or verify autosave and crash recovery behavior for dirty editor buffers. Source: `enterprise-editor-readiness-review-05-02-2026.md`.
+- [x] Add or verify autosave and crash recovery behavior for dirty editor buffers. Source: `enterprise-editor-readiness-review-05-02-2026.md`.
 - [x] Verify corrupt state handling for workspace/session restore files. Source: `enterprise-editor-readiness-review-05-02-2026.md`.
-- [ ] Add higher-level UI/close-flow tests for tab close, window close, and quit behavior with dirty buffers. Sources: `llnzy-critical-review-04-28-2026.md`, `old/durable-editor-foundation.md`.
+- [x] Add higher-level UI/close-flow tests for tab close, window close, and quit behavior with dirty buffers. Sources: `llnzy-critical-review-04-28-2026.md`, `old/durable-editor-foundation.md`.
 - [x] Add tests for save failure paths and failed writes. Source: `llnzy-critical-review-04-28-2026.md`.
 - [x] Restore last sessions safely without reopening stale or missing files as valid buffers. Source: `llnzy-reliability-durability-roadmap-05-01-2026.md`.
-- [ ] Add stale async response guards for LSP, Git detail loading, and any future background work that can target an old buffer or tab. Source: `llnzy-reliability-durability-roadmap-05-01-2026.md`.
-- [ ] Add large-file fixtures and stress fixtures. Source: `llnzy-reliability-durability-roadmap-05-01-2026.md`.
-- [ ] Define graceful degradation behavior for large files. Source: `llnzy-reliability-durability-roadmap-05-01-2026.md`.
+- [x] Add stale async response guards for LSP, Git detail loading, and any future background work that can target an old buffer or tab. Source: `llnzy-reliability-durability-roadmap-05-01-2026.md`.
+- [x] Add large-file fixtures and stress fixtures. Source: `llnzy-reliability-durability-roadmap-05-01-2026.md`.
+- [x] Define graceful degradation behavior for large files. Source: `llnzy-reliability-durability-roadmap-05-01-2026.md`.
 - [ ] Keep reducing very large UI files and feature ownership until new work can land without expanding oversized modules. Source: `llnzy-reliability-durability-roadmap-05-01-2026.md`.
 - [ ] Finish or intentionally suppress current warnings with specific justification. Source: `llnzy-reliability-durability-roadmap-05-01-2026.md`.
 - [ ] Run periodic manual smoke checks for tabs, splits, search, settings, Stacker, paste, terminal routing, and effects. Source: `llnzy-code-quality-cleanup-roadmap.md`.

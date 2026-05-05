@@ -33,6 +33,7 @@ impl App {
             }
             (SavePromptResponse::DontSave, Some(PendingClose::Tab(file))) => {
                 self.clear_save_prompt_error();
+                self.clear_editor_recovery_snapshot_for_buffer(file.buffer_id);
                 self.force_close_tab_id(file.tab_id);
                 true
             }
@@ -58,8 +59,11 @@ impl App {
                 }
                 true
             }
-            (SavePromptResponse::DontSave, Some(PendingClose::Window(_))) => {
+            (SavePromptResponse::DontSave, Some(PendingClose::Window(files))) => {
                 self.clear_save_prompt_error();
+                for file in files {
+                    self.clear_editor_recovery_snapshot_for_buffer(file.buffer_id);
+                }
                 self.save_window_state();
                 event_loop.exit();
                 true

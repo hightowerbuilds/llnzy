@@ -1,4 +1,5 @@
 use crate::config::EffectiveEditorConfig;
+use crate::editor::perf::LargeFileDegradation;
 use crate::editor::BufferView;
 use crate::keybindings::KeybindingPreset;
 use crate::lsp::FileDiagnostic;
@@ -40,9 +41,13 @@ pub(super) fn editor_status_text(
         KeybindingPreset::Vim => "",
         KeybindingPreset::Emacs => "  |  Emacs",
     };
+    let large_file_label = LargeFileDegradation::for_line_count(buf.line_count())
+        .status_label()
+        .map(|label| format!("  |  {label}"))
+        .unwrap_or_default();
 
     format!(
-        "Ln {}, Col {}  |  {} lines  |  {}  |  {}  |  {}{}{}{}{}",
+        "Ln {}, Col {}  |  {} lines  |  {}  |  {}  |  {}{}{}{}{}{}",
         view.cursor.pos.line + 1,
         view.cursor.pos.col + 1,
         buf.line_count(),
@@ -61,5 +66,41 @@ pub(super) fn editor_status_text(
         lsp_label,
         vim_label,
         preset_label,
+        large_file_label,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::editor::buffer::{Buffer, Position};
+
+    #[test]
+    fn status_text_names_large_file_degradation() {
+        let mut buffer = Buffer::empty();
+        buffer.insert(
+            Position::new(0, 0),
+            &crate::editor::stress_fixtures::rust_lines(
+                crate::editor::perf::LSP_CHANGE_LINE_LIMIT + 1,
+            ),
+        );
+
+        let status = editor_status_text(
+            &buffer,
+            &BufferView::default(),
+            &EffectiveEditorConfig {
+                tab_size: 4,
+                insert_spaces: true,
+                rulers: Vec::new(),
+                word_wrap: false,
+                visible_whitespace: false,
+                font_size: 14.0,
+            },
+            None,
+            "",
+            KeybindingPreset::VsCode,
+        );
+
+        assert!(status.contains("Large file: syntax, minimap, live LSP limited"));
+    }
 }

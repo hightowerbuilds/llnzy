@@ -6,8 +6,11 @@ pub mod history;
 pub mod keymap;
 pub mod perf;
 pub mod project_search;
+pub mod recovery;
 pub mod search;
 pub mod snippet;
+#[cfg(test)]
+pub(crate) mod stress_fixtures;
 pub mod syntax;
 
 use std::path::PathBuf;
@@ -462,6 +465,28 @@ mod tests {
 
         assert!(editor.views[0].tree.is_some());
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn large_syntax_fixture_skips_tree_sitter_parse() {
+        let dir = std::env::temp_dir().join(format!("llnzy-editor-large-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = stress_fixtures::write_rust_file(
+            &dir,
+            "large.rs",
+            stress_fixtures::LARGE_SYNTAX_LINE_COUNT,
+        );
+        let mut editor = EditorState::new();
+        let buffer_id = editor.open(path).unwrap();
+
+        editor.reparse_active();
+
+        let idx = editor.index_for_id(buffer_id).unwrap();
+        assert!(!editor.active_parse_pending());
+        assert!(editor.views[idx].tree_dirty);
+        assert!(editor.views[idx].tree.is_none());
+
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

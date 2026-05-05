@@ -197,6 +197,13 @@ impl Buffer {
         self.modified
     }
 
+    pub fn restore_unsaved_text(&mut self, text: &str) {
+        let normalized = text.replace("\r\n", "\n");
+        self.rope = Rope::from_str(&normalized);
+        self.modified = content_hash(&self.rope) != self.saved_hash;
+        self.history = UndoHistory::new();
+    }
+
     pub fn line_ending(&self) -> LineEnding {
         self.line_ending
     }
@@ -1061,6 +1068,33 @@ mod tests {
         assert!(raw.contains("\r\n"), "CRLF should be preserved");
 
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn large_fixture_edit_save_roundtrip_keeps_buffer_usable() {
+        let dir = std::env::temp_dir().join(format!("llnzy-buffer-large-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = crate::editor::stress_fixtures::write_rust_file(
+            &dir,
+            "large.rs",
+            crate::editor::stress_fixtures::LARGE_MINIMAP_LINE_COUNT,
+        );
+        let mut buf = Buffer::from_file(&path).unwrap();
+
+        assert_eq!(
+            buf.line_count(),
+            crate::editor::stress_fixtures::LARGE_MINIMAP_LINE_COUNT + 1
+        );
+
+        buf.insert(Position::new(0, 0), "// edited\n");
+        assert!(buf.is_modified());
+        buf.save().unwrap();
+
+        let loaded = Buffer::from_file(&path).unwrap();
+        assert!(loaded.text().starts_with("// edited\n"));
+        assert!(!loaded.is_modified());
+
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

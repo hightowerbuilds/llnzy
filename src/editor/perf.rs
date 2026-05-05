@@ -35,6 +35,49 @@ pub fn minimap_enabled(line_count: usize) -> bool {
     line_count <= MINIMAP_LINE_LIMIT
 }
 
+pub fn live_lsp_enabled(line_count: usize) -> bool {
+    line_count <= LSP_CHANGE_LINE_LIMIT
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LargeFileDegradation {
+    pub syntax_disabled: bool,
+    pub minimap_disabled: bool,
+    pub live_lsp_disabled: bool,
+}
+
+impl LargeFileDegradation {
+    pub fn for_line_count(line_count: usize) -> Self {
+        Self {
+            syntax_disabled: !syntax_enabled(line_count),
+            minimap_disabled: !minimap_enabled(line_count),
+            live_lsp_disabled: !live_lsp_enabled(line_count),
+        }
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.syntax_disabled || self.minimap_disabled || self.live_lsp_disabled
+    }
+
+    pub fn status_label(&self) -> Option<String> {
+        if !self.is_active() {
+            return None;
+        }
+
+        let mut disabled = Vec::new();
+        if self.syntax_disabled {
+            disabled.push("syntax");
+        }
+        if self.minimap_disabled {
+            disabled.push("minimap");
+        }
+        if self.live_lsp_disabled {
+            disabled.push("live LSP");
+        }
+        Some(format!("Large file: {} limited", disabled.join(", ")))
+    }
+}
+
 /// Tracks performance metrics for the profiling overlay.
 pub struct PerfStats {
     /// Keystroke-to-render latency samples (ms).
@@ -175,5 +218,45 @@ mod tests {
         assert!(s.contains("Rope:"));
         assert!(s.contains("Undo: 5"));
         assert!(s.contains("TS: on"));
+    }
+
+    #[test]
+    fn large_file_threshold_fixtures_hit_expected_perf_gates() {
+        assert!(!syntax_enabled(
+            crate::editor::stress_fixtures::LARGE_SYNTAX_LINE_COUNT
+        ));
+        assert!(!minimap_enabled(
+            crate::editor::stress_fixtures::LARGE_MINIMAP_LINE_COUNT
+        ));
+        assert!(syntax_enabled(SYNTAX_LINE_LIMIT));
+        assert!(minimap_enabled(MINIMAP_LINE_LIMIT));
+        assert!(live_lsp_enabled(LSP_CHANGE_LINE_LIMIT));
+        assert!(!live_lsp_enabled(LSP_CHANGE_LINE_LIMIT + 1));
+    }
+
+    #[test]
+    fn large_file_degradation_reports_disabled_features() {
+        assert!(!LargeFileDegradation::for_line_count(MINIMAP_LINE_LIMIT).is_active());
+
+        let minimap = LargeFileDegradation::for_line_count(MINIMAP_LINE_LIMIT + 1);
+        assert_eq!(
+            minimap.status_label().as_deref(),
+            Some("Large file: minimap limited")
+        );
+
+        let syntax = LargeFileDegradation::for_line_count(SYNTAX_LINE_LIMIT + 1);
+        assert!(syntax.syntax_disabled);
+        assert!(syntax.minimap_disabled);
+        assert_eq!(
+            syntax.status_label().as_deref(),
+            Some("Large file: syntax, minimap limited")
+        );
+
+        let lsp = LargeFileDegradation::for_line_count(LSP_CHANGE_LINE_LIMIT + 1);
+        assert!(lsp.live_lsp_disabled);
+        assert_eq!(
+            lsp.status_label().as_deref(),
+            Some("Large file: syntax, minimap, live LSP limited")
+        );
     }
 }

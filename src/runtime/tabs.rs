@@ -42,24 +42,41 @@ impl App {
         if self.tabs.is_empty() {
             return;
         }
-        if let TabContent::CodeFile { buffer_id, .. } = &self.tabs[self.active_tab].content {
-            if let Some(ui) = &self.ui {
-                if let Some(buffer) = ui.editor_view.editor.buffer_for_id(*buffer_id) {
-                    if !buffer.is_modified() {
-                        self.force_close_tab();
-                        return;
-                    }
-                    let file = pending_close_file(&self.tabs[self.active_tab], *buffer_id, buffer);
-                    if let Some(ui) = &mut self.ui {
-                        ui.pending_close = Some(PendingClose::Tab(file));
-                        ui.save_prompt_error = None;
-                    }
-                    self.request_redraw();
-                    return;
+        let plan = {
+            let tab = &self.tabs[self.active_tab];
+            let buffer = match tab.content {
+                TabContent::CodeFile { buffer_id, .. } => self
+                    .ui
+                    .as_ref()
+                    .and_then(|ui| ui.editor_view.editor.buffer_for_id(buffer_id)),
+                _ => None,
+            };
+            plan_tab_close(tab, buffer)
+        };
+        match plan {
+            TabClosePlan::CloseNow => self.force_close_tab(),
+            TabClosePlan::Prompt(file) => {
+                if let Some(ui) = &mut self.ui {
+                    ui.pending_close = Some(PendingClose::Tab(file));
+                    ui.save_prompt_error = None;
                 }
+                self.request_redraw();
             }
         }
-        self.force_close_tab();
+    }
+
+    pub(crate) fn begin_window_close(&mut self) -> bool {
+        match plan_window_close(self.modified_code_tabs()) {
+            WindowClosePlan::ExitNow => true,
+            WindowClosePlan::Prompt(files) => {
+                if let Some(ui) = &mut self.ui {
+                    ui.pending_close = Some(PendingClose::Window(files.clone()));
+                    ui.save_prompt_error = None;
+                }
+                self.request_redraw();
+                false
+            }
+        }
     }
 
     pub(crate) fn join_active_tab_with_next(&mut self) -> bool {
@@ -283,7 +300,11 @@ impl App {
             .path()
             .map(|path| path.display().to_string())
             .unwrap_or_else(|| buf.file_name().to_string());
-        save_modified_buffer_for_close(buf, label)
+        let result = save_modified_buffer_for_close(buf, label);
+        if result.is_ok() {
+            let _ = llnzy::editor::recovery::clear_buffer_snapshot(buf);
+        }
+        result
     }
 
     pub(crate) fn save_modified_tabs_for_close(
@@ -391,6 +412,40 @@ impl App {
                 ));
             }
         }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum WindowClosePlan {
+    ExitNow,
+    Prompt(Vec<PendingCloseFile>),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum TabClosePlan {
+    CloseNow,
+    Prompt(PendingCloseFile),
+}
+
+fn plan_window_close(modified: Vec<PendingCloseFile>) -> WindowClosePlan {
+    if modified.is_empty() {
+        WindowClosePlan::ExitNow
+    } else {
+        WindowClosePlan::Prompt(modified)
+    }
+}
+
+fn plan_tab_close(tab: &WorkspaceTab, buffer: Option<&Buffer>) -> TabClosePlan {
+    let TabContent::CodeFile { buffer_id, .. } = tab.content else {
+        return TabClosePlan::CloseNow;
+    };
+    let Some(buffer) = buffer else {
+        return TabClosePlan::CloseNow;
+    };
+    if buffer.is_modified() {
+        TabClosePlan::Prompt(pending_close_file(tab, buffer_id, buffer))
+    } else {
+        TabClosePlan::CloseNow
     }
 }
 
@@ -519,6 +574,102 @@ mod tests {
         assert_eq!(target.buffer_id, buffer_id);
         assert_eq!(target.name, path.file_name().unwrap().to_string_lossy());
 
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn tab_close_plan_prompts_for_dirty_code_buffer() {
+        let path =
+            std::env::temp_dir().join(format!("llnzy-tab-close-dirty-{}.rs", std::process::id()));
+        std::fs::write(&path, "fn main() {}\n").unwrap();
+        let mut editor = EditorState::new();
+        let buffer_id = editor.open(path.clone()).unwrap();
+        editor
+            .buffer_for_id_mut(buffer_id)
+            .unwrap()
+            .insert(Position::new(0, 0), "// dirty\n");
+        let buffer = editor.buffer_for_id(buffer_id).unwrap();
+        let tab = WorkspaceTab {
+            content: TabContent::CodeFile {
+                path: path.clone(),
+                buffer_id,
+            },
+            name: None,
+            id: 42,
+        };
+
+        let plan = plan_tab_close(&tab, Some(buffer));
+
+        assert_eq!(
+            plan,
+            TabClosePlan::Prompt(PendingCloseFile {
+                tab_id: 42,
+                buffer_id,
+                name: path.file_name().unwrap().to_string_lossy().to_string(),
+            })
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn tab_close_plan_closes_clean_or_missing_code_buffer_without_prompt() {
+        let path =
+            std::env::temp_dir().join(format!("llnzy-tab-close-clean-{}.rs", std::process::id()));
+        std::fs::write(&path, "fn main() {}\n").unwrap();
+        let mut editor = EditorState::new();
+        let buffer_id = editor.open(path.clone()).unwrap();
+        let tab = WorkspaceTab {
+            content: TabContent::CodeFile {
+                path: path.clone(),
+                buffer_id,
+            },
+            name: None,
+            id: 42,
+        };
+
+        assert_eq!(
+            plan_tab_close(&tab, editor.buffer_for_id(buffer_id)),
+            TabClosePlan::CloseNow
+        );
+        assert_eq!(plan_tab_close(&tab, None), TabClosePlan::CloseNow);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn tab_close_plan_closes_non_code_tabs_without_prompt() {
+        let tab = WorkspaceTab {
+            content: TabContent::Home,
+            name: None,
+            id: 7,
+        };
+
+        assert_eq!(plan_tab_close(&tab, None), TabClosePlan::CloseNow);
+    }
+
+    #[test]
+    fn window_close_plan_exits_when_no_dirty_buffers_exist() {
+        assert_eq!(plan_window_close(Vec::new()), WindowClosePlan::ExitNow);
+    }
+
+    #[test]
+    fn window_close_plan_prompts_with_all_dirty_buffers() {
+        let path = std::env::temp_dir().join(format!(
+            "llnzy-window-close-dirty-{}.rs",
+            std::process::id()
+        ));
+        std::fs::write(&path, "fn main() {}\n").unwrap();
+        let mut editor = EditorState::new();
+        let buffer_id = editor.open(path.clone()).unwrap();
+        let file = PendingCloseFile {
+            tab_id: 99,
+            buffer_id,
+            name: "main.rs".to_string(),
+        };
+
+        assert_eq!(
+            plan_window_close(vec![file.clone()]),
+            WindowClosePlan::Prompt(vec![file])
+        );
         let _ = std::fs::remove_file(path);
     }
 

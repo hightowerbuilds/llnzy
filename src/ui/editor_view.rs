@@ -305,8 +305,8 @@ pub(crate) fn render_text_editor(
     }
 
     // Syntax highlights for visible lines (disabled for very large files)
-    let source_text = buf.text();
     let highlight_spans = if perf::syntax_enabled(line_count) {
+        let source_text = buf.text();
         match (view.lang_id, &view.tree) {
             (Some(lang_id), Some(tree)) => syntax.highlights_for_range(
                 lang_id,

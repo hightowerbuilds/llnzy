@@ -369,4 +369,27 @@ mod tests {
         search.search(Path::new("/tmp"));
         assert_eq!(search.match_count(), 0);
     }
+
+    #[test]
+    fn search_caps_large_match_fixture() {
+        let dir =
+            std::env::temp_dir().join(format!("llnzy_project_search_large_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("large.rs"),
+            crate::editor::stress_fixtures::search_lines(
+                crate::editor::stress_fixtures::STRESS_MATCH_COUNT,
+                "needle",
+            ),
+        )
+        .unwrap();
+
+        let results = search_files(&dir, "needle", false);
+
+        assert_eq!(results.len(), 1000);
+        assert_eq!(results[0].line, 0);
+        assert_eq!(results[999].line, 999);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

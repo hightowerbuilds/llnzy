@@ -4,6 +4,7 @@ use crate::engine::{
     Size, TextRun,
 };
 
+use super::config_helpers::TERMINAL_MINIMAL_BG;
 use super::RenderRequest;
 
 pub(super) fn engine_frame_from_request(
@@ -17,7 +18,7 @@ pub(super) fn engine_frame_from_request(
     frame.clear_color = color_from_rgba(config.bg());
     let has_terminal_content = request.terminal.is_some() || !request.terminal_panes.is_empty();
     if has_terminal_content && config.effects.background == "none" {
-        frame.clear_color = color_from_rgb_u8(super::TERMINAL_MINIMAL_BG);
+        frame.clear_color = color_from_rgb_u8(TERMINAL_MINIMAL_BG);
     }
 
     if use_scene {
