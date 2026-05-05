@@ -18,6 +18,7 @@ pub mod macos_text_bridge;
 #[cfg(target_os = "macos")]
 pub mod menu;
 pub mod path_utils;
+pub mod performance;
 pub mod platform;
 pub mod pty;
 pub mod renderer;

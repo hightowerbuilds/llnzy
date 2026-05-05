@@ -1,9 +1,11 @@
 use std::collections::HashSet;
+use std::time::Instant;
 
 use crate::config::{Config, CursorStyle};
 use crate::engine::{Color, EngineFrame, LayerKind, Size};
 use crate::error_log::{ErrorLog, ErrorPanel};
 use crate::layout::{ScreenLayout, FOOTER_HEIGHT};
+use crate::performance::{EffectsMode, PerformanceScenario};
 use crate::session::{Rect as PaneRect, Session};
 
 use super::config_helpers::{rgba_from_rgb, same_rgb, terminal_render_config, TERMINAL_MINIMAL_BG};
@@ -32,6 +34,7 @@ struct OverlayPass<'a> {
 
 impl Renderer {
     pub fn render(&mut self, request: RenderRequest<'_>) {
+        let frame_start = Instant::now();
         self.gpu.update_frame_uniforms();
 
         let Some(output) = self.acquire_surface_texture() else {
@@ -41,7 +44,21 @@ impl Renderer {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
         let mut encoder = self.create_render_encoder();
-        let use_scene = request.effects_enabled && self.config.effects.any_active();
+        let requested_effects = request.effects_enabled && self.config.effects.any_active();
+        self.adaptive_quality.set_scenario(if requested_effects {
+            PerformanceScenario::EffectsEnabled
+        } else if request.terminal.is_some() || !request.terminal_panes.is_empty() {
+            PerformanceScenario::TerminalIdle
+        } else {
+            PerformanceScenario::EditorTenThousandLines
+        });
+        let use_scene =
+            requested_effects && self.adaptive_quality.quality().allows_expensive_effects();
+        let effects_mode = if use_scene {
+            EffectsMode::On
+        } else {
+            EffectsMode::Off
+        };
         let engine_frame = frame_adapter::engine_frame_from_request(
             &request,
             &self.config,
@@ -130,6 +147,9 @@ impl Renderer {
 
         output.present();
         self.text.trim_atlas();
+        let frame_ms = frame_start.elapsed().as_secs_f32() * 1000.0;
+        self.effects_smoothness.record(effects_mode, frame_ms);
+        self.adaptive_quality.record_frame_ms(frame_ms);
     }
 
     fn acquire_surface_texture(&mut self) -> Option<wgpu::SurfaceTexture> {

@@ -84,6 +84,18 @@ impl App {
             }
         }
 
+        if now.duration_since(self.last_power_check) >= std::time::Duration::from_secs(30) {
+            self.last_power_check = now;
+            let power_source = llnzy::platform::power::current_power_source();
+            if power_source != self.current_power_source {
+                self.current_power_source = power_source;
+                if let Some(renderer) = &mut self.renderer {
+                    renderer.set_power_source(power_source);
+                }
+                self.request_redraw();
+            }
+        }
+
         // Continuous animation mode — only when effects actually need it
         let terminal_active = self.screen_layout.as_ref().is_some_and(|layout| {
             self.ui.as_ref().is_some_and(|ui| {

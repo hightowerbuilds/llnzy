@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 mod main_app;
 mod runtime;
@@ -21,6 +21,7 @@ use llnzy::diagnostics::write_diagnostic;
 use llnzy::error_log::{ErrorLog, ErrorPanel};
 use llnzy::keybindings::{primary_modifier, Action};
 use llnzy::layout::{logical_to_physical_width, LayoutInputs, ScreenLayout};
+use llnzy::performance::PowerSource;
 use llnzy::renderer::{RenderRequest, Renderer, TerminalPane};
 use llnzy::search::Search;
 use llnzy::stacker::commands::StackerCommandId;
@@ -89,6 +90,8 @@ struct App {
     last_blink_toggle: Instant,
     last_keypress: Instant,
     last_config_check: Instant,
+    last_power_check: Instant,
+    current_power_source: PowerSource,
     last_editor_recovery_save: Instant,
     #[cfg(target_os = "macos")]
     stacker_bridge_active: Option<bool>,
@@ -127,6 +130,8 @@ impl App {
             last_blink_toggle: Instant::now(),
             last_keypress: Instant::now(),
             last_config_check: Instant::now(),
+            last_power_check: Instant::now() - Duration::from_secs(60),
+            current_power_source: PowerSource::Unknown,
             last_editor_recovery_save: Instant::now(),
             #[cfg(target_os = "macos")]
             stacker_bridge_active: None,

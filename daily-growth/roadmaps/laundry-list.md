@@ -26,6 +26,7 @@ Treat this as a parking lot, not a current sprint plan. Many entries came from o
 - [x] Tree-sitter incremental edit foundation: records precise buffer edit ranges, applies tree-sitter `InputEdit` to previous parse trees for small active-buffer edits, falls back to full parses when edit data or trees are unavailable, and covers Unicode byte-column behavior. Source: `tweaks.md`.
 - [x] Terminal interaction foundation: verified terminal conformance coverage for selection, paste, control keys, alternate screen, ANSI color, and scrollback basics; confirmed selection drag performance and copy correctness coverage; added configurable copy-on-select; verified terminal titles plus link detection/opening are wired; hardened lifecycle behavior with explicit close-time process termination plus bounded long-running output processing; and added search across retained scrollback. Sources: `llnzy-critical-review-04-28-2026.md`, `leftovers-roadmap-3.md`, `tweaks.md`.
 - [x] Git read-only foundation: shared repository discovery with the editor gutter, kept Git tab command work async, retained CLI behind the model/parser boundary for a future `git2` backend, opened Git file rows through normal editor tabs, added log scope/first-parent/active-file history controls, refreshed from a debounced repository watcher, displayed linked worktrees, improved keyboard commit selection, and kept mutating actions deferred behind explicit safety UX. Source: `llnzy-local-git-tab-roadmap-05-01-2026.md`.
+- [x] Rendering performance foundation: added explicit performance budgets for terminal, editor, effects, LSP, and Git scenarios; added repeatable harness definitions and frame-smoothness evaluation; wired renderer adaptive quality so expensive effects are reduced when recent frame timing exceeds budget; added platform power-source detection for power-aware quality caps; and added clean/effects frame-smoothness tracking. Sources: `llnzy-critical-review-04-28-2026.md`, `llnzy-roadmap.md`, `llnzy-code-quality-cleanup-roadmap.md`.
 
 ## Cross-Platform Compatibility
 
@@ -195,11 +196,11 @@ Treat this as a parking lot, not a current sprint plan. Many entries came from o
 
 ## Rendering, Performance, And Graphics
 
-- [ ] Add explicit performance budgets for terminal, editor, effects, LSP, and Git scenarios. Source: `llnzy-critical-review-04-28-2026.md`.
-- [ ] Build repeatable performance harnesses for terminal, editor, effects, LSP, and Git workflows. Source: `llnzy-critical-review-04-28-2026.md`.
-- [ ] Add adaptive quality when frame time exceeds budget. Source: `llnzy-roadmap.md`.
-- [ ] Add power-aware rendering on battery. Source: `llnzy-roadmap.md`.
-- [ ] Measure frame smoothness with effects on and off. Source: `llnzy-code-quality-cleanup-roadmap.md`.
+- [x] Add explicit performance budgets for terminal, editor, effects, LSP, and Git scenarios. Source: `llnzy-critical-review-04-28-2026.md`.
+- [x] Build repeatable performance harnesses for terminal, editor, effects, LSP, and Git workflows. Source: `llnzy-critical-review-04-28-2026.md`.
+- [x] Add adaptive quality when frame time exceeds budget. Source: `llnzy-roadmap.md`.
+- [x] Add power-aware rendering on battery. Source: `llnzy-roadmap.md`.
+- [x] Measure frame smoothness with effects on and off. Source: `llnzy-code-quality-cleanup-roadmap.md`.
 - [ ] Validate stale text artifacts after scroll, split resize, tab switch, and theme change. Source: `llnzy-code-quality-cleanup-roadmap.md`.
 - [ ] Verify terminal text correctness across resize, scrollback, splits, tabs, and themes. Source: `llnzy-code-quality-cleanup-roadmap.md`.
 - [ ] Resolve mismatch between UI background options and built-in shader registration. Source: `llnzy-code-quality-cleanup-roadmap.md`.

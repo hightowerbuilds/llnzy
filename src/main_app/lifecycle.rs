@@ -32,7 +32,11 @@ impl App {
         // Input methods can deliver text through AppKit's IME/text-input path.
         // winit disables that by default, so opt in for terminal and Stacker text entry.
         window.set_ime_allowed(true);
-        let renderer = pollster::block_on(Renderer::new(window.clone(), self.config.clone()));
+        let power_source = llnzy::platform::power::current_power_source();
+        self.current_power_source = power_source;
+        self.last_power_check = std::time::Instant::now();
+        let mut renderer = pollster::block_on(Renderer::new(window.clone(), self.config.clone()));
+        renderer.set_power_source(power_source);
 
         let (cw, ch) = renderer.cell_dimensions();
         let gox = renderer.glyph_offset_x();

@@ -17,6 +17,9 @@ use std::sync::Arc;
 use winit::window::Window;
 
 use crate::config::Config;
+use crate::performance::{
+    AdaptiveQualityState, EffectsSmoothnessSnapshot, EffectsSmoothnessTracker, PowerSource,
+};
 use background::BackgroundRenderer;
 use blit::BlitPipeline;
 use bloom::BloomEffect;
@@ -38,6 +41,8 @@ pub struct Renderer {
     cursor_renderer: CursorRenderer,
     particles: ParticleSystem,
     background: BackgroundRenderer,
+    adaptive_quality: AdaptiveQualityState,
+    effects_smoothness: EffectsSmoothnessTracker,
     config: Config,
     pub cursor_visible: bool,
     scale_factor: f32,
@@ -65,6 +70,8 @@ impl Renderer {
             cursor_renderer,
             particles,
             background,
+            adaptive_quality: AdaptiveQualityState::default(),
+            effects_smoothness: EffectsSmoothnessTracker::default(),
             config,
             cursor_visible: true,
             scale_factor: scale_factor as f32,
@@ -118,6 +125,14 @@ impl Renderer {
 
     pub fn gpu_delta_time(&self) -> f32 {
         self.gpu.current_delta
+    }
+
+    pub fn set_power_source(&mut self, power_source: PowerSource) {
+        self.adaptive_quality.set_power_source(power_source);
+    }
+
+    pub fn effects_smoothness(&self) -> EffectsSmoothnessSnapshot {
+        self.effects_smoothness.snapshot(16.67)
     }
 
     pub fn invalidate_text_cache(&mut self) {
