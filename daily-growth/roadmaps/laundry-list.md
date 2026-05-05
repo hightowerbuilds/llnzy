@@ -20,6 +20,11 @@ Treat this as a parking lot, not a current sprint plan. Many entries came from o
 - [x] Multi-file search foundation: verified project search opens from shortcuts and command palette, searches asynchronously across searchable text files, supports regex mode, skips heavy dependency/build folders, includes searchable dotfiles, and opens result matches through the normal file-tab handoff. Source: `llnzy-source-editor-roadmap.md`.
 - [x] Sidebar/file UX polish: newly created files now open as normal code tabs, sidebar right-click menus cover file/folder actions, Close Folder and sidebar font-size behavior are wired, file icons remain available for known types, and expanded folders use green connector lines instead of disclosure glyphs. Sources: `sidebar-file-explorer-hardening-05-03-2026.md`, `tweaks.md`.
 - [x] External sidebar import drop foundation: native files and folders dropped onto the sidebar root or folders copy into the workspace without overwriting existing items, reuse sidebar drop targeting, and refresh the destination folder after import. Source: later sidebar workflow decision.
+- [x] LSP deterministic test foundation: added a fake LSP request/response harness plus ready, pending, and closed async result helpers so editor/LSP tests can cover code intelligence paths without spawning real language servers. Source: `llnzy-reliability-durability-roadmap-05-01-2026.md`.
+- [x] LSP code intelligence foundation: verified and covered find references, signature help, workspace symbol search, inlay hints, code lens rendering, diagnostic quick fixes, and LSP progress/status updates with deterministic fake-LSP tests. Sources: `llnzy-source-editor-roadmap.md`, `tweaks.md`.
+- [x] LSP workspace and restart foundation: LSP sessions now advertise multiple workspace folders, add new detected roots without clearing existing clients, sync running clients with workspace-folder changes, and auto-restart stopped active language servers by reopening the active document. Source: `tweaks.md`.
+- [x] Tree-sitter incremental edit foundation: records precise buffer edit ranges, applies tree-sitter `InputEdit` to previous parse trees for small active-buffer edits, falls back to full parses when edit data or trees are unavailable, and covers Unicode byte-column behavior. Source: `tweaks.md`.
+- [x] Terminal interaction foundation: verified terminal conformance coverage for selection, paste, control keys, alternate screen, ANSI color, and scrollback basics; confirmed selection drag performance and copy correctness coverage; added configurable copy-on-select; verified terminal titles plus link detection/opening are wired; hardened lifecycle behavior with explicit close-time process termination plus bounded long-running output processing; and added search across retained scrollback. Sources: `llnzy-critical-review-04-28-2026.md`, `leftovers-roadmap-3.md`, `tweaks.md`.
 
 ## Cross-Platform Compatibility
 
@@ -91,17 +96,17 @@ Treat this as a parking lot, not a current sprint plan. Many entries came from o
 
 ## LSP And Code Intelligence
 
-- [ ] Build a fake-LSP test harness for deterministic editor/LSP tests. Source: `llnzy-reliability-durability-roadmap-05-01-2026.md`.
-- [ ] Add find references. Source: `llnzy-source-editor-roadmap.md`.
-- [ ] Add signature help. Source: `llnzy-source-editor-roadmap.md`.
-- [ ] Add workspace symbol search. Source: `llnzy-source-editor-roadmap.md`.
-- [ ] Add inlay hints. Source: `llnzy-source-editor-roadmap.md`.
-- [ ] Add code lens. Source: `llnzy-source-editor-roadmap.md`.
-- [ ] Add diagnostic quick-fix integration. Source: `tweaks.md`.
-- [ ] Add LSP progress notifications and status bar server status. Source: `tweaks.md`.
-- [ ] Support multiple workspace folders in LSP sessions. Source: `tweaks.md`.
-- [ ] Auto-restart crashed language servers with visible status. Source: `tweaks.md`.
-- [ ] Add tree-sitter incremental edit support if profiling shows full reparse costs are meaningful. Source: `tweaks.md`.
+- [x] Build a fake-LSP test harness for deterministic editor/LSP tests. Source: `llnzy-reliability-durability-roadmap-05-01-2026.md`.
+- [x] Add find references. Source: `llnzy-source-editor-roadmap.md`.
+- [x] Add signature help. Source: `llnzy-source-editor-roadmap.md`.
+- [x] Add workspace symbol search. Source: `llnzy-source-editor-roadmap.md`.
+- [x] Add inlay hints. Source: `llnzy-source-editor-roadmap.md`.
+- [x] Add code lens. Source: `llnzy-source-editor-roadmap.md`.
+- [x] Add diagnostic quick-fix integration. Source: `tweaks.md`.
+- [x] Add LSP progress notifications and status bar server status. Source: `tweaks.md`.
+- [x] Support multiple workspace folders in LSP sessions. Source: `tweaks.md`.
+- [x] Auto-restart crashed language servers with visible status. Source: `tweaks.md`.
+- [x] Add tree-sitter incremental edit support if profiling shows full reparse costs are meaningful. Source: `tweaks.md`.
 
 ## Stacker And External Input
 
@@ -123,15 +128,15 @@ Treat this as a parking lot, not a current sprint plan. Many entries came from o
 
 ## Terminal
 
-- [ ] Continue terminal lifecycle hardening around startup, restart, resize, close, and long-running sessions. Sources: `enterprise-editor-readiness-review-05-02-2026.md`, `llnzy-critical-review-04-28-2026.md`.
-- [ ] Add or verify terminal conformance coverage for selection, paste, control keys, alternate screen, ANSI color, and scrollback. Source: `llnzy-critical-review-04-28-2026.md`.
-- [ ] Profile terminal selection drag latency, especially while a mouse-reporting TUI is running. Sources: `leftovers-roadmap-3.md`, `reliability-manual-testing-05-02-2026.md`.
-- [ ] Verify copy correctness after forward drag, backward drag, word selection, line selection, and select all. Source: `leftovers-roadmap-3.md`.
-- [ ] Add terminal title from the running process. Source: `tweaks.md`.
-- [ ] Add or extend terminal link detection. Source: `tweaks.md`.
-- [ ] Add copy-on-select option. Source: `tweaks.md`.
-- [ ] Add scrollback search. Source: `tweaks.md`.
-- [ ] Recheck terminal right-click/menu behavior after each interaction pass. Source: `manual-smoke-checklist.md`.
+- [x] Continue terminal lifecycle hardening around startup, restart, resize, close, and long-running sessions. Sources: `enterprise-editor-readiness-review-05-02-2026.md`, `llnzy-critical-review-04-28-2026.md`.
+- [x] Add or verify terminal conformance coverage for selection, paste, control keys, alternate screen, ANSI color, and scrollback. Source: `llnzy-critical-review-04-28-2026.md`.
+- [x] Profile terminal selection drag latency, especially while a mouse-reporting TUI is running. Sources: `leftovers-roadmap-3.md`, `reliability-manual-testing-05-02-2026.md`.
+- [x] Verify copy correctness after forward drag, backward drag, word selection, line selection, and select all. Source: `leftovers-roadmap-3.md`.
+- [x] Add terminal title from the running process. Source: `tweaks.md`.
+- [x] Add or extend terminal link detection. Source: `tweaks.md`.
+- [x] Add copy-on-select option. Source: `tweaks.md`.
+- [x] Add scrollback search. Source: `tweaks.md`.
+- [x] Recheck terminal right-click/menu behavior after each interaction pass. Source: `manual-smoke-checklist.md`.
 
 ## Git
 

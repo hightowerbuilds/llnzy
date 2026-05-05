@@ -79,6 +79,11 @@ impl App {
         }
     }
 
+    pub(crate) fn terminate_all_terminal_tabs_for_exit(&mut self) {
+        let closing: Vec<usize> = (0..self.tabs.len()).collect();
+        self.terminate_terminal_tabs_for_close(&closing);
+    }
+
     pub(crate) fn join_active_tab_with_next(&mut self) -> bool {
         if self.tabs.len() < 2 {
             return false;
@@ -240,6 +245,7 @@ impl App {
         }
         let removed_idx = self.active_tab;
         let removed_id = self.tabs[removed_idx].id;
+        self.terminate_terminal_tabs_for_close(&[removed_idx]);
         self.tabs.remove(removed_idx);
         if let Some(ui) = &mut self.ui {
             ui.tab_groups.remove_tab(removed_id);
@@ -256,6 +262,24 @@ impl App {
         self.clear_terminal_selection();
         self.recompute_layout();
         self.request_redraw();
+    }
+
+    pub(crate) fn terminate_terminal_tabs_for_close(&mut self, tab_indexes: &[usize]) {
+        let mut outcomes = Vec::new();
+        for idx in tab_indexes {
+            let Some(tab) = self.tabs.get_mut(*idx) else {
+                continue;
+            };
+            if let Some(outcome) = terminate_terminal_for_close(tab) {
+                outcomes.push(outcome);
+            }
+        }
+        for outcome in outcomes {
+            match outcome.level {
+                TerminalCloseLogLevel::Info => self.error_log.info(outcome.message),
+                TerminalCloseLogLevel::Warn => self.error_log.warn(outcome.message),
+            }
+        }
     }
 
     pub(crate) fn force_close_tab_id(&mut self, tab_id: u64) -> bool {
@@ -483,6 +507,24 @@ struct TerminalRestartPlan {
     clear_selection: bool,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum TerminalClosePlan {
+    AlreadyExited,
+    TerminateRunning,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum TerminalCloseLogLevel {
+    Info,
+    Warn,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct TerminalCloseOutcome {
+    level: TerminalCloseLogLevel,
+    message: String,
+}
+
 fn plan_terminal_restart(
     idx: usize,
     cwd: Option<String>,
@@ -496,6 +538,49 @@ fn plan_terminal_restart(
         active_tab: idx,
         clear_selection: true,
     }
+}
+
+fn plan_terminal_close(exited: Option<i32>) -> TerminalClosePlan {
+    if exited.is_some() {
+        TerminalClosePlan::AlreadyExited
+    } else {
+        TerminalClosePlan::TerminateRunning
+    }
+}
+
+fn terminate_terminal_for_close(tab: &mut WorkspaceTab) -> Option<TerminalCloseOutcome> {
+    let TabContent::Terminal(session) = &mut tab.content else {
+        return None;
+    };
+    match plan_terminal_close(session.exited) {
+        TerminalClosePlan::AlreadyExited => None,
+        TerminalClosePlan::TerminateRunning => Some(match session.kill() {
+            Ok(()) => TerminalCloseOutcome {
+                level: TerminalCloseLogLevel::Info,
+                message: terminal_close_message(session.process_id),
+            },
+            Err(err) => TerminalCloseOutcome {
+                level: TerminalCloseLogLevel::Warn,
+                message: terminal_close_failure_message(session.process_id, &err),
+            },
+        }),
+    }
+}
+
+fn terminal_close_message(process_id: Option<u32>) -> String {
+    let pid = terminal_process_label(process_id);
+    format!("Terminated terminal process {pid} while closing tab")
+}
+
+fn terminal_close_failure_message(process_id: Option<u32>, err: &std::io::Error) -> String {
+    let pid = terminal_process_label(process_id);
+    format!("Failed to terminate terminal process {pid} while closing tab: {err}")
+}
+
+fn terminal_process_label(process_id: Option<u32>) -> String {
+    process_id
+        .map(|pid| pid.to_string())
+        .unwrap_or_else(|| "unknown pid".to_string())
 }
 
 fn terminal_tab_rejection_message(action: &str, idx: usize, reason: &str) -> String {
@@ -701,6 +786,32 @@ mod tests {
         assert!(!plan.kill_existing);
         assert_eq!(plan.active_tab, 1);
         assert!(plan.clear_selection);
+    }
+
+    #[test]
+    fn terminal_close_plan_terminates_only_running_sessions() {
+        assert_eq!(
+            plan_terminal_close(None),
+            TerminalClosePlan::TerminateRunning
+        );
+        assert_eq!(
+            plan_terminal_close(Some(0)),
+            TerminalClosePlan::AlreadyExited
+        );
+    }
+
+    #[test]
+    fn terminal_close_messages_include_process_identity() {
+        assert_eq!(
+            terminal_close_message(Some(4242)),
+            "Terminated terminal process 4242 while closing tab"
+        );
+
+        let err = std::io::Error::other("permission denied");
+        assert_eq!(
+            terminal_close_failure_message(None, &err),
+            "Failed to terminate terminal process unknown pid while closing tab: permission denied"
+        );
     }
 
     #[test]

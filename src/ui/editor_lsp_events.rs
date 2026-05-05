@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use tokio::sync::oneshot;
@@ -438,6 +439,14 @@ pub(super) fn refresh_lsp_status(editor_state: &mut EditorViewState) {
 
     let lang_id = editor_state.editor.views[active].lang_id;
     if let (Some(lang_id), Some(lsp)) = (lang_id, &mut editor_state.lsp) {
+        if let Some(path) = editor_state.editor.buffers[active]
+            .path()
+            .map(PathBuf::from)
+        {
+            let text = editor_state.editor.buffers[active].text();
+            let _ = lsp.restart_crashed_server_with_document(&path, lang_id, &text);
+        }
+
         let status = lsp.server_status(lang_id);
         if status.is_empty() {
             editor_state.lsp_status.clear();
@@ -523,6 +532,16 @@ mod tests {
         }
     }
 
+    fn workspace_symbol(path: std::path::PathBuf, name: &str) -> crate::lsp::WorkspaceSymbol {
+        crate::lsp::WorkspaceSymbol {
+            name: name.to_string(),
+            kind: "Function".to_string(),
+            path,
+            line: 0,
+            col: 0,
+        }
+    }
+
     fn edit(new_text: &str) -> crate::lsp::FormatEdit {
         crate::lsp::FormatEdit {
             start_line: 0,
@@ -531,6 +550,13 @@ mod tests {
             end_col: 5,
             new_text: new_text.to_string(),
         }
+    }
+
+    fn poll_ready_lsp_events(state: &mut EditorViewState) {
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| poll_lsp_events(ui, state));
+        });
     }
 
     fn seed_lsp_ui_state(state: &mut EditorViewState, path: std::path::PathBuf) {
@@ -847,5 +873,178 @@ mod tests {
         assert!(state.status_msg.is_none());
 
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn fake_lsp_ready_response_drives_pending_completion_poll() {
+        let path = temp_path("fake-completion-poll.rs");
+        std::fs::write(&path, "fn main() {}\n").unwrap();
+        let mut state = EditorViewState::default();
+        let buffer_id = state.editor.open(path.clone()).unwrap();
+        state.completion = Some(CompletionState {
+            items: Vec::new(),
+            selected: 0,
+            filter: String::new(),
+            trigger_line: 0,
+            trigger_col: 0,
+        });
+        state.pending.completion = Some(crate::ui::explorer_view::PendingLspRequest::new(
+            buffer_id,
+            crate::lsp::test_harness::ready_response(vec![completion("println!")]),
+        ));
+
+        poll_ready_lsp_events(&mut state);
+
+        assert!(state.pending.completion.is_none());
+        assert_eq!(
+            state.completion.as_ref().unwrap().items[0].label,
+            "println!"
+        );
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn fake_lsp_ready_response_drives_pending_signature_help_poll() {
+        let path = temp_path("fake-signature-help-poll.rs");
+        std::fs::write(&path, "fn main() {}\n").unwrap();
+        let mut state = EditorViewState::default();
+        let buffer_id = state.editor.open(path.clone()).unwrap();
+        state.signature_help = Some(signature("old-signature"));
+        state.pending.signature_help = Some(crate::ui::explorer_view::PendingLspRequest::new(
+            buffer_id,
+            crate::lsp::test_harness::ready_response(Some(signature("println!(value)"))),
+        ));
+
+        poll_ready_lsp_events(&mut state);
+
+        assert!(state.pending.signature_help.is_none());
+        assert_eq!(
+            state.signature_help.as_ref().unwrap().label,
+            "println!(value)"
+        );
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn fake_lsp_ready_response_drives_pending_references_poll() {
+        let path = temp_path("fake-references-poll.rs");
+        std::fs::write(&path, "fn main() {}\n").unwrap();
+        let mut state = EditorViewState::default();
+        let buffer_id = state.editor.open(path.clone()).unwrap();
+        state.references_popup = Some(vec![reference(path.clone(), "old-reference")]);
+        state.references_selected = 4;
+        state.status_msg = Some("Finding references...".to_string());
+        state.pending.references = Some(crate::ui::explorer_view::PendingLspRequest::new(
+            buffer_id,
+            crate::lsp::test_harness::ready_response(vec![
+                reference(path.clone(), "first-reference"),
+                reference(path.clone(), "second-reference"),
+            ]),
+        ));
+
+        poll_ready_lsp_events(&mut state);
+
+        assert!(state.pending.references.is_none());
+        let refs = state.references_popup.as_ref().unwrap();
+        assert_eq!(refs.len(), 2);
+        assert_eq!(refs[0].context, "first-reference");
+        assert_eq!(refs[1].context, "second-reference");
+        assert_eq!(state.references_selected, 0);
+        assert!(state.status_msg.is_none());
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn fake_lsp_ready_response_drives_pending_inlay_hints_poll() {
+        let path = temp_path("fake-inlay-hints-poll.rs");
+        std::fs::write(&path, "fn main() {}\n").unwrap();
+        let mut state = EditorViewState::default();
+        let buffer_id = state.editor.open(path.clone()).unwrap();
+        state.inlay_hints = vec![inlay("old-inlay")];
+        state.pending.inlay_hints = Some(crate::ui::explorer_view::PendingLspRequest::new(
+            buffer_id,
+            crate::lsp::test_harness::ready_response(vec![inlay(": usize"), inlay(": String")]),
+        ));
+
+        poll_ready_lsp_events(&mut state);
+
+        assert!(state.pending.inlay_hints.is_none());
+        assert_eq!(state.inlay_hints.len(), 2);
+        assert_eq!(state.inlay_hints[0].label, ": usize");
+        assert_eq!(state.inlay_hints[1].label, ": String");
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn fake_lsp_ready_response_drives_pending_code_lens_poll() {
+        let path = temp_path("fake-code-lens-poll.rs");
+        std::fs::write(&path, "fn main() {}\n").unwrap();
+        let mut state = EditorViewState::default();
+        let buffer_id = state.editor.open(path.clone()).unwrap();
+        state.code_lenses = vec![code_lens("old-lens")];
+        state.pending.code_lens = Some(crate::ui::explorer_view::PendingLspRequest::new(
+            buffer_id,
+            crate::lsp::test_harness::ready_response(vec![
+                code_lens("Run test"),
+                code_lens("Debug test"),
+            ]),
+        ));
+
+        poll_ready_lsp_events(&mut state);
+
+        assert!(state.pending.code_lens.is_none());
+        assert_eq!(state.code_lenses.len(), 2);
+        assert_eq!(state.code_lenses[0].title, "Run test");
+        assert_eq!(state.code_lenses[1].title, "Debug test");
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn fake_lsp_ready_response_drives_pending_code_actions_poll() {
+        let path = temp_path("fake-code-actions-poll.rs");
+        std::fs::write(&path, "fn main() {}\n").unwrap();
+        let mut state = EditorViewState::default();
+        let buffer_id = state.editor.open(path.clone()).unwrap();
+        state.code_actions_popup = None;
+        state.status_msg = Some("Loading code actions...".to_string());
+        state.pending.code_actions = Some(crate::ui::explorer_view::PendingLspRequest::new(
+            buffer_id,
+            crate::lsp::test_harness::ready_response(vec![code_action("Apply quick fix")]),
+        ));
+
+        poll_ready_lsp_events(&mut state);
+
+        assert!(state.pending.code_actions.is_none());
+        assert_eq!(
+            state.code_actions_popup.as_ref().unwrap()[0].title,
+            "Apply quick fix"
+        );
+        assert_eq!(state.code_actions_selected, 0);
+        assert!(state.status_msg.is_none());
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn fake_lsp_ready_response_drives_workspace_symbol_poll() {
+        let path = temp_path("fake-workspace-symbol.rs");
+        let mut state = EditorViewState::default();
+        state.pending.workspace_symbols = Some(crate::lsp::test_harness::ready_response(vec![
+            workspace_symbol(path.clone(), "FakeSymbol"),
+        ]));
+
+        poll_ready_lsp_events(&mut state);
+
+        assert!(state.pending.workspace_symbols.is_none());
+        assert_eq!(
+            state.workspace_symbols_popup.as_ref().unwrap()[0].name,
+            "FakeSymbol"
+        );
+        assert_eq!(state.workspace_symbols_selected, 0);
     }
 }

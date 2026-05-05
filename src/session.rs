@@ -4,6 +4,9 @@ use crate::platform::terminal_host::TerminalLaunchSpec;
 use crate::pty::{Pty, PtyReadResult};
 use crate::terminal::{Terminal, TerminalEvent};
 
+const MAX_OUTPUT_CHUNKS_PER_FRAME: usize = 256;
+const MAX_OUTPUT_BYTES_PER_FRAME: usize = 2 * 1024 * 1024;
+
 pub struct Session {
     pub terminal: Terminal,
     pub pty: Pty,
@@ -51,9 +54,16 @@ impl Session {
     pub fn process_output(&mut self) -> (bool, Option<String>, bool) {
         let mut all_bytes = Vec::new();
         let mut disconnected = false;
+        let mut chunks_read = 0;
         loop {
+            if terminal_output_budget_exhausted(chunks_read, all_bytes.len()) {
+                break;
+            }
             match self.pty.try_read() {
-                PtyReadResult::Data(bytes) => all_bytes.extend_from_slice(&bytes),
+                PtyReadResult::Data(bytes) => {
+                    chunks_read += 1;
+                    all_bytes.extend_from_slice(&bytes);
+                }
                 PtyReadResult::Empty => break,
                 PtyReadResult::Disconnected(exit_code) => {
                     if self.exited.is_none() {
@@ -119,6 +129,10 @@ impl Session {
     pub fn kill(&mut self) -> std::io::Result<()> {
         self.pty.kill()
     }
+}
+
+fn terminal_output_budget_exhausted(chunks_read: usize, bytes_read: usize) -> bool {
+    chunks_read >= MAX_OUTPUT_CHUNKS_PER_FRAME || bytes_read >= MAX_OUTPUT_BYTES_PER_FRAME
 }
 
 enum TerminalEventAction {
@@ -241,6 +255,23 @@ mod tests {
         assert!(matches!(action, TerminalEventAction::None));
         assert_eq!(title, "user@host: /tmp/from-title");
         assert_eq!(cwd.as_deref(), Some("/tmp/from-title"));
+    }
+
+    #[test]
+    fn terminal_output_budget_limits_chunks_and_bytes() {
+        assert!(!terminal_output_budget_exhausted(0, 0));
+        assert!(!terminal_output_budget_exhausted(
+            MAX_OUTPUT_CHUNKS_PER_FRAME - 1,
+            MAX_OUTPUT_BYTES_PER_FRAME - 1
+        ));
+        assert!(terminal_output_budget_exhausted(
+            MAX_OUTPUT_CHUNKS_PER_FRAME,
+            0
+        ));
+        assert!(terminal_output_budget_exhausted(
+            0,
+            MAX_OUTPUT_BYTES_PER_FRAME
+        ));
     }
 }
 

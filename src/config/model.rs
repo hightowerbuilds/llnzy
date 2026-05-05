@@ -71,6 +71,7 @@ pub struct Config {
     pub padding_y: f32,
     pub opacity: f32,
     pub scroll_lines: u32,
+    pub terminal: TerminalConfig,
     pub effects: EffectsConfig,
     pub editor: EditorConfig,
     pub syntax_colors: HashMap<HighlightGroup, [u8; 3]>,
@@ -79,6 +80,19 @@ pub struct Config {
     pub time_of_day_enabled: bool,
     pub(super) config_path: Option<PathBuf>,
     pub(super) config_mtime: Option<SystemTime>,
+}
+
+#[derive(Clone, Debug)]
+pub struct TerminalConfig {
+    pub copy_on_select: bool,
+}
+
+impl Default for TerminalConfig {
+    fn default() -> Self {
+        Self {
+            copy_on_select: false,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -263,6 +277,7 @@ impl Default for Config {
             padding_y: 25.0,
             opacity: 1.0,
             scroll_lines: 3,
+            terminal: TerminalConfig::default(),
             effects: EffectsConfig::default(),
             editor: EditorConfig::default(),
             syntax_colors: HashMap::new(),

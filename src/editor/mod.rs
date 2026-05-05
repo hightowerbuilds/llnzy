@@ -20,7 +20,7 @@ use std::thread;
 use buffer::Buffer;
 use cursor::EditorCursor;
 use syntax::{FoldRange, SyntaxEngine};
-use tree_sitter::Tree;
+use tree_sitter::{InputEdit, Point, Tree};
 
 use crate::keybindings::VimMode;
 
@@ -53,6 +53,8 @@ pub struct BufferView {
     pub tree_dirty: bool,
     parse_pending: bool,
     parse_generation: u64,
+    pending_tree_edit: Option<InputEdit>,
+    last_parse_used_incremental: bool,
     pub folded_ranges: Vec<FoldRange>,
     pub pending_key_chord: Option<EditorKeyChord>,
     pub git_gutter: Option<git_gutter::GitGutter>,
@@ -102,6 +104,8 @@ impl Default for BufferView {
             tree_dirty: false,
             parse_pending: false,
             parse_generation: 0,
+            pending_tree_edit: None,
+            last_parse_used_incremental: false,
             folded_ranges: Vec::new(),
             pending_key_chord: None,
             git_gutter: None,
@@ -127,6 +131,8 @@ impl Clone for BufferView {
             tree_dirty: true,
             parse_pending: false,
             parse_generation: self.parse_generation,
+            pending_tree_edit: None,
+            last_parse_used_incremental: false,
             folded_ranges: self.folded_ranges.clone(),
             pending_key_chord: self.pending_key_chord,
             git_gutter: None, // Git gutter reloaded on open
@@ -144,6 +150,38 @@ struct ParseResult {
     lang_id: &'static str,
     tree: Option<Tree>,
     line_count: usize,
+    used_incremental: bool,
+}
+
+enum SyntaxReparsePlan {
+    Skip,
+    Fresh {
+        lang_id: &'static str,
+    },
+    Incremental {
+        lang_id: &'static str,
+        old_tree: Tree,
+        edit: InputEdit,
+    },
+}
+
+fn plan_syntax_reparse(line_count: usize, view: &BufferView) -> SyntaxReparsePlan {
+    if !perf::syntax_enabled(line_count) || !view.tree_dirty || view.parse_pending {
+        return SyntaxReparsePlan::Skip;
+    }
+
+    let Some(lang_id) = view.lang_id else {
+        return SyntaxReparsePlan::Skip;
+    };
+
+    match (&view.tree, view.pending_tree_edit.clone()) {
+        (Some(tree), Some(edit)) => SyntaxReparsePlan::Incremental {
+            lang_id,
+            old_tree: tree.clone(),
+            edit,
+        },
+        _ => SyntaxReparsePlan::Fresh { lang_id },
+    }
 }
 
 /// Top-level editor state managing open buffers.
@@ -317,41 +355,71 @@ impl EditorState {
             .is_some_and(|view| view.parse_pending)
     }
 
+    pub fn record_active_incremental_edit(
+        &mut self,
+        old_source: &str,
+        start: buffer::Position,
+        old_end: buffer::Position,
+        new_text: &str,
+    ) -> bool {
+        if self.active >= self.buffers.len() {
+            return false;
+        }
+        let view = &mut self.views[self.active];
+        if view.parse_pending || view.tree.is_none() || view.lang_id.is_none() {
+            view.pending_tree_edit = None;
+            return false;
+        }
+
+        view.pending_tree_edit = Some(input_edit_from_positions(
+            old_source, start, old_end, new_text,
+        ));
+        view.tree_dirty = true;
+        view.folded_ranges.clear();
+        true
+    }
+
     /// Re-parse the active buffer's syntax tree if it's dirty.
     pub fn reparse_active(&mut self) {
         self.poll_parse_results();
         if self.active >= self.buffers.len() {
             return;
         }
-        // Skip re-parse for very large files
-        if !perf::syntax_enabled(self.buffers[self.active].line_count()) {
-            return;
-        }
-        let view = &mut self.views[self.active];
-        if !view.tree_dirty {
-            return;
-        }
-        let Some(lang_id) = view.lang_id else { return };
-        if view.parse_pending {
-            return;
-        }
+        let line_count = self.buffers[self.active].line_count();
+        let (lang_id, old_tree, used_incremental) =
+            match plan_syntax_reparse(line_count, &self.views[self.active]) {
+                SyntaxReparsePlan::Skip => return,
+                SyntaxReparsePlan::Fresh { lang_id } => (lang_id, None, false),
+                SyntaxReparsePlan::Incremental {
+                    lang_id,
+                    mut old_tree,
+                    edit,
+                } => {
+                    old_tree.edit(&edit);
+                    (lang_id, Some(old_tree), true)
+                }
+            };
 
         let source = self.buffers[self.active].text();
-        let line_count = self.buffers[self.active].line_count();
         let path = self.buffers[self.active].path().map(PathBuf::from);
         let buffer_id = self.buffer_ids[self.active];
+        let view = &mut self.views[self.active];
         view.parse_generation = view.parse_generation.wrapping_add(1);
         let generation = view.parse_generation;
         let view_index = self.active;
         let tx = self.parse_tx.clone();
         view.parse_pending = true;
         view.tree_dirty = false;
+        view.pending_tree_edit = None;
 
         let spawn_result = thread::Builder::new()
             .name("llnzy-tree-sitter-parse".to_string())
             .spawn(move || {
                 let mut syntax = SyntaxEngine::new();
-                let tree = syntax.parse(lang_id, &source);
+                let tree = match old_tree {
+                    Some(old_tree) => syntax.reparse(lang_id, &source, &old_tree),
+                    None => syntax.parse(lang_id, &source),
+                };
                 let _ = tx.send(ParseResult {
                     buffer_id,
                     generation,
@@ -359,6 +427,7 @@ impl EditorState {
                     lang_id,
                     tree,
                     line_count,
+                    used_incremental,
                 });
             });
         if let Err(err) = spawn_result {
@@ -366,6 +435,7 @@ impl EditorState {
             if let Some(view) = self.views.get_mut(view_index) {
                 view.parse_pending = false;
                 view.tree_dirty = true;
+                view.pending_tree_edit = None;
             }
         }
     }
@@ -403,6 +473,7 @@ impl EditorState {
         }
 
         view.tree = result.tree;
+        view.last_parse_used_incremental = result.used_incremental;
         view.folded_ranges.retain(|range| {
             range.start_line < range.end_line && range.end_line < result.line_count
         });
@@ -428,6 +499,77 @@ impl Default for EditorState {
     fn default() -> Self {
         Self::new()
     }
+}
+
+fn input_edit_from_positions(
+    old_source: &str,
+    start: buffer::Position,
+    old_end: buffer::Position,
+    new_text: &str,
+) -> InputEdit {
+    let start_byte = byte_for_position(old_source, start);
+    let old_end_byte = byte_for_position(old_source, old_end);
+    let start_position = point_for_position(old_source, start);
+    InputEdit {
+        start_byte,
+        old_end_byte,
+        new_end_byte: start_byte + new_text.len(),
+        start_position,
+        old_end_position: point_for_position(old_source, old_end),
+        new_end_position: point_after_insert(start_position, new_text),
+    }
+}
+
+fn point_after_insert(start: Point, inserted: &str) -> Point {
+    let mut row = start.row;
+    let mut column = start.column;
+    for chunk in inserted.split_inclusive('\n') {
+        if chunk.ends_with('\n') {
+            row += 1;
+            column = 0;
+        } else {
+            column += chunk.len();
+        }
+    }
+    Point { row, column }
+}
+
+fn point_for_position(source: &str, pos: buffer::Position) -> Point {
+    let line_start = line_start_byte(source, pos.line);
+    let byte = byte_for_position(source, pos);
+    Point {
+        row: pos.line,
+        column: byte.saturating_sub(line_start),
+    }
+}
+
+fn byte_for_position(source: &str, pos: buffer::Position) -> usize {
+    let line_start = line_start_byte(source, pos.line);
+    let line_end = source[line_start..]
+        .find('\n')
+        .map(|offset| line_start + offset)
+        .unwrap_or(source.len());
+    let line = &source[line_start..line_end];
+    line.char_indices()
+        .nth(pos.col)
+        .map(|(offset, _)| line_start + offset)
+        .unwrap_or(line_end)
+}
+
+fn line_start_byte(source: &str, line: usize) -> usize {
+    if line == 0 {
+        return 0;
+    }
+    let mut current_line = 0;
+    for (idx, byte) in source.bytes().enumerate() {
+        if byte == b'\n' {
+            current_line += 1;
+            if current_line == line {
+                return idx + 1;
+            }
+        }
+    }
+    source.len()
 }
 
 #[cfg(test)]
@@ -487,6 +629,133 @@ mod tests {
         assert!(editor.views[idx].tree.is_none());
 
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn dirty_parsed_buffer_plans_incremental_reparse_with_previous_tree() {
+        let source = "fn main() {\n    let value = 1;\n}\n";
+        let path = temp_file("incremental_plan.rs", source);
+        let mut editor = EditorState::new();
+        let buffer_id = editor.open(path.clone()).unwrap();
+        let idx = editor.index_for_id(buffer_id).unwrap();
+
+        editor.views[idx].tree = editor.syntax.parse("rust", source);
+        assert!(editor.views[idx].tree.is_some());
+
+        let old_source = editor.buffers[idx].text();
+        let start = crate::editor::buffer::Position::new(1, 16);
+        editor.buffers[idx].insert(start, " + 1");
+        editor.active = idx;
+        assert!(editor.record_active_incremental_edit(&old_source, start, start, " + 1"));
+
+        match plan_syntax_reparse(editor.buffers[idx].line_count(), &editor.views[idx]) {
+            SyntaxReparsePlan::Incremental {
+                lang_id, old_tree, ..
+            } => {
+                assert_eq!(lang_id, "rust");
+                assert_eq!(old_tree.root_node().kind(), "source_file");
+            }
+            SyntaxReparsePlan::Fresh { .. } => {
+                panic!("parsed dirty buffer should retain its previous tree for reparse")
+            }
+            SyntaxReparsePlan::Skip => panic!("small dirty Rust buffer should be parsed"),
+        }
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn incremental_reparse_applies_pending_tree_edit() {
+        let source = "fn main() {\n    let value = 1;\n}\n";
+        let path = temp_file("incremental_reparse.rs", source);
+        let mut editor = EditorState::new();
+        let buffer_id = editor.open(path.clone()).unwrap();
+        let idx = editor.index_for_id(buffer_id).unwrap();
+
+        editor.reparse_active();
+        for _ in 0..100 {
+            editor.reparse_active();
+            if editor.views[idx].tree.is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(editor.views[idx].tree.is_some());
+
+        let old_source = editor.buffers[idx].text();
+        let start = crate::editor::buffer::Position::new(1, 17);
+        editor.buffers[idx].insert(start, " + 1");
+        editor.active = idx;
+        assert!(editor.record_active_incremental_edit(&old_source, start, start, " + 1"));
+
+        editor.reparse_active();
+        for _ in 0..100 {
+            editor.reparse_active();
+            if !editor.active_parse_pending() && editor.views[idx].last_parse_used_incremental {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+
+        assert!(editor.views[idx].tree.is_some());
+        assert!(editor.views[idx].last_parse_used_incremental);
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn input_edit_uses_byte_columns_for_unicode_text() {
+        let source = "fn main() {\n    let café = 1;\n}\n";
+        let start = crate::editor::buffer::Position::new(1, 8);
+        let end = crate::editor::buffer::Position::new(1, 12);
+
+        let edit = input_edit_from_positions(source, start, end, "value");
+
+        assert_eq!(edit.start_position, Point { row: 1, column: 8 });
+        assert_eq!(edit.old_end_position, Point { row: 1, column: 13 });
+        assert_eq!(edit.new_end_position, Point { row: 1, column: 13 });
+        assert_eq!(edit.new_end_byte, edit.start_byte + "value".len());
+    }
+
+    #[test]
+    fn dirty_buffer_without_tree_plans_fresh_parse() {
+        let mut view = BufferView {
+            lang_id: Some("rust"),
+            tree_dirty: true,
+            tree: None,
+            ..Default::default()
+        };
+
+        match plan_syntax_reparse(3, &view) {
+            SyntaxReparsePlan::Fresh { lang_id } => assert_eq!(lang_id, "rust"),
+            SyntaxReparsePlan::Incremental { .. } => {
+                panic!("missing previous tree should fall back to a fresh parse")
+            }
+            SyntaxReparsePlan::Skip => panic!("dirty Rust buffer should not be skipped"),
+        }
+
+        view.parse_pending = true;
+        assert!(matches!(
+            plan_syntax_reparse(3, &view),
+            SyntaxReparsePlan::Skip
+        ));
+    }
+
+    #[test]
+    fn large_dirty_buffer_skips_even_when_previous_tree_exists() {
+        let source = "fn main() {}\n";
+        let mut syntax = SyntaxEngine::new();
+        let view = BufferView {
+            lang_id: Some("rust"),
+            tree_dirty: true,
+            tree: syntax.parse("rust", source),
+            ..Default::default()
+        };
+
+        assert!(matches!(
+            plan_syntax_reparse(stress_fixtures::LARGE_SYNTAX_LINE_COUNT, &view),
+            SyntaxReparsePlan::Skip
+        ));
     }
 
     #[test]

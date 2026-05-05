@@ -64,6 +64,7 @@ fn default_config_values_match_existing_defaults() {
     assert_eq!(config.padding_y, 25.0);
     assert_eq!(config.opacity, 1.0);
     assert_eq!(config.scroll_lines, 3);
+    assert!(!config.terminal.copy_on_select);
 }
 
 #[test]
@@ -116,6 +117,9 @@ fn apply_cursor_window_shell_and_effect_options() {
             [shell]
             program = "/bin/bash"
 
+            [terminal]
+            copy_on_select = true
+
             [effects]
             background = "smoke"
             background_color = "#112233"
@@ -133,6 +137,7 @@ fn apply_cursor_window_shell_and_effect_options() {
     assert_eq!(config.cursor_blink_ms, 500);
     assert_eq!(config.opacity, 1.0);
     assert_eq!(config.shell, "/bin/bash");
+    assert!(config.terminal.copy_on_select);
     assert_eq!(config.effects.background, "smoke");
     assert_eq!(config.effects.background_color, Some([0x11, 0x22, 0x33]));
     assert_eq!(config.effects.background_color2, Some([0x44, 0x55, 0x66]));

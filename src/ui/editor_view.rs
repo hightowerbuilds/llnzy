@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 
 use crate::config::EffectiveEditorConfig;
-use crate::editor::buffer::IndentStyle;
-use crate::editor::buffer::Position;
+use crate::editor::buffer::{BufferEdit, IndentStyle};
 use crate::editor::keymap::{handle_editor_keys, KeyAction};
 use crate::editor::perf;
 use crate::editor::search::EditorSearch;
@@ -32,8 +31,7 @@ use super::editor_wrap::{compute_wrap_rows, wrap_row_for_cursor, WrapRow};
 #[derive(Default)]
 pub(crate) struct EditorFrameResult {
     pub key_action: KeyAction,
-    /// Cursor position before the frame's edits were applied.
-    pub cursor_before: Position,
+    pub buffer_edit: Option<BufferEdit>,
 }
 
 /// Render the code editor for a text buffer.
@@ -75,10 +73,10 @@ pub(crate) fn render_text_editor(
     let gutter_width = (gutter_digits as f32 + 1.5) * char_width;
     let text_margin = 2.0;
 
-    // Handle keyboard input (may modify buffer)
-    let content_before = buf.len_chars();
+    // Handle keyboard input (may modify buffer). Drop any stale edit record so
+    // this frame only reports changes made by the key handler below.
+    let _ = buf.take_last_edit();
     let cursor_before = view.cursor.pos;
-    result.cursor_before = cursor_before;
     let ctx = ui.ctx().clone();
     let completion_active = completions.is_some();
     result.key_action = handle_editor_keys(
@@ -92,7 +90,8 @@ pub(crate) fn render_text_editor(
         completion_active,
         keybinding_preset,
     );
-    if buf.len_chars() != content_before {
+    result.buffer_edit = buf.take_last_edit();
+    if result.buffer_edit.is_some() {
         view.tree_dirty = true;
         view.folded_ranges.clear();
     }

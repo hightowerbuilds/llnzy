@@ -44,18 +44,26 @@ Completed on 2026-05-04:
 | `src/renderer/mod.rs` | 1,085 | 145 | `request`, `passes`, `config_helpers`, `layers` |
 | `src/editor/keymap.rs` | 1,214 | 624 | `types`, `pairs`, `vim`, `emacs` |
 | `src/ui/editor_command.rs` | 1,147 | 11 | `types`, `dispatch`, `save`, `comments`, `key_actions`, `tests` |
+| `src/main.rs` | 1,958 | 802 | `main_app::handler` |
+| `src/editor/buffer.rs` | 1,320 | 13 | `model`, `io`, `editing`, `indent`, `history`, `recovery`, `tests` |
+| `src/terminal.rs` | 1,288 | 101 | `events`, `osc`, `links`, `colors`, `grid`, `selection`, `tests` |
+| `src/ui/settings_tabs.rs` | 1,109 | 12 | `components`, `background`, `effects`, `appearance`, `editor`, `workspace` |
+| `src/main_app/handler.rs` | 1,158 | 628 | `lifecycle`, `frame`, `terminal_input`, `events`, `tick` |
+| `src/sketch.rs` | 997 | 26 | `model`, `state`, `tools`, `commands`, `serialization`, `geometry`, `hit_testing`, `tests` |
+| `src/ui/stacker_view.rs` | 983 | 110 | `actions`, `editor_panel`, `layout`, `modals`, `prompts`, `toolbar` |
+| `src/editor/cursor.rs` | 897 | 9 | `model`, `movement`, `selection`, `word`, `multi_cursor`, `tests` |
+| `src/git.rs` | 892 | 156 | `model`, `error`, `command`, `status`, `log`, `detail`, `tests` |
 
 Verification completed after integration:
 
+- `cargo fmt --check`
 - `cargo check`
 - `cargo test`
 
 Remaining highest-priority modularization targets:
 
-- `src/main.rs`
-- `src/editor/buffer.rs`
-- `src/terminal.rs`
-- `src/ui/settings_tabs.rs`
+- Continue reducing `src/main_app/handler.rs` by extracting keyboard/search routing, IME handling, drag/drop handling, Stacker bridge sync, and platform menu routing.
+- Continue the medium-priority watchlist: `src/lsp/client.rs`, `src/ui/sidebar_file_modals.rs`, `src/ui/editor_lsp_events.rs`, and other modules approaching 800+ lines.
 
 ## Critical Refactor Targets
 

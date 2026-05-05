@@ -5,6 +5,7 @@ use crate::terminal::Terminal;
 /// A match location in the terminal grid.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SearchMatch {
+    /// History-backed row number, where 0 is the oldest retained scrollback row.
     pub row: usize,
     pub col_start: usize,
     pub col_end: usize, // inclusive
@@ -101,7 +102,7 @@ impl Search {
         self.matches.get(self.focus)
     }
 
-    /// Re-run the search across all visible rows + scrollback.
+    /// Re-run the search across all retained scrollback rows plus the live viewport.
     pub fn update_matches(&mut self, terminal: &Terminal) {
         self.matches.clear();
         self.focus = 0;
@@ -110,11 +111,10 @@ impl Search {
             return;
         }
 
-        let (cols, rows) = terminal.size();
+        let rows = terminal.searchable_rows();
 
-        // Build each visible line as a string and search it
         for row in 0..rows {
-            let line: String = (0..cols).map(|col| terminal.cell_char(row, col)).collect();
+            let line = terminal.search_row_text(row);
             self.search_line(&line, row);
         }
 
@@ -159,17 +159,28 @@ impl Search {
 
     /// Generate highlight rects for all matches.
     /// Focused match gets a brighter color.
-    pub fn highlight_rects(&self, cell_w: f32, cell_h: f32) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
+    pub fn highlight_rects(
+        &self,
+        terminal: &Terminal,
+        cell_w: f32,
+        cell_h: f32,
+    ) -> Vec<(f32, f32, f32, f32, [f32; 4])> {
         let mut rects = Vec::with_capacity(self.matches.len());
+        let (_, visible_rows) = terminal.size();
+        let visible_start = terminal.visible_search_row_start();
+        let visible_end = visible_start + visible_rows;
 
         for (i, m) in self.matches.iter().enumerate() {
+            if m.row < visible_start || m.row >= visible_end {
+                continue;
+            }
             let color = if i == self.focus {
                 Self::FOCUS_COLOR
             } else {
                 Self::MATCH_COLOR
             };
             let x = m.col_start as f32 * cell_w;
-            let y = m.row as f32 * cell_h;
+            let y = (m.row - visible_start) as f32 * cell_h;
             let w = (m.col_end - m.col_start + 1) as f32 * cell_w;
             rects.push((x, y, w, cell_h, color));
         }
@@ -478,10 +489,31 @@ mod tests {
         assert_eq!(s.status(), "3/3");
     }
 
+    #[test]
+    fn update_matches_searches_retained_scrollback() {
+        let mut terminal = Terminal::new(16, 2);
+        terminal.process(b"needle-old\r\nmiddle\r\nvisible");
+
+        let mut search = Search::new();
+        search.query = "needle".to_string();
+        search.update_matches(&terminal);
+
+        assert!(terminal.history_size() > 0);
+        assert_eq!(search.matches.len(), 1);
+        assert_eq!(search.matches[0].row, 0);
+        assert!(search.highlight_rects(&terminal, 10.0, 20.0).is_empty());
+
+        terminal.scroll_to_search_row(search.matches[0].row);
+        let rects = search.highlight_rects(&terminal, 10.0, 20.0);
+        assert_eq!(rects.len(), 1);
+        assert_eq!(rects[0].1, 0.0);
+    }
+
     // ── Highlight rects ──
 
     #[test]
     fn highlight_rects_focused_gets_brighter_color() {
+        let terminal = Terminal::new(20, 4);
         let mut s = Search::new();
         s.matches = vec![
             SearchMatch {
@@ -496,7 +528,7 @@ mod tests {
             },
         ];
         s.focus = 0;
-        let rects = s.highlight_rects(10.0, 20.0);
+        let rects = s.highlight_rects(&terminal, 10.0, 20.0);
         // First rect (focused) should have brighter color
         let focused_alpha = rects[0].4[3];
         let other_alpha = rects[1].4[3];
@@ -505,13 +537,14 @@ mod tests {
 
     #[test]
     fn highlight_rects_geometry() {
+        let terminal = Terminal::new(20, 10);
         let mut s = Search::new();
         s.matches = vec![SearchMatch {
             row: 3,
             col_start: 5,
             col_end: 9,
         }];
-        let rects = s.highlight_rects(10.0, 20.0);
+        let rects = s.highlight_rects(&terminal, 10.0, 20.0);
         assert_eq!(rects.len(), 1);
         let (x, y, w, h, _) = rects[0];
         assert_eq!(x, 50.0); // col 5 * 10.0
@@ -522,14 +555,16 @@ mod tests {
 
     #[test]
     fn highlight_rects_empty_when_no_matches() {
+        let terminal = Terminal::new(20, 4);
         let s = Search::new();
-        let rects = s.highlight_rects(10.0, 20.0);
+        let rects = s.highlight_rects(&terminal, 10.0, 20.0);
         assert!(rects.is_empty());
         assert_eq!(rects.capacity(), 0);
     }
 
     #[test]
     fn highlight_rects_presizes_for_matches() {
+        let terminal = Terminal::new(20, 4);
         let mut s = Search::new();
         s.matches = vec![
             SearchMatch {
@@ -549,7 +584,7 @@ mod tests {
             },
         ];
 
-        let rects = s.highlight_rects(8.0, 16.0);
+        let rects = s.highlight_rects(&terminal, 8.0, 16.0);
 
         assert_eq!(rects.len(), 3);
         assert!(rects.capacity() >= rects.len());

@@ -6,6 +6,8 @@ mod manager;
 pub mod registry;
 mod requests;
 mod symbols;
+#[cfg(test)]
+pub(crate) mod test_harness;
 pub mod transport;
 mod types;
 mod workspace_edit;

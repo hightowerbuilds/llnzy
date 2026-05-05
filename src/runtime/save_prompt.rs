@@ -41,6 +41,7 @@ impl App {
                 match self.save_modified_tabs_for_close(&tabs) {
                     Ok(()) => {
                         self.clear_save_prompt_error();
+                        self.terminate_all_terminal_tabs_for_exit();
                         self.save_window_state();
                         event_loop.exit();
                     }
@@ -64,6 +65,7 @@ impl App {
                 for file in files {
                     self.clear_editor_recovery_snapshot_for_buffer(file.buffer_id);
                 }
+                self.terminate_all_terminal_tabs_for_exit();
                 self.save_window_state();
                 event_loop.exit();
                 true

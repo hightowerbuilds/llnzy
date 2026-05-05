@@ -1,5 +1,3 @@
-use std::path::Path;
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LspEnsureStatus {
     Running,
@@ -51,22 +49,9 @@ impl LspLifecycleStatus {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum RootUpdate {
-    Unchanged,
-    Changed,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ExistingClientEnsurePlan {
     ReuseRunning,
     RemoveAndRetry,
-}
-
-pub(super) fn plan_root_update(current: Option<&Path>, next: &Path) -> RootUpdate {
-    match current {
-        Some(current) if current == next => RootUpdate::Unchanged,
-        _ => RootUpdate::Changed,
-    }
 }
 
 pub(super) fn plan_existing_client_ensure(is_running: bool) -> ExistingClientEnsurePlan {
@@ -80,24 +65,6 @@ pub(super) fn plan_existing_client_ensure(is_running: bool) -> ExistingClientEns
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn root_update_only_restarts_when_path_changes() {
-        let current = Path::new("/workspace/app");
-
-        assert_eq!(
-            plan_root_update(Some(current), Path::new("/workspace/app")),
-            RootUpdate::Unchanged
-        );
-        assert_eq!(
-            plan_root_update(Some(current), Path::new("/workspace/other")),
-            RootUpdate::Changed
-        );
-        assert_eq!(
-            plan_root_update(None, Path::new("/workspace/app")),
-            RootUpdate::Changed
-        );
-    }
 
     #[test]
     fn stopped_client_is_removed_so_ensure_can_retry() {

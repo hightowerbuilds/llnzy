@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -9,8 +9,8 @@ use tokio::sync::oneshot;
 use super::client::{self, LspClient, LspNotification};
 use super::diagnostics::{clear_document_diagnostics, remap_document_diagnostics};
 use super::lifecycle::{
-    plan_existing_client_ensure, plan_root_update, ExistingClientEnsurePlan, LspEnsureStatus,
-    LspLifecycleState, LspLifecycleStatus, RootUpdate,
+    plan_existing_client_ensure, ExistingClientEnsurePlan, LspEnsureStatus, LspLifecycleState,
+    LspLifecycleStatus,
 };
 use super::registry::{resolve_server, ServerLookup};
 use super::transport::{ServerMessage, Transport};
@@ -22,10 +22,12 @@ pub struct LspManager {
     pub(super) clients: HashMap<&'static str, LspClient>,
     pub(super) starting: HashMap<&'static str, oneshot::Receiver<Result<LspClient, String>>>,
     pub(super) health_checks: HashMap<&'static str, oneshot::Receiver<bool>>,
+    crashed_servers: HashSet<&'static str>,
     pub(super) pending_open_docs: HashMap<&'static str, Vec<PendingOpenDoc>>,
     pub(super) unavailable: HashMap<&'static str, String>,
+    pub(super) progress: HashMap<&'static str, String>,
     pub diagnostics: HashMap<PathBuf, Vec<FileDiagnostic>>,
-    pub(super) root_path: Option<PathBuf>,
+    pub(super) workspace_roots: Vec<PathBuf>,
     pub(super) proxy: winit::event_loop::EventLoopProxy<crate::UserEvent>,
 }
 
@@ -43,19 +45,20 @@ impl LspManager {
             clients: HashMap::new(),
             starting: HashMap::new(),
             health_checks: HashMap::new(),
+            crashed_servers: HashSet::new(),
             pending_open_docs: HashMap::new(),
             unavailable: HashMap::new(),
+            progress: HashMap::new(),
             diagnostics: HashMap::new(),
-            root_path: None,
+            workspace_roots: Vec::new(),
             proxy,
         }
     }
 
     pub fn set_root(&mut self, path: PathBuf) {
-        if plan_root_update(self.root_path.as_deref(), &path) == RootUpdate::Changed {
-            self.reset_servers_for_root_change();
+        if add_workspace_root(&mut self.workspace_roots, path) {
+            self.sync_workspace_folders_with_clients();
         }
-        self.root_path = Some(path);
     }
 
     /// Ensure a language server is running for the given language.
@@ -102,15 +105,20 @@ impl LspManager {
         };
 
         log::info!("Starting LSP {} for {}", config.command, lang_id);
-        let root = self.root_path.clone();
+        let workspace_roots = self.workspace_roots.clone();
         let proxy = self.proxy.clone();
         let completion_proxy = self.proxy.clone();
         let (tx, rx) = oneshot::channel();
 
         self.runtime.spawn(async move {
             let result = async {
-                let mut client =
-                    LspClient::new(lang_id, config.command, config.args, root.as_deref(), proxy)?;
+                let mut client = LspClient::new(
+                    lang_id,
+                    config.command,
+                    config.args,
+                    &workspace_roots,
+                    proxy,
+                )?;
                 client.initialize().await?;
                 Ok::<LspClient, String>(client)
             }
@@ -120,6 +128,7 @@ impl LspManager {
         });
 
         self.starting.insert(lang_id, rx);
+        self.crashed_servers.remove(lang_id);
         self.unavailable.remove(lang_id);
         LspEnsureStatus::Starting
     }
@@ -152,6 +161,22 @@ impl LspManager {
         }
     }
 
+    pub fn restart_crashed_server_with_document(
+        &mut self,
+        path: &Path,
+        lang_id: &'static str,
+        text: &str,
+    ) -> Option<LspEnsureStatus> {
+        if !should_restart_crashed_server(
+            self.crashed_servers.contains(lang_id),
+            self.unavailable.get(lang_id).map(String::as_str),
+        ) {
+            return None;
+        }
+        self.crashed_servers.remove(lang_id);
+        Some(self.open_document(path, lang_id, text))
+    }
+
     fn poll_starting_servers(&mut self) {
         let completed: Vec<(&'static str, Result<LspClient, String>)> = self
             .starting
@@ -171,6 +196,7 @@ impl LspManager {
                 Ok(client) => {
                     self.clients.insert(lang_id, client);
                     self.unavailable.remove(lang_id);
+                    self.sync_workspace_folders_for_lang(lang_id);
                     if let Some(docs) = self.pending_open_docs.remove(lang_id) {
                         for doc in docs {
                             self.did_open(&doc.path, &doc.lang_id, &doc.text);
@@ -279,6 +305,30 @@ impl LspManager {
         self.spawn_notification(transport, notification, "didClose");
     }
 
+    fn sync_workspace_folders_with_clients(&mut self) {
+        let lang_ids: Vec<&'static str> = self.clients.keys().copied().collect();
+        for lang_id in lang_ids {
+            self.sync_workspace_folders_for_lang(lang_id);
+        }
+    }
+
+    fn sync_workspace_folders_for_lang(&mut self, lang_id: &'static str) {
+        let Some(client) = self.clients.get_mut(lang_id) else {
+            return;
+        };
+        let transport = client.transport().clone();
+        let notification = match client.workspace_folders_change_notification(&self.workspace_roots)
+        {
+            Ok(Some(notification)) => notification,
+            Ok(None) => return,
+            Err(e) => {
+                log::warn!("workspace folder sync failed: {e}");
+                return;
+            }
+        };
+        self.spawn_notification(transport, notification, "workspace folder sync");
+    }
+
     pub fn did_move(&mut self, old_path: &Path, new_path: &Path, lang_id: &str, text: &str) {
         self.remap_diagnostics(old_path, new_path.to_path_buf());
         let Some(client) = self.clients.get_mut(lang_id) else {
@@ -321,30 +371,26 @@ impl LspManager {
         });
     }
 
-    fn reset_servers_for_root_change(&mut self) {
-        self.clients.clear();
-        self.starting.clear();
-        self.health_checks.clear();
-        self.pending_open_docs.clear();
-        self.unavailable.clear();
-        self.diagnostics.clear();
-    }
-
     /// Drain messages from language servers and update manager-owned state.
     pub fn drain_server_messages(&mut self) {
         self.poll_starting_servers();
         self.poll_health_checks();
 
-        let messages: Vec<ServerMessage> = self
+        let messages: Vec<(&'static str, ServerMessage)> = self
             .clients
-            .values_mut()
-            .flat_map(LspClient::drain_messages)
+            .iter_mut()
+            .flat_map(|(&lang_id, client)| {
+                client
+                    .drain_messages()
+                    .into_iter()
+                    .map(move |message| (lang_id, message))
+            })
             .collect();
 
-        for message in messages {
+        for (lang_id, message) in messages {
             match message {
                 ServerMessage::Notification { method, params } => {
-                    self.handle_notification(&method, params);
+                    self.handle_notification(lang_id, &method, params);
                 }
                 ServerMessage::Request { id, method, .. } => {
                     log::debug!("Answered LSP server request {method} ({id})");
@@ -357,14 +403,29 @@ impl LspManager {
     }
 
     /// Process a server notification by method name.
-    pub fn handle_notification(&mut self, method: &str, params: Value) {
+    pub fn handle_notification(&mut self, lang_id: &'static str, method: &str, params: Value) {
         match method {
             "textDocument/publishDiagnostics" => {
                 self.handle_diagnostics_notification(params);
             }
+            "$/progress" => {
+                self.handle_progress_notification(lang_id, &params);
+            }
             _ => {
                 log::debug!("Unhandled LSP notification: {method}");
             }
+        }
+    }
+
+    fn handle_progress_notification(&mut self, lang_id: &'static str, params: &Value) {
+        match progress_update_from_params(params) {
+            Some(ProgressUpdate::Set(message)) => {
+                self.progress.insert(lang_id, message);
+            }
+            Some(ProgressUpdate::Clear) => {
+                self.progress.remove(lang_id);
+            }
+            None => {}
         }
     }
 
@@ -447,6 +508,8 @@ impl LspManager {
             if is_dead {
                 log::warn!("LSP server for {} has died -- removing client", lang_id);
                 self.clients.remove(lang_id);
+                self.progress.remove(lang_id);
+                self.crashed_servers.insert(lang_id);
                 self.unavailable
                     .insert(lang_id, "server stopped responding".to_string());
             }
@@ -455,7 +518,10 @@ impl LspManager {
 
     /// Get the status string for a language server (for display in the status bar).
     pub fn server_status(&self, lang_id: &str) -> String {
-        self.lifecycle_status(lang_id).label()
+        append_progress_status(
+            self.lifecycle_status(lang_id).label(),
+            self.progress.get(lang_id).map(String::as_str),
+        )
     }
 
     pub fn lifecycle_status(&self, lang_id: &str) -> LspLifecycleStatus {
@@ -556,8 +622,167 @@ impl LspManager {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum ProgressUpdate {
+    Set(String),
+    Clear,
+}
+
+fn progress_update_from_params(params: &Value) -> Option<ProgressUpdate> {
+    let value = params.get("value")?;
+    match value.get("kind").and_then(Value::as_str)? {
+        "end" => Some(ProgressUpdate::Clear),
+        "begin" | "report" => progress_message_from_value(value).map(ProgressUpdate::Set),
+        _ => None,
+    }
+}
+
+fn progress_message_from_value(value: &Value) -> Option<String> {
+    let title = value
+        .get("title")
+        .and_then(Value::as_str)
+        .unwrap_or("Working");
+    let message = value.get("message").and_then(Value::as_str);
+    let percentage = value.get("percentage").and_then(Value::as_u64);
+
+    let mut label = match message {
+        Some(message) if !message.is_empty() => format!("{title}: {message}"),
+        _ => title.to_string(),
+    };
+    if let Some(percentage) = percentage {
+        label.push_str(&format!(" ({percentage}%)"));
+    }
+
+    if label.is_empty() {
+        None
+    } else {
+        Some(label)
+    }
+}
+
+fn append_progress_status(base: String, progress: Option<&str>) -> String {
+    match (base.is_empty(), progress) {
+        (_, None) => base,
+        (true, Some(progress)) => progress.to_string(),
+        (false, Some(progress)) => format!("{base} - {progress}"),
+    }
+}
+
+fn add_workspace_root(roots: &mut Vec<PathBuf>, path: PathBuf) -> bool {
+    if roots.iter().any(|root| root == &path) {
+        return false;
+    }
+    roots.push(path);
+    true
+}
+
+fn should_restart_crashed_server(has_crash_marker: bool, unavailable_reason: Option<&str>) -> bool {
+    has_crash_marker && unavailable_reason == Some("server stopped responding")
+}
+
 impl Drop for LspManager {
     fn drop(&mut self) {
         self.shutdown_all();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn progress_begin_and_report_build_visible_status_text() {
+        let begin = serde_json::json!({
+            "token": "rust-analyzer/index",
+            "value": {
+                "kind": "begin",
+                "title": "Indexing",
+                "message": "crates",
+                "percentage": 42
+            }
+        });
+        let report = serde_json::json!({
+            "token": "rust-analyzer/index",
+            "value": {
+                "kind": "report",
+                "title": "Indexing",
+                "message": "workspace"
+            }
+        });
+
+        assert_eq!(
+            progress_update_from_params(&begin),
+            Some(ProgressUpdate::Set("Indexing: crates (42%)".to_string()))
+        );
+        assert_eq!(
+            progress_update_from_params(&report),
+            Some(ProgressUpdate::Set("Indexing: workspace".to_string()))
+        );
+    }
+
+    #[test]
+    fn progress_end_clears_visible_status_text() {
+        let end = serde_json::json!({
+            "token": "rust-analyzer/index",
+            "value": {
+                "kind": "end",
+                "message": "done"
+            }
+        });
+
+        assert_eq!(
+            progress_update_from_params(&end),
+            Some(ProgressUpdate::Clear)
+        );
+    }
+
+    #[test]
+    fn progress_status_appends_to_server_status() {
+        assert_eq!(
+            append_progress_status("rust-analyzer".to_string(), Some("Indexing: crates")),
+            "rust-analyzer - Indexing: crates"
+        );
+        assert_eq!(
+            append_progress_status(String::new(), Some("Indexing: crates")),
+            "Indexing: crates"
+        );
+        assert_eq!(
+            append_progress_status("rust-analyzer".to_string(), None),
+            "rust-analyzer"
+        );
+    }
+
+    #[test]
+    fn add_workspace_root_preserves_existing_roots_and_deduplicates() {
+        let first = PathBuf::from("/workspace/app");
+        let second = PathBuf::from("/workspace/tools");
+        let mut roots = Vec::new();
+
+        assert!(add_workspace_root(&mut roots, first.clone()));
+        assert!(!add_workspace_root(&mut roots, first.clone()));
+        assert!(add_workspace_root(&mut roots, second.clone()));
+
+        assert_eq!(roots, vec![first, second]);
+    }
+
+    #[test]
+    fn restart_guard_only_allows_detected_stopped_servers() {
+        assert!(should_restart_crashed_server(
+            true,
+            Some("server stopped responding")
+        ));
+        assert!(!should_restart_crashed_server(
+            false,
+            Some("server stopped responding")
+        ));
+        assert!(!should_restart_crashed_server(
+            true,
+            Some("server command not found: rust-analyzer")
+        ));
+        assert!(!should_restart_crashed_server(
+            true,
+            Some("unsupported language")
+        ));
+        assert!(!should_restart_crashed_server(true, None));
     }
 }

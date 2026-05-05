@@ -36,6 +36,7 @@ pub struct LspClient {
     pub lang_id: &'static str,
     pub server_name: String,
     root_uri: Option<Uri>,
+    workspace_folders: Vec<WorkspaceFolder>,
     server_capabilities: Option<ServerCapabilities>,
     documents: DocumentStore,
 }
@@ -46,13 +47,14 @@ impl LspClient {
         lang_id: &'static str,
         command: &str,
         args: &[&str],
-        root_path: Option<&Path>,
+        workspace_roots: &[PathBuf],
         proxy: winit::event_loop::EventLoopProxy<crate::UserEvent>,
     ) -> Result<Self, String> {
         let (transport, notifications_rx) = Transport::spawn(command, args, proxy)
             .map_err(|e| format!("Failed to spawn {command}: {e}"))?;
 
-        let root_uri = root_path.and_then(|p| path_to_uri(p).ok());
+        let workspace_folders = workspace_folders_from_paths(workspace_roots);
+        let root_uri = workspace_folders.first().map(|folder| folder.uri.clone());
 
         Ok(LspClient {
             transport: Arc::new(transport),
@@ -61,6 +63,7 @@ impl LspClient {
             lang_id,
             server_name: command.to_string(),
             root_uri,
+            workspace_folders,
             server_capabilities: None,
             documents: DocumentStore::new(),
         })
@@ -69,44 +72,7 @@ impl LspClient {
     /// Run the LSP initialize handshake.
     #[allow(deprecated)] // root_uri required by most servers; workspace_folders migration later
     pub async fn initialize(&mut self) -> Result<(), String> {
-        let params = InitializeParams {
-            root_uri: self.root_uri.clone(),
-            capabilities: ClientCapabilities {
-                text_document: Some(TextDocumentClientCapabilities {
-                    synchronization: Some(TextDocumentSyncClientCapabilities {
-                        dynamic_registration: Some(false),
-                        will_save: Some(false),
-                        will_save_wait_until: Some(false),
-                        did_save: Some(true),
-                    }),
-                    completion: Some(CompletionClientCapabilities {
-                        completion_item: Some(CompletionItemCapability {
-                            snippet_support: Some(false),
-                            ..Default::default()
-                        }),
-                        ..Default::default()
-                    }),
-                    hover: Some(HoverClientCapabilities {
-                        content_format: Some(vec![MarkupKind::PlainText]),
-                        ..Default::default()
-                    }),
-                    publish_diagnostics: Some(PublishDiagnosticsClientCapabilities {
-                        related_information: Some(true),
-                        ..Default::default()
-                    }),
-                    definition: Some(GotoCapability {
-                        dynamic_registration: Some(false),
-                        link_support: Some(false),
-                    }),
-                    references: Some(DynamicRegistrationClientCapabilities {
-                        dynamic_registration: Some(false),
-                    }),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            },
-            ..Default::default()
-        };
+        let params = initialize_params(self.root_uri.clone(), self.workspace_folders.clone());
 
         let params_value = serde_json::to_value(params).map_err(|e| e.to_string())?;
         let result = self.transport.request("initialize", params_value).await?;
@@ -145,6 +111,30 @@ impl LspClient {
                 .await?;
         }
         Ok(())
+    }
+
+    pub(crate) fn workspace_folders_change_notification(
+        &mut self,
+        workspace_roots: &[PathBuf],
+    ) -> Result<Option<LspNotification>, String> {
+        let desired = workspace_folders_from_paths(workspace_roots);
+        let added = workspace_folder_additions(&self.workspace_folders, &desired);
+
+        if added.is_empty() {
+            self.workspace_folders = desired;
+            return Ok(None);
+        }
+
+        self.workspace_folders = desired;
+        Ok(Some(LspNotification {
+            method: "workspace/didChangeWorkspaceFolders",
+            params: serde_json::json!({
+                "event": {
+                    "added": added,
+                    "removed": [],
+                }
+            }),
+        }))
     }
 
     /// Notify the server of a full document change (full sync mode).
@@ -890,5 +880,131 @@ impl LspClient {
 
     pub fn is_running(&self) -> bool {
         self.state == ClientState::Running
+    }
+}
+
+#[allow(deprecated)] // root_uri remains populated for compatibility with older servers.
+fn initialize_params(
+    root_uri: Option<Uri>,
+    workspace_folders: Vec<WorkspaceFolder>,
+) -> InitializeParams {
+    InitializeParams {
+        root_uri,
+        workspace_folders: if workspace_folders.is_empty() {
+            None
+        } else {
+            Some(workspace_folders)
+        },
+        capabilities: ClientCapabilities {
+            workspace: Some(WorkspaceClientCapabilities {
+                workspace_folders: Some(true),
+                ..Default::default()
+            }),
+            text_document: Some(TextDocumentClientCapabilities {
+                synchronization: Some(TextDocumentSyncClientCapabilities {
+                    dynamic_registration: Some(false),
+                    will_save: Some(false),
+                    will_save_wait_until: Some(false),
+                    did_save: Some(true),
+                }),
+                completion: Some(CompletionClientCapabilities {
+                    completion_item: Some(CompletionItemCapability {
+                        snippet_support: Some(false),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }),
+                hover: Some(HoverClientCapabilities {
+                    content_format: Some(vec![MarkupKind::PlainText]),
+                    ..Default::default()
+                }),
+                publish_diagnostics: Some(PublishDiagnosticsClientCapabilities {
+                    related_information: Some(true),
+                    ..Default::default()
+                }),
+                definition: Some(GotoCapability {
+                    dynamic_registration: Some(false),
+                    link_support: Some(false),
+                }),
+                references: Some(DynamicRegistrationClientCapabilities {
+                    dynamic_registration: Some(false),
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
+fn workspace_folders_from_paths(paths: &[PathBuf]) -> Vec<WorkspaceFolder> {
+    paths
+        .iter()
+        .filter_map(|path| {
+            Some(WorkspaceFolder {
+                uri: path_to_uri(path).ok()?,
+                name: workspace_folder_name(path),
+            })
+        })
+        .collect()
+}
+
+fn workspace_folder_name(path: &Path) -> String {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| path.display().to_string())
+}
+
+fn workspace_folder_additions(
+    current: &[WorkspaceFolder],
+    desired: &[WorkspaceFolder],
+) -> Vec<WorkspaceFolder> {
+    desired
+        .iter()
+        .filter(|folder| !current.iter().any(|current| current.uri == folder.uri))
+        .cloned()
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[allow(deprecated)] // This test verifies the compatibility root_uri fallback.
+    fn initialize_params_include_workspace_folders_and_capability() {
+        let roots = vec![
+            PathBuf::from("/workspace/app"),
+            PathBuf::from("/workspace/tools"),
+        ];
+        let folders = workspace_folders_from_paths(&roots);
+        let params = initialize_params(Some(folders[0].uri.clone()), folders.clone());
+
+        assert_eq!(params.root_uri, Some(folders[0].uri.clone()));
+        assert_eq!(params.workspace_folders, Some(folders));
+        assert_eq!(
+            params
+                .capabilities
+                .workspace
+                .and_then(|workspace| workspace.workspace_folders),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn workspace_folder_additions_only_include_new_uris() {
+        let roots = vec![
+            PathBuf::from("/workspace/app"),
+            PathBuf::from("/workspace/tools"),
+        ];
+        let folders = workspace_folders_from_paths(&roots);
+
+        assert_eq!(
+            workspace_folder_additions(&folders[..1], &folders),
+            vec![folders[1].clone()]
+        );
+        assert!(workspace_folder_additions(&folders, &folders).is_empty());
     }
 }

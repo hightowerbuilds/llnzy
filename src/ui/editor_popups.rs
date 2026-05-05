@@ -270,3 +270,95 @@ pub(super) fn render_references_popup(ui: &mut egui::Ui, editor_state: &mut Edit
         }
     }
 }
+
+pub(super) fn render_code_actions_popup(ui: &mut egui::Ui, editor_state: &mut EditorViewState) {
+    if editor_state.code_actions_popup.is_none() {
+        return;
+    }
+
+    let mut apply_action: Option<crate::lsp::CodeAction> = None;
+    let mut dismiss = false;
+
+    let actions = editor_state.code_actions_popup.as_ref().unwrap();
+    let selected = editor_state
+        .code_actions_selected
+        .min(actions.len().saturating_sub(1));
+
+    egui::Window::new("Code Actions")
+        .id(egui::Id::new("code_actions_panel"))
+        .fixed_pos(egui::pos2(110.0, 60.0))
+        .default_size(egui::Vec2::new(420.0, 220.0))
+        .resizable(true)
+        .show(ui.ctx(), |ui| {
+            let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
+            let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+            if escape {
+                dismiss = true;
+            }
+            if enter && !actions.is_empty() {
+                apply_action = Some(actions[selected].clone());
+            }
+
+            ui.label(
+                egui::RichText::new(format!("{} actions", actions.len()))
+                    .size(12.0)
+                    .color(egui::Color32::from_rgb(150, 155, 170)),
+            );
+            ui.separator();
+
+            egui::ScrollArea::vertical()
+                .max_height(170.0)
+                .show(ui, |ui| {
+                    for (i, action) in actions.iter().enumerate() {
+                        let bg = if i == selected {
+                            egui::Color32::from_rgb(50, 80, 130)
+                        } else {
+                            egui::Color32::TRANSPARENT
+                        };
+                        let text_color = if i == selected {
+                            egui::Color32::WHITE
+                        } else {
+                            egui::Color32::from_rgb(210, 215, 225)
+                        };
+
+                        egui::Frame::none()
+                            .fill(bg)
+                            .inner_margin(egui::Margin::symmetric(6.0, 3.0))
+                            .show(ui, |ui| {
+                                let resp = ui
+                                    .label(
+                                        egui::RichText::new(&action.title)
+                                            .size(12.0)
+                                            .color(text_color),
+                                    )
+                                    .interact(egui::Sense::click());
+                                if resp.clicked() {
+                                    apply_action = Some(action.clone());
+                                }
+                            });
+                    }
+                });
+        });
+
+    let actions_len = editor_state
+        .code_actions_popup
+        .as_ref()
+        .map_or(0, |actions| actions.len());
+    let down_pressed = ui.input(|i| i.key_pressed(egui::Key::ArrowDown));
+    let up_pressed = ui.input(|i| i.key_pressed(egui::Key::ArrowUp));
+    if down_pressed {
+        editor_state.code_actions_selected =
+            (editor_state.code_actions_selected + 1).min(actions_len.saturating_sub(1));
+    }
+    if up_pressed {
+        editor_state.code_actions_selected = editor_state.code_actions_selected.saturating_sub(1);
+    }
+
+    if dismiss {
+        editor_state.code_actions_popup = None;
+    }
+    if let Some(action) = apply_action {
+        editor_state.code_actions_popup = None;
+        editor_state.apply_code_action(&action);
+    }
+}

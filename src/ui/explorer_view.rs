@@ -249,8 +249,15 @@ pub(crate) fn render_explorer_view(
             }
         });
 
-        let len_before = editor_state.editor.buffers[active].len_chars();
         let was_modified = editor_state.editor.buffers[active].is_modified();
+        let syntax_source_before = if crate::editor::perf::syntax_enabled(
+            editor_state.editor.buffers[active].line_count(),
+        ) && editor_state.editor.views[active].tree.is_some()
+        {
+            Some(editor_state.editor.buffers[active].text())
+        } else {
+            None
+        };
 
         let hover_text = editor_state.hover_text.as_deref().map(|s| s.to_string());
         let sig_help = editor_state.signature_help.clone();
@@ -326,24 +333,18 @@ pub(crate) fn render_explorer_view(
             &mut editor_state.editor_search,
         );
 
-        let len_after = editor_state.editor.buffers[active].len_chars();
         let is_modified = editor_state.editor.buffers[active].is_modified();
-        if len_before != len_after {
-            // Capture last_edit info for incremental LSP sync.
-            // cursor_before was the position before editing; the cursor moved to the new position.
-            let cursor_before = frame_result.cursor_before;
-            let cursor_after = editor_state.editor.views[active].cursor.pos;
-            let chars_delta = len_after as i64 - len_before as i64;
-            if chars_delta > 0 {
-                // Text was inserted: range is empty at cursor_before, new_text is what was inserted
-                let new_text =
-                    editor_state.editor.buffers[active].text_range(cursor_before, cursor_after);
-                editor_state.last_edit = Some((cursor_before, cursor_before, new_text));
-            } else {
-                // Text was deleted: the range that was removed is from cursor_after to cursor_before
-                // (delete key goes forward, backspace goes backward)
-                editor_state.last_edit = Some((cursor_after, cursor_before, String::new()));
+        let buffer_edit = frame_result.buffer_edit.clone();
+        if let Some(edit) = buffer_edit {
+            if let Some(old_source) = syntax_source_before.as_deref() {
+                editor_state.editor.record_active_incremental_edit(
+                    old_source,
+                    edit.start,
+                    edit.old_end,
+                    &edit.new_text,
+                );
             }
+            editor_state.last_edit = Some((edit.start, edit.old_end, edit.new_text));
             editor_state.lsp_did_change();
             editor_state.hover_text = None; // Dismiss hover on edit
             if editor_state.editor_search.active {
@@ -367,7 +368,7 @@ pub(crate) fn render_explorer_view(
             }
         }
         // Clear active snippet on edit (snippet stops become stale)
-        if len_before != len_after && editor_state.active_snippet.is_some() {
+        if frame_result.buffer_edit.is_some() && editor_state.active_snippet.is_some() {
             editor_state.active_snippet = None;
         }
 
@@ -427,6 +428,7 @@ pub(crate) fn render_explorer_view(
 
         editor_popups::render_workspace_symbols_popup(ui, editor_state);
         editor_popups::render_references_popup(ui, editor_state);
+        editor_popups::render_code_actions_popup(ui, editor_state);
     }
 }
 

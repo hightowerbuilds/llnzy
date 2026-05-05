@@ -107,6 +107,12 @@ impl Config {
             }
         }
 
+        if let Some(terminal) = file.terminal {
+            if let Some(copy_on_select) = terminal.copy_on_select {
+                self.terminal.copy_on_select = copy_on_select;
+            }
+        }
+
         if let Some(shell) = file.shell {
             if let Some(p) = shell.program {
                 self.shell = p;

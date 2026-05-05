@@ -269,6 +269,7 @@ impl App {
                 if self.block_closing_modified_tabs(&closing) {
                     return false;
                 }
+                self.terminate_terminal_tabs_for_close(&closing);
                 let kept = self.tabs.remove(keep_idx);
                 self.tabs.clear();
                 self.tabs.push(kept);
@@ -286,6 +287,7 @@ impl App {
                 if self.block_closing_modified_tabs(&closing) {
                     return false;
                 }
+                self.terminate_terminal_tabs_for_close(&closing);
                 self.tabs.truncate(idx + 1);
                 if self.active_tab > idx {
                     self.active_tab = idx;

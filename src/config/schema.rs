@@ -9,6 +9,7 @@ pub(super) struct ConfigFile {
     pub(super) cursor: Option<CursorConfig>,
     pub(super) window: Option<WindowConfig>,
     pub(super) scrolling: Option<ScrollConfig>,
+    pub(super) terminal: Option<TerminalFileConfig>,
     pub(super) shell: Option<ShellConfig>,
     pub(super) effects: Option<EffectsFileConfig>,
     pub(super) editor: Option<EditorFileConfig>,
@@ -67,6 +68,11 @@ pub(super) struct WindowConfig {
 #[derive(Deserialize)]
 pub(super) struct ScrollConfig {
     pub(super) lines: Option<u32>,
+}
+
+#[derive(Deserialize)]
+pub(super) struct TerminalFileConfig {
+    pub(super) copy_on_select: Option<bool>,
 }
 
 #[derive(Deserialize)]
