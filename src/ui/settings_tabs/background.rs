@@ -1,22 +1,29 @@
 use crate::config::Config;
+use crate::renderer::background::{custom_shader_names_from_dir, BUILTIN_SHADER_NAMES};
 use crate::theme_store;
 
 use super::components::label;
 
 fn available_background_modes(config: &Config, saved_bgs: &[std::path::PathBuf]) -> Vec<String> {
+    available_background_modes_with_custom(config, saved_bgs, custom_shader_names())
+}
+
+fn available_background_modes_with_custom(
+    config: &Config,
+    saved_bgs: &[std::path::PathBuf],
+    custom_shaders: Vec<String>,
+) -> Vec<String> {
     let mut modes = Vec::new();
     push_mode(&mut modes, "none");
-    push_mode(&mut modes, "smoke");
-    push_mode(&mut modes, "aurora");
-    for name in custom_shader_names() {
+    for name in BUILTIN_SHADER_NAMES {
+        push_mode(&mut modes, name);
+    }
+    for name in custom_shaders {
         push_mode(&mut modes, &name);
     }
 
     if config.effects.background_image.is_some() || !saved_bgs.is_empty() {
         push_mode(&mut modes, "image");
-    }
-    if !modes.contains(&config.effects.background) {
-        modes.push(config.effects.background.clone());
     }
     modes
 }
@@ -27,28 +34,17 @@ fn push_mode(modes: &mut Vec<String>, name: &str) {
     }
 }
 
+fn normalize_background_mode(config: &mut Config, available_modes: &[String]) {
+    if !available_modes.contains(&config.effects.background) {
+        config.effects.background = "none".to_string();
+    }
+}
+
 fn custom_shader_names() -> Vec<String> {
     let Some(paths) = crate::platform::paths::current_paths() else {
         return Vec::new();
     };
-    let shader_dir = paths.shaders_dir();
-    let Ok(entries) = std::fs::read_dir(shader_dir) else {
-        return Vec::new();
-    };
-
-    entries
-        .flatten()
-        .filter_map(|entry| {
-            let path = entry.path();
-            let is_wgsl = path.extension().and_then(|ext| ext.to_str()) == Some("wgsl");
-            if !is_wgsl {
-                return None;
-            }
-            path.file_stem()
-                .and_then(|stem| stem.to_str())
-                .map(str::to_string)
-        })
-        .collect()
+    custom_shader_names_from_dir(&paths.shaders_dir())
 }
 
 fn shader_supports_custom_color(name: &str) -> bool {
@@ -78,6 +74,8 @@ pub(crate) fn render_background_tab(ui: &mut egui::Ui, config: &mut Config) {
     );
     ui.add_space(12.0);
     let saved_bgs = theme_store::list_backgrounds();
+    let available_modes = available_background_modes(config, &saved_bgs);
+    normalize_background_mode(config, &available_modes);
 
     egui::Grid::new("bg_settings")
         .num_columns(2)
@@ -91,7 +89,7 @@ pub(crate) fn render_background_tab(ui: &mut egui::Ui, config: &mut Config) {
             egui::ComboBox::from_id_salt("bg_type")
                 .selected_text(label(&config.effects.background))
                 .show_ui(ui, |ui| {
-                    for name in available_background_modes(config, &saved_bgs) {
+                    for name in &available_modes {
                         ui.selectable_value(
                             &mut config.effects.background,
                             name.clone(),
@@ -192,6 +190,17 @@ pub(crate) fn render_background_tab(ui: &mut egui::Ui, config: &mut Config) {
             ui.end_row();
         });
 
+    if let Some(path) = config.effects.background_image.as_deref() {
+        if !std::path::Path::new(path).is_file() {
+            ui.add_space(8.0);
+            ui.label(
+                egui::RichText::new("Selected background image is unavailable.")
+                    .size(12.0)
+                    .color(egui::Color32::from_rgb(210, 150, 110)),
+            );
+        }
+    }
+
     if !saved_bgs.is_empty() {
         ui.add_space(8.0);
         ui.label(
@@ -262,7 +271,63 @@ pub(crate) fn render_background_tab(ui: &mut egui::Ui, config: &mut Config) {
                 }
             }
         });
+    } else {
+        ui.add_space(8.0);
+        ui.label(
+            egui::RichText::new("No saved backgrounds.")
+                .size(12.0)
+                .color(egui::Color32::from_rgb(130, 135, 150)),
+        );
+    }
+    super::effects::render_effect_sections(ui, config);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{available_background_modes_with_custom, normalize_background_mode};
+    use crate::config::Config;
+
+    #[test]
+    fn background_modes_include_only_registered_builtins_and_custom_shaders() {
+        let config = Config::default();
+        let modes = available_background_modes_with_custom(
+            &config,
+            &[],
+            vec!["scanlines".to_string(), "smoke".to_string()],
+        );
+
+        assert_eq!(modes, ["none", "smoke", "aurora", "scanlines"]);
+        assert!(!modes.contains(&"matrix".to_string()));
+        assert!(!modes.contains(&"nebula".to_string()));
+        assert!(!modes.contains(&"tron".to_string()));
     }
 
-    super::effects::render_effect_sections(ui, config);
+    #[test]
+    fn image_mode_is_available_only_when_an_image_can_be_selected() {
+        let mut config = Config::default();
+        let modes_without_image = available_background_modes_with_custom(&config, &[], Vec::new());
+        assert!(!modes_without_image.contains(&"image".to_string()));
+
+        config.effects.background_image = Some("/tmp/llnzy-bg.png".to_string());
+        let modes_with_active_image =
+            available_background_modes_with_custom(&config, &[], Vec::new());
+        assert!(modes_with_active_image.contains(&"image".to_string()));
+
+        config.effects.background_image = None;
+        let saved = [std::path::PathBuf::from("/tmp/saved-bg.png")];
+        let modes_with_saved_image =
+            available_background_modes_with_custom(&config, &saved, Vec::new());
+        assert!(modes_with_saved_image.contains(&"image".to_string()));
+    }
+
+    #[test]
+    fn unavailable_background_selection_normalizes_to_none() {
+        let mut config = Config::default();
+        config.effects.background = "matrix".to_string();
+        let modes = available_background_modes_with_custom(&config, &[], Vec::new());
+
+        normalize_background_mode(&mut config, &modes);
+
+        assert_eq!(config.effects.background, "none");
+    }
 }

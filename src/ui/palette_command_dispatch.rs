@@ -29,7 +29,7 @@ pub(super) fn apply_palette_command(
 
     match command_id {
         CommandId::OpenWorkspace => {
-            commands.push(AppCommand::PickOpenProject);
+            commands.push(AppCommand::OpenWorkspaceSwitcher);
         }
         CommandId::NewTab => {
             commands.push(AppCommand::NewTerminalTab);
@@ -135,10 +135,10 @@ mod tests {
     }
 
     #[test]
-    fn open_workspace_palette_command_emits_project_picker() {
+    fn open_workspace_palette_command_emits_workspace_switcher() {
         let commands = apply_for_test(CommandId::OpenWorkspace, 0, 1);
 
-        assert!(matches!(&commands[..], [AppCommand::PickOpenProject]));
+        assert!(matches!(&commands[..], [AppCommand::OpenWorkspaceSwitcher]));
     }
 
     #[test]

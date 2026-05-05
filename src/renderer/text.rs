@@ -180,6 +180,13 @@ impl TextSystem {
             .retain(|cache_key, _| active_keys.contains(cache_key));
     }
 
+    pub fn release_cached_resources(&mut self) {
+        self.line_caches.clear();
+        self.grid_renderers.clear();
+        self.swash_cache = SwashCache::new();
+        self.atlas.trim();
+    }
+
     #[expect(
         clippy::too_many_arguments,
         reason = "glyphon render calls need GPU, target, cache, and terminal context together"

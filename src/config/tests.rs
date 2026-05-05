@@ -1,4 +1,4 @@
-use super::colors::parse_hex;
+use super::colors::{apply_time_of_day_at_hour, parse_hex};
 use super::presets::preset_scheme;
 use super::schema::ConfigFile;
 use super::*;
@@ -32,6 +32,36 @@ fn indexed_color_resolves_ansi_cube_and_grayscale_ranges() {
     assert_eq!(indexed_color(232, &scheme), [8, 8, 8]);
     assert_eq!(indexed_color(244, &scheme), [128, 128, 128]);
     assert_eq!(indexed_color(255, &scheme), [238, 238, 238]);
+}
+
+#[test]
+fn time_of_day_warmth_uses_local_hour_contract() {
+    let base = ColorScheme::default();
+    let mut midday = base.clone();
+    let mut midnight = base.clone();
+
+    apply_time_of_day_at_hour(&mut midday, 12.0);
+    apply_time_of_day_at_hour(&mut midnight, 0.0);
+
+    assert!(midday.foreground[0] < base.foreground[0]);
+    assert!(midday.foreground[2] > base.foreground[2]);
+    assert!(midnight.foreground[0] > base.foreground[0]);
+    assert!(midnight.foreground[2] < base.foreground[2]);
+}
+
+#[test]
+fn time_of_day_boundaries_are_neutral() {
+    let base = ColorScheme::default();
+    let mut dawn = base.clone();
+    let mut dusk = base.clone();
+
+    apply_time_of_day_at_hour(&mut dawn, 6.0);
+    apply_time_of_day_at_hour(&mut dusk, 18.0);
+
+    assert_eq!(dawn.foreground, base.foreground);
+    assert_eq!(dawn.background, base.background);
+    assert_eq!(dusk.foreground, base.foreground);
+    assert_eq!(dusk.background, base.background);
 }
 
 #[test]
@@ -87,6 +117,7 @@ fn apply_color_preset_then_overrides() {
         r##"
             [colors]
             scheme = "dracula"
+            time_of_day_enabled = true
             foreground = "#112233"
             red = "#FF0000"
             blue = "#0000FF"
@@ -100,6 +131,7 @@ fn apply_color_preset_then_overrides() {
     assert_eq!(config.colors.background, [0x28, 0x2A, 0x36]);
     assert_eq!(config.colors.ansi[1], [255, 0, 0]);
     assert_eq!(config.colors.ansi[4], [0, 0, 255]);
+    assert!(config.time_of_day_enabled);
 }
 
 #[test]

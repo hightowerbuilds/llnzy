@@ -112,21 +112,21 @@ Treat this as a parking lot, not a current sprint plan. Many entries came from o
 
 ## Stacker And External Input
 
-- [ ] Keep the Stacker text engine as the owner of text mutation and avoid bypassing it for formatting or queue actions. Source: `leftovers-roadmap-3.md`.
-- [ ] Preserve cursor and selection through formatting toolbar actions. Source: `leftovers-roadmap-3.md`.
-- [ ] Continue manual verification for typing, copy, paste, select all, undo, redo, formatting, saved prompt edit/delete, and queue actions. Source: `leftovers-roadmap-3.md`.
-- [ ] Keep normal Cmd+V paste and normal typing working after any external input changes. Source: `leftovers-roadmap-3.md`.
-- [ ] Keep a debug/instrumentation flag available for future external input debugging. Source: `leftovers-roadmap-3.md`.
-- [ ] Revisit remaining external input delay if future AppKit/WebView text ingress changes reintroduce latency. Source: `leftovers-roadmap-3.md`.
-- [ ] Investigate any future case where dictated text is queued and later delivered to the wrong surface. Source: `leftovers-roadmap-3.md`.
-- [ ] Maintain a first-class Stacker command registry shared by shortcuts, toolbar buttons, command palette, native menus, and future external tools. Source: `external-command-handoff-contract-05-04-2026.md`.
-- [ ] Keep command-palette entries available for Stacker formatting commands when Stacker is active. Source: `external-command-handoff-contract-05-04-2026.md`.
-- [ ] Document and preserve saved prompt edit/delete behavior, including delete confirmation modal. Source: later Stacker roadmap decisions.
-- [ ] Document how users delete saved prompts from the saved prompt list. Source: later Stacker roadmap decisions.
-- [ ] Keep public local IPC deferred until there is a security and permissions design. Source: `external-command-handoff-contract-05-04-2026.md`.
-- [ ] Define future external tool permission checks and user-visible settings before opening command execution to local clients. Source: `external-command-handoff-contract-05-04-2026.md`.
-- [ ] Treat future shell automation as a separate terminal execution contract, not as editor insertion. Source: `external-command-handoff-contract-05-04-2026.md`.
-- [ ] Consider direct insert/replace-selection support for the code editor as a later external command handoff extension. Source: `external-command-handoff-contract-05-04-2026.md`.
+- [x] Keep the Stacker text engine as the owner of text mutation and avoid bypassing it for formatting or queue actions. Source: `leftovers-roadmap-3.md`; verified via `StackerDocumentEditor`, Stacker command execution, external command dispatch, and `docs/stacker-command-workflow-05-05-2026.md`.
+- [x] Preserve cursor and selection through formatting toolbar actions. Source: `leftovers-roadmap-3.md`; toolbar formatting reads the live selection, executes the Stacker command, then stores the resulting selection through the Stacker cursor bridge.
+- [x] Continue manual verification for typing, copy, paste, select all, undo, redo, formatting, saved prompt edit/delete, and queue actions. Source: `leftovers-roadmap-3.md`; moved to `daily-growth/roadmaps/manual laundry.md`.
+- [x] Keep normal Cmd+V paste and normal typing working after any external input changes. Source: `leftovers-roadmap-3.md`; moved to `daily-growth/roadmaps/manual laundry.md` for live-app regression checks.
+- [x] Keep a debug/instrumentation flag available for future external input debugging. Source: `leftovers-roadmap-3.md`; `LLNZY_TRACE_EXTERNAL_INPUT` remains available and now has focused flag parsing tests plus documentation in `docs/stacker-command-workflow-05-05-2026.md`.
+- [x] Revisit remaining external input delay if future AppKit/WebView text ingress changes reintroduce latency. Source: `leftovers-roadmap-3.md`; moved to `daily-growth/roadmaps/manual laundry.md`.
+- [x] Investigate any future case where dictated text is queued and later delivered to the wrong surface. Source: `leftovers-roadmap-3.md`; moved to `daily-growth/roadmaps/manual laundry.md`.
+- [x] Maintain a first-class Stacker command registry shared by shortcuts, toolbar buttons, command palette, native menus, and future external tools. Source: `external-command-handoff-contract-05-04-2026.md`; formatting shortcuts now derive from `stacker_command_registry`, toolbar and palette already consume the registry, external formatting dispatch uses `StackerCommandId`, and native menus share common edit commands with the Stacker dispatcher.
+- [x] Keep command-palette entries available for Stacker formatting commands when Stacker is active. Source: `external-command-handoff-contract-05-04-2026.md`; covered by the Stacker palette context and tests.
+- [x] Document and preserve saved prompt edit/delete behavior, including delete confirmation modal. Source: later Stacker roadmap decisions; documented in `docs/stacker-command-workflow-05-05-2026.md`.
+- [x] Document how users delete saved prompts from the saved prompt list. Source: later Stacker roadmap decisions; documented in `README.md` and `docs/stacker-command-workflow-05-05-2026.md`.
+- [x] Keep public local IPC deferred until there is a security and permissions design. Source: `external-command-handoff-contract-05-04-2026.md`; deferred boundary captured in `docs/security-governance-05-05-2026.md` and `docs/stacker-command-workflow-05-05-2026.md`.
+- [x] Define future external tool permission checks and user-visible settings before opening command execution to local clients. Source: `external-command-handoff-contract-05-04-2026.md`; deferred design requirements captured in `docs/security-governance-05-05-2026.md` and `docs/stacker-command-workflow-05-05-2026.md`.
+- [x] Treat future shell automation as a separate terminal execution contract, not as editor insertion. Source: `external-command-handoff-contract-05-04-2026.md`; documented in `docs/security-governance-05-05-2026.md` and `docs/stacker-command-workflow-05-05-2026.md`.
+- [x] Consider direct insert/replace-selection support for the code editor as a later external command handoff extension. Source: `external-command-handoff-contract-05-04-2026.md`; current code editor external adapter rejects insert/replace and the deferred extension is documented in `docs/stacker-command-workflow-05-05-2026.md`.
 
 ## Terminal
 
@@ -201,55 +201,55 @@ Treat this as a parking lot, not a current sprint plan. Many entries came from o
 - [x] Add adaptive quality when frame time exceeds budget. Source: `llnzy-roadmap.md`.
 - [x] Add power-aware rendering on battery. Source: `llnzy-roadmap.md`.
 - [x] Measure frame smoothness with effects on and off. Source: `llnzy-code-quality-cleanup-roadmap.md`.
-- [ ] Validate stale text artifacts after scroll, split resize, tab switch, and theme change. Source: `llnzy-code-quality-cleanup-roadmap.md`.
-- [ ] Verify terminal text correctness across resize, scrollback, splits, tabs, and themes. Source: `llnzy-code-quality-cleanup-roadmap.md`.
-- [ ] Resolve mismatch between UI background options and built-in shader registration. Source: `llnzy-code-quality-cleanup-roadmap.md`.
-- [ ] Decide whether `matrix`, `nebula`, and `tron` backgrounds should exist or be removed. Source: `llnzy-code-quality-cleanup-roadmap.md`.
-- [ ] Verify custom shader loading. Source: `llnzy-code-quality-cleanup-roadmap.md`.
-- [ ] Clarify `apply_time_of_day` behavior around local time versus UTC. Source: `llnzy-code-quality-cleanup-roadmap.md`.
-- [ ] Migrate toward frame/layer vocabulary before any major renderer rewrite. Source: `llnzy-graphics-engine-roadmap.md`.
-- [ ] Make feature code produce frame descriptions rather than directly knowing about bloom, CRT, glyph atlases, or other renderer internals. Source: `llnzy-graphics-engine-roadmap.md`.
-- [ ] Treat text as a first-class engine primitive instead of terminal-only rendering data. Source: `llnzy-graphics-engine-roadmap.md`.
-- [ ] Add layer-aware effects and effect masks. Source: `llnzy-graphics-engine-roadmap.md`.
-- [ ] Consider future blur and color grading only after layer-aware passes exist. Source: `llnzy-graphics-engine-roadmap.md`.
-- [ ] Add render-aligned hit regions for interaction. Source: `llnzy-graphics-engine-roadmap.md`.
-- [ ] Migrate editor text rendering to GPU only after profiling shows a real bottleneck. Sources: `llnzy-source-editor-roadmap.md`, `leftovers-code-editor.md`, `tweaks.md`.
-- [ ] Add lazy rendering for long lines if profiling identifies long-line cost. Source: `tweaks.md`.
-- [ ] Add memory pressure monitoring and cache eviction. Source: `tweaks.md`.
+- [ ] Validate stale text artifacts after scroll, split resize, tab switch, and theme change. Source: `llnzy-code-quality-cleanup-roadmap.md`; manual matrix: `docs/terminal-rendering-visual-verification-05-05-2026.md`.
+- [ ] Verify terminal text correctness across resize, scrollback, splits, tabs, and themes. Source: `llnzy-code-quality-cleanup-roadmap.md`; manual matrix: `docs/terminal-rendering-visual-verification-05-05-2026.md`.
+- [x] Resolve mismatch between UI background options and built-in shader registration. Source: `llnzy-code-quality-cleanup-roadmap.md`.
+- [x] Decide whether `matrix`, `nebula`, and `tron` backgrounds should exist or be removed. Source: `llnzy-code-quality-cleanup-roadmap.md`.
+- [x] Verify custom shader loading. Source: `llnzy-code-quality-cleanup-roadmap.md`.
+- [x] Clarify `apply_time_of_day` behavior around local time versus UTC. Source: `llnzy-code-quality-cleanup-roadmap.md`.
+- [x] Migrate toward frame/layer vocabulary before any major renderer rewrite. Source: `llnzy-graphics-engine-roadmap.md`; architecture note: `docs/rendering-architecture-05-05-2026.md`.
+- [x] Make feature code produce frame descriptions rather than directly knowing about bloom, CRT, glyph atlases, or other renderer internals. Source: `llnzy-graphics-engine-roadmap.md`; current bridge: `RenderRequest -> EngineFrame`.
+- [x] Treat text as a first-class engine primitive instead of terminal-only rendering data. Source: `llnzy-graphics-engine-roadmap.md`; current scope: overlay/search/error text via `LayerKind::Text`.
+- [x] Add layer-aware effects and effect masks. Source: `llnzy-graphics-engine-roadmap.md`; current scope: `EffectStack` masks consumed by scene post-processing.
+- [x] Consider future blur and color grading only after layer-aware passes exist. Source: `llnzy-graphics-engine-roadmap.md`; decision documented in `docs/rendering-architecture-05-05-2026.md`.
+- [x] Add render-aligned hit regions for interaction. Source: `llnzy-graphics-engine-roadmap.md`; current scope: `EngineFrame` hit regions for terminal content and egui.
+- [x] Migrate editor text rendering to GPU only after profiling shows a real bottleneck. Sources: `llnzy-source-editor-roadmap.md`, `leftovers-code-editor.md`, `tweaks.md`; decision documented as profiling-gated.
+- [x] Add lazy rendering for long lines if profiling identifies long-line cost. Source: `tweaks.md`; decision documented as profiling-gated.
+- [x] Add memory pressure monitoring and cache eviction. Source: `tweaks.md`; current scope: renderer releases text caches on GPU out-of-memory.
 
 ## Workspaces, Settings, Themes, And UX
 
-- [ ] Create a workspace settings page where a workspace bundles theme, project, and tab layout. Source: `tweaks.md`.
-- [ ] Add workspace switcher from Home or command palette. Source: `tweaks.md`.
-- [ ] Add workspace auto-save and restore. Source: `tweaks.md`.
-- [ ] Keep Settings and Appearances as distinct product surfaces. Source: `llnzy-phase-9-product-hierarchy-ux-consistency-05-02-2026.md`.
+- [x] Create a workspace settings page where a workspace bundles theme, project, and tab layout. Source: `tweaks.md`; current scope: saved workspace create/launch/delete with theme, project, and tab entries.
+- [x] Add workspace switcher from Home or command palette. Source: `tweaks.md`; Home launches saved workspaces, command palette opens the Workspace settings switcher.
+- [ ] Add workspace auto-save and restore. Source: `tweaks.md`; partial: project, active tab, and tabs restore, but autosave does not yet persist the active theme name.
+- [x] Keep Settings and Appearances as distinct product surfaces. Source: `llnzy-phase-9-product-hierarchy-ux-consistency-05-02-2026.md`.
 - [ ] Verify Settings and Stacker UI still render and behave correctly after structural changes. Source: `llnzy-code-quality-cleanup-roadmap.md`.
-- [ ] Verify optional asset lists have clear empty and unavailable states. Source: `reliability-manual-testing-05-02-2026.md`.
-- [ ] Add or complete background image library behavior. Source: `tweaks.md`.
-- [ ] Fix or verify background image changing. Source: `tweaks-2.md`.
-- [ ] Add custom theme creation if the current theme system remains read-only. Source: `tweaks.md`.
+- [ ] Verify optional asset lists have clear empty and unavailable states. Source: `reliability-manual-testing-05-02-2026.md`; partial: background list has empty/unavailable states, saved workspaces and user themes still need review.
+- [x] Add or complete background image library behavior. Source: `tweaks.md`; import/list/delete storage and Settings selection covered by focused tests.
+- [ ] Fix or verify background image changing. Source: `tweaks-2.md`; code path exists, still needs live/manual image-switch verification.
+- [x] Add custom theme creation if the current theme system remains read-only. Source: `tweaks.md`; Appearance can save/load/delete user themes with persisted view flags.
 - [ ] Add per-view theme application if it fits the product model. Source: `tweaks.md`.
-- [ ] Consider theme hot-switch animation only after core theme behavior is stable. Source: `tweaks.md`.
+- [x] Consider theme hot-switch animation only after core theme behavior is stable. Source: `tweaks.md`; decision: defer beyond current color transition until per-view themes and background switching are stable.
 - [ ] Add welcome/onboarding overlay. Sources: `roadmap-to-maintenance.md`, `tweaks.md`.
 - [ ] Add keyboard shortcut cheat sheet overlay. Source: `tweaks.md`.
 - [ ] Add notification toasts. Sources: `roadmap-to-maintenance.md`, `tweaks.md`.
-- [ ] Fix or verify Cmd+/Cmd- zoom behavior. Source: `tweaks.md`.
+- [x] Fix or verify Cmd+/Cmd- zoom behavior. Source: `tweaks.md`; verified primary-modifier zoom bindings and existing font-size reflow handler.
 - [ ] Finish setup with appearance if initial setup still feels incomplete. Source: `tweaks-2.md`.
-- [ ] Audit README, config docs, known limitations, and product claims against current behavior. Source: `llnzy-critical-review-04-28-2026.md`.
-- [ ] Document built-in theme count and config path behavior accurately. Source: `llnzy-code-quality-cleanup-roadmap.md`.
+- [x] Audit README, config docs, known limitations, and product claims against current behavior. Source: `llnzy-critical-review-04-28-2026.md`; corrected theme/session/config path claims.
+- [x] Document built-in theme count and config path behavior accurately. Source: `llnzy-code-quality-cleanup-roadmap.md`; docs now list `Minimalist` and `Buzz` plus platform config paths.
 
 ## Security, Governance, And Enterprise Readiness
 
-- [ ] Write a documented threat model. Sources: `enterprise-editor-readiness-review-05-02-2026.md`, `llnzy-critical-review-04-28-2026.md`.
-- [ ] Define boundaries around terminals, project files, LSP, future plugins, Stacker commands, and external tools. Source: `enterprise-editor-readiness-review-05-02-2026.md`.
-- [ ] Add dependency review process. Source: `enterprise-editor-readiness-review-05-02-2026.md`.
-- [ ] Define secure update chain requirements before auto-update ships. Source: `enterprise-editor-readiness-review-05-02-2026.md`.
-- [ ] Define vulnerability handling and security response policy. Source: `enterprise-editor-readiness-review-05-02-2026.md`.
-- [ ] Define secrets-handling policy for terminals, config, workspaces, future plugins, and external command integrations. Source: `enterprise-editor-readiness-review-05-02-2026.md`.
-- [ ] Add admin/policy controls if LLNZY targets enterprise deployment. Source: `enterprise-editor-readiness-review-05-02-2026.md`.
-- [ ] Include managed settings, disabled features, enforced defaults, approved language servers/extensions, telemetry policy, and profile locking in the enterprise policy model. Source: `enterprise-editor-readiness-review-05-02-2026.md`.
-- [ ] Define compatibility policy, release cadence, deprecation process, and support expectations. Source: `enterprise-editor-readiness-review-05-02-2026.md`.
-- [ ] Keep narrowing product promise around core reliability before adding broad enterprise features. Sources: `llnzy-critical-review-04-28-2026.md`, `llnzy-veteran-editor-review-05-01-2026.md`.
+- [x] Write a documented threat model. Sources: `enterprise-editor-readiness-review-05-02-2026.md`, `llnzy-critical-review-04-28-2026.md`; baseline: `docs/security-governance-05-05-2026.md`.
+- [x] Define boundaries around terminals, project files, LSP, future plugins, Stacker commands, and external tools. Source: `enterprise-editor-readiness-review-05-02-2026.md`; baseline: `docs/security-governance-05-05-2026.md`.
+- [x] Add dependency review process. Source: `enterprise-editor-readiness-review-05-02-2026.md`; baseline: `docs/security-governance-05-05-2026.md`.
+- [x] Define secure update chain requirements before auto-update ships. Source: `enterprise-editor-readiness-review-05-02-2026.md`; auto-update remains deferred until requirements are met.
+- [x] Define vulnerability handling and security response policy. Source: `enterprise-editor-readiness-review-05-02-2026.md`; baseline: `docs/security-governance-05-05-2026.md`.
+- [x] Define secrets-handling policy for terminals, config, workspaces, future plugins, and external command integrations. Source: `enterprise-editor-readiness-review-05-02-2026.md`; baseline: `docs/security-governance-05-05-2026.md`.
+- [x] Add admin/policy controls if LLNZY targets enterprise deployment. Source: `enterprise-editor-readiness-review-05-02-2026.md`; decision: not current target, policy model defined for future enterprise work.
+- [x] Include managed settings, disabled features, enforced defaults, approved language servers/extensions, telemetry policy, and profile locking in the enterprise policy model. Source: `enterprise-editor-readiness-review-05-02-2026.md`; baseline: `docs/security-governance-05-05-2026.md`.
+- [x] Define compatibility policy, release cadence, deprecation process, and support expectations. Source: `enterprise-editor-readiness-review-05-02-2026.md`; current support promise and future requirements documented.
+- [x] Keep narrowing product promise around core reliability before adding broad enterprise features. Sources: `llnzy-critical-review-04-28-2026.md`, `llnzy-veteran-editor-review-05-01-2026.md`; documented as product promise guardrail.
 
 ## Extension System And Future Platform Surface
 

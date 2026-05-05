@@ -24,7 +24,7 @@ use llnzy::layout::{logical_to_physical_width, LayoutInputs, ScreenLayout};
 use llnzy::performance::PowerSource;
 use llnzy::renderer::{RenderRequest, Renderer, TerminalPane};
 use llnzy::search::Search;
-use llnzy::stacker::commands::StackerCommandId;
+use llnzy::stacker::commands::{stacker_command_registry, StackerCommandId};
 use llnzy::stacker::input::StackerSelection;
 use llnzy::stacker_webview::{StackerWebView, StackerWebViewMessage};
 use llnzy::ui::command_palette::CommandId;
@@ -677,11 +677,28 @@ fn stacker_editor_shortcut(key: &Key, modifiers: ModifiersState) -> Option<Stack
         return None;
     };
 
-    match (key.to_lowercase().as_str(), modifiers.shift_key()) {
-        ("b", _) => Some(StackerCommandId::Bold),
-        ("`", _) => Some(StackerCommandId::InlineCode),
-        _ => None,
-    }
+    let key = key.to_lowercase();
+    stacker_command_registry()
+        .iter()
+        .find(|command| {
+            !matches!(
+                command.id,
+                StackerCommandId::Clear | StackerCommandId::Undo | StackerCommandId::Redo
+            ) && stacker_command_shortcut_matches(command.keybinding, &key, modifiers.shift_key())
+        })
+        .map(|command| command.id)
+}
+
+fn stacker_command_shortcut_matches(keybinding: &str, key: &str, shift_pressed: bool) -> bool {
+    let Some(rest) = keybinding.strip_prefix("Cmd+") else {
+        return false;
+    };
+    let (requires_shift, expected) = rest
+        .strip_prefix("Shift+")
+        .map(|expected| (true, expected))
+        .unwrap_or((false, rest));
+
+    requires_shift == shift_pressed && expected.eq_ignore_ascii_case(key)
 }
 
 fn stacker_keyboard_text_fallback_candidate(
@@ -768,6 +785,38 @@ mod tests {
         assert!(!terminal_mouse_drag_exceeded((4, 8), 4, 8));
         assert!(terminal_mouse_drag_exceeded((4, 8), 4, 9));
         assert!(terminal_mouse_drag_exceeded((4, 8), 5, 8));
+    }
+
+    fn primary_mods() -> ModifiersState {
+        if cfg!(target_os = "macos") {
+            ModifiersState::SUPER
+        } else {
+            ModifiersState::CONTROL
+        }
+    }
+
+    fn ch(s: &str) -> Key {
+        Key::Character(s.into())
+    }
+
+    #[test]
+    fn stacker_format_shortcuts_come_from_command_registry() {
+        assert_eq!(
+            stacker_editor_shortcut(&ch("b"), primary_mods()),
+            Some(StackerCommandId::Bold)
+        );
+        assert_eq!(
+            stacker_editor_shortcut(&ch("`"), primary_mods()),
+            Some(StackerCommandId::InlineCode)
+        );
+    }
+
+    #[test]
+    fn stacker_format_shortcuts_ignore_plain_text_keys() {
+        assert_eq!(
+            stacker_editor_shortcut(&ch("b"), ModifiersState::empty()),
+            None
+        );
     }
 }
 

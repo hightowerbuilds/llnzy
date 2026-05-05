@@ -13,7 +13,11 @@ pub fn backgrounds_dir() -> Option<PathBuf> {
 /// Import an image file into the backgrounds library. Returns the new path.
 pub fn import_background(source: &Path) -> Result<PathBuf, String> {
     let dir = backgrounds_dir().ok_or("No config directory")?;
-    std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create backgrounds dir: {e}"))?;
+    import_background_into_dir(source, &dir)
+}
+
+fn import_background_into_dir(source: &Path, dir: &Path) -> Result<PathBuf, String> {
+    std::fs::create_dir_all(dir).map_err(|e| format!("Failed to create backgrounds dir: {e}"))?;
 
     let file_name = source.file_name().ok_or("No file name")?;
     let dest = dir.join(file_name);
@@ -43,7 +47,11 @@ pub fn list_backgrounds() -> Vec<PathBuf> {
     let Some(dir) = backgrounds_dir() else {
         return Vec::new();
     };
-    let Ok(entries) = std::fs::read_dir(&dir) else {
+    list_backgrounds_in_dir(&dir)
+}
+
+fn list_backgrounds_in_dir(dir: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
     let mut images: Vec<PathBuf> = entries
@@ -177,6 +185,16 @@ pub fn save_theme(
     view_flags: &ThemeViewFlags,
 ) -> Result<PathBuf, String> {
     let dir = themes_dir().ok_or("No config directory")?;
+    save_theme_to_dir(name, description, config, view_flags, &dir)
+}
+
+fn save_theme_to_dir(
+    name: &str,
+    description: &str,
+    config: &Config,
+    view_flags: &ThemeViewFlags,
+    dir: &Path,
+) -> Result<PathBuf, String> {
     std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create themes dir: {e}"))?;
 
     let safe_name: String = name
@@ -242,7 +260,11 @@ pub fn load_user_themes() -> Vec<(VisualTheme, ThemeViewFlags)> {
     let Some(dir) = themes_dir() else {
         return Vec::new();
     };
-    let Ok(entries) = std::fs::read_dir(&dir) else {
+    load_user_themes_from_dir(&dir)
+}
+
+fn load_user_themes_from_dir(dir: &Path) -> Vec<(VisualTheme, ThemeViewFlags)> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
 
@@ -322,6 +344,10 @@ pub fn load_user_themes() -> Vec<(VisualTheme, ThemeViewFlags)> {
 /// Delete a user-saved theme by name.
 pub fn delete_user_theme(name: &str) -> Result<(), String> {
     let dir = themes_dir().ok_or("No config directory")?;
+    delete_user_theme_from_dir(name, &dir)
+}
+
+fn delete_user_theme_from_dir(name: &str, dir: &Path) -> Result<(), String> {
     let safe_name: String = name
         .chars()
         .map(|c| {
@@ -342,6 +368,17 @@ pub fn delete_user_theme(name: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn test_dir(name: &str) -> PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("llnzy-theme-store-{name}-{stamp}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
 
     #[test]
     fn rgb_hex_roundtrip() {
@@ -359,5 +396,80 @@ mod tests {
             str_to_cursor_style(cursor_style_to_str(CursorStyle::Block)),
             CursorStyle::Block
         );
+    }
+
+    #[test]
+    fn background_library_imports_sorts_and_deletes_images() {
+        let root = test_dir("backgrounds");
+        let source = root.join("source");
+        let library = root.join("library");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(source.join("sky.png"), b"first").unwrap();
+        std::fs::write(source.join("notes.txt"), b"ignore").unwrap();
+
+        let first = import_background_into_dir(&source.join("sky.png"), &library).unwrap();
+        let second = import_background_into_dir(&source.join("sky.png"), &library).unwrap();
+
+        assert_eq!(
+            first.file_name().and_then(|name| name.to_str()),
+            Some("sky.png")
+        );
+        assert_eq!(
+            second.file_name().and_then(|name| name.to_str()),
+            Some("sky_1.png")
+        );
+        assert_eq!(
+            list_backgrounds_in_dir(&library),
+            vec![first.clone(), second]
+        );
+
+        delete_background(&first).unwrap();
+        assert!(!first.exists());
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn user_theme_roundtrips_flags_and_deletes() {
+        let root = test_dir("themes");
+        let mut config = Config::default();
+        config.colors.foreground = [1, 2, 3];
+        config.effects.background = "aurora".to_string();
+        config.effects.background_image = Some("/tmp/background.png".to_string());
+        config.cursor_style = CursorStyle::Beam;
+        let flags = ThemeViewFlags {
+            terminal: true,
+            editor: true,
+            sketch: false,
+            stacker: true,
+        };
+
+        let path = save_theme_to_dir("My Theme", "desc", &config, &flags, &root).unwrap();
+        assert_eq!(
+            path.file_name().and_then(|name| name.to_str()),
+            Some("My_Theme.toml")
+        );
+
+        let themes = load_user_themes_from_dir(&root);
+        assert_eq!(themes.len(), 1);
+        let (theme, loaded_flags) = &themes[0];
+        assert_eq!(theme.name, "My Theme");
+        assert_eq!(theme.description, "desc");
+        assert_eq!(theme.colors.foreground, [1, 2, 3]);
+        assert_eq!(theme.effects.background, "aurora");
+        assert_eq!(
+            theme.effects.background_image.as_deref(),
+            Some("/tmp/background.png")
+        );
+        assert_eq!(theme.cursor_style, CursorStyle::Beam);
+        assert!(loaded_flags.terminal);
+        assert!(loaded_flags.editor);
+        assert!(!loaded_flags.sketch);
+        assert!(loaded_flags.stacker);
+
+        delete_user_theme_from_dir("My Theme", &root).unwrap();
+        assert!(load_user_themes_from_dir(&root).is_empty());
+
+        let _ = std::fs::remove_dir_all(root);
     }
 }

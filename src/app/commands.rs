@@ -48,6 +48,7 @@ pub enum AppCommand {
         new_path: PathBuf,
     },
     OpenProject(PathBuf),
+    OpenWorkspaceSwitcher,
     LaunchWorkspace(SavedWorkspace),
     RenameTab {
         tab_idx: usize,

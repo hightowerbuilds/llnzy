@@ -37,13 +37,13 @@ Requires Rust 1.75+ and a GPU that supports wgpu (Metal on macOS, Vulkan/DX12 el
 
 **Sketch** -- Drawing canvas with marker, rectangle, and text tools. Save and recall named sketches.
 
-**Stacker** -- Prompt queue manager. Save, categorize, search, and copy prompts. Optional prompt bar above the footer for quick access.
+**Stacker** -- Prompt queue manager. Save, edit, delete, categorize, search, queue, and copy prompts. Optional prompt bar above the footer for quick access. Current command and saved-prompt workflow notes live in `docs/stacker-command-workflow-05-05-2026.md`.
 
-**Visual Effects** -- Animated shader backgrounds, custom WGSL shader loading, image backgrounds, bloom/glow, GPU particle system, CRT scanlines with curvature/vignette/chromatic aberration, cursor glow, and cursor trail. Effects can be enabled, tuned, and applied selectively through config and themes.
+**Visual Effects** -- Animated shader backgrounds, custom WGSL shader loading, image backgrounds, bloom/glow, GPU particle system, CRT scanlines with curvature/vignette/chromatic aberration, cursor glow, and cursor trail. Effects can be enabled, tuned, and included in saved themes.
 
-**Themes** -- Built-in presets plus custom theme creation. Save colors, effects, and backgrounds as named themes, choose whether effects apply to UI views, and manage a persistent background image gallery.
+**Themes** -- Two built-in presets, Minimalist and Buzz, plus custom theme creation. Save colors, effects, and backgrounds as named themes, and manage a persistent background image gallery.
 
-**Workspaces** -- Bundle a theme, a project folder, and a tab layout into a named workspace. Launch from the Home screen to restore everything at once. The last session is saved on close and restored on startup.
+**Workspaces** -- Bundle a theme, a project folder, and a tab layout into a named workspace. Launch from the Home screen or command palette workspace switcher. The last session saves project and tab layout on close and restores them on startup; active theme autosave is not wired yet.
 
 **Keybinding Presets** -- VS Code (default), Vim (normal/insert/visual modes with motions), Emacs (Ctrl chords). Cross-platform modifier handling (Cmd on macOS, Ctrl on Linux/Windows).
 
@@ -72,7 +72,13 @@ Requires Rust 1.75+ and a GPU that supports wgpu (Metal on macOS, Vulkan/DX12 el
 
 ## Config
 
-`~/.config/llnzy/config.toml` -- changes auto-reload within 2 seconds.
+llnzy reads `config.toml` from the platform config directory and auto-reloads changes within 2 seconds:
+
+| Platform | Config path |
+|---|---|
+| macOS | `~/Library/Application Support/llnzy/config.toml` |
+| Linux | `~/.config/llnzy/config.toml` |
+| Windows | `%APPDATA%\\llnzy\\config.toml` |
 
 ```toml
 [effects]

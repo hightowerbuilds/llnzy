@@ -29,6 +29,7 @@ pub(super) struct FontConfig {
 #[derive(Deserialize)]
 pub(super) struct ColorConfig {
     pub(super) scheme: Option<String>,
+    pub(super) time_of_day_enabled: Option<bool>,
     pub(super) foreground: Option<String>,
     pub(super) background: Option<String>,
     pub(super) cursor: Option<String>,

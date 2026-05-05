@@ -1,5 +1,6 @@
 use bytemuck::{Pod, Zeroable};
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 use super::state::GpuState;
 
@@ -142,12 +143,62 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
 // ── Built-in shader registry ──
 
+pub const BUILTIN_SHADER_NAMES: &[&str] = &["smoke", "aurora"];
+
+const BUILTIN_SHADER_SOURCES: &[(&str, &str)] =
+    &[("smoke", SMOKE_FRAGMENT), ("aurora", AURORA_FRAGMENT)];
+
 fn builtin_shaders() -> Vec<(&'static str, String)> {
-    let shaders = [("smoke", SMOKE_FRAGMENT), ("aurora", AURORA_FRAGMENT)];
-    shaders
+    BUILTIN_SHADER_SOURCES
         .iter()
         .map(|(name, frag)| (*name, format!("{}{}", SHARED_PREAMBLE, frag)))
         .collect()
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct CustomShaderSource {
+    name: String,
+    source: String,
+}
+
+pub fn custom_shader_names_from_dir(shader_dir: &Path) -> Vec<String> {
+    custom_shader_files(shader_dir)
+        .into_iter()
+        .filter_map(|path| custom_shader_name(&path))
+        .collect()
+}
+
+fn custom_shader_sources_from_dir(shader_dir: &Path) -> Vec<CustomShaderSource> {
+    custom_shader_files(shader_dir)
+        .into_iter()
+        .filter_map(|path| {
+            let name = custom_shader_name(&path)?;
+            let fragment = std::fs::read_to_string(&path).ok()?;
+            Some(CustomShaderSource {
+                name,
+                source: format!("{}{}", SHARED_PREAMBLE, fragment),
+            })
+        })
+        .collect()
+}
+
+fn custom_shader_files(shader_dir: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(shader_dir) else {
+        return Vec::new();
+    };
+    let mut paths: Vec<PathBuf> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("wgsl"))
+        .collect();
+    paths.sort();
+    paths
+}
+
+fn custom_shader_name(path: &Path) -> Option<String> {
+    path.file_stem()
+        .and_then(|stem| stem.to_str())
+        .map(str::to_string)
 }
 
 // ── Image background blit shader ──
@@ -240,24 +291,14 @@ impl BackgroundRenderer {
         }
 
         if let Some(paths) = crate::platform::paths::current_paths() {
-            let shader_dir = paths.shaders_dir();
-            if let Ok(entries) = std::fs::read_dir(&shader_dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.extension().is_some_and(|e| e == "wgsl") {
-                        if let Ok(user_frag) = std::fs::read_to_string(&path) {
-                            let name = path.file_stem().unwrap().to_string_lossy().to_string();
-                            let full_source = format!("{}{}", SHARED_PREAMBLE, user_frag);
-                            if let Some(pipeline) =
-                                Self::compile_pipeline(gpu, &pipeline_layout, &full_source, &name)
-                            {
-                                log::info!("Loaded custom shader: {}", name);
-                                pipelines.insert(name, pipeline);
-                            } else {
-                                log::warn!("Failed to compile custom shader: {}", path.display());
-                            }
-                        }
-                    }
+            for shader in custom_shader_sources_from_dir(&paths.shaders_dir()) {
+                if let Some(pipeline) =
+                    Self::compile_pipeline(gpu, &pipeline_layout, &shader.source, &shader.name)
+                {
+                    log::info!("Loaded custom shader: {}", shader.name);
+                    pipelines.insert(shader.name, pipeline);
+                } else {
+                    log::warn!("Failed to compile custom shader: {}", shader.name);
                 }
             }
         }
@@ -599,4 +640,68 @@ fn brighten_rgb(color: [u8; 3], add: [u8; 3]) -> [u8; 3] {
         color[1].saturating_add(add[1]),
         color[2].saturating_add(add[2]),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        custom_shader_names_from_dir, custom_shader_sources_from_dir, BUILTIN_SHADER_NAMES,
+        BUILTIN_SHADER_SOURCES,
+    };
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn builtin_shader_names_match_registered_sources() {
+        let source_names: Vec<&str> = BUILTIN_SHADER_SOURCES
+            .iter()
+            .map(|(name, _)| *name)
+            .collect();
+
+        assert_eq!(source_names, BUILTIN_SHADER_NAMES);
+    }
+
+    #[test]
+    fn custom_shader_names_are_sorted_wgsl_file_stems() {
+        let dir = temp_shader_dir("names");
+        std::fs::write(dir.join("zebra.wgsl"), "z").unwrap();
+        std::fs::write(dir.join("alpha.wgsl"), "a").unwrap();
+        std::fs::write(dir.join("notes.txt"), "ignore").unwrap();
+
+        let names = custom_shader_names_from_dir(&dir);
+
+        assert_eq!(names, ["alpha", "zebra"]);
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn custom_shader_sources_include_shared_preamble() {
+        let dir = temp_shader_dir("sources");
+        let fragment = r#"
+@fragment
+fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    return vec4<f32>(in.uv, 0.0, bg.intensity);
+}
+"#;
+        std::fs::write(dir.join("custom.wgsl"), fragment).unwrap();
+
+        let shaders = custom_shader_sources_from_dir(&dir);
+
+        assert_eq!(shaders.len(), 1);
+        assert_eq!(shaders[0].name, "custom");
+        assert!(shaders[0].source.contains("struct FrameUniforms"));
+        assert!(shaders[0].source.contains(fragment));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    fn temp_shader_dir(label: &str) -> std::path::PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("llnzy-custom-shader-{label}-{unique}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
 }

@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::time::Instant;
 
 use crate::config::{Config, CursorStyle};
-use crate::engine::{Color, EngineFrame, LayerKind, Size};
+use crate::engine::{Color, EffectMask, EngineFrame, LayerKind, Size};
 use crate::error_log::{ErrorLog, ErrorPanel};
 use crate::layout::{ScreenLayout, FOOTER_HEIGHT};
 use crate::performance::{EffectsMode, PerformanceScenario};
@@ -125,7 +125,7 @@ impl Renderer {
         // Shadered views render egui to the scene texture before post-processing.
         // Clean views post-process terminal content first, then draw egui on top.
         let egui_to_scene = use_scene && request.apply_effects_to_ui;
-        let effects_mask = request.effects_mask;
+        let effects_mask = effect_mask_uv_from_frame(&engine_frame);
         if egui_to_scene {
             self.render_egui_overlay(request.egui_render, &self.gpu.scene_view);
             let mut pp_encoder = self.create_render_encoder();
@@ -164,6 +164,7 @@ impl Renderer {
             }
             Err(wgpu::SurfaceError::OutOfMemory) => {
                 log::error!("GPU out of memory");
+                self.text.release_cached_resources();
                 None
             }
             Err(e) => {
@@ -662,5 +663,35 @@ impl Renderer {
             let desc = self.screen_descriptor();
             egui_fn(&self.gpu.device, &self.gpu.queue, swapchain_view, desc);
         }
+    }
+}
+
+fn effect_mask_uv_from_frame(frame: &EngineFrame) -> Option<[f32; 4]> {
+    frame.layers.iter().find_map(|layer| {
+        layer.style.effects.mask.as_ref().map(|mask| match mask {
+            EffectMask::UvRect(rect) => *rect,
+        })
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::{EffectMask, EffectStack, Layer, LayerKind};
+
+    #[test]
+    fn effect_mask_uv_comes_from_engine_frame_layer_effects() {
+        let mut frame = EngineFrame::new(Size::new(100.0, 100.0));
+        let mut layer = Layer::new("scene-effects", 900, LayerKind::Primitives(Vec::new()));
+        layer.style.effects = EffectStack {
+            passes: Vec::new(),
+            mask: Some(EffectMask::UvRect([0.1, 0.2, 0.8, 0.9])),
+        };
+        frame.push_layer(layer);
+
+        assert_eq!(
+            effect_mask_uv_from_frame(&frame),
+            Some([0.1, 0.2, 0.8, 0.9])
+        );
     }
 }

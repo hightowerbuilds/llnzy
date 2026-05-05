@@ -396,6 +396,28 @@ mod tests {
     }
 
     #[test]
+    fn default_zoom_bindings_use_primary_modifier() {
+        let bindings = KeyBindings::default_bindings();
+
+        assert_eq!(
+            bindings.match_key_parts(&ch("="), primary_mods()),
+            Some(Action::ZoomIn)
+        );
+        assert_eq!(
+            bindings.match_key_parts(&ch("+"), primary_mods()),
+            Some(Action::ZoomIn)
+        );
+        assert_eq!(
+            bindings.match_key_parts(&ch("-"), primary_mods()),
+            Some(Action::ZoomOut)
+        );
+        assert_eq!(
+            bindings.match_key_parts(&ch("0"), primary_mods()),
+            Some(Action::ZoomReset)
+        );
+    }
+
+    #[test]
     fn super_backspace_is_not_an_app_keybinding() {
         let bindings = KeyBindings::default_bindings();
 

@@ -354,6 +354,14 @@ impl App {
                 *sidebar_changed = true;
                 true
             }
+            AppCommand::OpenWorkspaceSwitcher => {
+                self.open_singleton_tab(TabKind::Settings);
+                if let Some(ui) = &mut self.ui {
+                    ui.settings.active_tab = llnzy::ui::types::SettingsTab::Workspace;
+                    ui.active_view = ActiveView::Shells;
+                }
+                true
+            }
             AppCommand::LaunchWorkspace(ws) => {
                 if let Some(ref theme_name) = ws.theme {
                     if let Some(theme) = llnzy::theme::builtin_themes()

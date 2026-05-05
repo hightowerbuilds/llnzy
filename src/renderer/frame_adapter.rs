@@ -1,7 +1,7 @@
 use crate::config::Config;
 use crate::engine::{
-    Color, EffectPass, EffectStack, EguiLayer, EngineFrame, Layer, LayerKind, Primitive, Rect,
-    Size, TextRun,
+    Color, EffectMask, EffectPass, EffectStack, EguiLayer, EngineFrame, HitRegion, Layer,
+    LayerKind, Primitive, Rect, Size, TextRun,
 };
 
 use super::config_helpers::TERMINAL_MINIMAL_BG;
@@ -34,6 +34,7 @@ pub(super) fn engine_frame_from_request(
                 scanline_strength: config.effects.scanline_intensity,
             });
         }
+        scene_effects.mask = request.effects_mask.map(EffectMask::UvRect);
         if !scene_effects.passes.is_empty() {
             let mut layer = Layer::new("scene-effects", 900, LayerKind::Primitives(Vec::new()));
             layer.style.effects = scene_effects;
@@ -42,14 +43,8 @@ pub(super) fn engine_frame_from_request(
     }
 
     if has_terminal_content {
-        frame.push_layer(Layer::new(
-            "terminal-content",
-            100,
-            LayerKind::CustomGpu(crate::engine::CustomGpuLayer {
-                pass: crate::engine::CustomPassId::new("terminal-grid"),
-                bounds: rect_from_layout_content(request),
-            }),
-        ));
+        let terminal_bounds = rect_from_layout_content(request);
+        push_terminal_content_layer(&mut frame, terminal_bounds);
     }
 
     if let Some(session) = request.terminal {
@@ -205,6 +200,12 @@ pub(super) fn engine_frame_from_request(
                 bounds: Some(Rect::new(0.0, 0.0, viewport.width, viewport.height)),
             }),
         ));
+        frame.push_hit_region(HitRegion::new(
+            "egui",
+            "egui",
+            Rect::new(0.0, 0.0, viewport.width, viewport.height),
+            1_000,
+        ));
     }
 
     frame
@@ -217,6 +218,23 @@ fn rect_from_layout_content(request: &RenderRequest<'_>) -> Rect {
         request.screen_layout.content.w,
         request.screen_layout.content.h,
     )
+}
+
+fn push_terminal_content_layer(frame: &mut EngineFrame, terminal_bounds: Rect) {
+    frame.push_layer(Layer::new(
+        "terminal-content",
+        100,
+        LayerKind::CustomGpu(crate::engine::CustomGpuLayer {
+            pass: crate::engine::CustomPassId::new("terminal-grid"),
+            bounds: terminal_bounds,
+        }),
+    ));
+    frame.push_hit_region(HitRegion::new(
+        "terminal-content",
+        "terminal-content",
+        terminal_bounds,
+        100,
+    ));
 }
 
 fn rect_primitives(
@@ -429,6 +447,103 @@ mod tests {
             .layers
             .iter()
             .any(|layer| layer.id.as_str() == "scene-effects"));
+    }
+
+    #[test]
+    fn adapter_attaches_request_effect_mask_to_engine_effect_layer() {
+        let layout = layout();
+        let mut config = Config::default();
+        config.effects.crt_enabled = true;
+        let request = RenderRequest {
+            terminal: None,
+            tab_id: 1,
+            terminal_panes: &[],
+            tab_titles: &[],
+            selection_rects: &[],
+            search_rects: &[],
+            search_bar: None,
+            error_panel: None,
+            visual_bell: false,
+            screen_layout: &layout,
+            egui_render: None,
+            effects_enabled: true,
+            apply_effects_to_ui: false,
+            effects_mask: Some([0.1, 0.2, 0.8, 0.9]),
+        };
+
+        let frame =
+            engine_frame_from_request(&request, &config, Size::new(800.0, 600.0), true, 16.0);
+        let layer = frame
+            .layers
+            .iter()
+            .find(|layer| layer.id.as_str() == "scene-effects")
+            .expect("missing scene-effects layer");
+
+        assert_eq!(
+            layer.style.effects.mask,
+            Some(EffectMask::UvRect([0.1, 0.2, 0.8, 0.9]))
+        );
+    }
+
+    #[test]
+    fn adapter_adds_render_aligned_hit_regions_for_terminal_layer() {
+        let mut frame = EngineFrame::new(Size::new(800.0, 600.0));
+        push_terminal_content_layer(&mut frame, Rect::new(10.0, 40.0, 780.0, 520.0));
+
+        assert_eq!(
+            frame
+                .hit_regions
+                .iter()
+                .map(|region| region.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["terminal-content"]
+        );
+        assert_eq!(
+            frame.hit_test(20.0, 50.0).map(|region| region.id.as_str()),
+            Some("terminal-content")
+        );
+    }
+
+    #[test]
+    fn adapter_adds_render_aligned_hit_region_for_egui() {
+        let layout = layout();
+        let request = RenderRequest {
+            terminal: None,
+            tab_id: 1,
+            terminal_panes: &[],
+            tab_titles: &[],
+            selection_rects: &[],
+            search_rects: &[],
+            search_bar: None,
+            error_panel: None,
+            visual_bell: false,
+            screen_layout: &layout,
+            egui_render: Some(&mut |_, _, _, _| {}),
+            effects_enabled: false,
+            apply_effects_to_ui: false,
+            effects_mask: None,
+        };
+
+        let frame = engine_frame_from_request(
+            &request,
+            &Config::default(),
+            Size::new(800.0, 600.0),
+            false,
+            16.0,
+        );
+
+        assert_eq!(
+            frame
+                .hit_regions
+                .iter()
+                .map(|region| region.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["egui"]
+        );
+        assert_eq!(
+            frame.hit_test(20.0, 50.0).map(|region| region.id.as_str()),
+            Some("egui")
+        );
     }
 
     #[test]

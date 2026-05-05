@@ -36,6 +36,9 @@ impl Config {
                     self.colors = preset;
                 }
             }
+            if let Some(time_of_day_enabled) = colors.time_of_day_enabled {
+                self.time_of_day_enabled = time_of_day_enabled;
+            }
             macro_rules! apply_color {
                 ($field:ident, $cfg:expr) => {
                     if let Some(c) = $cfg.and_then(|s| parse_hex(&s)) {

@@ -138,6 +138,7 @@ impl Default for LayerStyle {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct EffectStack {
     pub passes: Vec<EffectPass>,
+    pub mask: Option<EffectMask>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -156,6 +157,12 @@ pub enum EffectPass {
         saturation: f32,
         contrast: f32,
     },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum EffectMask {
+    /// Normalized UV rect [left, top, right, bottom] in the render target.
+    UvRect([f32; 4]),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -268,11 +275,69 @@ impl Default for FrameBudget {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct HitRegionId(String);
+
+impl HitRegionId {
+    pub fn new(id: impl Into<String>) -> Self {
+        Self(id.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<&str> for HitRegionId {
+    fn from(value: &str) -> Self {
+        Self::new(value)
+    }
+}
+
+impl From<String> for HitRegionId {
+    fn from(value: String) -> Self {
+        Self::new(value)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct HitRegion {
+    pub id: HitRegionId,
+    pub layer_id: LayerId,
+    pub bounds: Rect,
+    pub z_index: i32,
+}
+
+impl HitRegion {
+    pub fn new(
+        id: impl Into<HitRegionId>,
+        layer_id: impl Into<LayerId>,
+        bounds: Rect,
+        z_index: i32,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            layer_id: layer_id.into(),
+            bounds,
+            z_index,
+        }
+    }
+
+    pub fn contains(&self, x: f32, y: f32) -> bool {
+        !self.bounds.is_empty()
+            && x >= self.bounds.x
+            && y >= self.bounds.y
+            && x < self.bounds.x + self.bounds.width
+            && y < self.bounds.y + self.bounds.height
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct EngineFrame {
     pub viewport: Size,
     pub clear_color: Color,
     pub layers: Vec<Layer>,
+    pub hit_regions: Vec<HitRegion>,
     pub budget: FrameBudget,
 }
 
@@ -282,6 +347,7 @@ impl EngineFrame {
             viewport,
             clear_color: Color::BLACK,
             layers: Vec::new(),
+            hit_regions: Vec::new(),
             budget: FrameBudget::default(),
         }
     }
@@ -290,10 +356,21 @@ impl EngineFrame {
         self.layers.push(layer);
     }
 
+    pub fn push_hit_region(&mut self, region: HitRegion) {
+        self.hit_regions.push(region);
+    }
+
     pub fn sorted_layers(&self) -> Vec<&Layer> {
         let mut layers: Vec<&Layer> = self.layers.iter().collect();
         layers.sort_by_key(|layer| layer.z_index);
         layers
+    }
+
+    pub fn hit_test(&self, x: f32, y: f32) -> Option<&HitRegion> {
+        self.hit_regions
+            .iter()
+            .filter(|region| region.contains(x, y))
+            .max_by_key(|region| region.z_index)
     }
 
     pub fn validate(&self) -> Result<(), FrameValidationError> {
@@ -311,6 +388,33 @@ impl EngineFrame {
                     opacity: layer.style.opacity,
                 });
             }
+            if let Some(EffectMask::UvRect(rect)) = layer.style.effects.mask {
+                if rect[0] < 0.0
+                    || rect[1] < 0.0
+                    || rect[2] > 1.0
+                    || rect[3] > 1.0
+                    || rect[0] >= rect[2]
+                    || rect[1] >= rect[3]
+                {
+                    return Err(FrameValidationError::InvalidEffectMask {
+                        layer: layer.id.clone(),
+                    });
+                }
+            }
+        }
+
+        for region in &self.hit_regions {
+            if region.id.as_str().trim().is_empty() {
+                return Err(FrameValidationError::EmptyHitRegionId);
+            }
+            if region.layer_id.as_str().trim().is_empty() {
+                return Err(FrameValidationError::EmptyLayerId);
+            }
+            if region.bounds.is_empty() {
+                return Err(FrameValidationError::InvalidHitRegion {
+                    region: region.id.clone(),
+                });
+            }
         }
 
         Ok(())
@@ -321,7 +425,10 @@ impl EngineFrame {
 pub enum FrameValidationError {
     InvalidViewport,
     EmptyLayerId,
+    EmptyHitRegionId,
     InvalidOpacity { layer: LayerId, opacity: f32 },
+    InvalidEffectMask { layer: LayerId },
+    InvalidHitRegion { region: HitRegionId },
 }
 
 #[cfg(test)]
@@ -372,5 +479,47 @@ mod tests {
                 opacity: 1.5,
             })
         );
+    }
+
+    #[test]
+    fn validate_rejects_invalid_effect_mask() {
+        let mut frame = EngineFrame::new(Size::new(100.0, 100.0));
+        let mut layer = Layer::new("masked", 0, LayerKind::Primitives(Vec::new()));
+        layer.style.effects.mask = Some(EffectMask::UvRect([0.8, 0.0, 0.2, 1.0]));
+        frame.push_layer(layer);
+
+        assert_eq!(
+            frame.validate(),
+            Err(FrameValidationError::InvalidEffectMask {
+                layer: LayerId::new("masked")
+            })
+        );
+    }
+
+    #[test]
+    fn hit_test_returns_topmost_render_aligned_region() {
+        let mut frame = EngineFrame::new(Size::new(100.0, 100.0));
+        frame.push_hit_region(HitRegion::new(
+            "background",
+            "base",
+            Rect::new(0.0, 0.0, 100.0, 100.0),
+            0,
+        ));
+        frame.push_hit_region(HitRegion::new(
+            "button",
+            "overlay",
+            Rect::new(20.0, 20.0, 20.0, 20.0),
+            10,
+        ));
+
+        assert_eq!(
+            frame.hit_test(25.0, 25.0).map(|region| region.id.as_str()),
+            Some("button")
+        );
+        assert_eq!(
+            frame.hit_test(2.0, 2.0).map(|region| region.id.as_str()),
+            Some("background")
+        );
+        assert!(frame.hit_test(120.0, 2.0).is_none());
     }
 }
