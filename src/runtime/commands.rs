@@ -92,6 +92,25 @@ impl App {
         inserted
     }
 
+    pub(crate) fn open_image_file_tab(&mut self, path: PathBuf) {
+        if let Some(idx) = self.tabs.iter().position(
+            |tab| matches!(&tab.content, TabContent::ImageFile { path: existing } if existing == &path),
+        ) {
+            self.active_tab = idx;
+        } else {
+            let id = self.alloc_tab_id();
+            self.tabs.push(WorkspaceTab {
+                content: TabContent::ImageFile { path },
+                name: None,
+                id,
+            });
+            self.active_tab = self.tabs.len() - 1;
+        }
+        if let Some(ui) = &mut self.ui {
+            ui.active_view = ActiveView::Shells;
+        }
+    }
+
     pub(crate) fn open_workspace_tab_entry(&mut self, entry: llnzy::workspace_store::TabEntry) {
         match entry {
             llnzy::workspace_store::TabEntry::Terminal => self.new_tab(),
@@ -103,6 +122,7 @@ impl App {
                     Err(e) => self.error_log.error(format!("Workspace: {e}")),
                 }
             }
+            llnzy::workspace_store::TabEntry::ImageFile { path } => self.open_image_file_tab(path),
             llnzy::workspace_store::TabEntry::Stacker => self.open_singleton_tab(TabKind::Stacker),
             llnzy::workspace_store::TabEntry::Sketch => self.open_singleton_tab(TabKind::Sketch),
             llnzy::workspace_store::TabEntry::Git => self.open_singleton_tab(TabKind::Git),
@@ -305,6 +325,10 @@ impl App {
             }
             AppCommand::OpenCodeFile { path, buffer_id } => {
                 self.open_code_file_tab(path, buffer_id);
+                true
+            }
+            AppCommand::OpenImageFile { path } => {
+                self.open_image_file_tab(path);
                 true
             }
             AppCommand::RemapCodeFilePath { old_path, new_path } => {

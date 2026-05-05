@@ -147,7 +147,7 @@ fn open_finder_path(
 ) {
     explorer.close_finder();
     if is_image_ext(&path) {
-        explorer.open(path);
+        editor_state.pending_image_tab = Some(path);
     } else {
         match editor_state.open_file(path) {
             Ok(_) => editor_state.status_msg = None,

@@ -345,6 +345,7 @@ impl UiState {
         let mut save_prompt_response: Option<SavePromptResponse> = None;
 
         let mut sidebar_state = std::mem::take(&mut self.sidebar);
+        sidebar_state.clear_native_drop_zones();
         let editing_tab = self.editing_tab;
         let editing_tab_text = std::mem::take(&mut self.editing_tab_text);
         let _tab_count = self.tab_count;
@@ -419,6 +420,7 @@ impl UiState {
                 &mut editor_view,
                 &recent_projects,
                 &config_clone,
+                &mut sidebar_state,
                 &mut commands_out,
             );
             sidebar_state.open = sidebar_result.open;
@@ -521,6 +523,9 @@ impl UiState {
         self.tab_groups = tab_groups;
         if let Some((path, buffer_id)) = editor_view.pending_file_tab.take() {
             commands_out.push(AppCommand::OpenCodeFile { path, buffer_id });
+        }
+        if let Some(path) = editor_view.pending_image_tab.take() {
+            commands_out.push(AppCommand::OpenImageFile { path });
         }
         if let Some((old_path, new_path)) = editor_view.pending_file_remap.take() {
             commands_out.push(AppCommand::RemapCodeFilePath { old_path, new_path });

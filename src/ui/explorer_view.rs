@@ -14,7 +14,7 @@ use crate::lsp::LspManager;
 
 use super::{
     editor_file_events, editor_host, editor_lsp_events, editor_popups, project_search_view,
-    sidebar_tree, task_picker_view,
+    sidebar_state, sidebar_tree, task_picker_view,
 };
 
 /// Pending async LSP requests being polled each frame.
@@ -114,6 +114,8 @@ pub struct EditorViewState {
     pub(super) last_change_sent: Instant,
     /// File to open as a workspace tab (set by sidebar click, consumed by main loop).
     pub pending_file_tab: Option<(std::path::PathBuf, crate::editor::BufferId)>,
+    /// Image to open as a workspace tab (set by sidebar/finder click, consumed by main loop).
+    pub pending_image_tab: Option<std::path::PathBuf>,
     /// File path remap caused by sidebar rename (consumed by main loop).
     pub pending_file_remap: Option<(std::path::PathBuf, std::path::PathBuf)>,
     /// Sidebar file/folder rename state: (path being renamed, current input text).
@@ -194,6 +196,7 @@ impl Default for EditorViewState {
             last_health_check: Instant::now(),
             last_change_sent: Instant::now(),
             pending_file_tab: None,
+            pending_image_tab: None,
             pending_file_remap: None,
             sidebar_rename: None,
             sidebar_delete_confirm: None,
@@ -427,7 +430,15 @@ pub(crate) fn render_sidebar_tree(
     explorer: &mut ExplorerState,
     editor_state: &mut EditorViewState,
     sidebar_font_size: f32,
+    sidebar_state: &mut sidebar_state::SidebarUiState,
     commands: &mut Vec<AppCommand>,
 ) {
-    sidebar_tree::render_sidebar_tree(ui, explorer, editor_state, sidebar_font_size, commands);
+    sidebar_tree::render_sidebar_tree(
+        ui,
+        explorer,
+        editor_state,
+        sidebar_font_size,
+        sidebar_state,
+        commands,
+    );
 }

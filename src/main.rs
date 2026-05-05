@@ -792,6 +792,14 @@ impl ApplicationHandler<UserEvent> for App {
             }
             _ => None,
         };
+        let native_cursor_target = match &event {
+            WindowEvent::CursorMoved { .. } => self
+                .ui
+                .as_ref()
+                .and_then(|ui| ui.drag_drop.hovered_native_files.first())
+                .and_then(|path| self.native_file_drop_target(path)),
+            _ => None,
+        };
         let terminal_ime_commit =
             matches!(&event, WindowEvent::Ime(Ime::Commit(_))) && self.active_session().is_some();
         let stacker_ime_commit =
@@ -918,6 +926,12 @@ impl ApplicationHandler<UserEvent> for App {
                 WindowEvent::HoveredFile(path) => {
                     ui.drag_drop.hover_native_file(path.clone());
                     ui.drag_drop.active_target = native_hover_target.and_then(|(_, target)| target);
+                    window.request_redraw();
+                }
+                WindowEvent::CursorMoved { .. }
+                    if !ui.drag_drop.hovered_native_files.is_empty() =>
+                {
+                    ui.drag_drop.active_target = native_cursor_target;
                     window.request_redraw();
                 }
                 WindowEvent::HoveredFileCancelled => {

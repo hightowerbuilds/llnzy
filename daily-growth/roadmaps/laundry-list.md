@@ -18,6 +18,8 @@ Treat this as a parking lot, not a current sprint plan. Many entries came from o
 - [x] Code folding foundation: verified tree-sitter fold range detection, gutter folding, visible-line snapping, placeholder rendering, fold shortcuts, and command palette folding actions; added focused dispatch coverage for fold current, unfold current, fold all, and unfold all. Source: `llnzy-source-editor-roadmap.md`.
 - [x] Word wrap foundation: verified editor wrap row computation, wrapped cursor hit testing, wrapped terminal output behavior, sidebar filename wrapping, Settings and native-menu toggles, and added a command palette toggle that updates editor config. Sources: `tweaks.md`, `tweaks-2.md`.
 - [x] Multi-file search foundation: verified project search opens from shortcuts and command palette, searches asynchronously across searchable text files, supports regex mode, skips heavy dependency/build folders, includes searchable dotfiles, and opens result matches through the normal file-tab handoff. Source: `llnzy-source-editor-roadmap.md`.
+- [x] Sidebar/file UX polish: newly created files now open as normal code tabs, sidebar right-click menus cover file/folder actions, Close Folder and sidebar font-size behavior are wired, file icons remain available for known types, and expanded folders use green connector lines instead of disclosure glyphs. Sources: `sidebar-file-explorer-hardening-05-03-2026.md`, `tweaks.md`.
+- [x] External sidebar import drop foundation: native files and folders dropped onto the sidebar root or folders copy into the workspace without overwriting existing items, reuse sidebar drop targeting, and refresh the destination folder after import. Source: later sidebar workflow decision.
 
 ## Cross-Platform Compatibility
 
@@ -151,20 +153,21 @@ Treat this as a parking lot, not a current sprint plan. Many entries came from o
 - [x] Verify dirty open file rename/delete is blocked or explicitly prompted. Source: `sidebar-file-explorer-hardening-05-03-2026.md`.
 - [x] Decide whether folder rename should remap clean open descendant buffers or require descendants to be closed first. Sources: `manual-smoke-checklist.md`, `sidebar-file-explorer-hardening-05-03-2026.md`.
 - [x] Decide folder rename behavior for dirty open descendant buffers. Source: `sidebar-file-explorer-hardening-05-03-2026.md`.
-- [ ] Optionally open newly created files immediately after creation. Source: `sidebar-file-explorer-hardening-05-03-2026.md`.
+- [x] Optionally open newly created files immediately after creation. Source: `sidebar-file-explorer-hardening-05-03-2026.md`.
 - [ ] Consider inline rename/create instead of modal flows. Source: `sidebar-file-explorer-hardening-05-03-2026.md`.
 - [x] Restore selection/focus for newly created or renamed tree items. Source: `sidebar-file-explorer-hardening-05-03-2026.md`.
 - [x] Confirm tab paths remap correctly after clean rename/move. Sources: `manual-smoke-checklist.md`, `sidebar-file-explorer-hardening-05-03-2026.md`.
 - [x] Confirm dirty tabs never get silently remapped, closed, or overwritten. Sources: `manual-smoke-checklist.md`, `sidebar-file-explorer-hardening-05-03-2026.md`.
-- [ ] Add or polish sidebar right-click context menus on files and folders. Source: `tweaks.md`.
-- [ ] Add Close Folder action. Source: `tweaks.md`.
-- [ ] Add configurable sidebar font size. Source: `tweaks.md`.
-- [ ] Add or refine file icons. Source: `tweaks.md`.
+- [x] Add or polish sidebar right-click context menus on files and folders. Source: `tweaks.md`.
+- [x] Add Close Folder action. Source: `tweaks.md`.
+- [x] Add configurable sidebar font size. Source: `tweaks.md`.
+- [x] Add or refine file icons. Source: `tweaks.md`.
 - [ ] Replace first-pass drag geometry checks with per-surface drop target registration. Source: `llnzy-drag-and-drop-roadmap-04-29-2026.md`.
 - [ ] Aggregate multi-file hover/drop state because window events may arrive one file at a time. Source: `llnzy-drag-and-drop-roadmap-04-29-2026.md`.
-- [ ] Route binary/image drops to an image viewer, preview, or clear unsupported message. Source: `llnzy-drag-and-drop-roadmap-04-29-2026.md`.
+- [x] Support native file and folder drops onto sidebar root and folders to import external assets into the workspace without overwriting existing items. Source: later sidebar workflow decision.
+- [x] Route binary/image drops to an image viewer, preview, or clear unsupported message. Source: `llnzy-drag-and-drop-roadmap-04-29-2026.md`.
 - [ ] Add modifier/context-menu alternate drag operations later. Source: `llnzy-drag-and-drop-roadmap-04-29-2026.md`.
-- [ ] Ensure drag copy/move never overwrites files without an explicit overwrite design. Source: `llnzy-drag-and-drop-roadmap-04-29-2026.md`.
+- [x] Ensure drag copy/move never overwrites files without an explicit overwrite design. Source: `llnzy-drag-and-drop-roadmap-04-29-2026.md`.
 - [ ] Ensure one undo step can restore a whole drag move/copy operation if undoable file operations are added. Source: `llnzy-drag-and-drop-roadmap-04-29-2026.md`.
 - [ ] Consider native outbound drag and drop to Finder, Explorer, and other apps as a future platform bridge. Source: `llnzy-drag-and-drop-roadmap-04-29-2026.md`.
 - [ ] Keep drag and drop as a command-producing interaction layer, not feature business logic. Source: `llnzy-drag-and-drop-roadmap-04-29-2026.md`.

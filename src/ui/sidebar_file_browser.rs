@@ -4,6 +4,7 @@ use super::{
     explorer_view::EditorViewState,
     sidebar_file_types::is_image_ext,
     sidebar_finder::render_finder,
+    sidebar_state::SidebarUiState,
     sidebar_tree::{render_tree_nodes, toggle_at, TreeAction},
 };
 
@@ -63,12 +64,13 @@ pub(super) fn render_file_browser(
         .auto_shrink([false; 2])
         .show(ui, |ui| {
             let mut action: Option<TreeAction> = None;
-            render_tree_nodes(ui, &explorer.tree, 0, &mut action, 13.0);
+            let mut sidebar_state = SidebarUiState::default();
+            render_tree_nodes(ui, &explorer.tree, 0, &mut action, 13.0, &mut sidebar_state);
 
             match action {
                 Some(TreeAction::OpenFile(path)) => {
                     if is_image_ext(&path) {
-                        explorer.open(path);
+                        editor_state.pending_image_tab = Some(path);
                     } else {
                         match editor_state.open_file(path) {
                             Ok(_) => editor_state.status_msg = None,

@@ -64,6 +64,14 @@ pub(super) fn render_tab_content(
             }
             render_code_file(ctx, config, &appearance, state);
         }
+        Some(TabKind::ImageFile) => {
+            if let Some(path) = tab_panes
+                .get(active_tab_index)
+                .and_then(|pane| pane.image_path.clone())
+            {
+                render_image_file(ctx, path, state);
+            }
+        }
         Some(TabKind::Sketch) => render_sketch(ctx, &appearance, state),
         Some(TabKind::Git) => render_git(ctx, state),
         Some(TabKind::Appearances) => {
@@ -171,7 +179,7 @@ fn render_joined_tabs(
                 ui,
                 ctx,
                 left_rect,
-                tab_panes[joined.primary],
+                tab_panes[joined.primary].clone(),
                 joined.primary == active_tab_index,
                 config,
                 appearance,
@@ -181,7 +189,7 @@ fn render_joined_tabs(
                 ui,
                 ctx,
                 right_rect,
-                tab_panes[joined.secondary],
+                tab_panes[joined.secondary].clone(),
                 joined.secondary == active_tab_index,
                 config,
                 appearance,
@@ -269,6 +277,18 @@ fn render_joined_pane(
             render_pane_frame(&mut pane_ui, color_from_rgb(appearance.bg), 12.0, |ui| {
                 explorer_view::render_explorer_view(ui, state.explorer, state.editor_view, config);
             });
+        }
+        TabKind::ImageFile => {
+            if let Some(path) = pane.image_path {
+                render_pane_frame(
+                    &mut pane_ui,
+                    egui::Color32::from_rgb(20, 20, 20),
+                    12.0,
+                    |ui| {
+                        render_image_file_ui(ui, path, state.explorer);
+                    },
+                );
+            }
         }
         TabKind::Sketch => {
             let sketch_bg = color_from_rgb(appearance.bg);
@@ -393,6 +413,30 @@ fn render_code_file(
         .show(ctx, |ui| {
             explorer_view::render_explorer_view(ui, state.explorer, state.editor_view, config);
         });
+}
+
+fn render_image_file(ctx: &egui::Context, path: std::path::PathBuf, state: TabContentState<'_>) {
+    egui::CentralPanel::default()
+        .frame(content_frame(egui::Color32::from_rgb(20, 20, 20), 20.0))
+        .show(ctx, |ui| {
+            render_image_file_ui(ui, path, state.explorer);
+        });
+}
+
+fn render_image_file_ui(ui: &mut egui::Ui, path: std::path::PathBuf, explorer: &mut ExplorerState) {
+    let current_path = explorer.open_file.as_ref().map(|open| open.path.as_path());
+    if current_path != Some(path.as_path()) {
+        explorer.open(path);
+    }
+    if explorer.open_file.is_some() {
+        super::image_viewer::render_image_viewer(ui, explorer, false);
+    } else if let Some(error) = &explorer.error {
+        ui.label(
+            egui::RichText::new(error)
+                .size(14.0)
+                .color(egui::Color32::from_rgb(255, 120, 120)),
+        );
+    }
 }
 
 fn render_sketch(

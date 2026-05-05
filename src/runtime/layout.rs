@@ -2,6 +2,7 @@ use std::path::Path;
 
 use llnzy::app::drag_drop::{tab_drop_zone_at_x, tab_index_at_x, DropTarget, TerminalDropMode};
 use llnzy::layout::{logical_to_physical_width, LayoutInputs, ScreenLayout};
+use llnzy::path_utils::same_path;
 use llnzy::session::Rect as PaneRect;
 use llnzy::ui::ActiveView;
 use llnzy::workspace::TabContent;
@@ -141,12 +142,31 @@ impl App {
         let x = pos.x as f32;
         let y = pos.y as f32;
 
-        if self
+        if let Some(ui) = self
             .ui
             .as_ref()
-            .is_some_and(|ui| x < self.sidebar_width_px() && ui.sidebar.open)
+            .filter(|ui| x < self.sidebar_width_px() && ui.sidebar.open)
         {
-            return Some(DropTarget::Home);
+            let project_active = !ui.explorer.tree.is_empty()
+                || dirs::home_dir()
+                    .map(|home| !same_path(&ui.explorer.root, &home))
+                    .unwrap_or(true);
+            if !project_active {
+                return Some(DropTarget::Home);
+            }
+
+            let scale = self
+                .window
+                .as_ref()
+                .map(|window| window.scale_factor() as f32)
+                .unwrap_or(1.0)
+                .max(1.0);
+            let logical_pos = egui::pos2(x / scale, y / scale);
+            let path = ui
+                .sidebar
+                .folder_at_logical_pos(logical_pos)
+                .unwrap_or_else(|| ui.explorer.root.clone());
+            return Some(DropTarget::ExplorerFolder { path });
         }
 
         let Some(layout) = &self.screen_layout else {

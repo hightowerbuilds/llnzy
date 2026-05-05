@@ -80,9 +80,10 @@ pub struct UiTabInfo {
     pub exited: bool,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UiTabPaneInfo {
     pub tab_id: u64,
     pub kind: TabKind,
     pub buffer_id: Option<BufferId>,
+    pub image_path: Option<std::path::PathBuf>,
 }

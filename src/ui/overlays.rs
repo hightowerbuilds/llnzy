@@ -47,8 +47,9 @@ pub fn render_drag_drop_overlay(ctx: &egui::Context, drag_drop: &DragDropState) 
         Some(DropTarget::Terminal { .. }) => ("Insert path", egui::Color32::from_rgb(75, 130, 210)),
         Some(DropTarget::Editor { .. }) => ("Open file", egui::Color32::from_rgb(65, 145, 100)),
         Some(DropTarget::TabBar { .. }) => ("Open near tab", egui::Color32::from_rgb(65, 145, 100)),
-        Some(DropTarget::Home) | Some(DropTarget::ExplorerFolder { .. }) => {
-            ("Open project", egui::Color32::from_rgb(70, 120, 95))
+        Some(DropTarget::Home) => ("Open project", egui::Color32::from_rgb(70, 120, 95)),
+        Some(DropTarget::ExplorerFolder { .. }) => {
+            ("Import to folder", egui::Color32::from_rgb(70, 120, 95))
         }
         Some(DropTarget::Stacker) => ("Save prompt", egui::Color32::from_rgb(120, 90, 180)),
         Some(DropTarget::SketchCanvas) => ("Import", egui::Color32::from_rgb(150, 110, 70)),

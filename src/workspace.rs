@@ -12,6 +12,8 @@ pub enum TabContent {
     Terminal(Box<Session>),
     /// A source code file open in the editor.
     CodeFile { path: PathBuf, buffer_id: BufferId },
+    /// An image file open in a preview tab.
+    ImageFile { path: PathBuf },
     /// The prompt queue manager (singleton).
     Stacker,
     /// The drawing canvas (singleton).
@@ -30,6 +32,7 @@ pub enum TabKind {
     Home,
     Terminal,
     CodeFile,
+    ImageFile,
     Stacker,
     Sketch,
     Git,
@@ -43,6 +46,7 @@ impl TabContent {
             TabContent::Home => TabKind::Home,
             TabContent::Terminal(_) => TabKind::Terminal,
             TabContent::CodeFile { .. } => TabKind::CodeFile,
+            TabContent::ImageFile { .. } => TabKind::ImageFile,
             TabContent::Stacker => TabKind::Stacker,
             TabContent::Sketch => TabKind::Sketch,
             TabContent::Git => TabKind::Git,
@@ -102,6 +106,11 @@ impl WorkspaceTab {
                 .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("untitled")
+                .to_string(),
+            TabContent::ImageFile { path } => path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("image")
                 .to_string(),
             TabContent::Stacker => "Stacker".to_string(),
             TabContent::Sketch => "Sketch".to_string(),

@@ -40,6 +40,9 @@ pub enum AppCommand {
         path: PathBuf,
         buffer_id: BufferId,
     },
+    OpenImageFile {
+        path: PathBuf,
+    },
     RemapCodeFilePath {
         old_path: PathBuf,
         new_path: PathBuf,

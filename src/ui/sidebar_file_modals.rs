@@ -5,7 +5,7 @@ use crate::explorer::ExplorerState;
 use crate::path_utils::{path_contains, same_path};
 use crate::sidebar_move::collect_sidebar_move_destinations;
 use std::fs::OpenOptions;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub(super) fn render_sidebar_file_modals(
     ui: &mut egui::Ui,
@@ -341,14 +341,29 @@ fn render_new_entry_modal(
                 let name = new_path
                     .file_name()
                     .and_then(|name| name.to_str())
-                    .unwrap_or("item");
+                    .unwrap_or("item")
+                    .to_string();
                 editor_state.status_msg = Some(format!("Created {name}"));
+                if !is_folder {
+                    if let Err(e) = open_created_sidebar_file(editor_state, new_path) {
+                        editor_state.status_msg = Some(format!("Created {name}, open failed: {e}"));
+                    }
+                }
             }
             Err(e) => editor_state.status_msg = Some(format!("Create failed: {e}")),
         }
     } else if !cancel {
         editor_state.sidebar_new_entry = Some((parent_dir, input_text, is_folder));
     }
+}
+
+fn open_created_sidebar_file(
+    editor_state: &mut EditorViewState,
+    path: PathBuf,
+) -> Result<(), String> {
+    let buffer_id = editor_state.open_file(path.clone())?;
+    editor_state.pending_file_tab = Some((path, buffer_id));
+    Ok(())
 }
 
 fn render_move_picker(
@@ -744,6 +759,26 @@ mod tests {
         let err = create_sidebar_entry(&root, "note.md", false).unwrap_err();
         assert_eq!(err, "note.md already exists");
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "keep me");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn opening_created_sidebar_file_requests_file_tab() {
+        let root = temp_root("create-file-open");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let path = create_sidebar_entry(&root, "note.md", false).unwrap();
+        let mut editor_state = EditorViewState::default();
+
+        open_created_sidebar_file(&mut editor_state, path.clone()).unwrap();
+
+        let (tab_path, buffer_id) = editor_state
+            .pending_file_tab
+            .clone()
+            .expect("created file should request a file tab");
+        assert_eq!(tab_path, path);
+        assert!(editor_state.editor.index_for_id(buffer_id).is_some());
 
         let _ = std::fs::remove_dir_all(root);
     }

@@ -7,7 +7,16 @@ use super::{
     explorer_view::EditorViewState,
     sidebar_file_modals,
     sidebar_file_types::{file_type_icon, is_image_ext},
+    sidebar_state::SidebarUiState,
 };
+
+fn tree_connector_color() -> egui::Color32 {
+    egui::Color32::from_rgb(100, 220, 140)
+}
+
+fn folder_label_text(name: &str) -> &str {
+    name
+}
 
 pub(super) enum TreeAction {
     OpenFile(std::path::PathBuf),
@@ -31,6 +40,7 @@ pub(super) fn render_tree_nodes(
     depth: usize,
     action: &mut Option<TreeAction>,
     font_size: f32,
+    sidebar_state: &mut SidebarUiState,
 ) {
     let indent = depth as f32 * 16.0;
     let dir_color = egui::Color32::from_rgb(100, 180, 255);
@@ -46,11 +56,15 @@ pub(super) fn render_tree_nodes(
             ui.add_space(indent);
 
             if node.is_dir {
-                let folder_icon = if node.expanded { "v " } else { "> " };
-                let label = format!("{folder_icon}{}", node.name);
-                let resp = wrapped_tree_label(ui, &label, font_size, dir_color, true)
-                    .on_hover_text(node.path.display().to_string())
-                    .on_hover_cursor(egui::CursorIcon::PointingHand);
+                let resp = wrapped_tree_label(
+                    ui,
+                    folder_label_text(&node.name),
+                    font_size,
+                    dir_color,
+                    true,
+                )
+                .on_hover_text(node.path.display().to_string())
+                .on_hover_cursor(egui::CursorIcon::PointingHand);
                 if resp.clicked() {
                     let indices = vec![i];
                     *action = Some(TreeAction::Toggle(indices));
@@ -82,6 +96,7 @@ pub(super) fn render_tree_nodes(
 
         let item_response = resp.inner;
         if node.is_dir {
+            sidebar_state.register_native_drop_zone(item_response.rect, node.path.clone());
             handle_node_drag(ui.ctx(), &item_response, &node.path, &node.name);
             handle_folder_drop(&item_response, &node.path, action);
         } else {
@@ -95,9 +110,19 @@ pub(super) fn render_tree_nodes(
         });
 
         if node.is_dir && node.expanded {
+            let children_top = ui.cursor().top();
             if let Some(children) = &node.children {
                 let mut child_action: Option<TreeAction> = None;
-                render_tree_children(ui, children, depth + 1, &mut child_action, &[i], font_size);
+                render_tree_children(
+                    ui,
+                    children,
+                    depth + 1,
+                    &mut child_action,
+                    &[i],
+                    font_size,
+                    sidebar_state,
+                );
+                paint_folder_connector(ui, item_response.rect, children_top);
                 if child_action.is_some() && action.is_none() {
                     *action = child_action;
                 }
@@ -113,6 +138,7 @@ fn render_tree_children(
     action: &mut Option<TreeAction>,
     parent_path: &[usize],
     font_size: f32,
+    sidebar_state: &mut SidebarUiState,
 ) {
     let indent = depth as f32 * 16.0;
     let dir_color = egui::Color32::from_rgb(100, 180, 255);
@@ -127,11 +153,15 @@ fn render_tree_children(
             ui.set_min_width(ui.available_width());
             ui.add_space(indent);
             if node.is_dir {
-                let folder_icon = if node.expanded { "v " } else { "> " };
-                let label = format!("{folder_icon}{}", node.name);
-                let resp = wrapped_tree_label(ui, &label, font_size, dir_color, true)
-                    .on_hover_text(node.path.display().to_string())
-                    .on_hover_cursor(egui::CursorIcon::PointingHand);
+                let resp = wrapped_tree_label(
+                    ui,
+                    folder_label_text(&node.name),
+                    font_size,
+                    dir_color,
+                    true,
+                )
+                .on_hover_text(node.path.display().to_string())
+                .on_hover_cursor(egui::CursorIcon::PointingHand);
                 if resp.clicked() {
                     let mut indices: Vec<usize> = parent_path.to_vec();
                     indices.push(i);
@@ -164,6 +194,7 @@ fn render_tree_children(
 
         let item_response = resp.inner;
         if node.is_dir {
+            sidebar_state.register_native_drop_zone(item_response.rect, node.path.clone());
             handle_node_drag(ui.ctx(), &item_response, &node.path, &node.name);
             handle_folder_drop(&item_response, &node.path, action);
         } else {
@@ -177,13 +208,50 @@ fn render_tree_children(
         });
 
         if node.is_dir && node.expanded {
+            let children_top = ui.cursor().top();
             if let Some(children) = &node.children {
                 let mut path: Vec<usize> = parent_path.to_vec();
                 path.push(i);
-                render_tree_children(ui, children, depth + 1, action, &path, font_size);
+                render_tree_children(
+                    ui,
+                    children,
+                    depth + 1,
+                    action,
+                    &path,
+                    font_size,
+                    sidebar_state,
+                );
+                paint_folder_connector(ui, item_response.rect, children_top);
             }
         }
     }
+}
+
+fn paint_folder_connector(ui: &egui::Ui, folder_rect: egui::Rect, children_top: f32) {
+    let children_bottom = ui.cursor().top();
+    if children_bottom <= children_top {
+        return;
+    }
+
+    let line_x = (folder_rect.left() - 10.0).max(ui.min_rect().left() + 4.0);
+    let folder_y = folder_rect.center().y;
+    let child_bottom_y = children_bottom - 4.0;
+    let stroke = egui::Stroke::new(1.0, tree_connector_color());
+    let painter = ui.painter();
+    painter.line_segment(
+        [
+            egui::pos2(line_x, folder_y),
+            egui::pos2(line_x, child_bottom_y),
+        ],
+        stroke,
+    );
+    painter.line_segment(
+        [
+            egui::pos2(line_x, folder_y),
+            egui::pos2(folder_rect.left() - 4.0, folder_y),
+        ],
+        stroke,
+    );
 }
 
 fn wrapped_tree_label(
@@ -273,6 +341,7 @@ fn render_root_drop_target(
     root: &std::path::Path,
     action: &mut Option<TreeAction>,
     font_size: f32,
+    sidebar_state: &mut SidebarUiState,
 ) {
     let label = root
         .file_name()
@@ -282,7 +351,7 @@ fn render_root_drop_target(
         .add_sized(
             [ui.available_width(), 24.0],
             egui::Label::new(
-                egui::RichText::new(format!("v {label}"))
+                egui::RichText::new(label)
                     .size(font_size)
                     .color(egui::Color32::from_rgb(135, 205, 255))
                     .strong(),
@@ -290,6 +359,7 @@ fn render_root_drop_target(
             .sense(egui::Sense::click_and_drag()),
         )
         .on_hover_text(format!("Project root: {}", root.display()));
+    sidebar_state.register_native_drop_zone(response.rect, root.to_path_buf());
     handle_folder_drop(&response, root, action);
 }
 
@@ -308,7 +378,7 @@ fn paint_folder_drop_target(
         egui::Color32::from_rgba_unmultiplied(150, 65, 65, 75)
     };
     let stroke = if is_valid {
-        egui::Stroke::new(1.0, egui::Color32::from_rgb(100, 220, 140))
+        egui::Stroke::new(1.0, tree_connector_color())
     } else {
         egui::Stroke::new(1.0, egui::Color32::from_rgb(220, 90, 90))
     };
@@ -431,18 +501,32 @@ pub(crate) fn render_sidebar_tree(
     explorer: &mut ExplorerState,
     editor_state: &mut EditorViewState,
     sidebar_font_size: f32,
+    sidebar_state: &mut SidebarUiState,
     commands: &mut Vec<AppCommand>,
 ) {
     sidebar_file_modals::render_sidebar_file_modals(ui, explorer, editor_state, commands);
 
     let mut action: Option<TreeAction> = None;
-    render_root_drop_target(ui, &explorer.root, &mut action, sidebar_font_size);
-    render_tree_nodes(ui, &explorer.tree, 0, &mut action, sidebar_font_size);
+    render_root_drop_target(
+        ui,
+        &explorer.root,
+        &mut action,
+        sidebar_font_size,
+        sidebar_state,
+    );
+    render_tree_nodes(
+        ui,
+        &explorer.tree,
+        0,
+        &mut action,
+        sidebar_font_size,
+        sidebar_state,
+    );
 
     match action {
         Some(TreeAction::OpenFile(path)) => {
             if is_image_ext(&path) {
-                explorer.open(path);
+                commands.push(AppCommand::OpenImageFile { path });
             } else {
                 let file_path = path.clone();
                 match editor_state.open_file(path) {
@@ -514,5 +598,18 @@ mod tests {
 
         assert_eq!(job.wrap.max_rows, 2);
         assert!(job.wrap.break_anywhere);
+    }
+
+    #[test]
+    fn folder_labels_do_not_add_disclosure_icons() {
+        assert_eq!(folder_label_text("src"), "src");
+    }
+
+    #[test]
+    fn folder_connector_uses_drag_drop_green() {
+        assert_eq!(
+            tree_connector_color(),
+            egui::Color32::from_rgb(100, 220, 140)
+        );
     }
 }

@@ -21,6 +21,8 @@ pub enum TabEntry {
     Terminal,
     /// A code file to open.
     CodeFile { path: PathBuf },
+    /// An image file to open in a preview tab.
+    ImageFile { path: PathBuf },
     /// The Stacker singleton.
     Stacker,
     /// The Sketch singleton.
@@ -39,6 +41,11 @@ impl TabEntry {
                 .and_then(|n| n.to_str())
                 .unwrap_or("File")
                 .to_string(),
+            TabEntry::ImageFile { path } => path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("Image")
+                .to_string(),
             TabEntry::Stacker => "Stacker".to_string(),
             TabEntry::Sketch => "Sketch".to_string(),
             TabEntry::Git => "Git".to_string(),
@@ -50,6 +57,7 @@ impl TabEntry {
             TabEntry::Home => "Home",
             TabEntry::Terminal => "Terminal",
             TabEntry::CodeFile { .. } => "Code File",
+            TabEntry::ImageFile { .. } => "Image",
             TabEntry::Stacker => "Stacker",
             TabEntry::Sketch => "Sketch",
             TabEntry::Git => "Git",
@@ -209,7 +217,7 @@ pub fn plan_session_restore_with(
     let mut tabs = Vec::new();
     let mut skipped_files = Vec::new();
     for (snapshot_index, entry) in snapshot.tabs.into_iter().enumerate() {
-        if let TabEntry::CodeFile { path } = &entry {
+        if let TabEntry::CodeFile { path } | TabEntry::ImageFile { path } = &entry {
             if !file_exists(path) {
                 skipped_files.push(path.clone());
                 continue;
@@ -517,6 +525,20 @@ Stacker = {}
             }
             .display_name(),
             "bar.rs"
+        );
+        assert_eq!(
+            TabEntry::ImageFile {
+                path: PathBuf::from("/foo/logo.png")
+            }
+            .display_name(),
+            "logo.png"
+        );
+        assert_eq!(
+            TabEntry::ImageFile {
+                path: PathBuf::from("/foo/logo.png")
+            }
+            .kind_label(),
+            "Image"
         );
     }
 }

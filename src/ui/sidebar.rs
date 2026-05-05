@@ -5,6 +5,8 @@ use crate::config::Config;
 use crate::explorer::ExplorerState;
 use std::path::PathBuf;
 
+use super::sidebar_state;
+
 /// Result of rendering the sidebar.
 pub struct SidebarResult {
     pub open: bool,
@@ -29,6 +31,7 @@ pub fn render_sidebar(
     editor_view: &mut explorer_view::EditorViewState,
     recent_projects: &[PathBuf],
     config: &Config,
+    sidebar_state: &mut sidebar_state::SidebarUiState,
     commands: &mut Vec<AppCommand>,
 ) -> SidebarResult {
     let mut open = sidebar_open;
@@ -49,6 +52,7 @@ pub fn render_sidebar(
             recent_projects,
             &mut recent_open,
             config,
+            sidebar_state,
             commands,
         );
         panel_width = width;
@@ -81,6 +85,7 @@ fn render_file_tree(
     recent_projects: &[PathBuf],
     recent_open: &mut bool,
     config: &Config,
+    sidebar_state: &mut sidebar_state::SidebarUiState,
     commands: &mut Vec<AppCommand>,
 ) -> (f32, bool, Option<PathBuf>) {
     let default_width = SIDEBAR_WIDTH - BUMPER_WIDTH;
@@ -269,6 +274,7 @@ fn render_file_tree(
                             explorer,
                             editor_view,
                             sidebar_font_size,
+                            sidebar_state,
                             commands,
                         );
                     });

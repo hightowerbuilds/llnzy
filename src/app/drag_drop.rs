@@ -90,6 +90,10 @@ pub enum DragDropCommand {
         files: Vec<PathBuf>,
         folder: PathBuf,
     },
+    CopyExternalFilesToFolder {
+        files: Vec<PathBuf>,
+        folder: PathBuf,
+    },
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -129,7 +133,13 @@ impl DragDropState {
                 tab_idx,
                 mode: TerminalDropMode::InsertEscapedPath,
             } => Some(DragDropCommand::InsertTerminalPaths { tab_idx, paths }),
-            DropTarget::Home | DropTarget::ExplorerFolder { .. } => paths
+            DropTarget::ExplorerFolder { path: folder } => {
+                Some(DragDropCommand::CopyExternalFilesToFolder {
+                    files: paths,
+                    folder,
+                })
+            }
+            DropTarget::Home => paths
                 .iter()
                 .find(|path| path.is_dir())
                 .cloned()
@@ -361,6 +371,27 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&root);
         assert_eq!(command, Some(DragDropCommand::OpenProject(root)));
+    }
+
+    #[test]
+    fn external_drop_to_explorer_folder_emits_copy_command() {
+        let mut state = DragDropState::default();
+        let file = PathBuf::from("/tmp/screenshot.png");
+        let folder = PathBuf::from("/project/assets");
+        let command = state.command_for_external_files(
+            vec![file.clone()],
+            DropTarget::ExplorerFolder {
+                path: folder.clone(),
+            },
+        );
+
+        assert_eq!(
+            command,
+            Some(DragDropCommand::CopyExternalFilesToFolder {
+                files: vec![file],
+                folder
+            })
+        );
     }
 
     #[test]

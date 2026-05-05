@@ -266,7 +266,7 @@ impl ExplorerState {
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "unknown".to_string());
 
-        if is_image(&path) {
+        if is_image_path(&path) {
             self.open_image(path, name);
         }
     }
@@ -274,6 +274,7 @@ impl ExplorerState {
     fn open_image(&mut self, path: PathBuf, name: String) {
         match fs::metadata(&path) {
             Ok(meta) if meta.len() > MAX_IMAGE_SIZE => {
+                self.open_file = None;
                 self.error = Some(format!(
                     "Image too large ({:.0} MB limit)",
                     MAX_IMAGE_SIZE as f64 / 1_048_576.0
@@ -281,6 +282,7 @@ impl ExplorerState {
                 return;
             }
             Err(e) => {
+                self.open_file = None;
                 self.error = Some(format!("Cannot read file: {e}"));
                 return;
             }
@@ -305,7 +307,10 @@ impl ExplorerState {
                     },
                 });
             }
-            Err(e) => self.error = Some(format!("Cannot decode image: {e}")),
+            Err(e) => {
+                self.open_file = None;
+                self.error = Some(format!("Cannot decode image: {e}"));
+            }
         }
     }
 
@@ -477,7 +482,7 @@ fn fuzzy_match(query: &str, target: &str) -> bool {
     true
 }
 
-fn is_image(path: &Path) -> bool {
+pub fn is_image_path(path: &Path) -> bool {
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
@@ -504,6 +509,37 @@ pub fn format_size(bytes: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn image_path_detection_matches_preview_formats() {
+        assert!(is_image_path(Path::new("screenshot.PNG")));
+        assert!(is_image_path(Path::new("photo.jpeg")));
+        assert!(is_image_path(Path::new("icon.ico")));
+        assert!(!is_image_path(Path::new("diagram.svg")));
+        assert!(!is_image_path(Path::new("notes.md")));
+    }
+
+    #[test]
+    fn failed_image_open_clears_previous_preview() {
+        let root =
+            std::env::temp_dir().join(format!("llnzy_image_preview_{}_{}", std::process::id(), 1));
+        std::fs::create_dir_all(&root).unwrap();
+        let valid = root.join("valid.png");
+        let invalid = root.join("invalid.png");
+        let image = image::RgbaImage::from_pixel(1, 1, image::Rgba([255, 0, 0, 255]));
+        image.save(&valid).unwrap();
+        std::fs::write(&invalid, "not an image").unwrap();
+
+        let mut explorer = ExplorerState::new();
+        explorer.open(valid);
+        assert!(explorer.open_file.is_some());
+
+        explorer.open(invalid);
+        assert!(explorer.open_file.is_none());
+        assert!(explorer.error.is_some());
+
+        let _ = std::fs::remove_dir_all(root);
+    }
 
     #[test]
     fn file_index_builds_on_background_thread() {

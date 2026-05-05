@@ -1,22 +1,27 @@
 use crate::explorer::{ExplorerState, FileContent};
 
-#[allow(dead_code)] // Retained for the standalone file browser/image preview path.
-pub(super) fn render_image_viewer(ui: &mut egui::Ui, explorer: &mut ExplorerState) {
+pub(super) fn render_image_viewer(
+    ui: &mut egui::Ui,
+    explorer: &mut ExplorerState,
+    show_back_button: bool,
+) {
     let file_name = explorer.open_file.as_ref().unwrap().name.clone();
     let mut close = false;
     ui.horizontal(|ui| {
-        if ui
-            .add(
-                egui::Button::new(
-                    egui::RichText::new("< Back")
-                        .size(14.0)
-                        .color(egui::Color32::from_rgb(100, 180, 255)),
+        if show_back_button {
+            if ui
+                .add(
+                    egui::Button::new(
+                        egui::RichText::new("< Back")
+                            .size(14.0)
+                            .color(egui::Color32::from_rgb(100, 180, 255)),
+                    )
+                    .fill(egui::Color32::TRANSPARENT),
                 )
-                .fill(egui::Color32::TRANSPARENT),
-            )
-            .clicked()
-        {
-            close = true;
+                .clicked()
+            {
+                close = true;
+            }
         }
         ui.label(
             egui::RichText::new(&file_name)

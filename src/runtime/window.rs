@@ -47,6 +47,9 @@ impl App {
                 TabContent::CodeFile { path, .. } => {
                     Some(llnzy::workspace_store::TabEntry::CodeFile { path: path.clone() })
                 }
+                TabContent::ImageFile { path } => {
+                    Some(llnzy::workspace_store::TabEntry::ImageFile { path: path.clone() })
+                }
                 TabContent::Stacker => Some(llnzy::workspace_store::TabEntry::Stacker),
                 TabContent::Sketch => Some(llnzy::workspace_store::TabEntry::Sketch),
                 TabContent::Git => Some(llnzy::workspace_store::TabEntry::Git),
@@ -90,6 +93,10 @@ impl App {
                 kind: tab.content.kind(),
                 buffer_id: match &tab.content {
                     TabContent::CodeFile { buffer_id, .. } => Some(*buffer_id),
+                    _ => None,
+                },
+                image_path: match &tab.content {
+                    TabContent::ImageFile { path } => Some(path.clone()),
                     _ => None,
                 },
             })
