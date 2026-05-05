@@ -1,6 +1,11 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use super::{GitCommitNode, GitGraphEdge, GitReflogEntry, GitStashEntry, FIELD_SEP, RECORD_SEP};
+use std::path::PathBuf;
+
+use super::{
+    GitCommitNode, GitGraphEdge, GitReflogEntry, GitStashEntry, GitWorktreeEntry, FIELD_SEP,
+    RECORD_SEP,
+};
 
 pub(super) fn parse_log(text: &str) -> Vec<GitCommitNode> {
     let mut commits = Vec::new();
@@ -136,6 +141,46 @@ pub(super) fn parse_reflog(text: &str) -> Vec<GitReflogEntry> {
             })
         })
         .collect()
+}
+
+pub(super) fn parse_worktree_list(text: &str) -> Vec<GitWorktreeEntry> {
+    let mut entries = Vec::new();
+    let mut current: Option<GitWorktreeEntry> = None;
+
+    for line in text.lines().chain(std::iter::once("")) {
+        if line.is_empty() {
+            if let Some(entry) = current.take() {
+                entries.push(entry);
+            }
+            continue;
+        }
+
+        if let Some(path) = line.strip_prefix("worktree ") {
+            if let Some(entry) = current.replace(GitWorktreeEntry {
+                path: PathBuf::from(path),
+                ..Default::default()
+            }) {
+                entries.push(entry);
+            }
+        } else if let Some(entry) = &mut current {
+            if let Some(head) = line.strip_prefix("HEAD ") {
+                entry.head = Some(head.to_string());
+            } else if let Some(branch) = line.strip_prefix("branch ") {
+                entry.branch = Some(
+                    branch
+                        .strip_prefix("refs/heads/")
+                        .unwrap_or(branch)
+                        .to_string(),
+                );
+            } else if line == "detached" {
+                entry.detached = true;
+            } else if line == "bare" {
+                entry.bare = true;
+            }
+        }
+    }
+
+    entries
 }
 
 fn short_oid(oid: &str) -> String {

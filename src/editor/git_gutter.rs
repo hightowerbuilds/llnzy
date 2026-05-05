@@ -36,7 +36,8 @@ const DEBOUNCE_MS: u128 = 500;
 impl GitGutter {
     /// Load the HEAD version of a file. Returns None if not in a git repo or file is untracked.
     pub fn load(path: &Path) -> Option<Self> {
-        let repo_root = find_git_root(path)?;
+        let dir = if path.is_dir() { path } else { path.parent()? };
+        let repo_root = crate::git::discover_repo_root(dir).ok()?;
         let relative = path.strip_prefix(&repo_root).ok()?;
         let relative_str = relative.to_str()?;
 
@@ -183,21 +184,6 @@ impl GitGutter {
         }
         None
     }
-}
-
-/// Find the root of the git repository containing the given path.
-fn find_git_root(path: &Path) -> Option<std::path::PathBuf> {
-    let dir = if path.is_dir() { path } else { path.parent()? };
-    let output = Command::new("git")
-        .args(["rev-parse", "--show-toplevel"])
-        .current_dir(dir)
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let root = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    Some(std::path::PathBuf::from(root))
 }
 
 /// Compute the longest common subsequence of two line slices.

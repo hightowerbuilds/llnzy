@@ -6,6 +6,7 @@ mod error;
 mod log;
 mod model;
 mod status;
+mod watcher;
 
 #[cfg(test)]
 mod tests;
@@ -13,14 +14,16 @@ mod tests;
 pub use error::{GitError, GitErrorKind};
 pub use model::{
     CommitDetail, CommitFileChange, GitCommitNode, GitFileState, GitGraphEdge, GitHeadState,
-    GitReflogEntry, GitRepositoryState, GitSnapshot, GitStashEntry, GitStatusEntry,
+    GitLogOptions, GitReflogEntry, GitRepositoryState, GitSnapshot, GitStashEntry, GitStatusEntry,
+    GitWorktreeEntry,
 };
 pub use status::file_state_label;
+pub use watcher::GitRepoWatcher;
 
-use command::{detect_repository_state, is_bare_repository, run_git_in};
+use command::{detect_repository_state, is_bare_repository, run_git_in, run_git_in_owned};
 use detail::parse_commit_detail;
 use error::bare_repository_error;
-use log::{parse_log, parse_reflog, parse_stash_list};
+use log::{parse_log, parse_reflog, parse_stash_list, parse_worktree_list};
 use status::parse_status;
 
 const FIELD_SEP: char = '\x1f';
@@ -51,6 +54,14 @@ pub fn discover_repo_root(start: &Path) -> Result<PathBuf, GitError> {
 }
 
 pub fn load_snapshot(repo_root: &Path, max_commits: usize) -> Result<GitSnapshot, GitError> {
+    load_snapshot_with_options(repo_root, max_commits, &GitLogOptions::default())
+}
+
+pub fn load_snapshot_with_options(
+    repo_root: &Path,
+    max_commits: usize,
+    options: &GitLogOptions,
+) -> Result<GitSnapshot, GitError> {
     let mut repository_state = detect_repository_state(repo_root)?;
     if repository_state.is_bare {
         return Err(bare_repository_error());
@@ -75,25 +86,8 @@ pub fn load_snapshot(repo_root: &Path, max_commits: usize) -> Result<GitSnapshot
     );
     snapshot.repository_state = repository_state;
 
-    let max_count = format!("--max-count={}", max_commits.max(1));
-    let format = format!(
-        "%H{fs}%P{fs}%an{fs}%ae{fs}%at{fs}%D{fs}%s{rs}",
-        fs = FIELD_SEP,
-        rs = RECORD_SEP
-    );
-    let log_text = run_git_in(
-        repo_root,
-        &[
-            "log",
-            "--all",
-            "--topo-order",
-            "--date-order",
-            "--decorate=short",
-            &max_count,
-            &format!("--format={format}"),
-        ],
-    )
-    .unwrap_or_default();
+    let log_args = build_log_args(repo_root, max_commits, options);
+    let log_text = run_git_in_owned(repo_root, &log_args).unwrap_or_default();
     snapshot.commits = parse_log(&log_text);
     if snapshot.head_oid.is_none() {
         snapshot.head_oid = snapshot.commits.first().map(|commit| commit.oid.clone());
@@ -129,8 +123,48 @@ pub fn load_snapshot(repo_root: &Path, max_commits: usize) -> Result<GitSnapshot
         )
         .unwrap_or_default(),
     );
+    snapshot.worktrees = parse_worktree_list(
+        &run_git_in(repo_root, &["worktree", "list", "--porcelain"]).unwrap_or_default(),
+    );
     snapshot.is_dirty = !snapshot.status.is_empty();
     Ok(snapshot)
+}
+
+fn build_log_args(repo_root: &Path, max_commits: usize, options: &GitLogOptions) -> Vec<String> {
+    let mut args = vec!["log".to_string()];
+    if options.all_branches {
+        args.push("--all".to_string());
+    }
+    if options.first_parent {
+        args.push("--first-parent".to_string());
+    }
+    args.extend([
+        "--topo-order".to_string(),
+        "--date-order".to_string(),
+        "--decorate=short".to_string(),
+        format!("--max-count={}", max_commits.max(1)),
+        format!(
+            "--format=%H{fs}%P{fs}%an{fs}%ae{fs}%at{fs}%D{fs}%s{rs}",
+            fs = FIELD_SEP,
+            rs = RECORD_SEP
+        ),
+    ]);
+
+    if let Some(path) = normalized_file_history_path(repo_root, options.file_path.as_deref()) {
+        args.push("--".to_string());
+        args.push(path.to_string_lossy().to_string());
+    }
+
+    args
+}
+
+fn normalized_file_history_path(repo_root: &Path, path: Option<&Path>) -> Option<PathBuf> {
+    let path = path?;
+    if path.is_absolute() {
+        path.strip_prefix(repo_root).ok().map(PathBuf::from)
+    } else {
+        Some(path.to_path_buf())
+    }
 }
 
 pub fn load_commit_detail(repo_root: &Path, oid: &str) -> Result<CommitDetail, GitError> {

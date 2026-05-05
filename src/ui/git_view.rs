@@ -1,12 +1,13 @@
 use std::path::Path;
 
-use super::git_state::{GitPanel, GitUiState};
+use super::explorer_view::EditorViewState;
+use super::git_state::{GitPanel, GitSelectionMove, GitUiState};
+use crate::app::commands::AppCommand;
 use crate::git::{
     file_state_label, GitCommitNode, GitErrorKind, GitFileState, GitHeadState, GitSnapshot,
     GitStatusEntry,
 };
 
-const BG: egui::Color32 = egui::Color32::from_rgb(30, 31, 32);
 const PANEL: egui::Color32 = egui::Color32::from_rgb(38, 39, 40);
 const PANEL_DARK: egui::Color32 = egui::Color32::from_rgb(26, 27, 28);
 const TEXT: egui::Color32 = egui::Color32::from_rgb(232, 235, 232);
@@ -16,20 +17,16 @@ const RED: egui::Color32 = egui::Color32::from_rgb(255, 122, 122);
 const BLUE: egui::Color32 = egui::Color32::from_rgb(115, 182, 255);
 const YELLOW: egui::Color32 = egui::Color32::from_rgb(240, 205, 95);
 
-pub(crate) fn render_git_view(ctx: &egui::Context, state: &mut GitUiState, project_root: &Path) {
-    egui::CentralPanel::default()
-        .frame(
-            egui::Frame::none()
-                .fill(BG)
-                .inner_margin(egui::Margin::same(12.0)),
-        )
-        .show(ctx, |ui| {
-            render_git_view_ui(ui, state, project_root);
-        });
-}
-
-pub(crate) fn render_git_view_ui(ui: &mut egui::Ui, state: &mut GitUiState, project_root: &Path) {
+pub(crate) fn render_git_view_ui(
+    ui: &mut egui::Ui,
+    state: &mut GitUiState,
+    project_root: &Path,
+    active_editor_file: Option<std::path::PathBuf>,
+    mut editor_state: Option<&mut EditorViewState>,
+    commands: &mut Vec<AppCommand>,
+) {
     state.poll();
+    state.set_active_editor_file(active_editor_file);
     state.ensure_loaded(project_root);
     if matches!(state.active_panel, GitPanel::CommitLog) && state.detail_expanded {
         state.ensure_detail_loaded();
@@ -37,6 +34,10 @@ pub(crate) fn render_git_view_ui(ui: &mut egui::Ui, state: &mut GitUiState, proj
     if state.loading || state.detail_loading {
         ui.ctx()
             .request_repaint_after(std::time::Duration::from_millis(80));
+    }
+    if state.watching_repo() {
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(250));
     }
 
     let snapshot = state.snapshot.clone();
@@ -61,7 +62,13 @@ pub(crate) fn render_git_view_ui(ui: &mut egui::Ui, state: &mut GitUiState, proj
     );
     content_ui.set_clip_rect(content_rect);
     match state.active_panel {
-        GitPanel::CommitLog => render_commit_log_dashboard(&mut content_ui, state, &snapshot),
+        GitPanel::CommitLog => render_commit_log_dashboard(
+            &mut content_ui,
+            state,
+            &snapshot,
+            editor_state.as_deref_mut(),
+            commands,
+        ),
         GitPanel::Readme => render_readme_dashboard(&mut content_ui, state, &snapshot),
     }
 }
@@ -81,6 +88,18 @@ fn render_header(ui: &mut egui::Ui, state: &mut GitUiState, snapshot: Option<&Gi
                             .desired_width(260.0)
                             .hint_text("Search commits"),
                     );
+                    let mut all_branches = state.log_options.all_branches;
+                    if ui.checkbox(&mut all_branches, "All branches").changed() {
+                        state.set_all_branches(all_branches);
+                    }
+                    let mut first_parent = state.log_options.first_parent;
+                    if ui.checkbox(&mut first_parent, "First parent").changed() {
+                        state.set_first_parent(first_parent);
+                    }
+                    let mut active_file = state.active_file_history;
+                    if ui.checkbox(&mut active_file, "Active file").changed() {
+                        state.set_active_file_history(active_file);
+                    }
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let text = if state.loading {
@@ -134,6 +153,12 @@ fn render_header(ui: &mut egui::Ui, state: &mut GitUiState, snapshot: Option<&Gi
                         );
                     }
                     badge(ui, format!("{} commits", snapshot.commits.len()), DIM);
+                    if let Some(path) = &state.log_options.file_path {
+                        badge(ui, format!("file {}", path_display(path)), BLUE);
+                    }
+                    if let Some(error) = &state.repo_watch_error {
+                        badge(ui, "WATCH OFF", YELLOW).on_hover_text(error.as_str());
+                    }
                 }
             });
         });
@@ -204,7 +229,13 @@ fn render_loading_state(ui: &mut egui::Ui, state: &GitUiState, project_root: &Pa
     });
 }
 
-fn render_commit_log_dashboard(ui: &mut egui::Ui, state: &mut GitUiState, snapshot: &GitSnapshot) {
+fn render_commit_log_dashboard(
+    ui: &mut egui::Ui,
+    state: &mut GitUiState,
+    snapshot: &GitSnapshot,
+    mut editor_state: Option<&mut EditorViewState>,
+    commands: &mut Vec<AppCommand>,
+) {
     let available_h = ui.available_height();
     let detail_h = 206.0_f32.min((available_h * 0.42).max(150.0));
     let top_height = (available_h - detail_h - 10.0).max(180.0);
@@ -214,7 +245,7 @@ fn render_commit_log_dashboard(ui: &mut egui::Ui, state: &mut GitUiState, snapsh
         ui.allocate_ui_with_layout(
             egui::vec2(worktree_width, top_height),
             egui::Layout::top_down(egui::Align::Min),
-            |ui| render_worktree_panel(ui, snapshot),
+            |ui| render_worktree_panel(ui, snapshot, editor_state.as_deref_mut(), commands),
         );
         ui.separator();
         ui.allocate_ui_with_layout(
@@ -227,7 +258,7 @@ fn render_commit_log_dashboard(ui: &mut egui::Ui, state: &mut GitUiState, snapsh
     ui.allocate_ui_with_layout(
         egui::vec2(ui.available_width(), ui.available_height().max(1.0)),
         egui::Layout::top_down(egui::Align::Min),
-        |ui| render_detail_panel(ui, state, snapshot),
+        |ui| render_detail_panel(ui, state, snapshot, editor_state, commands),
     );
 }
 
@@ -296,7 +327,12 @@ fn git_error_title(error_kind: Option<GitErrorKind>) -> &'static str {
     }
 }
 
-fn render_worktree_panel(ui: &mut egui::Ui, snapshot: &GitSnapshot) {
+fn render_worktree_panel(
+    ui: &mut egui::Ui,
+    snapshot: &GitSnapshot,
+    mut editor_state: Option<&mut EditorViewState>,
+    commands: &mut Vec<AppCommand>,
+) {
     panel_header(ui, "Working Tree");
     ui.add_space(6.0);
     egui::ScrollArea::vertical()
@@ -313,6 +349,9 @@ fn render_worktree_panel(ui: &mut egui::Ui, snapshot: &GitSnapshot) {
                     ui,
                     "Conflicts",
                     snapshot.status.iter().filter(|e| e.conflicted),
+                    snapshot,
+                    editor_state.as_deref_mut(),
+                    commands,
                 );
                 render_status_group(
                     ui,
@@ -321,6 +360,9 @@ fn render_worktree_panel(ui: &mut egui::Ui, snapshot: &GitSnapshot) {
                         .status
                         .iter()
                         .filter(|e| e.index != GitFileState::Unmodified && !e.conflicted),
+                    snapshot,
+                    editor_state.as_deref_mut(),
+                    commands,
                 );
                 render_status_group(
                     ui,
@@ -329,7 +371,31 @@ fn render_worktree_panel(ui: &mut egui::Ui, snapshot: &GitSnapshot) {
                         .status
                         .iter()
                         .filter(|e| e.worktree != GitFileState::Unmodified && !e.conflicted),
+                    snapshot,
+                    editor_state.as_deref_mut(),
+                    commands,
                 );
+            }
+
+            ui.add_space(10.0);
+            panel_header(ui, "Worktrees");
+            if snapshot.worktrees.is_empty() {
+                muted(ui, "None");
+            } else {
+                for worktree in snapshot.worktrees.iter().take(6) {
+                    ui.horizontal_wrapped(|ui| {
+                        badge(
+                            ui,
+                            worktree.branch.as_deref().unwrap_or(if worktree.detached {
+                                "detached"
+                            } else {
+                                "worktree"
+                            }),
+                            if worktree.detached { YELLOW } else { BLUE },
+                        );
+                        wrapped_label(ui, &worktree.path.display().to_string(), 12.0, TEXT);
+                    });
+                }
             }
 
             ui.add_space(10.0);
@@ -369,6 +435,9 @@ fn render_status_group<'a>(
     ui: &mut egui::Ui,
     title: &str,
     entries: impl Iterator<Item = &'a GitStatusEntry>,
+    snapshot: &GitSnapshot,
+    mut editor_state: Option<&mut EditorViewState>,
+    commands: &mut Vec<AppCommand>,
 ) {
     let entries: Vec<&GitStatusEntry> = entries.collect();
     if entries.is_empty() {
@@ -386,8 +455,12 @@ fn render_status_group<'a>(
         };
         ui.horizontal_wrapped(|ui| {
             badge(ui, file_state_label(state), state_color(state));
-            wrapped_label(ui, &entry.path.display().to_string(), 12.0, TEXT)
+            let response = ui
+                .selectable_label(false, path_display(&entry.path))
                 .on_hover_text(entry.path.display().to_string());
+            if response.clicked() {
+                open_repo_file(snapshot, &entry.path, editor_state.as_deref_mut(), commands);
+            }
         });
         if let Some(old_path) = &entry.old_path {
             wrapped_label(ui, &format!("from {}", old_path.display()), 11.0, DIM);
@@ -404,6 +477,7 @@ fn render_log_panel(ui: &mut egui::Ui, state: &mut GitUiState, snapshot: &GitSna
         muted(ui, "No commits");
         return;
     }
+    handle_log_keyboard(ui, state, &commits);
 
     egui::ScrollArea::vertical()
         .id_salt("git_log_scroll")
@@ -421,6 +495,30 @@ fn render_log_panel(ui: &mut egui::Ui, state: &mut GitUiState, snapshot: &GitSna
                 paint_commit_row(ui, rect, &commit, selected);
             }
         });
+}
+
+fn handle_log_keyboard(ui: &mut egui::Ui, state: &mut GitUiState, commits: &[GitCommitNode]) {
+    let ids = commits
+        .iter()
+        .map(|commit| commit.oid.clone())
+        .collect::<Vec<_>>();
+    ui.input(|input| {
+        if input.key_pressed(egui::Key::ArrowUp) {
+            state.move_selection(&ids, GitSelectionMove::Previous);
+        }
+        if input.key_pressed(egui::Key::ArrowDown) {
+            state.move_selection(&ids, GitSelectionMove::Next);
+        }
+        if input.key_pressed(egui::Key::Home) {
+            state.move_selection(&ids, GitSelectionMove::First);
+        }
+        if input.key_pressed(egui::Key::End) {
+            state.move_selection(&ids, GitSelectionMove::Last);
+        }
+        if input.key_pressed(egui::Key::Enter) || input.key_pressed(egui::Key::Space) {
+            state.detail_expanded = !state.detail_expanded;
+        }
+    });
 }
 
 fn filtered_commits(snapshot: &GitSnapshot, filter: &str) -> Vec<GitCommitNode> {
@@ -534,7 +632,13 @@ fn paint_commit_row(ui: &egui::Ui, rect: egui::Rect, commit: &GitCommitNode, sel
     }
 }
 
-fn render_detail_panel(ui: &mut egui::Ui, state: &mut GitUiState, snapshot: &GitSnapshot) {
+fn render_detail_panel(
+    ui: &mut egui::Ui,
+    state: &mut GitUiState,
+    snapshot: &GitSnapshot,
+    mut editor_state: Option<&mut EditorViewState>,
+    commands: &mut Vec<AppCommand>,
+) {
     panel_header(ui, "Commit Detail");
     ui.add_space(6.0);
     let Some(selected_oid) = state.selected_commit.clone() else {
@@ -646,11 +750,17 @@ fn render_detail_panel(ui: &mut egui::Ui, state: &mut GitUiState, snapshot: &Git
                         for file in &detail.files {
                             ui.horizontal(|ui| {
                                 badge(ui, file_state_label(file.status), state_color(file.status));
-                                ui.label(
-                                    egui::RichText::new(path_display(&file.path))
-                                        .size(12.0)
-                                        .color(TEXT),
-                                );
+                                let response = ui
+                                    .selectable_label(false, path_display(&file.path))
+                                    .on_hover_text(file.path.display().to_string());
+                                if response.clicked() {
+                                    open_repo_file(
+                                        snapshot,
+                                        &file.path,
+                                        editor_state.as_deref_mut(),
+                                        commands,
+                                    );
+                                }
                             });
                         }
                     });
@@ -697,7 +807,25 @@ fn panel_header(ui: &mut egui::Ui, text: &str) {
     );
 }
 
-fn badge(ui: &mut egui::Ui, text: impl Into<String>, color: egui::Color32) {
+fn open_repo_file(
+    snapshot: &GitSnapshot,
+    path: &Path,
+    editor_state: Option<&mut EditorViewState>,
+    commands: &mut Vec<AppCommand>,
+) {
+    let Some(editor_state) = editor_state else {
+        return;
+    };
+    let path = snapshot.repo_root.join(path);
+    if !path.is_file() {
+        return;
+    }
+    if let Ok(buffer_id) = editor_state.open_file(path.clone()) {
+        commands.push(AppCommand::OpenCodeFile { path, buffer_id });
+    }
+}
+
+fn badge(ui: &mut egui::Ui, text: impl Into<String>, color: egui::Color32) -> egui::Response {
     ui.add(
         egui::Label::new(
             egui::RichText::new(text.into())
@@ -706,7 +834,7 @@ fn badge(ui: &mut egui::Ui, text: impl Into<String>, color: egui::Color32) {
                 .color(color),
         )
         .selectable(false),
-    );
+    )
 }
 
 fn muted(ui: &mut egui::Ui, text: &str) {
@@ -737,8 +865,12 @@ fn branch_label(snapshot: &GitSnapshot) -> String {
 fn render_repository_state_badges(ui: &mut egui::Ui, snapshot: &GitSnapshot) {
     let state = &snapshot.repository_state;
     match state.head {
-        GitHeadState::Detached => badge(ui, "DETACHED", YELLOW),
-        GitHeadState::Unborn => badge(ui, "NO COMMITS", YELLOW),
+        GitHeadState::Detached => {
+            badge(ui, "DETACHED", YELLOW);
+        }
+        GitHeadState::Unborn => {
+            badge(ui, "NO COMMITS", YELLOW);
+        }
         GitHeadState::Unknown | GitHeadState::Branch => {}
     }
     if state.is_shallow {

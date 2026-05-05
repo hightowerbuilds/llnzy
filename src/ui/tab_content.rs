@@ -319,7 +319,15 @@ fn render_joined_pane(
                 egui::Color32::from_rgb(30, 31, 32),
                 10.0,
                 |ui| {
-                    git_view::render_git_view_ui(ui, state.git, &state.explorer.root);
+                    let active_editor_file = active_editor_file(state.editor_view);
+                    git_view::render_git_view_ui(
+                        ui,
+                        state.git,
+                        &state.explorer.root,
+                        active_editor_file,
+                        Some(state.editor_view),
+                        state.commands,
+                    );
                 },
             );
         }
@@ -474,7 +482,30 @@ fn render_sketch(
 }
 
 fn render_git(ctx: &egui::Context, state: TabContentState<'_>) {
-    git_view::render_git_view(ctx, state.git, &state.explorer.root);
+    let active_editor_file = active_editor_file(state.editor_view);
+    egui::CentralPanel::default()
+        .frame(
+            egui::Frame::none()
+                .fill(egui::Color32::from_rgb(30, 31, 32))
+                .inner_margin(egui::Margin::same(12.0)),
+        )
+        .show(ctx, |ui| {
+            git_view::render_git_view_ui(
+                ui,
+                state.git,
+                &state.explorer.root,
+                active_editor_file,
+                Some(state.editor_view),
+                state.commands,
+            );
+        });
+}
+
+fn active_editor_file(state: &explorer_view::EditorViewState) -> Option<std::path::PathBuf> {
+    state
+        .editor
+        .active_buffer_view()
+        .and_then(|(_, buffer, _)| buffer.path().map(std::path::PathBuf::from))
 }
 
 fn render_empty(ctx: &egui::Context, _bg: [u8; 3]) {

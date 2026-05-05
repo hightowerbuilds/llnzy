@@ -25,6 +25,7 @@ Treat this as a parking lot, not a current sprint plan. Many entries came from o
 - [x] LSP workspace and restart foundation: LSP sessions now advertise multiple workspace folders, add new detected roots without clearing existing clients, sync running clients with workspace-folder changes, and auto-restart stopped active language servers by reopening the active document. Source: `tweaks.md`.
 - [x] Tree-sitter incremental edit foundation: records precise buffer edit ranges, applies tree-sitter `InputEdit` to previous parse trees for small active-buffer edits, falls back to full parses when edit data or trees are unavailable, and covers Unicode byte-column behavior. Source: `tweaks.md`.
 - [x] Terminal interaction foundation: verified terminal conformance coverage for selection, paste, control keys, alternate screen, ANSI color, and scrollback basics; confirmed selection drag performance and copy correctness coverage; added configurable copy-on-select; verified terminal titles plus link detection/opening are wired; hardened lifecycle behavior with explicit close-time process termination plus bounded long-running output processing; and added search across retained scrollback. Sources: `llnzy-critical-review-04-28-2026.md`, `leftovers-roadmap-3.md`, `tweaks.md`.
+- [x] Git read-only foundation: shared repository discovery with the editor gutter, kept Git tab command work async, retained CLI behind the model/parser boundary for a future `git2` backend, opened Git file rows through normal editor tabs, added log scope/first-parent/active-file history controls, refreshed from a debounced repository watcher, displayed linked worktrees, improved keyboard commit selection, and kept mutating actions deferred behind explicit safety UX. Source: `llnzy-local-git-tab-roadmap-05-01-2026.md`.
 
 ## Cross-Platform Compatibility
 
@@ -140,16 +141,16 @@ Treat this as a parking lot, not a current sprint plan. Many entries came from o
 
 ## Git
 
-- [ ] Share Git repository discovery between the Git tab and editor git gutter. Source: `llnzy-local-git-tab-roadmap-05-01-2026.md`.
-- [ ] Keep Git tab process work off the UI frame path. Source: `llnzy-local-git-tab-roadmap-05-01-2026.md`.
-- [ ] Consider a `git2` backend later, behind the existing model boundary. Source: `llnzy-local-git-tab-roadmap-05-01-2026.md`.
-- [ ] Let Git file rows open files or diffs. Source: `llnzy-local-git-tab-roadmap-05-01-2026.md`.
-- [ ] Add branch/all and first-parent toggles. Source: `llnzy-local-git-tab-roadmap-05-01-2026.md`.
-- [ ] Add debounced repo-root file watcher for Git refresh. Source: `llnzy-local-git-tab-roadmap-05-01-2026.md`.
-- [ ] Add worktree display support. Source: `llnzy-local-git-tab-roadmap-05-01-2026.md`.
-- [ ] Add optional file-specific history from the active editor file. Source: `llnzy-local-git-tab-roadmap-05-01-2026.md`.
-- [ ] Improve keyboard-friendly Git selection. Source: `llnzy-local-git-tab-roadmap-05-01-2026.md`.
-- [ ] Introduce mutating Git actions only with explicit safety UX. Potential actions include stash, commit, reset, checkout, rebase, revert, stash pop, and amend. Source: `llnzy-local-git-tab-roadmap-05-01-2026.md`.
+- [x] Share Git repository discovery between the Git tab and editor git gutter. Source: `llnzy-local-git-tab-roadmap-05-01-2026.md`.
+- [x] Keep Git tab process work off the UI frame path. Source: `llnzy-local-git-tab-roadmap-05-01-2026.md`.
+- [x] Consider a `git2` backend later, behind the existing model boundary. Source: `llnzy-local-git-tab-roadmap-05-01-2026.md`.
+- [x] Let Git file rows open files or diffs. Source: `llnzy-local-git-tab-roadmap-05-01-2026.md`.
+- [x] Add branch/all and first-parent toggles. Source: `llnzy-local-git-tab-roadmap-05-01-2026.md`.
+- [x] Add debounced repo-root file watcher for Git refresh. Source: `llnzy-local-git-tab-roadmap-05-01-2026.md`.
+- [x] Add worktree display support. Source: `llnzy-local-git-tab-roadmap-05-01-2026.md`.
+- [x] Add optional file-specific history from the active editor file. Source: `llnzy-local-git-tab-roadmap-05-01-2026.md`.
+- [x] Improve keyboard-friendly Git selection. Source: `llnzy-local-git-tab-roadmap-05-01-2026.md`.
+- [x] Keep mutating Git actions deferred until explicit safety UX exists. Potential actions include stash, commit, reset, checkout, rebase, revert, stash pop, and amend. Source: `llnzy-local-git-tab-roadmap-05-01-2026.md`.
 
 ## Sidebar, Files, Drag And Drop, Tabs
 

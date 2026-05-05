@@ -33,6 +33,24 @@ pub struct GitSnapshot {
     pub commits: Vec<GitCommitNode>,
     pub stashes: Vec<GitStashEntry>,
     pub reflog: Vec<GitReflogEntry>,
+    pub worktrees: Vec<GitWorktreeEntry>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GitLogOptions {
+    pub all_branches: bool,
+    pub first_parent: bool,
+    pub file_path: Option<PathBuf>,
+}
+
+impl Default for GitLogOptions {
+    fn default() -> Self {
+        Self {
+            all_branches: true,
+            first_parent: false,
+            file_path: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -115,4 +133,13 @@ pub struct GitReflogEntry {
     pub selector: String,
     pub relative_time: String,
     pub message: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct GitWorktreeEntry {
+    pub path: PathBuf,
+    pub head: Option<String>,
+    pub branch: Option<String>,
+    pub detached: bool,
+    pub bare: bool,
 }

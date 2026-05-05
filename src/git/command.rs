@@ -35,6 +35,18 @@ pub(super) fn parse_git_bool(text: &str) -> bool {
 }
 
 pub(super) fn run_git_in(dir: &Path, args: &[&str]) -> Result<String, GitError> {
+    run_git_output(dir, args)
+}
+
+pub(super) fn run_git_in_owned(dir: &Path, args: &[String]) -> Result<String, GitError> {
+    run_git_output(dir, args)
+}
+
+fn run_git_output<I, S>(dir: &Path, args: I) -> Result<String, GitError>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<std::ffi::OsStr>,
+{
     let output = Command::new("git")
         .args(args)
         .current_dir(dir)

@@ -4,12 +4,15 @@ use std::thread;
 use std::time::Instant;
 
 use crate::async_guard::{is_current_request, AsyncRequestCounter, AsyncRequestToken};
-use crate::git::{self, CommitDetail, GitError, GitErrorKind, GitSnapshot};
+use crate::git::{
+    self, CommitDetail, GitError, GitErrorKind, GitLogOptions, GitRepoWatcher, GitSnapshot,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct RefreshRequest {
     token: AsyncRequestToken,
     candidate: PathBuf,
+    options: GitLogOptions,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -25,6 +28,14 @@ pub enum GitPanel {
     Readme,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GitSelectionMove {
+    Previous,
+    Next,
+    First,
+    Last,
+}
+
 pub struct GitUiState {
     pub candidate_root: Option<PathBuf>,
     pub repo_root: Option<PathBuf>,
@@ -34,6 +45,9 @@ pub struct GitUiState {
     pub active_panel: GitPanel,
     pub detail_expanded: bool,
     pub filter: String,
+    pub log_options: GitLogOptions,
+    pub active_file_history: bool,
+    active_editor_file: Option<PathBuf>,
     pub loading: bool,
     pub detail_loading: bool,
     pub error: Option<String>,
@@ -48,6 +62,8 @@ pub struct GitUiState {
     pub readme_error: Option<String>,
     pub last_refresh: Option<Instant>,
     request_counter: AsyncRequestCounter,
+    repo_watcher: Option<GitRepoWatcher>,
+    pub repo_watch_error: Option<String>,
 }
 
 impl Default for GitUiState {
@@ -61,6 +77,9 @@ impl Default for GitUiState {
             active_panel: GitPanel::CommitLog,
             detail_expanded: false,
             filter: String::new(),
+            log_options: GitLogOptions::default(),
+            active_file_history: false,
+            active_editor_file: None,
             loading: false,
             detail_loading: false,
             error: None,
@@ -75,12 +94,15 @@ impl Default for GitUiState {
             readme_error: None,
             last_refresh: None,
             request_counter: AsyncRequestCounter::default(),
+            repo_watcher: None,
+            repo_watch_error: None,
         }
     }
 }
 
 impl GitUiState {
     pub fn poll(&mut self) {
+        self.poll_repo_watcher();
         self.poll_refresh();
         self.poll_detail();
     }
@@ -103,6 +125,8 @@ impl GitUiState {
             self.readme_root = None;
             self.readme_text = None;
             self.readme_error = None;
+            self.repo_watcher = None;
+            self.repo_watch_error = None;
             self.start_refresh(candidate, false);
         } else if self.snapshot.is_none() && self.error.is_none() && !self.loading {
             self.start_refresh(candidate, false);
@@ -113,6 +137,61 @@ impl GitUiState {
         if let Some(candidate) = self.candidate_root.clone() {
             self.start_refresh(candidate, true);
         }
+    }
+
+    pub fn watching_repo(&self) -> bool {
+        self.repo_watcher.is_some()
+    }
+
+    pub fn set_all_branches(&mut self, enabled: bool) {
+        if self.log_options.all_branches != enabled {
+            self.log_options.all_branches = enabled;
+            self.refresh();
+        }
+    }
+
+    pub fn set_first_parent(&mut self, enabled: bool) {
+        if self.log_options.first_parent != enabled {
+            self.log_options.first_parent = enabled;
+            self.refresh();
+        }
+    }
+
+    pub fn set_active_file_history(&mut self, enabled: bool) {
+        if self.active_file_history != enabled {
+            self.active_file_history = enabled;
+            self.sync_file_history_option();
+            self.refresh();
+        }
+    }
+
+    pub fn set_active_editor_file(&mut self, path: Option<PathBuf>) {
+        if self.active_editor_file != path {
+            self.active_editor_file = path;
+            if self.sync_file_history_option() {
+                self.refresh();
+            }
+        }
+    }
+
+    pub fn move_selection(&mut self, commit_ids: &[String], movement: GitSelectionMove) {
+        if commit_ids.is_empty() {
+            self.selected_commit = None;
+            return;
+        }
+
+        let current = self
+            .selected_commit
+            .as_ref()
+            .and_then(|selected| commit_ids.iter().position(|oid| oid == selected));
+        let next = match (movement, current) {
+            (GitSelectionMove::First, _) => 0,
+            (GitSelectionMove::Last, _) => commit_ids.len() - 1,
+            (GitSelectionMove::Previous, Some(idx)) => idx.saturating_sub(1),
+            (GitSelectionMove::Next, Some(idx)) => (idx + 1).min(commit_ids.len() - 1),
+            (GitSelectionMove::Previous | GitSelectionMove::Next, None) => 0,
+        };
+        self.select_commit(commit_ids[next].clone());
     }
 
     pub fn select_commit(&mut self, oid: String) {
@@ -215,6 +294,7 @@ impl GitUiState {
         let request = RefreshRequest {
             token: self.next_request_token(),
             candidate: candidate.clone(),
+            options: self.log_options.clone(),
         };
         self.loading = true;
         self.error = None;
@@ -222,10 +302,19 @@ impl GitUiState {
         self.refresh_requested = Some(request.clone());
         thread::spawn(move || {
             let snapshot = git::discover_repo_root(&candidate)
-                .and_then(|root| git::load_snapshot(&root, 1_000));
+                .and_then(|root| git::load_snapshot_with_options(&root, 1_000, &request.options));
             let _ = tx.send((request, snapshot));
         });
         self.refresh_rx = Some(rx);
+    }
+
+    fn poll_repo_watcher(&mut self) {
+        let Some(watcher) = &mut self.repo_watcher else {
+            return;
+        };
+        if watcher.poll() {
+            self.refresh();
+        }
     }
 
     fn poll_refresh(&mut self) {
@@ -241,6 +330,18 @@ impl GitUiState {
                 self.refresh_requested = None;
                 let repo_changed = self.repo_root.as_ref() != Some(&snapshot.repo_root);
                 self.repo_root = Some(snapshot.repo_root.clone());
+                if repo_changed {
+                    match GitRepoWatcher::new(snapshot.repo_root.clone()) {
+                        Ok(watcher) => {
+                            self.repo_watcher = Some(watcher);
+                            self.repo_watch_error = None;
+                        }
+                        Err(error) => {
+                            self.repo_watcher = None;
+                            self.repo_watch_error = Some(error);
+                        }
+                    }
+                }
                 self.error = None;
                 self.error_kind = None;
                 self.last_refresh = Some(Instant::now());
@@ -275,6 +376,8 @@ impl GitUiState {
                 self.readme_root = None;
                 self.readme_text = None;
                 self.readme_error = None;
+                self.repo_watcher = None;
+                self.repo_watch_error = None;
                 self.refresh_rx = None;
             }
             Err(TryRecvError::Empty) => {}
@@ -332,6 +435,19 @@ impl GitUiState {
     fn next_request_token(&mut self) -> AsyncRequestToken {
         self.request_counter.next_token()
     }
+
+    fn sync_file_history_option(&mut self) -> bool {
+        let next = if self.active_file_history {
+            self.active_editor_file.clone()
+        } else {
+            None
+        };
+        if self.log_options.file_path == next {
+            return false;
+        }
+        self.log_options.file_path = next;
+        true
+    }
 }
 
 #[cfg(test)]
@@ -352,6 +468,7 @@ mod tests {
         RefreshRequest {
             token: token(id),
             candidate: PathBuf::from(candidate),
+            options: GitLogOptions::default(),
         }
     }
 
@@ -570,5 +687,64 @@ mod tests {
 
         assert!(!state.refresh_result_is_current(&first));
         assert!(state.refresh_result_is_current(&second));
+    }
+
+    #[test]
+    fn refresh_identity_includes_log_options() {
+        let mut current = refresh_request(2, "/tmp/repo");
+        current.options.first_parent = true;
+        let mut stale = current.clone();
+        stale.options.first_parent = false;
+        let state = GitUiState {
+            refresh_requested: Some(current.clone()),
+            ..GitUiState::default()
+        };
+
+        assert!(state.refresh_result_is_current(&current));
+        assert!(!state.refresh_result_is_current(&stale));
+    }
+
+    #[test]
+    fn active_file_history_updates_log_options() {
+        let mut state = GitUiState::default();
+
+        state.set_active_editor_file(Some(PathBuf::from("/tmp/repo/src/main.rs")));
+        assert!(state.log_options.file_path.is_none());
+
+        state.set_active_file_history(true);
+        assert_eq!(
+            state.log_options.file_path,
+            Some(PathBuf::from("/tmp/repo/src/main.rs"))
+        );
+
+        state.set_active_editor_file(Some(PathBuf::from("/tmp/repo/src/lib.rs")));
+        assert_eq!(
+            state.log_options.file_path,
+            Some(PathBuf::from("/tmp/repo/src/lib.rs"))
+        );
+    }
+
+    #[test]
+    fn keyboard_selection_moves_within_filtered_commit_ids() {
+        let mut state = GitUiState {
+            selected_commit: Some("b".to_string()),
+            ..GitUiState::default()
+        };
+        let commits = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+
+        state.move_selection(&commits, GitSelectionMove::Next);
+        assert_eq!(state.selected_commit.as_deref(), Some("c"));
+
+        state.move_selection(&commits, GitSelectionMove::Next);
+        assert_eq!(state.selected_commit.as_deref(), Some("c"));
+
+        state.move_selection(&commits, GitSelectionMove::First);
+        assert_eq!(state.selected_commit.as_deref(), Some("a"));
+
+        state.move_selection(&commits, GitSelectionMove::Previous);
+        assert_eq!(state.selected_commit.as_deref(), Some("a"));
+
+        state.move_selection(&[], GitSelectionMove::Next);
+        assert!(state.selected_commit.is_none());
     }
 }

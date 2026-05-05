@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use super::command::{is_large_repository, parse_count_objects, parse_git_bool};
 use super::detail::parse_commit_detail;
 use super::error::classify_git_failure;
-use super::log::parse_log;
+use super::log::{parse_log, parse_worktree_list};
 use super::status::{parse_renamed_status, parse_status};
 use super::*;
 
@@ -158,4 +158,49 @@ fn parses_commit_detail_files() {
     assert_eq!(detail.subject, "Subject");
     assert_eq!(detail.files.len(), 2);
     assert_eq!(detail.files[1].old_path, Some(PathBuf::from("old.rs")));
+}
+
+#[test]
+fn log_args_respect_scope_first_parent_and_file_history() {
+    let repo_root = PathBuf::from("/tmp/repo");
+    let options = GitLogOptions {
+        all_branches: false,
+        first_parent: true,
+        file_path: Some(PathBuf::from("/tmp/repo/src/main.rs")),
+    };
+
+    let args = build_log_args(&repo_root, 25, &options);
+
+    assert_eq!(args[0], "log");
+    assert!(!args.iter().any(|arg| arg == "--all"));
+    assert!(args.iter().any(|arg| arg == "--first-parent"));
+    assert!(args.iter().any(|arg| arg == "--max-count=25"));
+    assert_eq!(
+        args.iter()
+            .position(|arg| arg == "--")
+            .and_then(|idx| args.get(idx + 1))
+            .map(String::as_str),
+        Some("src/main.rs")
+    );
+}
+
+#[test]
+fn parses_worktree_porcelain_entries() {
+    let text = "\
+worktree /tmp/repo
+HEAD abc123
+branch refs/heads/main
+
+worktree /tmp/repo-feature
+HEAD def456
+detached
+";
+
+    let entries = parse_worktree_list(text);
+
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].path, PathBuf::from("/tmp/repo"));
+    assert_eq!(entries[0].branch.as_deref(), Some("main"));
+    assert_eq!(entries[0].head.as_deref(), Some("abc123"));
+    assert!(entries[1].detached);
 }
