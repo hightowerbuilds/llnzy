@@ -1,0 +1,15 @@
+- [ ] Fix the Cmd+Plus / Cmd+Minus bug.
+- [ ] Complete the Appearances page.
+- [ ] Make sidebar adjustments.
+- [ ] Fix background images.
+- [ ] Advance Sketcher features.
+- [ ] Fix tab name editing.
+- [ ] Fix Sketcher commands.
+- [ ] Add image uploads into Sketcher.
+- [ ] Remove Kill and Restart from the Shell tab menu.
+- [ ] Fix right-side tab padding.
+- [ ] Show a grab cursor when scrolling Markdown files by dragging.
+- [ ] Hot-update the sidebar and file explorer for file changes, folder creation, file creation, and related filesystem events.
+- [ ] Improve display switching when the OS moves the app between monitors, including larger HDMI-connected screens.
+- [ ] Persist the Stacker queue across app sessions.
+- [ ] Add a New Window option so users can open another LLNZY window elsewhere in the OS.
