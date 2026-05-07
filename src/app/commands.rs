@@ -14,6 +14,7 @@ use crate::workspace_store::SavedWorkspace;
 #[derive(Clone)]
 pub enum AppCommand {
     PickOpenProject,
+    NewWindow,
     NewTerminalTab,
     OpenSingletonTab(TabKind),
     SwitchTab(usize),

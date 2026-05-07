@@ -87,6 +87,7 @@ impl EditorCommand {
             CommandId::OpenWorkspace
             | CommandId::ToggleTerminal
             | CommandId::ToggleSidebar
+            | CommandId::NewWindow
             | CommandId::NewTab
             | CommandId::CloseTab
             | CommandId::NextTab

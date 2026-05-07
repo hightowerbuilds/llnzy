@@ -93,6 +93,10 @@ impl PlatformPathSet {
         self.config_dir.join("stacker.json")
     }
 
+    pub fn stacker_queue_file(&self) -> PathBuf {
+        self.config_dir.join("stacker_queue.json")
+    }
+
     pub fn last_session_file(&self) -> PathBuf {
         self.config_dir.join("last_session.toml")
     }
@@ -137,6 +141,10 @@ mod tests {
         assert_eq!(paths.themes_dir, paths.config_dir.join("themes"));
         assert_eq!(paths.workspaces_dir, paths.config_dir.join("workspaces"));
         assert_eq!(paths.stacker_file(), paths.config_dir.join("stacker.json"));
+        assert_eq!(
+            paths.stacker_queue_file(),
+            paths.config_dir.join("stacker_queue.json")
+        );
         assert_eq!(
             paths.sketch_scratch_file(),
             paths.config_dir.join("sketches").join("scratch.json")

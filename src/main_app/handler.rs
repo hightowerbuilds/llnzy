@@ -36,6 +36,14 @@ impl ApplicationHandler<UserEvent> for App {
             event: key_event, ..
         } = &event
         {
+            if key_event.state == ElementState::Pressed {
+                if let Some(command) = app_zoom_shortcut_command(key_event, self.modifiers) {
+                    let mut sidebar_changed = false;
+                    self.handle_app_command(command, &mut sidebar_changed);
+                    return;
+                }
+            }
+
             if self.active_session().is_some() && key_event.state == ElementState::Pressed {
                 if let Some(action) = self.config.keybindings.match_key(key_event, self.modifiers) {
                     match action {
@@ -216,21 +224,16 @@ impl ApplicationHandler<UserEvent> for App {
                 }
             }
 
-            WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
-                if let Some(renderer) = &mut self.renderer {
-                    renderer.set_scale_factor(scale_factor as f32);
-                }
+            WindowEvent::ScaleFactorChanged { .. } => {
+                self.sync_window_metrics();
             }
 
-            WindowEvent::Resized(size) => {
-                if let Some(renderer) = &mut self.renderer {
-                    renderer.resize(size.width, size.height);
-                    renderer.invalidate_text_cache();
-                }
-                self.recompute_layout();
-                self.resize_terminal_tabs();
-                self.clear_terminal_selection();
-                self.terminal_pending_mouse_press = None;
+            WindowEvent::Resized(_) => {
+                self.sync_window_metrics();
+            }
+
+            WindowEvent::Moved(_) => {
+                self.sync_window_metrics();
             }
 
             WindowEvent::RedrawRequested => {
@@ -437,7 +440,8 @@ impl ApplicationHandler<UserEvent> for App {
                         Action::ToggleTerminalPanel => {
                             // Terminal panel in explorer removed — no-op
                         }
-                        Action::NewTab
+                        Action::NewWindow
+                        | Action::NewTab
                         | Action::CloseTab
                         | Action::NextTab
                         | Action::PrevTab

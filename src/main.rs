@@ -7,7 +7,7 @@ mod runtime;
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, Ime, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
-use winit::keyboard::{Key, ModifiersState, NamedKey};
+use winit::keyboard::{Key, KeyCode, ModifiersState, NamedKey, PhysicalKey};
 use winit::window::{Window, WindowAttributes, WindowId};
 
 use llnzy::app::click_state::ClickState;
@@ -519,6 +519,10 @@ impl App {
         use llnzy::platform::menu;
 
         match command_id {
+            menu::COMMAND_NEW_WINDOW => {
+                let mut sidebar_changed = false;
+                self.handle_app_command(AppCommand::NewWindow, &mut sidebar_changed);
+            }
             menu::COMMAND_NEW_TAB => {
                 let mut sidebar_changed = false;
                 self.handle_app_command(AppCommand::NewTerminalTab, &mut sidebar_changed);
@@ -600,6 +604,18 @@ impl App {
                 let mut sidebar_changed = false;
                 self.handle_app_command(AppCommand::ToggleEffects, &mut sidebar_changed);
             }
+            menu::COMMAND_ZOOM_IN => {
+                let mut sidebar_changed = false;
+                self.handle_app_command(AppCommand::ZoomIn, &mut sidebar_changed);
+            }
+            menu::COMMAND_ZOOM_OUT => {
+                let mut sidebar_changed = false;
+                self.handle_app_command(AppCommand::ZoomOut, &mut sidebar_changed);
+            }
+            menu::COMMAND_ZOOM_RESET => {
+                let mut sidebar_changed = false;
+                self.handle_app_command(AppCommand::ZoomReset, &mut sidebar_changed);
+            }
             menu::COMMAND_OPEN_PROJECT => {
                 let mut sidebar_changed = false;
                 if self.handle_app_command(AppCommand::PickOpenProject, &mut sidebar_changed) {
@@ -636,6 +652,43 @@ impl App {
 
 fn rect_contains(rect: llnzy::session::Rect, x: f32, y: f32) -> bool {
     x >= rect.x && x < rect.x + rect.w && y >= rect.y && y < rect.y + rect.h
+}
+
+fn app_zoom_shortcut_command(
+    key_event: &winit::event::KeyEvent,
+    modifiers: ModifiersState,
+) -> Option<AppCommand> {
+    app_zoom_shortcut_command_for_key(&key_event.logical_key, key_event.physical_key, modifiers)
+}
+
+fn app_zoom_shortcut_command_for_key(
+    logical_key: &Key,
+    physical_key: PhysicalKey,
+    modifiers: ModifiersState,
+) -> Option<AppCommand> {
+    if !primary_modifier(modifiers) || modifiers.alt_key() {
+        return None;
+    }
+
+    match physical_key {
+        PhysicalKey::Code(KeyCode::Equal) | PhysicalKey::Code(KeyCode::NumpadAdd) => {
+            Some(AppCommand::ZoomIn)
+        }
+        PhysicalKey::Code(KeyCode::Minus) | PhysicalKey::Code(KeyCode::NumpadSubtract) => {
+            Some(AppCommand::ZoomOut)
+        }
+        PhysicalKey::Code(KeyCode::Digit0) | PhysicalKey::Code(KeyCode::Numpad0) => {
+            Some(AppCommand::ZoomReset)
+        }
+        _ => match logical_key {
+            Key::Character(ch) if ch.as_str() == "+" || ch.as_str() == "=" => {
+                Some(AppCommand::ZoomIn)
+            }
+            Key::Character(ch) if ch.as_str() == "-" => Some(AppCommand::ZoomOut),
+            Key::Character(ch) if ch.as_str() == "0" => Some(AppCommand::ZoomReset),
+            _ => None,
+        },
+    }
 }
 
 fn store_stacker_webview_selection(ui: &mut UiState, selection: StackerSelection) {
@@ -817,6 +870,36 @@ mod tests {
             stacker_editor_shortcut(&ch("b"), ModifiersState::empty()),
             None
         );
+    }
+
+    #[test]
+    fn app_zoom_shortcuts_use_physical_plus_minus_keys() {
+        assert!(matches!(
+            app_zoom_shortcut_command_for_key(
+                &ch("="),
+                PhysicalKey::Code(KeyCode::Equal),
+                primary_mods()
+            ),
+            Some(AppCommand::ZoomIn)
+        ));
+        assert!(matches!(
+            app_zoom_shortcut_command_for_key(
+                &ch("-"),
+                PhysicalKey::Code(KeyCode::Minus),
+                primary_mods()
+            ),
+            Some(AppCommand::ZoomOut)
+        ));
+    }
+
+    #[test]
+    fn app_zoom_shortcuts_block_plain_plus_minus() {
+        assert!(app_zoom_shortcut_command_for_key(
+            &ch("="),
+            PhysicalKey::Code(KeyCode::Equal),
+            ModifiersState::empty()
+        )
+        .is_none());
     }
 }
 

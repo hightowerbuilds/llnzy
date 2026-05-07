@@ -9,6 +9,7 @@ pub(super) fn apply_keybindings(keybindings: &mut KeyBindings, overrides: HashMa
             "paste" => Some(Action::Paste),
             "select_all" => Some(Action::SelectAll),
             "search" | "find" => Some(Action::Search),
+            "new_window" => Some(Action::NewWindow),
             "new_tab" => Some(Action::NewTab),
             "close_tab" => Some(Action::CloseTab),
             "next_tab" => Some(Action::NextTab),

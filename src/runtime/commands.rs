@@ -144,6 +144,7 @@ impl App {
                 };
                 self.handle_app_command(AppCommand::OpenProject(project_path), sidebar_changed)
             }
+            AppCommand::NewWindow => self.open_new_window(),
             AppCommand::NewTerminalTab => {
                 self.new_tab();
                 if let Some(ui) = &mut self.ui {

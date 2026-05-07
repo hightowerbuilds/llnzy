@@ -3,9 +3,9 @@ use super::types::CopyGhost;
 use crate::stacker::{
     document::StackerDocumentEditor,
     draft::StackerDraft,
-    load_stacker_prompts,
+    load_stacker_prompts, load_stacker_queue,
     queue::{self, QueuedPrompt},
-    save_stacker_prompts, StackerPrompt,
+    save_stacker_prompts, save_stacker_queue, StackerPrompt,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -27,6 +27,7 @@ pub struct StackerUiState {
     pub editor_font_size: f32,
     pub web_editor_rect: Option<egui::Rect>,
     pub queued_prompts: Vec<QueuedPrompt>,
+    last_persisted_queue: Vec<QueuedPrompt>,
 }
 
 impl Default for StackerUiState {
@@ -44,14 +45,19 @@ impl Default for StackerUiState {
             editor_font_size: stacker_view::DEFAULT_EDITOR_FONT_SIZE,
             web_editor_rect: None,
             queued_prompts: Vec::new(),
+            last_persisted_queue: Vec::new(),
         }
     }
 }
 
 impl StackerUiState {
     pub fn load() -> Self {
+        let mut queued_prompts = load_stacker_queue();
+        queue::sanitize_prompt_queue(&mut queued_prompts);
         Self {
             prompts: load_stacker_prompts(),
+            last_persisted_queue: queued_prompts.clone(),
+            queued_prompts,
             ..Default::default()
         }
     }
@@ -62,5 +68,9 @@ impl StackerUiState {
             self.dirty = false;
         }
         queue::sanitize_prompt_queue(&mut self.queued_prompts);
+        if self.queued_prompts != self.last_persisted_queue {
+            save_stacker_queue(&self.queued_prompts);
+            self.last_persisted_queue = self.queued_prompts.clone();
+        }
     }
 }

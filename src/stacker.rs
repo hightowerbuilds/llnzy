@@ -7,6 +7,8 @@ pub mod formatting;
 pub mod input;
 pub mod queue;
 
+use queue::{sanitize_prompt_queue, QueuedPrompt};
+
 /// A saved prompt in the Stacker queue.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct StackerPrompt {
@@ -18,6 +20,10 @@ pub struct StackerPrompt {
 
 pub fn stacker_path() -> Option<PathBuf> {
     crate::platform::paths::current_paths().map(|paths| paths.stacker_file())
+}
+
+pub fn stacker_queue_path() -> Option<PathBuf> {
+    crate::platform::paths::current_paths().map(|paths| paths.stacker_queue_file())
 }
 
 pub fn prompt_label(text: &str) -> String {
@@ -99,6 +105,39 @@ pub fn load_stacker_prompts() -> Vec<StackerPrompt> {
 pub fn save_stacker_prompts(prompts: &[StackerPrompt]) {
     let Some(path) = stacker_path() else { return };
     let _ = save_prompts_to_path(prompts, &path);
+}
+
+pub fn load_queue_from_path(path: &Path) -> Result<Vec<QueuedPrompt>, String> {
+    let data = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let mut queue: Vec<QueuedPrompt> = serde_json::from_str(&data).map_err(|e| e.to_string())?;
+    sanitize_prompt_queue(&mut queue);
+    Ok(queue)
+}
+
+pub fn save_queue_to_path(queue: &[QueuedPrompt], path: &Path) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+
+    let mut queue = queue.to_vec();
+    sanitize_prompt_queue(&mut queue);
+    let json = serde_json::to_string_pretty(&queue).map_err(|e| e.to_string())?;
+    std::fs::write(path, json).map_err(|e| e.to_string())
+}
+
+pub fn load_stacker_queue() -> Vec<QueuedPrompt> {
+    let Some(path) = stacker_queue_path() else {
+        return Vec::new();
+    };
+
+    load_queue_from_path(&path).unwrap_or_default()
+}
+
+pub fn save_stacker_queue(queue: &[QueuedPrompt]) {
+    let Some(path) = stacker_queue_path() else {
+        return;
+    };
+    let _ = save_queue_to_path(queue, &path);
 }
 
 /// Import prompts from a JSON file, returning the loaded prompts.
@@ -189,5 +228,31 @@ mod tests {
         let _ = std::fs::remove_file(&path);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn save_and_load_queue_round_trips_sanitized_prompts() {
+        let path = temp_path("queue");
+        let queue = vec![
+            QueuedPrompt::from_text("one").unwrap(),
+            QueuedPrompt::from_text("two").unwrap(),
+            QueuedPrompt::from_text("one").unwrap(),
+            QueuedPrompt::from_text("three").unwrap(),
+            QueuedPrompt::from_text("four").unwrap(),
+            QueuedPrompt::from_text("five").unwrap(),
+            QueuedPrompt::from_text("six").unwrap(),
+        ];
+
+        save_queue_to_path(&queue, &path).unwrap();
+        let loaded = load_queue_from_path(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(
+            loaded
+                .iter()
+                .map(|prompt| prompt.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["one", "two", "three", "four", "five"]
+        );
     }
 }

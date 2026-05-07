@@ -2,7 +2,7 @@ use super::{prompt_label, StackerPrompt};
 
 pub const MAX_QUEUE_PROMPTS: usize = 5;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct QueuedPrompt {
     pub text: String,
     pub label: String,

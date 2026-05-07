@@ -31,6 +31,9 @@ pub(super) fn apply_palette_command(
         CommandId::OpenWorkspace => {
             commands.push(AppCommand::OpenWorkspaceSwitcher);
         }
+        CommandId::NewWindow => {
+            commands.push(AppCommand::NewWindow);
+        }
         CommandId::NewTab => {
             commands.push(AppCommand::NewTerminalTab);
         }
@@ -139,6 +142,13 @@ mod tests {
         let commands = apply_for_test(CommandId::OpenWorkspace, 0, 1);
 
         assert!(matches!(&commands[..], [AppCommand::OpenWorkspaceSwitcher]));
+    }
+
+    #[test]
+    fn new_window_palette_command_emits_app_command() {
+        let commands = apply_for_test(CommandId::NewWindow, 0, 1);
+
+        assert!(matches!(&commands[..], [AppCommand::NewWindow]));
     }
 
     #[test]

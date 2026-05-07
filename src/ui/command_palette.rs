@@ -49,6 +49,7 @@ pub enum CommandId {
     FindFile,
     ToggleTerminal,
     ToggleSidebar,
+    NewWindow,
     NewTab,
     CloseTab,
     NextTab,
@@ -270,6 +271,11 @@ fn core_commands() -> Vec<Command> {
             name: "Toggle Sidebar",
             keybinding: "Cmd+B",
             id: CommandId::ToggleSidebar,
+        },
+        Command {
+            name: "New Window",
+            keybinding: "Cmd+N",
+            id: CommandId::NewWindow,
         },
         Command {
             name: "New Tab",

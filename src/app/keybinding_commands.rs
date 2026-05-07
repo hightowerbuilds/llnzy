@@ -7,6 +7,7 @@ pub fn app_command_for_keybinding(
     tab_count: usize,
 ) -> Option<AppCommand> {
     match action {
+        Action::NewWindow => Some(AppCommand::NewWindow),
         Action::NewTab | Action::SplitVertical | Action::SplitHorizontal => {
             Some(AppCommand::NewTerminalTab)
         }
@@ -79,6 +80,14 @@ mod tests {
         assert!(matches!(
             app_command_for_keybinding(&Action::SplitHorizontal, 0, 1),
             Some(AppCommand::NewTerminalTab)
+        ));
+    }
+
+    #[test]
+    fn new_window_keybinding_emits_new_window_command() {
+        assert!(matches!(
+            app_command_for_keybinding(&Action::NewWindow, 0, 1),
+            Some(AppCommand::NewWindow)
         ));
     }
 

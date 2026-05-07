@@ -120,6 +120,9 @@ impl Renderer {
     }
 
     pub fn set_scale_factor(&mut self, scale_factor: f32) {
+        if (self.scale_factor - scale_factor).abs() < f32::EPSILON {
+            return;
+        }
         self.scale_factor = scale_factor;
         self.text = TextSystem::new(&self.gpu, &self.config, scale_factor as f64);
     }

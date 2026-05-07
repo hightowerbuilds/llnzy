@@ -10,6 +10,37 @@ const MIN_APP_FONT_SIZE: f32 = 8.0;
 const MAX_APP_FONT_SIZE: f32 = 40.0;
 
 impl App {
+    pub(crate) fn open_new_window(&mut self) -> bool {
+        match spawn_new_app_process() {
+            Ok(()) => true,
+            Err(error) => {
+                self.error_log.error(format!("New Window: {error}"));
+                self.request_redraw();
+                false
+            }
+        }
+    }
+
+    pub(crate) fn sync_window_metrics(&mut self) {
+        let Some(window) = &self.window else {
+            return;
+        };
+        let size = window.inner_size();
+        let scale_factor = window.scale_factor() as f32;
+
+        if let Some(renderer) = &mut self.renderer {
+            renderer.set_scale_factor(scale_factor);
+            renderer.resize(size.width, size.height);
+            renderer.invalidate_text_cache();
+        }
+        self.recompute_layout();
+        self.resize_terminal_tabs();
+        self.clear_terminal_selection();
+        self.terminal_pending_mouse_press = None;
+        self.update_ime_cursor_area();
+        self.request_redraw();
+    }
+
     pub(crate) fn adjust_app_font_size(&mut self, delta: f32) -> bool {
         self.set_app_font_size(self.config.font_size + delta)
     }
@@ -128,4 +159,12 @@ impl App {
             })
             .collect()
     }
+}
+
+fn spawn_new_app_process() -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    std::process::Command::new(exe)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }

@@ -50,6 +50,7 @@ pub enum Action {
     Paste,
     SelectAll,
     Search,
+    NewWindow,
     NewTab,
     CloseTab,
     NextTab,
@@ -134,6 +135,7 @@ impl KeyBindings {
             (cmd("c"), Copy),
             (cmd("v"), Paste),
             (cmd("a"), SelectAll),
+            (cmd("n"), NewWindow),
             (cmd("t"), NewTab),
             (cmd("w"), CloseTab),
             (cmd("]"), NextTab),
@@ -353,6 +355,20 @@ mod tests {
         );
         assert_eq!(
             bindings.match_key_parts(&ch("v"), ModifiersState::empty()),
+            None
+        );
+    }
+
+    #[test]
+    fn default_new_window_uses_primary_modifier() {
+        let bindings = KeyBindings::default_bindings();
+
+        assert_eq!(
+            bindings.match_key_parts(&ch("n"), primary_mods()),
+            Some(Action::NewWindow)
+        );
+        assert_eq!(
+            bindings.match_key_parts(&ch("n"), ModifiersState::empty()),
             None
         );
     }

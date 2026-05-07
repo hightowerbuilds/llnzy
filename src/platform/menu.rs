@@ -15,6 +15,7 @@ pub struct MenuCommandBinding {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PlatformMenuAction {
+    NewWindow,
     NewTab,
     Save,
     CloseTab,
@@ -33,10 +34,14 @@ pub enum PlatformMenuAction {
     SplitHorizontal,
     ToggleWordWrap,
     ToggleEffects,
+    ZoomIn,
+    ZoomOut,
+    ZoomReset,
     OpenProject,
     CloseProject,
 }
 
+pub const COMMAND_NEW_WINDOW: &str = "app.new-window";
 pub const COMMAND_NEW_TAB: &str = "app.new-terminal-tab";
 pub const COMMAND_SAVE: &str = "editor.save";
 pub const COMMAND_CLOSE_TAB: &str = "app.close-tab";
@@ -55,11 +60,15 @@ pub const COMMAND_SPLIT_VERTICAL: &str = "view.split-vertical";
 pub const COMMAND_SPLIT_HORIZONTAL: &str = "view.split-horizontal";
 pub const COMMAND_TOGGLE_WORD_WRAP: &str = "editor.toggle-word-wrap";
 pub const COMMAND_TOGGLE_EFFECTS: &str = "view.toggle-effects";
+pub const COMMAND_ZOOM_IN: &str = "view.zoom-in";
+pub const COMMAND_ZOOM_OUT: &str = "view.zoom-out";
+pub const COMMAND_ZOOM_RESET: &str = "view.zoom-reset";
 pub const COMMAND_OPEN_PROJECT: &str = "project.open";
 pub const COMMAND_CLOSE_PROJECT: &str = "project.close";
 
 pub fn command_id_for_native_action(action: PlatformMenuAction) -> &'static str {
     match action {
+        PlatformMenuAction::NewWindow => COMMAND_NEW_WINDOW,
         PlatformMenuAction::NewTab => COMMAND_NEW_TAB,
         PlatformMenuAction::Save => COMMAND_SAVE,
         PlatformMenuAction::CloseTab => COMMAND_CLOSE_TAB,
@@ -78,6 +87,9 @@ pub fn command_id_for_native_action(action: PlatformMenuAction) -> &'static str 
         PlatformMenuAction::SplitHorizontal => COMMAND_SPLIT_HORIZONTAL,
         PlatformMenuAction::ToggleWordWrap => COMMAND_TOGGLE_WORD_WRAP,
         PlatformMenuAction::ToggleEffects => COMMAND_TOGGLE_EFFECTS,
+        PlatformMenuAction::ZoomIn => COMMAND_ZOOM_IN,
+        PlatformMenuAction::ZoomOut => COMMAND_ZOOM_OUT,
+        PlatformMenuAction::ZoomReset => COMMAND_ZOOM_RESET,
         PlatformMenuAction::OpenProject => COMMAND_OPEN_PROJECT,
         PlatformMenuAction::CloseProject => COMMAND_CLOSE_PROJECT,
     }
@@ -114,6 +126,10 @@ mod tests {
     #[test]
     fn native_menu_actions_map_to_stable_command_ids() {
         assert_eq!(
+            command_id_for_native_action(PlatformMenuAction::NewWindow),
+            COMMAND_NEW_WINDOW
+        );
+        assert_eq!(
             command_id_for_native_action(PlatformMenuAction::Save),
             COMMAND_SAVE
         );
@@ -124,6 +140,10 @@ mod tests {
         assert_eq!(
             command_id_for_native_action(PlatformMenuAction::ToggleWordWrap),
             COMMAND_TOGGLE_WORD_WRAP
+        );
+        assert_eq!(
+            command_id_for_native_action(PlatformMenuAction::ZoomIn),
+            COMMAND_ZOOM_IN
         );
     }
 

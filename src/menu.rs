@@ -24,6 +24,11 @@ define_class!(
     struct MenuTarget;
 
     impl MenuTarget {
+        #[unsafe(method(llnzyNewWindow:))]
+        fn new_window(&self, _sender: &AnyObject) {
+            send_action(PlatformMenuAction::NewWindow);
+        }
+
         #[unsafe(method(llnzyNewTab:))]
         fn new_tab(&self, _sender: &AnyObject) {
             send_action(PlatformMenuAction::NewTab);
@@ -104,6 +109,21 @@ define_class!(
             send_action(PlatformMenuAction::ToggleWordWrap);
         }
 
+        #[unsafe(method(llnzyZoomIn:))]
+        fn zoom_in(&self, _sender: &AnyObject) {
+            send_action(PlatformMenuAction::ZoomIn);
+        }
+
+        #[unsafe(method(llnzyZoomOut:))]
+        fn zoom_out(&self, _sender: &AnyObject) {
+            send_action(PlatformMenuAction::ZoomOut);
+        }
+
+        #[unsafe(method(llnzyZoomReset:))]
+        fn zoom_reset(&self, _sender: &AnyObject) {
+            send_action(PlatformMenuAction::ZoomReset);
+        }
+
         #[unsafe(method(llnzyOpenProject:))]
         fn open_project(&self, _sender: &AnyObject) {
             send_action(PlatformMenuAction::OpenProject);
@@ -163,6 +183,13 @@ pub fn setup_menu_bar(proxy: winit::event_loop::EventLoopProxy<UserEvent>) {
     // File menu
     let file_menu = NSMenu::initWithTitle(mtm.alloc(), &NSString::from_str("File"));
     file_menu.setAutoenablesItems(false);
+    file_menu.addItem(&make_app_item(
+        mtm,
+        target,
+        "New Window",
+        sel!(llnzyNewWindow:),
+        "n",
+    ));
     file_menu.addItem(&make_app_item(
         mtm,
         target,
@@ -281,6 +308,28 @@ pub fn setup_menu_bar(proxy: winit::event_loop::EventLoopProxy<UserEvent>) {
         "Toggle Word Wrap",
         sel!(llnzyToggleWordWrap:),
         "",
+    ));
+    view_menu.addItem(&NSMenuItem::separatorItem(mtm));
+    view_menu.addItem(&make_app_item(
+        mtm,
+        target,
+        "Increase Font Size",
+        sel!(llnzyZoomIn:),
+        "+",
+    ));
+    view_menu.addItem(&make_app_item(
+        mtm,
+        target,
+        "Decrease Font Size",
+        sel!(llnzyZoomOut:),
+        "-",
+    ));
+    view_menu.addItem(&make_app_item(
+        mtm,
+        target,
+        "Reset Font Size",
+        sel!(llnzyZoomReset:),
+        "0",
     ));
     let view_item = NSMenuItem::new(mtm);
     view_item.setSubmenu(Some(&view_menu));

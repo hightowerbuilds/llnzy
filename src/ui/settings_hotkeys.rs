@@ -171,6 +171,7 @@ fn group_for_command(id: command_palette::CommandId) -> &'static str {
         | command_palette::CommandId::WorkspaceSymbols => "LSP",
         command_palette::CommandId::ProjectSearch
         | command_palette::CommandId::FindFile
+        | command_palette::CommandId::NewWindow
         | command_palette::CommandId::NewTab
         | command_palette::CommandId::CloseTab
         | command_palette::CommandId::NextTab
