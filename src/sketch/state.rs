@@ -1,6 +1,6 @@
 use super::{
     load_document_from_path, sketch_path, DraftElement, MoveDraft, SketchDocument, SketchStyle,
-    SketchTool, TextDraft,
+    SketchTool, TextDraft, MAX_SKETCH_ZOOM, MIN_SKETCH_ZOOM,
 };
 
 pub struct SketchState {
@@ -21,6 +21,10 @@ pub struct SketchState {
     pub browser_open: bool,
     /// Cached list of saved sketch names (refreshed on open).
     pub saved_sketch_names: Vec<String>,
+    /// Visual zoom for the canvas. This is transient UI state, not document data.
+    pub zoom: f32,
+    pub last_canvas_size: [f32; 2],
+    pub status_message: Option<String>,
     pub(super) undo_stack: Vec<SketchDocument>,
     pub(super) redo_stack: Vec<SketchDocument>,
     pub(super) dirty: bool,
@@ -41,6 +45,9 @@ impl Default for SketchState {
             save_as_open: false,
             browser_open: false,
             saved_sketch_names: Vec::new(),
+            zoom: 1.0,
+            last_canvas_size: [1200.0, 800.0],
+            status_message: None,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             dirty: false,
@@ -73,6 +80,22 @@ impl SketchState {
 
     pub fn can_redo(&self) -> bool {
         !self.redo_stack.is_empty()
+    }
+
+    pub fn set_zoom(&mut self, zoom: f32) {
+        self.zoom = zoom.clamp(MIN_SKETCH_ZOOM, MAX_SKETCH_ZOOM);
+    }
+
+    pub fn zoom_in(&mut self) {
+        self.set_zoom((self.zoom + 0.1).clamp(MIN_SKETCH_ZOOM, MAX_SKETCH_ZOOM));
+    }
+
+    pub fn zoom_out(&mut self) {
+        self.set_zoom((self.zoom - 0.1).clamp(MIN_SKETCH_ZOOM, MAX_SKETCH_ZOOM));
+    }
+
+    pub fn reset_zoom(&mut self) {
+        self.zoom = 1.0;
     }
 
     pub(super) fn push_undo(&mut self) {

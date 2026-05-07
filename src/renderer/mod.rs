@@ -121,6 +121,7 @@ impl Renderer {
 
     pub fn set_scale_factor(&mut self, scale_factor: f32) {
         self.scale_factor = scale_factor;
+        self.text = TextSystem::new(&self.gpu, &self.config, scale_factor as f64);
     }
 
     pub fn gpu_delta_time(&self) -> f32 {
@@ -143,8 +144,13 @@ impl Renderer {
         if config.time_of_day_enabled {
             crate::config::apply_time_of_day(&mut config.colors);
         }
+        let text_config_changed = text_config_changed(&self.config, &config);
         self.config = config;
-        self.invalidate_text_cache();
+        if text_config_changed {
+            self.text = TextSystem::new(&self.gpu, &self.config, self.scale_factor as f64);
+        } else {
+            self.invalidate_text_cache();
+        }
         self.background.update_uniforms(
             &self.gpu,
             self.config.effects.background_intensity,
@@ -157,4 +163,11 @@ impl Renderer {
             ],
         );
     }
+}
+
+fn text_config_changed(old: &Config, new: &Config) -> bool {
+    (old.font_size - new.font_size).abs() >= f32::EPSILON
+        || old.font_family != new.font_family
+        || old.ligatures != new.ligatures
+        || (old.line_height - new.line_height).abs() >= f32::EPSILON
 }

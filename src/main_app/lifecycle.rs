@@ -53,11 +53,12 @@ impl App {
         });
         self.screen_layout = Some(layout);
 
-        let ui_state = UiState::new(
+        let mut ui_state = UiState::new(
             &window,
             renderer.gpu_device(),
             renderer.gpu_surface_format(),
         );
+        ui_state.apply_config(&self.config);
 
         self.window = Some(window);
         self.renderer = Some(renderer);

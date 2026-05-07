@@ -56,6 +56,14 @@ pub(super) fn translate_element(element: &mut SketchElement, dx: f32, dy: f32) {
             text.x += dx;
             text.y += dy;
         }
+        SketchElement::Image(image) => {
+            image.x += dx;
+            image.y += dy;
+        }
+        SketchElement::Symbol(symbol) => {
+            symbol.x += dx;
+            symbol.y += dy;
+        }
     }
 }
 

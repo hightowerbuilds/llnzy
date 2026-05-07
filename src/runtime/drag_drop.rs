@@ -245,7 +245,7 @@ impl App {
 
         for item in &plan.items {
             if let Err(error) = copy_external_item(&item.source, &item.destination) {
-                let message = format!("Import failed: {error}");
+                let message = external_copy_error_message(&item.source, error);
                 self.report_file_move_status(message.clone());
                 self.error_log.error(message);
                 return false;
@@ -437,6 +437,16 @@ fn copy_dir_recursive(source: &Path, destination: &Path) -> std::io::Result<()> 
     Ok(())
 }
 
+fn external_copy_error_message(source: &Path, error: std::io::Error) -> String {
+    if error.kind() == std::io::ErrorKind::PermissionDenied {
+        return format!(
+            "Import failed: macOS denied access to {}. Grant LLNZY Files and Folders or Full Disk Access permission, then try again.",
+            source.display()
+        );
+    }
+    format!("Import failed: {error}")
+}
+
 fn dropped_file_name(path: &Path) -> String {
     path.file_name()
         .and_then(|name| name.to_str())
@@ -617,6 +627,17 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn external_copy_permission_error_mentions_macos_permission() {
+        let message = external_copy_error_message(
+            Path::new("/Users/example/Desktop/secret.txt"),
+            std::io::Error::from(std::io::ErrorKind::PermissionDenied),
+        );
+
+        assert!(message.contains("macOS denied access"));
+        assert!(message.contains("Full Disk Access"));
     }
 
     fn temp_path(label: &str) -> PathBuf {

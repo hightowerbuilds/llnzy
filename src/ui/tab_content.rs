@@ -303,6 +303,7 @@ fn render_joined_pane(
                     ui,
                     &mut state.sketch.state,
                     &sketch_appearance,
+                    &state.explorer.root,
                 );
                 let ppp = ctx.pixels_per_point();
                 state.sketch.canvas_px = Some([
@@ -467,6 +468,7 @@ fn render_sketch(
                 ui,
                 &mut state.sketch.state,
                 &sketch_appearance,
+                &state.explorer.root,
             ));
         });
 

@@ -52,8 +52,7 @@ impl Renderer {
         } else {
             PerformanceScenario::EditorTenThousandLines
         });
-        let use_scene =
-            requested_effects && self.adaptive_quality.quality().allows_expensive_effects();
+        let use_scene = should_render_effect_scene(requested_effects);
         let effects_mode = if use_scene {
             EffectsMode::On
         } else {
@@ -226,8 +225,11 @@ impl Renderer {
         if use_scene && self.config.effects.background != "none" {
             if self.config.effects.background == "image" {
                 if let Some(path) = self.config.effects.background_image.clone() {
-                    self.background.load_image(&self.gpu, &path);
-                    self.background.draw_image(encoder, &self.gpu.scene_view);
+                    if let Some(path) = crate::theme_store::resolve_background_path(&path) {
+                        let path = path.to_string_lossy();
+                        self.background.load_image(&self.gpu, &path);
+                        self.background.draw_image(encoder, &self.gpu.scene_view);
+                    }
                 }
             } else {
                 self.background.update_uniforms(
@@ -674,6 +676,10 @@ fn effect_mask_uv_from_frame(frame: &EngineFrame) -> Option<[f32; 4]> {
     })
 }
 
+fn should_render_effect_scene(requested_effects: bool) -> bool {
+    requested_effects
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -693,5 +699,11 @@ mod tests {
             effect_mask_uv_from_frame(&frame),
             Some([0.1, 0.2, 0.8, 0.9])
         );
+    }
+
+    #[test]
+    fn enabled_terminal_effects_always_use_scene_pipeline() {
+        assert!(should_render_effect_scene(true));
+        assert!(!should_render_effect_scene(false));
     }
 }

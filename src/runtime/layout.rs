@@ -138,7 +138,14 @@ impl App {
     }
 
     pub(crate) fn native_file_drop_target(&self, dropped_path: &Path) -> Option<DropTarget> {
-        let pos = self.cursor_pos;
+        self.native_file_drop_target_at(dropped_path, self.cursor_pos)
+    }
+
+    pub(crate) fn native_file_drop_target_at(
+        &self,
+        dropped_path: &Path,
+        pos: winit::dpi::PhysicalPosition<f64>,
+    ) -> Option<DropTarget> {
         let x = pos.x as f32;
         let y = pos.y as f32;
 

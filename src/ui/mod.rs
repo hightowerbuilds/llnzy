@@ -95,6 +95,7 @@ pub struct UiState {
     // Tab renaming
     pub editing_tab: Option<usize>,
     pub editing_tab_text: String,
+    pub editing_tab_cursor_initialized: bool,
     pub tab_context_menu: Option<tab_bar::TabContextMenuState>,
     pub saved_tab_name: Option<(usize, String)>, // (tab_index, new_name) to apply after render
     // Tab context for rendering interaction
@@ -190,6 +191,7 @@ impl UiState {
             editor_view: explorer_view::EditorViewState::default(),
             editing_tab: None,
             editing_tab_text: String::new(),
+            editing_tab_cursor_initialized: false,
             tab_context_menu: None,
             saved_tab_name: None,
             tab_count: 0,
@@ -207,6 +209,35 @@ impl UiState {
             pending_close: None,
             save_prompt_error: None,
         }
+    }
+
+    pub fn apply_config(&mut self, config: &Config) {
+        let app_font_size = config.font_size.clamp(8.0, 40.0);
+        let family = egui::FontFamily::Name("Atkinson Hyperlegible".into());
+        let monospace = egui::FontFamily::Monospace;
+
+        let mut style = (*self.ctx.style()).clone();
+        style.text_styles.insert(
+            egui::TextStyle::Heading,
+            egui::FontId::new((app_font_size + 5.0).clamp(14.0, 48.0), family.clone()),
+        );
+        style.text_styles.insert(
+            egui::TextStyle::Body,
+            egui::FontId::new(app_font_size.clamp(10.0, 32.0), family.clone()),
+        );
+        style.text_styles.insert(
+            egui::TextStyle::Button,
+            egui::FontId::new(app_font_size.clamp(10.0, 32.0), family.clone()),
+        );
+        style.text_styles.insert(
+            egui::TextStyle::Small,
+            egui::FontId::new((app_font_size - 2.0).clamp(8.0, 24.0), family),
+        );
+        style.text_styles.insert(
+            egui::TextStyle::Monospace,
+            egui::FontId::new(app_font_size.clamp(8.0, 40.0), monospace),
+        );
+        self.ctx.set_style(style);
     }
 
     /// Pass a winit event to egui. Returns true if egui consumed it.
@@ -271,12 +302,14 @@ impl UiState {
     pub fn start_editing_tab(&mut self, tab_index: usize, current_name: Option<&str>) {
         self.editing_tab = Some(tab_index);
         self.editing_tab_text = current_name.unwrap_or("").to_string();
+        self.editing_tab_cursor_initialized = false;
     }
 
     /// Cancel tab editing without saving.
     pub fn cancel_editing_tab(&mut self) {
         self.editing_tab = None;
         self.editing_tab_text.clear();
+        self.editing_tab_cursor_initialized = false;
     }
 
     /// Update tab context (called before rendering).
@@ -348,12 +381,14 @@ impl UiState {
         sidebar_state.clear_native_drop_zones();
         let editing_tab = self.editing_tab;
         let editing_tab_text = std::mem::take(&mut self.editing_tab_text);
+        let editing_tab_cursor_initialized = self.editing_tab_cursor_initialized;
         let _tab_count = self.tab_count;
         let active_tab_index = self.active_tab_index;
         let tab_names = std::mem::take(&mut self.tab_names);
         let mut tab_bar_state = tab_bar::TabBarEditState {
             editing_tab,
             editing_tab_text: editing_tab_text.clone(),
+            editing_cursor_initialized: editing_tab_cursor_initialized,
             context_menu: self.tab_context_menu,
         };
         let mut tab_bar_action = tab_bar::TabBarAction::default();
@@ -542,6 +577,7 @@ impl UiState {
         // Restore tab editing state
         self.editing_tab = tab_bar_state.editing_tab;
         self.editing_tab_text = tab_bar_state.editing_tab_text;
+        self.editing_tab_cursor_initialized = tab_bar_state.editing_cursor_initialized;
         self.tab_context_menu = tab_bar_state.context_menu;
         self.saved_tab_name = None;
 

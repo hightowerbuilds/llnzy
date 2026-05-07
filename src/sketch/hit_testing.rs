@@ -34,5 +34,17 @@ fn element_contains(element: &SketchElement, point: SketchPoint) -> bool {
                 && point.y >= text.y
                 && point.y <= text.y + text.h
         }
+        SketchElement::Image(image) => {
+            point.x >= image.x
+                && point.x <= image.x + image.w
+                && point.y >= image.y
+                && point.y <= image.y + image.h
+        }
+        SketchElement::Symbol(symbol) => {
+            point.x >= symbol.x
+                && point.x <= symbol.x + symbol.w
+                && point.y >= symbol.y
+                && point.y <= symbol.y + symbol.h
+        }
     }
 }

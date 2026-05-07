@@ -6,7 +6,33 @@ use llnzy::workspace::TabContent;
 
 use crate::App;
 
+const MIN_APP_FONT_SIZE: f32 = 8.0;
+const MAX_APP_FONT_SIZE: f32 = 40.0;
+
 impl App {
+    pub(crate) fn adjust_app_font_size(&mut self, delta: f32) -> bool {
+        self.set_app_font_size(self.config.font_size + delta)
+    }
+
+    pub(crate) fn set_app_font_size(&mut self, font_size: f32) -> bool {
+        let font_size = font_size.clamp(MIN_APP_FONT_SIZE, MAX_APP_FONT_SIZE);
+        if (self.config.font_size - font_size).abs() < f32::EPSILON {
+            return false;
+        }
+
+        self.config.font_size = font_size;
+        if let Some(ui) = &mut self.ui {
+            ui.apply_config(&self.config);
+        }
+        if let Some(renderer) = &mut self.renderer {
+            renderer.update_config(self.config.clone());
+        }
+        self.recompute_layout();
+        self.resize_terminal_tabs();
+        self.invalidate_and_redraw();
+        true
+    }
+
     pub(crate) fn toggle_effects(&mut self) {
         self.config.effects.enabled = !self.config.effects.enabled;
         if let Some(renderer) = &mut self.renderer {

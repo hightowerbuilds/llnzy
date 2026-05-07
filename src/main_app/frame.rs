@@ -49,6 +49,7 @@ impl App {
         };
 
         let sidebar_w_before = self.sidebar_width_px();
+        let mut project_tree_changed = false;
 
         if let Some(renderer) = &mut self.renderer {
             if let Some(layout) = &self.screen_layout {
@@ -57,6 +58,10 @@ impl App {
                         ui.editor_view.clipboard_in = Some(text);
                     }
                     ui.editor_view.init_lsp(self.proxy.clone());
+                    ui.explorer.ensure_project_watcher(self.proxy.clone());
+                    if ui.explorer.poll_project_watcher() {
+                        project_tree_changed = true;
+                    }
                 }
                 if let Some(ui) = self.ui.as_mut() {
                     ui.set_tab_context(self.tabs.len(), self.active_tab);
@@ -129,6 +134,9 @@ impl App {
                 self.handle_ui_frame_output(ui_frame_output, event_loop);
                 self.sync_stacker_webview();
             }
+        }
+        if project_tree_changed {
+            self.request_redraw();
         }
 
         let sidebar_w_after = self.sidebar_width_px();

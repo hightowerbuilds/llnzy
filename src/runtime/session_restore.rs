@@ -92,6 +92,9 @@ impl App {
         };
 
         theme.apply_to(&mut self.config);
+        if let Some(ui) = &mut self.ui {
+            ui.apply_config(&self.config);
+        }
         if let Some(renderer) = &mut self.renderer {
             renderer.update_config(self.config.clone());
         }

@@ -3,8 +3,8 @@ use super::types::UiTabInfo;
 use crate::app::commands::AppCommand;
 use crate::app::drag_drop::{tab_reorder_destination, DragDropCommand, DragPayload, TabDropZone};
 use crate::tab_groups::TabGroupState;
-use crate::workspace::TabKind;
 use crate::workspace_layout::{JoinedTabs, TabBarEntry};
+use egui::text::{CCursor, CCursorRange};
 
 const TAB_BAR_HEIGHT: f32 = 44.0;
 pub(super) const TAB_TEXT_SIZE: f32 = 14.0;
@@ -16,6 +16,7 @@ pub(super) const TAB_MAX_WIDTH: f32 = 220.0;
 const TAB_GHOST_ALPHA: u8 = 210;
 const TAB_MENU_MARGIN: f32 = 8.0;
 const TAB_MENU_ROW_HEIGHT: f32 = 28.0;
+const TAB_RENAME_BLINK_SECS: f64 = 0.55;
 
 #[derive(Default)]
 pub struct TabBarAction {
@@ -77,6 +78,7 @@ impl TabBarAction {
 pub struct TabBarEditState {
     pub editing_tab: Option<usize>,
     pub editing_tab_text: String,
+    pub editing_cursor_initialized: bool,
     pub context_menu: Option<TabContextMenuState>,
 }
 
@@ -304,7 +306,7 @@ pub fn render_workspace_tab_bar(
 
 pub(super) fn render_tab_context_menu(
     ui: &mut egui::Ui,
-    tab: &UiTabInfo,
+    _tab: &UiTabInfo,
     tab_idx: usize,
     edit_targets: Option<(usize, usize)>,
     tabs: &[UiTabInfo],
@@ -329,18 +331,6 @@ pub(super) fn render_tab_context_menu(
         start_tab_name_edit(tab_idx, tabs, edit_state);
         close = true;
     }
-    ui.separator();
-    if tab.kind == TabKind::Terminal {
-        if !tab.exited && menu_button(ui, "Kill Process").clicked() {
-            action.kill_terminal = Some(tab_idx);
-            close = true;
-        }
-        if menu_button(ui, "Restart Terminal").clicked() {
-            action.restart_terminal = Some(tab_idx);
-            close = true;
-        }
-        ui.separator();
-    }
     if menu_button(ui, "Close").clicked() {
         action.close_tab = Some(tab_idx);
         close = true;
@@ -362,6 +352,7 @@ fn start_tab_name_edit(tab_idx: usize, tabs: &[UiTabInfo], edit_state: &mut TabB
     };
     edit_state.editing_tab = Some(tab_idx);
     edit_state.editing_tab_text = tab.title.clone();
+    edit_state.editing_cursor_initialized = false;
     edit_state.context_menu = None;
 }
 
@@ -616,19 +607,34 @@ pub(super) fn render_tab_name_editor(
     state: &mut TabBarEditState,
     action: &mut TabBarAction,
 ) {
+    let blink_on = tab_rename_blink_on(ui.input(|input| input.time));
+    ui.ctx()
+        .request_repaint_after(std::time::Duration::from_millis(120));
     let edit_rect = egui::Rect::from_min_max(
         egui::pos2(tab_rect.left() + 10.0, tab_rect.top() + 5.0),
         egui::pos2(close_rect.left() - 6.0, tab_rect.bottom() - 5.0),
     );
+    paint_tab_rename_editing_state(ui, tab_rect, edit_rect, blink_on);
     let editor_id = ui.id().with(("tab_name_editor", tab_idx));
-    let response = ui.put(
-        edit_rect,
-        egui::TextEdit::singleline(&mut state.editing_tab_text)
-            .id(editor_id)
-            .frame(false)
-            .desired_width(edit_rect.width())
-            .font(egui::FontId::proportional(TAB_TEXT_SIZE)),
-    );
+    if !state.editing_cursor_initialized {
+        let mut edit_state = egui::TextEdit::load_state(ui.ctx(), editor_id).unwrap_or_default();
+        edit_state
+            .cursor
+            .set_char_range(Some(CCursorRange::one(CCursor::new(0))));
+        edit_state.store(ui.ctx(), editor_id);
+        state.editing_cursor_initialized = true;
+    }
+    let output = ui
+        .allocate_new_ui(egui::UiBuilder::new().max_rect(edit_rect), |ui| {
+            egui::TextEdit::singleline(&mut state.editing_tab_text)
+                .id(editor_id)
+                .frame(false)
+                .desired_width(edit_rect.width())
+                .font(egui::FontId::proportional(TAB_TEXT_SIZE))
+                .show(ui)
+        })
+        .inner;
+    let response = output.response;
     response.request_focus();
 
     let enter_pressed = ui.input(|input| input.key_pressed(egui::Key::Enter));
@@ -644,10 +650,47 @@ pub(super) fn render_tab_name_editor(
         action.saved_tab_name = Some((tab_idx, state.editing_tab_text.clone()));
         state.editing_tab = None;
         state.editing_tab_text.clear();
+        state.editing_cursor_initialized = false;
     } else if escape_pressed {
         state.editing_tab = None;
         state.editing_tab_text.clear();
+        state.editing_cursor_initialized = false;
     }
+}
+
+fn paint_tab_rename_editing_state(
+    ui: &egui::Ui,
+    tab_rect: egui::Rect,
+    edit_rect: egui::Rect,
+    blink_on: bool,
+) {
+    let fill = if blink_on {
+        egui::Color32::from_rgba_unmultiplied(40, 88, 145, 95)
+    } else {
+        egui::Color32::from_rgba_unmultiplied(30, 58, 92, 72)
+    };
+    let stroke = if blink_on {
+        egui::Stroke::new(1.5, egui::Color32::from_rgb(125, 195, 255))
+    } else {
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(70, 120, 170))
+    };
+    ui.painter()
+        .rect_filled(tab_rect.shrink(2.0), egui::Rounding::same(4.0), fill);
+    ui.painter()
+        .rect_stroke(tab_rect.shrink(2.0), egui::Rounding::same(4.0), stroke);
+    if blink_on {
+        ui.painter().line_segment(
+            [
+                egui::pos2(edit_rect.left() + 1.0, edit_rect.top() + 3.0),
+                egui::pos2(edit_rect.left() + 1.0, edit_rect.bottom() - 3.0),
+            ],
+            egui::Stroke::new(1.5, egui::Color32::WHITE),
+        );
+    }
+}
+
+fn tab_rename_blink_on(time: f64) -> bool {
+    ((time / TAB_RENAME_BLINK_SECS).floor() as i64).rem_euclid(2) == 0
 }
 
 pub(super) fn paint_drag_ghost(
@@ -715,5 +758,45 @@ pub(super) fn tab_drop_zone(response: &egui::Response) -> TabDropZone {
         TabDropZone::Before
     } else {
         TabDropZone::After
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::workspace::TabKind;
+
+    fn tab(title: &str) -> UiTabInfo {
+        UiTabInfo {
+            tab_id: 1,
+            title: title.to_string(),
+            kind: TabKind::Terminal,
+            exited: false,
+        }
+    }
+
+    #[test]
+    fn starting_tab_name_edit_resets_cursor_initialization() {
+        let tabs = [tab("server")];
+        let mut state = TabBarEditState {
+            editing_tab: None,
+            editing_tab_text: String::new(),
+            editing_cursor_initialized: true,
+            context_menu: None,
+        };
+
+        start_tab_name_edit(0, &tabs, &mut state);
+
+        assert_eq!(state.editing_tab, Some(0));
+        assert_eq!(state.editing_tab_text, "server");
+        assert!(!state.editing_cursor_initialized);
+    }
+
+    #[test]
+    fn tab_rename_blink_toggles_on_interval() {
+        assert!(tab_rename_blink_on(0.0));
+        assert!(tab_rename_blink_on(TAB_RENAME_BLINK_SECS - 0.01));
+        assert!(!tab_rename_blink_on(TAB_RENAME_BLINK_SECS + 0.01));
+        assert!(tab_rename_blink_on(TAB_RENAME_BLINK_SECS * 2.0 + 0.01));
     }
 }

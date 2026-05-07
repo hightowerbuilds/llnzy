@@ -6,6 +6,7 @@ use std::thread;
 
 use crate::editor::buffer::Buffer;
 use crate::path_utils::comparable_path;
+use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 
 const MAX_IMAGE_SIZE: u64 = 20_971_520; // 20 MB
 /// Maximum number of files to index for the fuzzy finder.
@@ -194,6 +195,8 @@ pub struct ExplorerState {
     file_index: Option<Vec<PathBuf>>,
     file_index_rx: Option<Receiver<(PathBuf, Vec<PathBuf>)>>,
     indexing_root: Option<PathBuf>,
+    project_watcher: Option<ProjectWatcher>,
+    project_watcher_enabled: bool,
 }
 
 impl Default for ExplorerState {
@@ -218,6 +221,8 @@ impl ExplorerState {
             file_index: None,
             file_index_rx: None,
             indexing_root: None,
+            project_watcher: None,
+            project_watcher_enabled: false,
         }
     }
 
@@ -230,6 +235,8 @@ impl ExplorerState {
         self.file_index = None;
         self.file_index_rx = None;
         self.indexing_root = None;
+        self.project_watcher = None;
+        self.project_watcher_enabled = false;
         self.finder_open = false;
         self.finder_query.clear();
         self.finder_results.clear();
@@ -239,6 +246,8 @@ impl ExplorerState {
     pub fn set_root(&mut self, path: PathBuf) {
         self.root = path;
         self.tree = read_dir_sorted(&self.root);
+        self.project_watcher = None;
+        self.project_watcher_enabled = true;
         self.clear_file_index();
     }
 
@@ -257,6 +266,41 @@ impl ExplorerState {
         self.file_index = None;
         self.file_index_rx = None;
         self.indexing_root = None;
+    }
+
+    /// Ensure the opened project root is being watched for file tree changes.
+    pub fn ensure_project_watcher(
+        &mut self,
+        proxy: winit::event_loop::EventLoopProxy<crate::UserEvent>,
+    ) {
+        if !self.project_watcher_enabled || !self.root.is_dir() {
+            return;
+        }
+        if self
+            .project_watcher
+            .as_ref()
+            .is_some_and(|watcher| watcher.matches_root(&self.root))
+        {
+            return;
+        }
+
+        match ProjectWatcher::new(self.root.clone(), proxy) {
+            Ok(watcher) => self.project_watcher = Some(watcher),
+            Err(err) => log::warn!("Failed to watch project tree: {err}"),
+        }
+    }
+
+    /// Poll filesystem changes and rebuild the tree once for the drained batch.
+    pub fn poll_project_watcher(&mut self) -> bool {
+        let Some(watcher) = &mut self.project_watcher else {
+            return false;
+        };
+        let Some(refresh_paths) = watcher.poll_refresh_paths() else {
+            return false;
+        };
+
+        self.refresh_preserving_expansion(&refresh_paths);
+        true
     }
 
     /// Open a file (image only -- text files go through EditorState).
@@ -418,6 +462,95 @@ impl ExplorerState {
             .to_string_lossy()
             .to_string()
     }
+}
+
+struct ProjectWatcher {
+    _watcher: RecommendedWatcher,
+    event_rx: Receiver<notify::Result<Event>>,
+    root: PathBuf,
+    pending_refresh_paths: HashSet<PathBuf>,
+}
+
+impl ProjectWatcher {
+    fn new(
+        root: PathBuf,
+        proxy: winit::event_loop::EventLoopProxy<crate::UserEvent>,
+    ) -> Result<Self, String> {
+        let root = root.canonicalize().unwrap_or(root);
+        let (tx, rx) = mpsc::channel();
+        let proxy_root = root.clone();
+        let mut watcher = notify::recommended_watcher(move |event: notify::Result<Event>| {
+            let wake_path = event
+                .as_ref()
+                .ok()
+                .and_then(|event| event.paths.first().cloned())
+                .unwrap_or_else(|| proxy_root.clone());
+            if let Err(err) = tx.send(event) {
+                log::warn!("Project watcher channel send failed: {err}");
+            }
+            let _ = proxy.send_event(crate::UserEvent::FileChanged(wake_path));
+        })
+        .map_err(|err| format!("Failed to create project watcher: {err}"))?;
+        watcher
+            .watch(&root, RecursiveMode::Recursive)
+            .map_err(|err| format!("Failed to watch {}: {err}", root.display()))?;
+
+        Ok(Self {
+            _watcher: watcher,
+            event_rx: rx,
+            root,
+            pending_refresh_paths: HashSet::new(),
+        })
+    }
+
+    fn matches_root(&self, root: &Path) -> bool {
+        comparable_path(&self.root) == comparable_path(root)
+    }
+
+    fn poll_refresh_paths(&mut self) -> Option<Vec<PathBuf>> {
+        while let Ok(event) = self.event_rx.try_recv() {
+            let Ok(event) = event else {
+                continue;
+            };
+            self.pending_refresh_paths
+                .extend(project_event_refresh_paths(&event, &self.root));
+        }
+
+        if self.pending_refresh_paths.is_empty() {
+            return None;
+        }
+
+        Some(self.pending_refresh_paths.drain().collect())
+    }
+}
+
+fn project_event_refresh_paths(event: &Event, root: &Path) -> Vec<PathBuf> {
+    if !project_event_affects_tree(event) {
+        return Vec::new();
+    }
+
+    let mut dirs = Vec::new();
+    for path in &event.paths {
+        let refresh_dir = if path.is_dir() {
+            path.as_path()
+        } else {
+            path.parent().unwrap_or(root)
+        };
+        dirs.push(refresh_dir.to_path_buf());
+    }
+    if dirs.is_empty() {
+        dirs.push(root.to_path_buf());
+    }
+    dirs.sort();
+    dirs.dedup();
+    dirs
+}
+
+fn project_event_affects_tree(event: &Event) -> bool {
+    matches!(
+        event.kind,
+        EventKind::Create(_) | EventKind::Remove(_) | EventKind::Modify(_)
+    )
 }
 
 /// Walk a directory tree iteratively, collecting file paths up to a cap.
@@ -602,6 +735,39 @@ mod tests {
         assert!(dir_contains_file(destination_node, "note.md"));
 
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn project_create_event_refreshes_parent_directory() {
+        let root = PathBuf::from("/tmp/llnzy-project-watch");
+        let created = root.join("src").join("generated.rs");
+        let event = Event {
+            kind: EventKind::Create(notify::event::CreateKind::File),
+            paths: vec![created],
+            attrs: Default::default(),
+        };
+
+        assert_eq!(
+            project_event_refresh_paths(&event, &root),
+            vec![root.join("src")]
+        );
+    }
+
+    #[test]
+    fn project_rename_event_refreshes_source_and_destination_directories() {
+        let root = PathBuf::from("/tmp/llnzy-project-watch");
+        let event = Event {
+            kind: EventKind::Modify(notify::event::ModifyKind::Name(
+                notify::event::RenameMode::Both,
+            )),
+            paths: vec![root.join("old").join("a.rs"), root.join("new").join("a.rs")],
+            attrs: Default::default(),
+        };
+
+        assert_eq!(
+            project_event_refresh_paths(&event, &root),
+            vec![root.join("new"), root.join("old")]
+        );
     }
 
     fn expand_top_level_dir(tree: &mut [TreeNode], name: &str) {

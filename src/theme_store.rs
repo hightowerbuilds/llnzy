@@ -16,6 +16,42 @@ pub fn import_background(source: &Path) -> Result<PathBuf, String> {
     import_background_into_dir(source, &dir)
 }
 
+/// Resolve a stored background image reference to an image in the background library.
+///
+/// Older configs may contain absolute paths. Newer UI writes can use just the library
+/// file name, which is more portable across packaged app installs and data moves.
+pub fn resolve_background_path(reference: &str) -> Option<PathBuf> {
+    let dir = backgrounds_dir()?;
+    resolve_background_path_in_dir(reference, &dir)
+}
+
+fn resolve_background_path_in_dir(reference: &str, dir: &Path) -> Option<PathBuf> {
+    let reference = reference.trim();
+    if reference.is_empty() {
+        return None;
+    }
+
+    let path = PathBuf::from(reference);
+    if path.is_file() {
+        return Some(path);
+    }
+
+    if !path.is_absolute() {
+        let library_path = dir.join(&path);
+        if library_path.is_file() {
+            return Some(library_path);
+        }
+    }
+
+    let file_name = path.file_name()?;
+    let library_path = dir.join(file_name);
+    if library_path.is_file() {
+        return Some(library_path);
+    }
+
+    None
+}
+
 fn import_background_into_dir(source: &Path, dir: &Path) -> Result<PathBuf, String> {
     std::fs::create_dir_all(dir).map_err(|e| format!("Failed to create backgrounds dir: {e}"))?;
 
@@ -425,6 +461,34 @@ mod tests {
 
         delete_background(&first).unwrap();
         assert!(!first.exists());
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn background_references_resolve_from_library_names_and_stale_absolute_paths() {
+        let root = test_dir("background-resolve");
+        let library = root.join("library");
+        std::fs::create_dir_all(&library).unwrap();
+        let image = library.join("sky.png");
+        std::fs::write(&image, b"not actually decoded here").unwrap();
+
+        assert_eq!(
+            resolve_background_path_in_dir("sky.png", &library),
+            Some(image.clone())
+        );
+        assert_eq!(
+            resolve_background_path_in_dir("/missing/old/location/sky.png", &library),
+            Some(image.clone())
+        );
+        assert_eq!(
+            resolve_background_path_in_dir(image.to_str().unwrap(), &library),
+            Some(image.clone())
+        );
+        assert_eq!(
+            resolve_background_path_in_dir("missing.png", &library),
+            None
+        );
 
         let _ = std::fs::remove_dir_all(root);
     }

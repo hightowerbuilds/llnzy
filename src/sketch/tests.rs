@@ -166,6 +166,40 @@ fn hit_test_returns_topmost_element() {
 }
 
 #[test]
+fn symbol_elements_can_be_added_selected_and_hit_tested() {
+    let mut state = SketchState::default();
+    let index = state.add_symbol(SketchSymbolKind::Database, point(30.0, 40.0));
+
+    assert_eq!(state.selected, Some(index));
+    assert_eq!(state.hit_test(point(50.0, 60.0)), Some(index));
+}
+
+#[test]
+fn selected_image_resizes_proportionally() {
+    let mut state = SketchState::default();
+    state
+        .document
+        .elements
+        .push(SketchElement::Image(ImageElement {
+            x: 0.0,
+            y: 0.0,
+            w: 200.0,
+            h: 100.0,
+            original_w: 400.0,
+            original_h: 200.0,
+            path: "/tmp/image.png".to_string(),
+        }));
+    state.selected = Some(0);
+
+    assert!(state.resize_selected_image_to_scale(0.25));
+    let SketchElement::Image(image) = &state.document.elements[0] else {
+        panic!("expected image");
+    };
+    assert_eq!(image.w, 100.0);
+    assert_eq!(image.h, 50.0);
+}
+
+#[test]
 fn serialization_round_trip() {
     let mut document = SketchDocument::default();
     document.elements.push(SketchElement::Text(TextElement {

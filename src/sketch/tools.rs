@@ -1,9 +1,11 @@
 use super::geometry::{distance, rect_from_drag, translate_element};
 use super::{
-    DraftElement, MoveDraft, RectElement, SketchElement, SketchPoint, SketchState, SketchTool,
-    StrokeElement, TextDraft, TextElement, DEFAULT_TEXT_H, DEFAULT_TEXT_W, MIN_POINTS_FOR_STROKE,
-    MIN_RECT_SIZE,
+    fit_image_size, import_sketch_image, DraftElement, ImageElement, MoveDraft, RectElement,
+    SketchElement, SketchPoint, SketchState, SketchSymbolKind, SketchTool, StrokeElement,
+    SymbolElement, TextDraft, TextElement, DEFAULT_SYMBOL_H, DEFAULT_SYMBOL_W, DEFAULT_TEXT_H,
+    DEFAULT_TEXT_W, MIN_POINTS_FOR_STROKE, MIN_RECT_SIZE,
 };
+use std::path::Path;
 
 impl SketchState {
     pub fn set_tool(&mut self, tool: SketchTool) {
@@ -128,6 +130,81 @@ impl SketchState {
         });
         self.dirty = true;
         index
+    }
+
+    pub fn add_symbol(&mut self, kind: SketchSymbolKind, point: SketchPoint) -> usize {
+        self.push_undo();
+        let index = self.document.elements.len();
+        self.document
+            .elements
+            .push(SketchElement::Symbol(SymbolElement {
+                x: point.x,
+                y: point.y,
+                w: DEFAULT_SYMBOL_W,
+                h: DEFAULT_SYMBOL_H,
+                kind,
+                style: self.style,
+            }));
+        self.selected = Some(index);
+        self.dirty = true;
+        index
+    }
+
+    pub fn add_image_from_path(
+        &mut self,
+        path: &Path,
+        point: SketchPoint,
+    ) -> Result<usize, String> {
+        let (imported, original_w, original_h) = import_sketch_image(path)?;
+        let (w, h) = fit_image_size(original_w, original_h, 360.0);
+        self.push_undo();
+        let index = self.document.elements.len();
+        self.document
+            .elements
+            .push(SketchElement::Image(ImageElement {
+                x: point.x,
+                y: point.y,
+                w,
+                h,
+                original_w: original_w as f32,
+                original_h: original_h as f32,
+                path: imported.to_string_lossy().into_owned(),
+            }));
+        self.selected = Some(index);
+        self.dirty = true;
+        Ok(index)
+    }
+
+    pub fn selected_image_scale(&self) -> Option<f32> {
+        let Some(index) = self.selected else {
+            return None;
+        };
+        let Some(SketchElement::Image(image)) = self.document.elements.get(index) else {
+            return None;
+        };
+        Some(image.w / image.original_w.max(1.0))
+    }
+
+    pub fn resize_selected_image_to_scale(&mut self, scale: f32) -> bool {
+        let Some(index) = self.selected else {
+            return false;
+        };
+        let Some(SketchElement::Image(image)) = self.document.elements.get(index) else {
+            return false;
+        };
+        let scale = scale.clamp(0.05, 2.0);
+        let new_w = (image.original_w * scale).max(1.0);
+        let new_h = (image.original_h * scale).max(1.0);
+        if (image.w - new_w).abs() < 0.5 && (image.h - new_h).abs() < 0.5 {
+            return false;
+        }
+        self.push_undo();
+        if let Some(SketchElement::Image(image)) = self.document.elements.get_mut(index) {
+            image.w = new_w;
+            image.h = new_h;
+        }
+        self.dirty = true;
+        true
     }
 
     pub fn edit_text_box(&mut self, index: usize) -> bool {

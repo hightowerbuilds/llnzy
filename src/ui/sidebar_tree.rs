@@ -14,10 +14,24 @@ fn tree_connector_color() -> egui::Color32 {
     egui::Color32::from_rgb(100, 220, 140)
 }
 
+fn tree_hover_color() -> egui::Color32 {
+    egui::Color32::from_rgba_unmultiplied(255, 255, 255, 18)
+}
+
 fn folder_label_text(name: &str) -> &str {
     name
 }
 
+const TREE_ROW_LEFT_PADDING: f32 = 10.0;
+const TREE_ROW_INDENT: f32 = 16.0;
+const TREE_CONNECTOR_LABEL_GAP: f32 = 8.0;
+const TREE_CONNECTOR_MIN_LEFT_PADDING: f32 = 4.0;
+
+fn tree_row_indent(depth: usize) -> f32 {
+    TREE_ROW_LEFT_PADDING + depth as f32 * TREE_ROW_INDENT
+}
+
+#[derive(Debug, PartialEq, Eq)]
 pub(super) enum TreeAction {
     OpenFile(std::path::PathBuf),
     Toggle(Vec<usize>),
@@ -34,6 +48,12 @@ pub(super) enum TreeAction {
     },
 }
 
+fn queue_tree_action(action: &mut Option<TreeAction>, next: TreeAction) {
+    if action.is_none() {
+        *action = Some(next);
+    }
+}
+
 pub(super) fn render_tree_nodes(
     ui: &mut egui::Ui,
     nodes: &[crate::explorer::TreeNode],
@@ -42,15 +62,11 @@ pub(super) fn render_tree_nodes(
     font_size: f32,
     sidebar_state: &mut SidebarUiState,
 ) {
-    let indent = depth as f32 * 16.0;
+    let indent = tree_row_indent(depth);
     let dir_color = egui::Color32::from_rgb(100, 180, 255);
     let file_color = egui::Color32::WHITE;
 
     for (i, node) in nodes.iter().enumerate() {
-        if action.is_some() {
-            break;
-        }
-
         let resp = ui.horizontal(|ui| {
             ui.set_min_width(ui.available_width());
             ui.add_space(indent);
@@ -66,8 +82,7 @@ pub(super) fn render_tree_nodes(
                 .on_hover_text(node.path.display().to_string())
                 .on_hover_cursor(egui::CursorIcon::PointingHand);
                 if resp.clicked() {
-                    let indices = vec![i];
-                    *action = Some(TreeAction::Toggle(indices));
+                    queue_tree_action(action, TreeAction::Toggle(vec![i]));
                 }
                 resp
             } else {
@@ -88,13 +103,14 @@ pub(super) fn render_tree_nodes(
                     .on_hover_text(hover_text)
                     .on_hover_cursor(egui::CursorIcon::PointingHand);
                 if resp.clicked() {
-                    *action = Some(TreeAction::OpenFile(node.path.clone()));
+                    queue_tree_action(action, TreeAction::OpenFile(node.path.clone()));
                 }
                 resp
             }
         });
 
         let item_response = resp.inner;
+        paint_tree_row_hover(ui, &resp.response, &item_response);
         if node.is_dir {
             sidebar_state.register_native_drop_zone(item_response.rect, node.path.clone());
             handle_node_drag(ui.ctx(), &item_response, &node.path, &node.name);
@@ -123,8 +139,8 @@ pub(super) fn render_tree_nodes(
                     sidebar_state,
                 );
                 paint_folder_connector(ui, item_response.rect, children_top);
-                if child_action.is_some() && action.is_none() {
-                    *action = child_action;
+                if let Some(child_action) = child_action {
+                    queue_tree_action(action, child_action);
                 }
             }
         }
@@ -140,15 +156,11 @@ fn render_tree_children(
     font_size: f32,
     sidebar_state: &mut SidebarUiState,
 ) {
-    let indent = depth as f32 * 16.0;
+    let indent = tree_row_indent(depth);
     let dir_color = egui::Color32::from_rgb(100, 180, 255);
     let file_color = egui::Color32::WHITE;
 
     for (i, node) in nodes.iter().enumerate() {
-        if action.is_some() {
-            break;
-        }
-
         let resp = ui.horizontal(|ui| {
             ui.set_min_width(ui.available_width());
             ui.add_space(indent);
@@ -165,7 +177,7 @@ fn render_tree_children(
                 if resp.clicked() {
                     let mut indices: Vec<usize> = parent_path.to_vec();
                     indices.push(i);
-                    *action = Some(TreeAction::Toggle(indices));
+                    queue_tree_action(action, TreeAction::Toggle(indices));
                 }
                 resp
             } else {
@@ -186,13 +198,14 @@ fn render_tree_children(
                     .on_hover_text(hover_text)
                     .on_hover_cursor(egui::CursorIcon::PointingHand);
                 if resp.clicked() {
-                    *action = Some(TreeAction::OpenFile(node.path.clone()));
+                    queue_tree_action(action, TreeAction::OpenFile(node.path.clone()));
                 }
                 resp
             }
         });
 
         let item_response = resp.inner;
+        paint_tree_row_hover(ui, &resp.response, &item_response);
         if node.is_dir {
             sidebar_state.register_native_drop_zone(item_response.rect, node.path.clone());
             handle_node_drag(ui.ctx(), &item_response, &node.path, &node.name);
@@ -227,13 +240,31 @@ fn render_tree_children(
     }
 }
 
+fn paint_tree_row_hover(
+    ui: &egui::Ui,
+    row_response: &egui::Response,
+    item_response: &egui::Response,
+) {
+    if !row_response.hovered() && !item_response.hovered() {
+        return;
+    }
+
+    ui.painter().rect_filled(
+        row_response.rect.expand2(egui::vec2(2.0, 1.0)),
+        egui::Rounding::same(4.0),
+        tree_hover_color(),
+    );
+}
+
 fn paint_folder_connector(ui: &egui::Ui, folder_rect: egui::Rect, children_top: f32) {
     let children_bottom = ui.cursor().top();
     if children_bottom <= children_top {
         return;
     }
 
-    let line_x = (folder_rect.left() - 10.0).max(ui.min_rect().left() + 4.0);
+    let line_x = (folder_rect.left() - TREE_CONNECTOR_LABEL_GAP)
+        .max(ui.min_rect().left() + TREE_CONNECTOR_MIN_LEFT_PADDING);
+    let branch_end_x = (folder_rect.left() - 3.0).max(line_x);
     let folder_y = folder_rect.center().y;
     let child_bottom_y = children_bottom - 4.0;
     let stroke = egui::Stroke::new(1.0, tree_connector_color());
@@ -248,7 +279,7 @@ fn paint_folder_connector(ui: &egui::Ui, folder_rect: egui::Rect, children_top: 
     painter.line_segment(
         [
             egui::pos2(line_x, folder_y),
-            egui::pos2(folder_rect.left() - 4.0, folder_y),
+            egui::pos2(branch_end_x, folder_y),
         ],
         stroke,
     );
@@ -327,10 +358,13 @@ fn handle_folder_drop(
     if action.is_none() {
         if let Some(payload) = response.dnd_release_payload::<DragPayload>() {
             if let Some(paths) = payload.explorer_item_paths() {
-                *action = Some(TreeAction::MoveFilesToFolder {
-                    files: paths.to_vec(),
-                    folder: folder.to_path_buf(),
-                });
+                queue_tree_action(
+                    action,
+                    TreeAction::MoveFilesToFolder {
+                        files: paths.to_vec(),
+                        folder: folder.to_path_buf(),
+                    },
+                );
             }
         }
     }
@@ -444,30 +478,30 @@ fn render_tree_context_menu(
 ) {
     if is_dir {
         if ui.button("New File").clicked() {
-            *action = Some(TreeAction::NewFile(path.to_path_buf()));
+            queue_tree_action(action, TreeAction::NewFile(path.to_path_buf()));
             ui.close_menu();
         }
         if ui.button("New Folder").clicked() {
-            *action = Some(TreeAction::NewFolder(path.to_path_buf()));
+            queue_tree_action(action, TreeAction::NewFolder(path.to_path_buf()));
             ui.close_menu();
         }
         ui.separator();
     }
     if ui.button("Rename").clicked() {
-        *action = Some(TreeAction::Rename(path.to_path_buf()));
+        queue_tree_action(action, TreeAction::Rename(path.to_path_buf()));
         ui.close_menu();
     }
     if ui.button("Move...").clicked() {
-        *action = Some(TreeAction::Move(path.to_path_buf()));
+        queue_tree_action(action, TreeAction::Move(path.to_path_buf()));
         ui.close_menu();
     }
     if !is_dir {
         if ui.button("Copy Absolute Path").clicked() {
-            *action = Some(TreeAction::CopyAbsPath(path.to_path_buf()));
+            queue_tree_action(action, TreeAction::CopyAbsPath(path.to_path_buf()));
             ui.close_menu();
         }
         if ui.button("Copy Relative Path").clicked() {
-            *action = Some(TreeAction::CopyRelPath(path.to_path_buf()));
+            queue_tree_action(action, TreeAction::CopyRelPath(path.to_path_buf()));
             ui.close_menu();
         }
     }
@@ -476,7 +510,7 @@ fn render_tree_context_menu(
         .button(egui::RichText::new("Delete").color(egui::Color32::from_rgb(220, 80, 80)))
         .clicked()
     {
-        *action = Some(TreeAction::Delete(path.to_path_buf()));
+        queue_tree_action(action, TreeAction::Delete(path.to_path_buf()));
         ui.close_menu();
     }
 }
@@ -540,6 +574,7 @@ pub(crate) fn render_sidebar_tree(
         }
         Some(TreeAction::Toggle(indices)) => {
             toggle_at(&mut explorer.tree, &indices);
+            ui.ctx().request_repaint();
         }
         Some(TreeAction::CopyAbsPath(path)) => {
             editor_state.clipboard_out = Some(path.to_string_lossy().to_string());
@@ -611,5 +646,34 @@ mod tests {
             tree_connector_color(),
             egui::Color32::from_rgb(100, 220, 140)
         );
+    }
+
+    #[test]
+    fn tree_hover_highlight_is_subtle_translucent_fill() {
+        assert_eq!(
+            tree_hover_color(),
+            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 18)
+        );
+    }
+
+    #[test]
+    fn tree_rows_keep_left_padding_before_depth_indent() {
+        assert_eq!(tree_row_indent(0), TREE_ROW_LEFT_PADDING);
+        assert_eq!(
+            tree_row_indent(2),
+            TREE_ROW_LEFT_PADDING + TREE_ROW_INDENT * 2.0
+        );
+    }
+
+    #[test]
+    fn tree_actions_keep_first_queued_action() {
+        let mut action = None;
+        queue_tree_action(&mut action, TreeAction::Toggle(vec![0]));
+        queue_tree_action(
+            &mut action,
+            TreeAction::OpenFile(std::path::PathBuf::from("/tmp/other.rs")),
+        );
+
+        assert_eq!(action, Some(TreeAction::Toggle(vec![0])));
     }
 }

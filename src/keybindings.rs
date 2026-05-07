@@ -156,6 +156,8 @@ impl KeyBindings {
             (cmd("`"), ToggleTerminalPanel),
             (cmd("="), ZoomIn),
             (cmd("+"), ZoomIn),
+            (cmd_shift("="), ZoomIn),
+            (cmd_shift("+"), ZoomIn),
             (cmd("-"), ZoomOut),
             (cmd("0"), ZoomReset),
         ];
@@ -405,6 +407,14 @@ mod tests {
         );
         assert_eq!(
             bindings.match_key_parts(&ch("+"), primary_mods()),
+            Some(Action::ZoomIn)
+        );
+        assert_eq!(
+            bindings.match_key_parts(&ch("="), primary_mods() | ModifiersState::SHIFT),
+            Some(Action::ZoomIn)
+        );
+        assert_eq!(
+            bindings.match_key_parts(&ch("+"), primary_mods() | ModifiersState::SHIFT),
             Some(Action::ZoomIn)
         );
         assert_eq!(

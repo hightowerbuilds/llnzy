@@ -66,6 +66,27 @@ fn ensure_background_palette(config: &mut Config) {
         .get_or_insert(config.colors.foreground);
 }
 
+fn background_library_reference(path: &std::path::Path) -> String {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| path.display().to_string())
+}
+
+fn background_reference_matches_path(reference: Option<&str>, path: &std::path::Path) -> bool {
+    let Some(reference) = reference else {
+        return false;
+    };
+
+    if let Some(resolved) = theme_store::resolve_background_path(reference) {
+        if resolved == path {
+            return true;
+        }
+    }
+
+    std::path::Path::new(reference).file_name() == path.file_name()
+}
+
 pub(crate) fn render_background_tab(ui: &mut egui::Ui, config: &mut Config) {
     ui.label(
         egui::RichText::new("Background Effects")
@@ -166,7 +187,7 @@ pub(crate) fn render_background_tab(ui: &mut egui::Ui, config: &mut Config) {
                         match theme_store::import_background(&path) {
                             Ok(saved_path) => {
                                 config.effects.background_image =
-                                    Some(saved_path.display().to_string());
+                                    Some(background_library_reference(&saved_path));
                                 config.effects.background = "image".to_string();
                             }
                             Err(e) => log::warn!("Failed to import background: {e}"),
@@ -191,7 +212,7 @@ pub(crate) fn render_background_tab(ui: &mut egui::Ui, config: &mut Config) {
         });
 
     if let Some(path) = config.effects.background_image.as_deref() {
-        if !std::path::Path::new(path).is_file() {
+        if theme_store::resolve_background_path(path).is_none() {
             ui.add_space(8.0);
             ui.label(
                 egui::RichText::new("Selected background image is unavailable.")
@@ -213,8 +234,10 @@ pub(crate) fn render_background_tab(ui: &mut egui::Ui, config: &mut Config) {
             let mut to_delete: Option<std::path::PathBuf> = None;
             for bg_path in &saved_bgs {
                 let name = bg_path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
-                let is_active = config.effects.background_image.as_deref()
-                    == Some(&bg_path.display().to_string());
+                let is_active = background_reference_matches_path(
+                    config.effects.background_image.as_deref(),
+                    bg_path,
+                );
                 let row_w = ui.available_width();
                 let bg_color = if is_active {
                     egui::Color32::from_rgb(40, 80, 160)
@@ -243,7 +266,7 @@ pub(crate) fn render_background_tab(ui: &mut egui::Ui, config: &mut Config) {
                                 .clicked()
                             {
                                 config.effects.background_image =
-                                    Some(bg_path.display().to_string());
+                                    Some(background_library_reference(bg_path));
                                 config.effects.background = "image".to_string();
                             }
                             if ui
@@ -265,7 +288,10 @@ pub(crate) fn render_background_tab(ui: &mut egui::Ui, config: &mut Config) {
             }
             if let Some(path) = to_delete {
                 let _ = theme_store::delete_background(&path);
-                if config.effects.background_image.as_deref() == Some(&path.display().to_string()) {
+                if background_reference_matches_path(
+                    config.effects.background_image.as_deref(),
+                    &path,
+                ) {
                     config.effects.background_image = None;
                     config.effects.background = "none".to_string();
                 }

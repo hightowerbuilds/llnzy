@@ -72,10 +72,68 @@ pub struct TextElement {
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ImageElement {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+    pub original_w: f32,
+    pub original_h: f32,
+    pub path: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum SketchSymbolKind {
+    Database,
+    Table,
+    Api,
+    Server,
+    Queue,
+    Cache,
+    Cloud,
+    Lock,
+    User,
+    Component,
+    Decision,
+    Flow,
+}
+
+impl SketchSymbolKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Database => "Database",
+            Self::Table => "Table",
+            Self::Api => "API",
+            Self::Server => "Server",
+            Self::Queue => "Queue",
+            Self::Cache => "Cache",
+            Self::Cloud => "Cloud",
+            Self::Lock => "Lock",
+            Self::User => "User",
+            Self::Component => "Component",
+            Self::Decision => "Decision",
+            Self::Flow => "Flow",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SymbolElement {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+    pub kind: SketchSymbolKind,
+    pub style: SketchStyle,
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum SketchElement {
     Stroke(StrokeElement),
     Rectangle(RectElement),
     Text(TextElement),
+    Image(ImageElement),
+    Symbol(SymbolElement),
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]

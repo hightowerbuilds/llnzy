@@ -77,6 +77,9 @@ impl App {
             self.last_config_check = now;
             if self.config.check_reload() {
                 self.error_log.info("Config reloaded from disk");
+                if let Some(ui) = &mut self.ui {
+                    ui.apply_config(&self.config);
+                }
                 if let Some(renderer) = &mut self.renderer {
                     renderer.update_config(self.config.clone());
                 }

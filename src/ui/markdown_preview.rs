@@ -2,6 +2,12 @@ use std::path::{Path, PathBuf};
 
 use crate::editor::buffer::Buffer;
 use crate::editor::MarkdownViewMode;
+use egui::scroll_area::ScrollAreaOutput;
+
+const PREVIEW_MAX_PAGE_WIDTH: f32 = 840.0;
+const PREVIEW_RIGHT_GUTTER: f32 = 18.0;
+const PREVIEW_SURFACE_X_PADDING: f32 = 34.0;
+const PREVIEW_SURFACE_Y_PADDING: f32 = 30.0;
 
 #[derive(Clone, Copy)]
 pub(crate) struct MarkdownPreviewTheme {
@@ -90,27 +96,74 @@ pub(crate) fn render_markdown_text(
     theme: MarkdownPreviewTheme,
 ) {
     egui::Frame::none().fill(theme.background).show(ui, |ui| {
-        egui::ScrollArea::vertical()
+        let output = egui::ScrollArea::vertical()
             .auto_shrink([false; 2])
             .show(ui, |ui| {
-                let available_width = ui.available_width();
-                let page_width = available_width.min(840.0);
-                let side_margin = ((available_width - page_width) * 0.5).max(0.0);
+                let layout = markdown_preview_layout(ui.available_width());
                 ui.horizontal_top(|ui| {
-                    ui.add_space(side_margin);
+                    ui.add_space(layout.left_margin);
                     egui::Frame::none()
                         .fill(theme.surface)
-                        .inner_margin(egui::Margin::symmetric(34.0, 30.0))
+                        .inner_margin(egui::Margin::symmetric(
+                            PREVIEW_SURFACE_X_PADDING,
+                            PREVIEW_SURFACE_Y_PADDING,
+                        ))
                         .show(ui, |ui| {
-                            ui.set_width(page_width);
+                            ui.set_width(layout.page_width);
                             let blocks = parse_markdown_blocks(text);
                             ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
                                 render_markdown_blocks(ui, &blocks, base_dir, theme);
                             });
                         });
+                    ui.add_space(layout.right_gutter);
                 });
             });
+        apply_markdown_preview_drag_cursor(ui.ctx(), &output);
     });
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct MarkdownPreviewLayout {
+    page_width: f32,
+    left_margin: f32,
+    right_gutter: f32,
+}
+
+fn markdown_preview_layout(available_width: f32) -> MarkdownPreviewLayout {
+    let right_gutter = PREVIEW_RIGHT_GUTTER.min((available_width * 0.2).max(0.0));
+    let content_width = (available_width - right_gutter).max(1.0);
+    let page_width = content_width.min(PREVIEW_MAX_PAGE_WIDTH);
+    let left_margin = ((content_width - page_width) * 0.5).max(0.0);
+    MarkdownPreviewLayout {
+        page_width,
+        left_margin,
+        right_gutter,
+    }
+}
+
+fn apply_markdown_preview_drag_cursor(ctx: &egui::Context, output: &ScrollAreaOutput<()>) {
+    let scrollable = output.content_size.y > output.inner_rect.height() + 0.5;
+    let cursor = ctx.input(|input| {
+        markdown_preview_cursor_for_drag(
+            scrollable,
+            input
+                .pointer
+                .press_origin()
+                .is_some_and(|pos| output.inner_rect.contains(pos)),
+            input.pointer.primary_down() && input.pointer.is_decidedly_dragging(),
+        )
+    });
+    if let Some(cursor) = cursor {
+        ctx.set_cursor_icon(cursor);
+    }
+}
+
+fn markdown_preview_cursor_for_drag(
+    scrollable: bool,
+    press_origin_in_preview: bool,
+    dragging: bool,
+) -> Option<egui::CursorIcon> {
+    (scrollable && press_origin_in_preview && dragging).then_some(egui::CursorIcon::Grabbing)
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -722,6 +775,38 @@ mod tests {
         assert_eq!(MarkdownViewMode::Source.cycle(), MarkdownViewMode::Preview);
         assert_eq!(MarkdownViewMode::Preview.cycle(), MarkdownViewMode::Split);
         assert_eq!(MarkdownViewMode::Split.cycle(), MarkdownViewMode::Source);
+    }
+
+    #[test]
+    fn preview_layout_reserves_right_gutter_in_narrow_panes() {
+        let layout = markdown_preview_layout(320.0);
+
+        assert_eq!(layout.right_gutter, PREVIEW_RIGHT_GUTTER);
+        assert_eq!(layout.left_margin, 0.0);
+        assert_eq!(layout.page_width, 320.0 - PREVIEW_RIGHT_GUTTER);
+    }
+
+    #[test]
+    fn preview_layout_centers_page_after_reserving_right_gutter() {
+        let layout = markdown_preview_layout(1200.0);
+
+        assert_eq!(layout.right_gutter, PREVIEW_RIGHT_GUTTER);
+        assert_eq!(layout.page_width, PREVIEW_MAX_PAGE_WIDTH);
+        assert_eq!(
+            layout.left_margin,
+            ((1200.0 - PREVIEW_RIGHT_GUTTER - PREVIEW_MAX_PAGE_WIDTH) * 0.5)
+        );
+    }
+
+    #[test]
+    fn preview_drag_cursor_only_shows_while_dragging_scrollable_preview() {
+        assert_eq!(
+            markdown_preview_cursor_for_drag(true, true, true),
+            Some(egui::CursorIcon::Grabbing)
+        );
+        assert_eq!(markdown_preview_cursor_for_drag(false, true, true), None);
+        assert_eq!(markdown_preview_cursor_for_drag(true, false, true), None);
+        assert_eq!(markdown_preview_cursor_for_drag(true, true, false), None);
     }
 
     #[test]

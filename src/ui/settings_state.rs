@@ -2,6 +2,7 @@ use super::settings_hotkeys;
 use super::settings_tabs::{self, WorkspaceAction};
 use super::types::SettingsTab;
 use crate::config::Config;
+use crate::theme_store;
 use crate::workspace_store::SavedWorkspace;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -499,7 +500,9 @@ fn active_preview_background_texture<'a>(
 }
 
 fn load_preview_background_texture(ui: &mut egui::Ui, path: &str) -> Option<egui::TextureHandle> {
-    let image = match image::open(path) {
+    let resolved_path = theme_store::resolve_background_path(path)
+        .unwrap_or_else(|| std::path::PathBuf::from(path));
+    let image = match image::open(&resolved_path) {
         Ok(image) => image.thumbnail(1200, 1200).to_rgba8(),
         Err(err) => {
             log::warn!("Failed to load preview background image: {err}");

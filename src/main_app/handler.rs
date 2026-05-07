@@ -18,11 +18,11 @@ impl ApplicationHandler<UserEvent> for App {
             _ => None,
         };
         let native_cursor_target = match &event {
-            WindowEvent::CursorMoved { .. } => self
+            WindowEvent::CursorMoved { position, .. } => self
                 .ui
                 .as_ref()
                 .and_then(|ui| ui.drag_drop.hovered_native_files.first())
-                .and_then(|path| self.native_file_drop_target(path)),
+                .and_then(|path| self.native_file_drop_target_at(path, *position)),
             _ => None,
         };
         let terminal_ime_commit =
@@ -437,36 +437,6 @@ impl ApplicationHandler<UserEvent> for App {
                         Action::ToggleTerminalPanel => {
                             // Terminal panel in explorer removed — no-op
                         }
-                        Action::ZoomIn => {
-                            self.config.font_size = (self.config.font_size + 1.0).min(40.0);
-                            if let Some(renderer) = &mut self.renderer {
-                                renderer.update_config(self.config.clone());
-                                renderer.invalidate_text_cache();
-                            }
-                            self.recompute_layout();
-                            self.resize_terminal_tabs();
-                            self.invalidate_and_redraw();
-                        }
-                        Action::ZoomOut => {
-                            self.config.font_size = (self.config.font_size - 1.0).max(8.0);
-                            if let Some(renderer) = &mut self.renderer {
-                                renderer.update_config(self.config.clone());
-                                renderer.invalidate_text_cache();
-                            }
-                            self.recompute_layout();
-                            self.resize_terminal_tabs();
-                            self.invalidate_and_redraw();
-                        }
-                        Action::ZoomReset => {
-                            self.config.font_size = 14.0;
-                            if let Some(renderer) = &mut self.renderer {
-                                renderer.update_config(self.config.clone());
-                                renderer.invalidate_text_cache();
-                            }
-                            self.recompute_layout();
-                            self.resize_terminal_tabs();
-                            self.invalidate_and_redraw();
-                        }
                         Action::NewTab
                         | Action::CloseTab
                         | Action::NextTab
@@ -477,6 +447,9 @@ impl ApplicationHandler<UserEvent> for App {
                         | Action::ToggleEffects
                         | Action::ToggleFps
                         | Action::ToggleSidebar
+                        | Action::ZoomIn
+                        | Action::ZoomOut
+                        | Action::ZoomReset
                         | Action::SwitchTab(_) => {}
                     }
                     return;
@@ -592,7 +565,11 @@ impl ApplicationHandler<UserEvent> for App {
 
             // Drag-and-drop: insert escaped file path into terminal
             WindowEvent::DroppedFile(path) => {
-                let target = self.native_file_drop_target(&path);
+                let target = self
+                    .ui
+                    .as_ref()
+                    .and_then(|ui| ui.drag_drop.active_target.clone())
+                    .or_else(|| self.native_file_drop_target(&path));
                 if let (Some(ui), Some(target)) = (&mut self.ui, target) {
                     if let Some(command) =
                         ui.drag_drop.command_for_external_files(vec![path], target)

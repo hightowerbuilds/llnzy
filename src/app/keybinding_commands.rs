@@ -17,6 +17,9 @@ pub fn app_command_for_keybinding(
         Action::ToggleEffects => Some(AppCommand::ToggleEffects),
         Action::ToggleFps => Some(AppCommand::ToggleFps),
         Action::ToggleSidebar => Some(AppCommand::ToggleSidebar),
+        Action::ZoomIn => Some(AppCommand::ZoomIn),
+        Action::ZoomOut => Some(AppCommand::ZoomOut),
+        Action::ZoomReset => Some(AppCommand::ZoomReset),
         Action::SwitchTab(n) => Some(AppCommand::SwitchTab(n.saturating_sub(1) as usize)),
         Action::Copy
         | Action::Paste
@@ -27,10 +30,7 @@ pub fn app_command_for_keybinding(
         | Action::CyclePaneBackward
         | Action::ScrollPageUp
         | Action::ScrollPageDown
-        | Action::ToggleTerminalPanel
-        | Action::ZoomIn
-        | Action::ZoomOut
-        | Action::ZoomReset => None,
+        | Action::ToggleTerminalPanel => None,
     }
 }
 
@@ -93,7 +93,18 @@ mod tests {
         assert!(app_command_for_keybinding(&Action::CyclePaneForward, 0, 1).is_none());
         assert!(app_command_for_keybinding(&Action::CyclePaneBackward, 0, 1).is_none());
         assert!(app_command_for_keybinding(&Action::ToggleTerminalPanel, 0, 1).is_none());
-        assert!(app_command_for_keybinding(&Action::ZoomIn, 0, 1).is_none());
+        assert!(matches!(
+            app_command_for_keybinding(&Action::ZoomIn, 0, 1),
+            Some(AppCommand::ZoomIn)
+        ));
+        assert!(matches!(
+            app_command_for_keybinding(&Action::ZoomOut, 0, 1),
+            Some(AppCommand::ZoomOut)
+        ));
+        assert!(matches!(
+            app_command_for_keybinding(&Action::ZoomReset, 0, 1),
+            Some(AppCommand::ZoomReset)
+        ));
     }
 
     #[test]

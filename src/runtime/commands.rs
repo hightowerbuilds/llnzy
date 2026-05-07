@@ -185,6 +185,9 @@ impl App {
                 self.request_redraw();
                 true
             }
+            AppCommand::ZoomIn => self.adjust_app_font_size(1.0),
+            AppCommand::ZoomOut => self.adjust_app_font_size(-1.0),
+            AppCommand::ZoomReset => self.set_app_font_size(16.0),
             AppCommand::ToggleSidebar => {
                 if let Some(ui) = &mut self.ui {
                     ui.toggle_sidebar();
@@ -301,6 +304,9 @@ impl App {
             AppCommand::RestartTerminalTab(idx) => self.restart_terminal_tab(idx),
             AppCommand::ApplyConfig(new_config) => {
                 self.config = new_config;
+                if let Some(ui) = &mut self.ui {
+                    ui.apply_config(&self.config);
+                }
                 if let Some(renderer) = &mut self.renderer {
                     renderer.update_config(self.config.clone());
                 }
@@ -377,6 +383,9 @@ impl App {
                     }
                     if let Some(renderer) = &mut self.renderer {
                         renderer.update_config(self.config.clone());
+                    }
+                    if let Some(ui) = &mut self.ui {
+                        ui.apply_config(&self.config);
                     }
                 }
                 if let Some(ui) = &mut self.ui {

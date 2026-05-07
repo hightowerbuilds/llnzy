@@ -22,6 +22,9 @@ pub enum AppCommand {
     ToggleEffects,
     ToggleFps,
     ToggleSidebar,
+    ZoomIn,
+    ZoomOut,
+    ZoomReset,
     JoinTab(usize),
     JoinTabs {
         primary: usize,
