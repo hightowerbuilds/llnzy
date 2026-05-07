@@ -132,6 +132,29 @@ impl SketchState {
         index
     }
 
+    pub fn paste_text_box(&mut self, text: &str, point: SketchPoint) -> Option<usize> {
+        if text.trim().is_empty() {
+            return None;
+        }
+        self.push_undo();
+        let index = self.document.elements.len();
+        let (w, h) = pasted_text_box_size(text, self.style.font_size);
+        self.document
+            .elements
+            .push(SketchElement::Text(TextElement {
+                x: point.x,
+                y: point.y,
+                w,
+                h,
+                text: text.to_string(),
+                style: self.style,
+            }));
+        self.selected = Some(index);
+        self.text_draft = None;
+        self.dirty = true;
+        Some(index)
+    }
+
     pub fn add_symbol(&mut self, kind: SketchSymbolKind, point: SketchPoint) -> usize {
         self.push_undo();
         let index = self.document.elements.len();
@@ -355,4 +378,16 @@ impl SketchState {
             *from_center,
         ))
     }
+}
+
+fn pasted_text_box_size(text: &str, font_size: f32) -> (f32, f32) {
+    let line_count = text.lines().count().max(1) as f32;
+    let max_chars = text
+        .lines()
+        .map(|line| line.chars().count())
+        .max()
+        .unwrap_or(0) as f32;
+    let width = (max_chars * font_size * 0.56 + 24.0).clamp(DEFAULT_TEXT_W, 520.0);
+    let height = (line_count * font_size * 1.35 + 18.0).clamp(DEFAULT_TEXT_H, 420.0);
+    (width, height)
 }

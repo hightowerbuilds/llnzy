@@ -104,6 +104,23 @@ fn text_box_commit_keeps_trimmed_text() {
 }
 
 #[test]
+fn pasted_text_box_commits_text_and_can_undo() {
+    let mut state = SketchState::default();
+    let index = state
+        .paste_text_box("service boundary", point(24.0, 32.0))
+        .expect("expected pasted text");
+
+    assert_eq!(state.selected, Some(index));
+    let SketchElement::Text(text) = &state.document.elements[index] else {
+        panic!("expected text box");
+    };
+    assert_eq!(text.text, "service boundary");
+    assert!(text.w >= DEFAULT_TEXT_W);
+    assert!(state.undo());
+    assert!(state.document.elements.is_empty());
+}
+
+#[test]
 fn existing_text_box_can_be_edited() {
     let mut state = SketchState::default();
     let index = state.add_text_box(point(10.0, 10.0));

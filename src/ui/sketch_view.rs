@@ -237,6 +237,7 @@ fn render_canvas(
         canvas_rect.width() / sketch.zoom.max(0.01),
         canvas_rect.height() / sketch.zoom.max(0.01),
     ];
+    handle_canvas_paste(ctx, sketch, canvas_rect);
     handle_sketch_pointer(sketch, &response, canvas_rect);
     paint_sketch_document(&painter, canvas_rect, sketch);
     paint_inline_text_cursor(ctx, &painter, canvas_rect, sketch);
@@ -546,6 +547,9 @@ fn sketch_shortcuts(ui: &egui::Ui, sketch: &mut SketchState) {
                 sketch.undo();
             }
         }
+        if input.modifiers.command && input.key_pressed(egui::Key::Y) {
+            sketch.redo();
+        }
         if (input.key_pressed(egui::Key::Delete) || input.key_pressed(egui::Key::Backspace))
             && sketch.text_draft.is_none()
         {
@@ -586,10 +590,34 @@ fn handle_inline_text_input(ui: &egui::Ui, sketch: &mut SketchState) {
             text.pop();
             return;
         }
+        if input.modifiers.command && input.key_pressed(egui::Key::Z) {
+            if input.modifiers.shift {
+                sketch.redo();
+            } else {
+                sketch.cancel_text_draft();
+                sketch.undo();
+            }
+            return;
+        }
+        if input.modifiers.command && input.key_pressed(egui::Key::Y) {
+            sketch.redo();
+            return;
+        }
         // Collect typed text from events
+        let mut pasted_from_event = false;
         for event in &input.events {
-            if let egui::Event::Text(s) = event {
-                text.push_str(s);
+            match event {
+                egui::Event::Text(s) => text.push_str(s),
+                egui::Event::Paste(s) => {
+                    text.push_str(s);
+                    pasted_from_event = true;
+                }
+                _ => {}
+            }
+        }
+        if !pasted_from_event && input.modifiers.command && input.key_pressed(egui::Key::V) {
+            if let Some(paste) = sketch.clipboard_in.as_deref() {
+                text.push_str(paste);
             }
         }
     });
@@ -602,6 +630,42 @@ fn handle_inline_text_input(ui: &egui::Ui, sketch: &mut SketchState) {
     } else {
         sketch.update_text_draft(text);
     }
+}
+
+fn handle_canvas_paste(ctx: &egui::Context, sketch: &mut SketchState, canvas_rect: egui::Rect) {
+    if sketch.text_draft.is_some() || ctx.wants_keyboard_input() {
+        return;
+    }
+    let paste = ctx.input(|input| {
+        let pasted_event = input.events.iter().find_map(|event| {
+            if let egui::Event::Paste(text) = event {
+                Some(text.clone())
+            } else {
+                None
+            }
+        });
+        if pasted_event.is_some() {
+            pasted_event
+        } else if input.modifiers.command && input.key_pressed(egui::Key::V) {
+            sketch.clipboard_in.clone()
+        } else {
+            None
+        }
+    });
+    let Some(text) = paste.filter(|text| !text.trim().is_empty()) else {
+        return;
+    };
+    let point = ctx.input(|input| input.pointer.hover_pos()).map_or_else(
+        || SketchPoint::new(canvas_rect.width() * 0.5 / sketch.zoom, 72.0),
+        |pos| {
+            if canvas_rect.contains(pos) {
+                screen_to_canvas(pos, canvas_rect, sketch.zoom)
+            } else {
+                SketchPoint::new(canvas_rect.width() * 0.5 / sketch.zoom, 72.0)
+            }
+        },
+    );
+    sketch.paste_text_box(&text, point);
 }
 
 fn handle_sketch_pointer(

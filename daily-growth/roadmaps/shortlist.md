@@ -8,7 +8,7 @@
 - [x] show files on single click
 - [x] Fix background images.
 
-- [ ] Fix Sketcher commands.
+- [x] Fix Sketcher commands.
 - [x] Add image uploads into Sketcher, need image resizer too.
 - [x] zoom in/out
 - [x] export feature to sketcher

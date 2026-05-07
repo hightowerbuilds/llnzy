@@ -55,7 +55,8 @@ impl App {
             if let Some(layout) = &self.screen_layout {
                 if let Some(ui) = self.ui.as_mut() {
                     if let Ok(text) = self.clipboard.get_text() {
-                        ui.editor_view.clipboard_in = Some(text);
+                        ui.editor_view.clipboard_in = Some(text.clone());
+                        ui.sketch.state.clipboard_in = Some(text);
                     }
                     ui.editor_view.init_lsp(self.proxy.clone());
                     ui.explorer.ensure_project_watcher(self.proxy.clone());

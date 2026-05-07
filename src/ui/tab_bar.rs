@@ -616,11 +616,14 @@ pub(super) fn render_tab_name_editor(
     );
     paint_tab_rename_editing_state(ui, tab_rect, edit_rect, blink_on);
     let editor_id = ui.id().with(("tab_name_editor", tab_idx));
-    if !state.editing_cursor_initialized {
+    let initialized_this_frame = !state.editing_cursor_initialized;
+    if initialized_this_frame {
         let mut edit_state = egui::TextEdit::load_state(ui.ctx(), editor_id).unwrap_or_default();
         edit_state
             .cursor
-            .set_char_range(Some(CCursorRange::one(CCursor::new(0))));
+            .set_char_range(Some(initial_tab_rename_cursor_range(
+                &state.editing_tab_text,
+            )));
         edit_state.store(ui.ctx(), editor_id);
         state.editing_cursor_initialized = true;
     }
@@ -639,12 +642,15 @@ pub(super) fn render_tab_name_editor(
 
     let enter_pressed = ui.input(|input| input.key_pressed(egui::Key::Enter));
     let escape_pressed = ui.input(|input| input.key_pressed(egui::Key::Escape));
-    let clicked_elsewhere = ui.input(|input| input.pointer.any_pressed())
-        && !response.hovered()
-        && !tab_rect.contains(
-            ui.input(|input| input.pointer.latest_pos())
-                .unwrap_or(tab_rect.center()),
-        );
+    let clicked_elsewhere = ui.input(|input| {
+        tab_rename_clicked_elsewhere(
+            initialized_this_frame,
+            input.pointer.any_pressed(),
+            response.hovered(),
+            tab_rect,
+            input.pointer.latest_pos(),
+        )
+    });
 
     if enter_pressed || clicked_elsewhere {
         action.saved_tab_name = Some((tab_idx, state.editing_tab_text.clone()));
@@ -691,6 +697,26 @@ fn paint_tab_rename_editing_state(
 
 fn tab_rename_blink_on(time: f64) -> bool {
     ((time / TAB_RENAME_BLINK_SECS).floor() as i64).rem_euclid(2) == 0
+}
+
+fn initial_tab_rename_cursor_range(text: &str) -> CCursorRange {
+    CCursorRange {
+        primary: CCursor::new(0),
+        secondary: CCursor::new(text.chars().count()),
+    }
+}
+
+fn tab_rename_clicked_elsewhere(
+    initialized_this_frame: bool,
+    pointer_pressed: bool,
+    editor_hovered: bool,
+    tab_rect: egui::Rect,
+    pointer_pos: Option<egui::Pos2>,
+) -> bool {
+    pointer_pressed
+        && !initialized_this_frame
+        && !editor_hovered
+        && !tab_rect.contains(pointer_pos.unwrap_or(tab_rect.center()))
 }
 
 pub(super) fn paint_drag_ghost(
@@ -798,5 +824,33 @@ mod tests {
         assert!(tab_rename_blink_on(TAB_RENAME_BLINK_SECS - 0.01));
         assert!(!tab_rename_blink_on(TAB_RENAME_BLINK_SECS + 0.01));
         assert!(tab_rename_blink_on(TAB_RENAME_BLINK_SECS * 2.0 + 0.01));
+    }
+
+    #[test]
+    fn tab_rename_initial_cursor_selects_existing_title_from_front() {
+        let range = initial_tab_rename_cursor_range("Shell 1");
+
+        assert_eq!(range.primary.index, 0);
+        assert_eq!(range.secondary.index, 7);
+    }
+
+    #[test]
+    fn tab_rename_ignores_opening_pointer_press() {
+        let tab_rect = egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(120.0, 32.0));
+
+        assert!(!tab_rename_clicked_elsewhere(
+            true,
+            true,
+            false,
+            tab_rect,
+            Some(egui::pos2(240.0, 60.0))
+        ));
+        assert!(tab_rename_clicked_elsewhere(
+            false,
+            true,
+            false,
+            tab_rect,
+            Some(egui::pos2(240.0, 60.0))
+        ));
     }
 }
