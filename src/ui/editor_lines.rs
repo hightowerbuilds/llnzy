@@ -43,7 +43,11 @@ pub(super) fn render_editor_lines(
     let text_color = egui::Color32::WHITE;
     let gutter_color = egui::Color32::from_rgb(100, 100, 120);
     let current_line_gutter = egui::Color32::from_rgb(180, 180, 200);
-    let current_line_bg = egui::Color32::from_rgba_unmultiplied(255, 255, 255, 8);
+    let current_line_bg = if editor_config.highlight_current_line {
+        egui::Color32::from_rgba_unmultiplied(255, 255, 255, 8)
+    } else {
+        egui::Color32::TRANSPARENT
+    };
     let font = egui::FontId::monospace(editor_font_size);
     let active_indent_level = indent_level(buf.line(view.cursor.pos.line), buf.indent_style);
 
@@ -69,6 +73,7 @@ pub(super) fn render_editor_lines(
             text_clip,
             buf,
             view,
+            editor_config,
             syntax_colors,
             highlight_spans,
             visible_wrap_window,
@@ -122,6 +127,7 @@ fn render_wrapped_lines(
     text_clip: egui::Rect,
     buf: &crate::editor::buffer::Buffer,
     view: &BufferView,
+    editor_config: &EffectiveEditorConfig,
     syntax_colors: &HashMap<HighlightGroup, [u8; 3]>,
     highlight_spans: &[Vec<HighlightSpan>],
     visible_wrap_window: &[WrapRow],
@@ -157,13 +163,15 @@ fn render_wrapped_lines(
             } else {
                 gutter_color
             };
-            painter.text(
-                egui::pos2(rect.left() + 4.0, y + 1.0),
-                egui::Align2::LEFT_TOP,
-                &num_str,
-                font.clone(),
-                num_color,
-            );
+            if editor_config.show_line_numbers {
+                painter.text(
+                    egui::pos2(rect.left() + 4.0, y + 1.0),
+                    egui::Align2::LEFT_TOP,
+                    &num_str,
+                    font.clone(),
+                    num_color,
+                );
+            }
             render_git_gutter_change(
                 painter,
                 view,
@@ -173,7 +181,7 @@ fn render_wrapped_lines(
                 y,
                 line_height,
             );
-        } else {
+        } else if editor_config.show_line_numbers {
             painter.text(
                 egui::pos2(rect.left() + gutter_width - 12.0, y + 1.0),
                 egui::Align2::LEFT_TOP,
@@ -330,13 +338,15 @@ fn render_unwrapped_lines(
         } else {
             gutter_color
         };
-        painter.text(
-            egui::pos2(rect.left() + 4.0, y + 1.0),
-            egui::Align2::LEFT_TOP,
-            &num_str,
-            font.clone(),
-            num_color,
-        );
+        if editor_config.show_line_numbers {
+            painter.text(
+                egui::pos2(rect.left() + 4.0, y + 1.0),
+                egui::Align2::LEFT_TOP,
+                &num_str,
+                font.clone(),
+                num_color,
+            );
+        }
 
         render_git_gutter_change(painter, view, line_idx, rect, gutter_width, y, line_height);
         render_fold_marker(

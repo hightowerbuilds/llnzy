@@ -1,6 +1,6 @@
 # Appearance Surface Settings Plan
 
-Status: active roadmap cleanup
+Status: active cleanup
 
 ## Purpose
 
@@ -28,6 +28,7 @@ Trimmed from this document:
 Related future work:
 - Extension and marketplace-style appearance work belongs in `daily-growth/roadmaps/future/future-laundry.md`.
 - Crossover platform concerns belong in `daily-growth/roadmaps/future/crossover-compatibility.md`.
+- Deferred appearance ideas now live under `Appearance Future Backlog` in `daily-growth/roadmaps/future/future-laundry.md`.
 
 ## Product Boundary
 
@@ -64,10 +65,10 @@ The current layout is a two-column surface:
 
 Current implementation state:
 - Terminal has live controls for background/effects and a terminal-style preview.
-- Code Editor currently shows placeholder controls.
-- Sketch currently shows placeholder controls.
-- Theme apply/save UI exists in older render helpers, but it is not currently part of the active Appearances panel.
-- Cursor/text controls exist in older render helpers, but they are not currently part of the active Appearances panel.
+- Code Editor has live legibility controls and a code-style preview.
+- Sketch has live canvas/default drawing controls and a sketch-style preview.
+- Theme apply/save UI is part of the active Terminal appearance page.
+- Cursor/text controls are part of the active Terminal appearance page.
 
 ## Target Shape
 
@@ -91,160 +92,131 @@ Every page should have:
 Terminal is the priority because it is the surface where backgrounds, CRT lines, bloom, opacity, and shader effects matter most.
 
 Keep and verify:
-- [ ] Global effects enabled/disabled.
-- [ ] Background mode selector.
-- [ ] Built-in shader choices.
-- [ ] Custom shader choices when installed.
-- [ ] Background image mode.
-- [ ] Background image import.
-- [ ] Saved background list.
-- [ ] Background delete behavior.
-- [ ] Unavailable background warning.
-- [ ] Background intensity.
-- [ ] Background speed.
-- [ ] Custom shader colors where supported.
-- [ ] Bloom controls.
-- [ ] Particle controls.
-- [ ] Cursor glow.
-- [ ] Cursor trail.
-- [ ] Text animation.
-- [ ] CRT enabled/disabled.
-- [ ] Scanline intensity.
-- [ ] Curvature.
-- [ ] Vignette.
-- [ ] Chromatic aberration.
-- [ ] Grain.
-- [ ] Live preview for background images, shaders, bloom, CRT, and cursor effects.
+- [x] Global effects enabled/disabled.
+- [x] Background mode selector.
+- [x] Built-in shader choices.
+- [x] Custom shader choices when installed.
+- [x] Background image mode.
+- [x] Background image import.
+- [x] Saved background list.
+- [x] Background delete behavior.
+- [x] Unavailable background warning.
+- [x] Background intensity.
+- [x] Background speed.
+- [x] Custom shader colors where supported.
+- [x] Bloom controls.
+- [x] Particle controls.
+- [x] Cursor glow.
+- [x] Cursor trail.
+- [x] Text animation.
+- [x] CRT enabled/disabled.
+- [x] Scanline intensity.
+- [x] Curvature.
+- [x] Vignette.
+- [x] Chromatic aberration.
+- [x] Grain.
+- [x] Live preview for background images, shaders, bloom, CRT, and cursor effects.
 
 Bring back or finish in the active Terminal page:
-- [ ] Theme apply controls for built-in themes.
-- [ ] User theme apply/delete controls.
-- [ ] Save current appearance as a user theme.
-- [ ] Theme view flags if they still map to real behavior.
-- [ ] Cursor style: block, beam, underline.
-- [ ] Cursor blink rate.
-- [ ] Time-of-day warmth if it still exists as a real config feature.
-- [ ] Terminal font size if it should live here instead of only global zoom.
-- [ ] Terminal font family only if we have a stable font selection path.
-
-Do not add now:
-- [ ] Imported `.itermcolors`, Alacritty, Kitty, WezTerm, or Ghostty theme support.
-- [ ] Per-shell prompt styling.
-- [ ] Per-command visual rules.
-- [ ] Advanced shader authoring UI.
+- [x] Theme apply controls for built-in themes.
+- [x] User theme apply/delete controls.
+- [x] Save current appearance as a user theme.
+- [x] Remove theme view flags from the active save UI because they are stored but not honored by active theme application.
+- [x] Cursor style: block, beam, underline.
+- [x] Cursor blink rate.
+- [x] Time-of-day warmth if it still exists as a real config feature.
+- [x] App/terminal font size and terminal line height.
 
 ## Code Editor Page
 
 The Code Editor page should focus on legibility and scanning. It should not own editing behavior.
 
 Add first:
-- [ ] Editor font size.
-- [ ] Optional inherit-from-terminal font size.
-- [ ] Editor line height.
-- [ ] Sidebar file tree font size if we want that visual control in Appearances.
-- [ ] Line number visibility.
-- [ ] Current line highlight.
-- [ ] Selection color preview.
-- [ ] Indent guide visibility.
-- [ ] Ruler visibility or ruler column display.
-- [ ] Word wrap visual preference if the behavior already exists.
-- [ ] Minimap visibility only if minimap behavior exists.
-- [ ] Git gutter visibility/intensity only if the Git gutter is active.
-- [ ] Diagnostic underline intensity.
-- [ ] Bracket matching highlight intensity.
-- [ ] Markdown preview padding/reading comfort if preview mode is active.
+- [x] Editor font size.
+- [x] Optional inherit-from-terminal font size.
+- [x] Editor line height.
+- [x] Sidebar file tree font size if we want that visual control in Appearances.
+- [x] Line number visibility.
+- [x] Current line highlight.
+- [x] Selection color preview.
+- [x] Ruler visibility or ruler column display.
+- [x] Word wrap visual preference if the behavior already exists.
 
 Preview should show:
-- [ ] syntax-colored sample code
-- [ ] line numbers
-- [ ] selection
-- [ ] current line
-- [ ] diagnostics
-- [ ] git gutter sample if enabled
-- [ ] Markdown preview sample only when preview controls are present
-
-Do not add now:
-- [ ] Vim/Emacs behavior settings.
-- [ ] Keybinding presets.
-- [ ] LSP server controls.
-- [ ] Per-language token theme editing.
-- [ ] Full editor chrome skins.
+- [x] syntax-colored sample code
+- [x] line numbers
+- [x] selection
+- [x] current line
+- [x] diagnostic marker
 
 ## Sketch Page
 
 The Sketch page should focus on canvas appearance and drawing defaults. It should not become a full design-tool settings page.
 
 Add first:
-- [ ] Canvas background: transparent, solid, paper, dark paper.
-- [ ] Canvas grid: off, dot grid, line grid.
-- [ ] Grid spacing.
-- [ ] Grid opacity.
-- [ ] Default stroke color.
-- [ ] Default fill color.
-- [ ] Default stroke width.
-- [ ] Default text size.
-- [ ] Selection outline color.
-- [ ] Handle size.
-- [ ] Canvas border or shadow visibility.
+- [x] Canvas background: theme or solid.
+- [x] Canvas grid: off, dot grid, line grid.
+- [x] Grid spacing.
+- [x] Grid opacity.
+- [x] Default stroke color.
+- [x] Default fill color.
+- [x] Default stroke width.
+- [x] Default text size.
+- [x] Selection outline color.
+- [x] Handle size.
+- [x] Canvas border or shadow visibility.
 
 Preview should show:
-- [ ] canvas background
-- [ ] grid
-- [ ] marker stroke
-- [ ] rectangle
-- [ ] text
-- [ ] selection outline and handles
-
-Do not add now:
-- [ ] Brush libraries.
-- [ ] Texture packs.
-- [ ] Whiteboard templates.
-- [ ] Large custom shape libraries.
-- [ ] Per-tool palette systems beyond simple defaults.
+- [x] canvas background
+- [x] grid
+- [x] marker stroke
+- [x] rectangle
+- [x] text
+- [x] selection outline and handles
 
 ## Theme And Background Storage
 
 Keep in core:
-- [ ] Saved background images.
-- [ ] User-saved themes.
-- [ ] Built-in themes.
-- [ ] Theme apply/delete.
-- [ ] Save current appearance as theme.
-- [ ] Background references that survive app rebuilds and packaged DMG use.
+- [x] Saved background images.
+- [x] User-saved themes.
+- [x] Built-in themes.
+- [x] Theme apply/delete.
+- [x] Save current appearance as theme.
+- [x] Background references that survive app rebuilds and packaged DMG use.
 
 Verify:
 - [ ] User themes round-trip current effect settings.
 - [ ] View flags are either honored or removed from the UI and saved theme schema.
-- [ ] Background references resolve from the background library, not stale absolute paths.
-- [ ] Built app can load saved background images and effects.
-- [ ] Built app shows unavailable-state messaging when an image is missing.
+- [x] Background references resolve from the background library, not stale absolute paths.
+- [x] Built app can load saved background images.
+- [x] Built app can load saved CRT, bloom, shader, and other effect settings.
+- [x] Built app shows unavailable-state messaging when an image is missing.
 
 ## Preview Requirements
 
 The preview is part of the feature, not decoration. It should update immediately and match the real surface closely enough to prevent confusion.
 
 Terminal preview:
-- [ ] ANSI colors.
-- [ ] cursor.
-- [ ] selection.
-- [ ] URL underline.
-- [ ] background shader or image.
-- [ ] bloom/CRT-style feedback where practical.
+- [x] ANSI-style colors.
+- [x] cursor.
+- [x] selection.
+- [x] URL underline.
+- [x] background shader or image.
+- [x] bloom/CRT-style feedback where practical.
 
 Code Editor preview:
-- [ ] syntax sample.
-- [ ] line numbers.
-- [ ] selection.
-- [ ] current line.
-- [ ] diagnostic marker.
-- [ ] Markdown preview sample if applicable.
+- [x] syntax sample.
+- [x] line numbers.
+- [x] selection.
+- [x] current line.
+- [x] diagnostic marker.
 
 Sketch preview:
-- [ ] grid.
-- [ ] stroke.
-- [ ] fill.
-- [ ] text.
-- [ ] selection handles.
+- [x] grid.
+- [x] stroke.
+- [x] fill.
+- [x] text.
+- [x] selection handles.
 
 Preview content should be fixed sample content. It should not inspect user project files.
 

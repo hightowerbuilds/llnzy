@@ -1,6 +1,7 @@
 use crate::sketch::{
-    default_export_file_name, export_svg_to_path, list_saved_sketches, SketchElement, SketchPoint,
-    SketchState, SketchSymbolKind, SketchTool, MAX_SKETCH_ZOOM, MIN_SKETCH_ZOOM,
+    default_export_file_name, export_svg_to_path, list_saved_sketches, SketchCanvasBackgroundMode,
+    SketchElement, SketchGridMode, SketchPoint, SketchState, SketchSymbolKind, SketchTool,
+    MAX_SKETCH_ZOOM, MIN_SKETCH_ZOOM,
 };
 use std::path::Path;
 
@@ -229,12 +230,27 @@ fn render_canvas(
         ui.allocate_exact_size(canvas_size, egui::Sense::click_and_drag());
     let painter = ui.painter_at(canvas_rect);
 
-    painter.rect_filled(canvas_rect, egui::Rounding::same(4.0), appearance.canvas_bg);
-    painter.rect_stroke(
-        canvas_rect,
-        egui::Rounding::same(4.0),
-        egui::Stroke::new(1.0, appearance.active_btn),
-    );
+    if sketch.appearance.canvas_shadow_visible {
+        painter.rect_filled(
+            canvas_rect.translate(egui::vec2(5.0, 5.0)),
+            egui::Rounding::same(5.0),
+            egui::Color32::from_rgba_unmultiplied(0, 0, 0, 70),
+        );
+    }
+
+    let canvas_bg = match sketch.appearance.canvas_background_mode {
+        SketchCanvasBackgroundMode::Theme => appearance.canvas_bg,
+        SketchCanvasBackgroundMode::Solid => rgba32(sketch.appearance.canvas_background_color),
+    };
+    painter.rect_filled(canvas_rect, egui::Rounding::same(4.0), canvas_bg);
+    if sketch.appearance.canvas_border_visible {
+        painter.rect_stroke(
+            canvas_rect,
+            egui::Rounding::same(4.0),
+            egui::Stroke::new(1.0, appearance.active_btn),
+        );
+    }
+    paint_canvas_grid(&painter, canvas_rect, sketch);
 
     sketch.last_canvas_size = [
         canvas_rect.width() / sketch.zoom.max(0.01),
@@ -246,6 +262,61 @@ fn render_canvas(
     paint_inline_text_cursor(ctx, &painter, canvas_rect, sketch);
 
     canvas_rect
+}
+
+fn paint_canvas_grid(painter: &egui::Painter, canvas_rect: egui::Rect, sketch: &SketchState) {
+    if !sketch.appearance.grid_visible() {
+        return;
+    }
+
+    let spacing = (sketch.appearance.effective_grid_spacing() * sketch.zoom).max(4.0);
+    let opacity = (sketch.appearance.effective_grid_opacity() * 255.0).clamp(0.0, 255.0) as u8;
+    let color = egui::Color32::from_rgba_unmultiplied(180, 190, 210, opacity);
+    let clipped = painter.with_clip_rect(canvas_rect);
+
+    match sketch.appearance.grid_mode {
+        SketchGridMode::Hidden => {}
+        SketchGridMode::Lines => {
+            let mut x = canvas_rect.left();
+            while x <= canvas_rect.right() {
+                clipped.line_segment(
+                    [
+                        egui::pos2(x, canvas_rect.top()),
+                        egui::pos2(x, canvas_rect.bottom()),
+                    ],
+                    egui::Stroke::new(1.0, color),
+                );
+                x += spacing;
+            }
+
+            let mut y = canvas_rect.top();
+            while y <= canvas_rect.bottom() {
+                clipped.line_segment(
+                    [
+                        egui::pos2(canvas_rect.left(), y),
+                        egui::pos2(canvas_rect.right(), y),
+                    ],
+                    egui::Stroke::new(1.0, color),
+                );
+                y += spacing;
+            }
+        }
+        SketchGridMode::Dots => {
+            let mut x = canvas_rect.left();
+            while x <= canvas_rect.right() {
+                let mut y = canvas_rect.top();
+                while y <= canvas_rect.bottom() {
+                    clipped.circle_filled(egui::pos2(x, y), 1.2, color);
+                    y += spacing;
+                }
+                x += spacing;
+            }
+        }
+    }
+}
+
+fn rgba32(color: [u8; 4]) -> egui::Color32 {
+    egui::Color32::from_rgba_unmultiplied(color[0], color[1], color[2], color[3])
 }
 
 fn render_save_as_prompt(ui: &mut egui::Ui, sketch: &mut SketchState) {

@@ -2,6 +2,9 @@ use super::settings_hotkeys;
 use super::settings_tabs::{self, WorkspaceAction};
 use super::types::SettingsTab;
 use crate::config::Config;
+use crate::sketch::{
+    save_appearance_settings, SketchCanvasBackgroundMode, SketchGridMode, SketchState,
+};
 use crate::theme_store;
 use crate::workspace_store::SavedWorkspace;
 
@@ -38,7 +41,12 @@ impl Default for SettingsUiState {
 }
 
 impl SettingsUiState {
-    pub fn render_appearances(&mut self, ctx: &egui::Context, config: &mut Config) {
+    pub fn render_appearances(
+        &mut self,
+        ctx: &egui::Context,
+        config: &mut Config,
+        sketch: &mut SketchState,
+    ) {
         egui::CentralPanel::default()
             .frame(
                 egui::Frame::none()
@@ -46,7 +54,7 @@ impl SettingsUiState {
                     .inner_margin(egui::Margin::same(18.0)),
             )
             .show(ctx, |ui| {
-                self.render_appearances_ui(ui, config);
+                self.render_appearances_ui(ui, config, sketch);
             });
     }
 
@@ -75,8 +83,13 @@ impl SettingsUiState {
         output
     }
 
-    pub(crate) fn render_appearances_ui(&mut self, ui: &mut egui::Ui, config: &mut Config) {
-        render_appearance_panel(ui, self, config);
+    pub(crate) fn render_appearances_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        config: &mut Config,
+        sketch: &mut SketchState,
+    ) {
+        render_appearance_panel(ui, self, config, sketch);
     }
 
     pub(crate) fn render_settings_ui(
@@ -110,12 +123,12 @@ impl SettingsUiState {
     }
 }
 
-fn render_appearance_panel(ui: &mut egui::Ui, state: &mut SettingsUiState, config: &mut Config) {
-    let _appearance_settings_renderers = (
-        settings_tabs::render_themes_tab as fn(&mut egui::Ui, &mut Config),
-        settings_tabs::render_text_tab as fn(&mut egui::Ui, &mut Config),
-    );
-
+fn render_appearance_panel(
+    ui: &mut egui::Ui,
+    state: &mut SettingsUiState,
+    config: &mut Config,
+    sketch: &mut SketchState,
+) {
     let full = ui.available_size();
     let nav_h = 44.0;
     let nav_gap = 18.0;
@@ -139,10 +152,16 @@ fn render_appearance_panel(ui: &mut egui::Ui, state: &mut SettingsUiState, confi
             .layout(egui::Layout::top_down(egui::Align::Min)),
     );
     effects_ui.set_clip_rect(left_rect);
-    if matches!(state.active_appearance, AppearancePage::Terminal) {
-        render_terminal_effects_column(&mut effects_ui, config, column_w, content_size.y);
-    } else {
-        render_placeholder_column(&mut effects_ui, "Effects", column_w, content_size.y);
+    match state.active_appearance {
+        AppearancePage::Terminal => {
+            render_terminal_controls_column(&mut effects_ui, config, column_w, content_size.y);
+        }
+        AppearancePage::CodeEditor => {
+            render_code_editor_controls_column(&mut effects_ui, config, column_w, content_size.y);
+        }
+        AppearancePage::Sketch => {
+            render_sketch_controls_column(&mut effects_ui, sketch, column_w, content_size.y);
+        }
     }
 
     let mut preview_ui = ui.new_child(
@@ -151,7 +170,14 @@ fn render_appearance_panel(ui: &mut egui::Ui, state: &mut SettingsUiState, confi
             .layout(egui::Layout::top_down(egui::Align::Min)),
     );
     preview_ui.set_clip_rect(right_rect);
-    render_preview_column(&mut preview_ui, state, config, column_w, content_size.y);
+    render_preview_column(
+        &mut preview_ui,
+        state,
+        config,
+        sketch,
+        column_w,
+        content_size.y,
+    );
 
     ui.add_space(nav_gap);
     egui::Frame::none()
@@ -169,7 +195,12 @@ fn render_appearance_panel(ui: &mut egui::Ui, state: &mut SettingsUiState, confi
     ui.add_space(footer_clearance);
 }
 
-fn render_terminal_effects_column(ui: &mut egui::Ui, config: &mut Config, width: f32, height: f32) {
+fn render_terminal_controls_column(
+    ui: &mut egui::Ui,
+    config: &mut Config,
+    width: f32,
+    height: f32,
+) {
     let inner_w = (width - 32.0).max(88.0);
     let inner_h = (height - 32.0).max(1.0);
     ui.set_min_width(width);
@@ -194,12 +225,51 @@ fn render_terminal_effects_column(ui: &mut egui::Ui, config: &mut Config, width:
                 .show(ui, |ui| {
                     ui.set_min_width(content_w);
                     ui.set_max_width(content_w);
+                    render_terminal_typography_controls(ui, config);
+                    ui.add_space(16.0);
+                    ui.separator();
+                    ui.add_space(16.0);
+                    settings_tabs::render_themes_tab(ui, config);
+                    ui.add_space(16.0);
+                    ui.separator();
+                    ui.add_space(16.0);
+                    settings_tabs::render_text_tab(ui, config);
+                    ui.add_space(16.0);
+                    ui.separator();
+                    ui.add_space(16.0);
                     settings_tabs::render_background_tab(ui, config);
                 });
         });
 }
 
-fn render_placeholder_column(ui: &mut egui::Ui, title: &str, width: f32, height: f32) {
+fn render_terminal_typography_controls(ui: &mut egui::Ui, config: &mut Config) {
+    ui.label(
+        egui::RichText::new("Typography")
+            .size(18.0)
+            .color(egui::Color32::WHITE),
+    );
+    ui.add_space(12.0);
+
+    egui::Grid::new("terminal_typography_settings")
+        .num_columns(2)
+        .spacing([24.0, 10.0])
+        .show(ui, |ui| {
+            ui.label(appearance_control_label("App Font Size"));
+            ui.add(egui::Slider::new(&mut config.font_size, 8.0..=40.0).text("px"));
+            ui.end_row();
+
+            ui.label(appearance_control_label("Terminal Line Height"));
+            ui.add(egui::Slider::new(&mut config.line_height, 0.9..=2.2).text("x"));
+            ui.end_row();
+        });
+}
+
+fn render_code_editor_controls_column(
+    ui: &mut egui::Ui,
+    config: &mut Config,
+    width: f32,
+    height: f32,
+) {
     let inner_w = (width - 32.0).max(88.0);
     let inner_h = (height - 32.0).max(1.0);
     ui.set_min_width(width);
@@ -211,22 +281,228 @@ fn render_placeholder_column(ui: &mut egui::Ui, title: &str, width: f32, height:
         .rounding(egui::Rounding::same(4.0))
         .inner_margin(egui::Margin::same(16.0))
         .show(ui, |ui| {
+            let content_w = (inner_w - 14.0).max(72.0);
             ui.set_min_width(inner_w);
             ui.set_max_width(inner_w);
             ui.set_min_height(inner_h);
             ui.set_max_height(inner_h);
-            ui.label(
-                egui::RichText::new(title)
-                    .size(14.0)
-                    .color(egui::Color32::from_rgb(235, 240, 250)),
-            );
+            egui::ScrollArea::vertical()
+                .id_salt("code_editor_appearance_column_scroll")
+                .auto_shrink([false, false])
+                .max_width(inner_w)
+                .max_height(inner_h)
+                .show(ui, |ui| {
+                    ui.set_min_width(content_w);
+                    ui.set_max_width(content_w);
+                    settings_tabs::render_editor_appearance_tab(ui, config);
+                });
         });
+}
+
+fn render_sketch_controls_column(
+    ui: &mut egui::Ui,
+    sketch: &mut SketchState,
+    width: f32,
+    height: f32,
+) {
+    let inner_w = (width - 32.0).max(88.0);
+    let inner_h = (height - 32.0).max(1.0);
+    ui.set_min_width(width);
+    ui.set_max_width(width);
+    ui.set_min_height(height);
+    ui.set_max_height(height);
+    egui::Frame::none()
+        .fill(egui::Color32::from_rgb(30, 30, 30))
+        .rounding(egui::Rounding::same(4.0))
+        .inner_margin(egui::Margin::same(16.0))
+        .show(ui, |ui| {
+            let content_w = (inner_w - 14.0).max(72.0);
+            ui.set_min_width(inner_w);
+            ui.set_max_width(inner_w);
+            ui.set_min_height(inner_h);
+            ui.set_max_height(inner_h);
+            egui::ScrollArea::vertical()
+                .id_salt("sketch_appearance_column_scroll")
+                .auto_shrink([false, false])
+                .max_width(inner_w)
+                .max_height(inner_h)
+                .show(ui, |ui| {
+                    ui.set_min_width(content_w);
+                    ui.set_max_width(content_w);
+                    render_sketch_appearance_controls(ui, sketch);
+                });
+        });
+}
+
+fn render_sketch_appearance_controls(ui: &mut egui::Ui, sketch: &mut SketchState) {
+    ui.label(
+        egui::RichText::new("Sketch")
+            .size(18.0)
+            .color(egui::Color32::WHITE),
+    );
+    ui.add_space(4.0);
+    ui.label(
+        egui::RichText::new("Canvas defaults for new sketch objects.")
+            .size(13.0)
+            .color(egui::Color32::from_rgb(160, 160, 170)),
+    );
+    ui.add_space(12.0);
+
+    let mut appearance_changed = false;
+    egui::Grid::new("sketch_appearance_settings")
+        .num_columns(2)
+        .spacing([24.0, 10.0])
+        .show(ui, |ui| {
+            ui.label(appearance_control_label("Canvas Background"));
+            egui::ComboBox::from_id_salt("sketch_canvas_background_mode")
+                .selected_text(match sketch.appearance.canvas_background_mode {
+                    SketchCanvasBackgroundMode::Theme => "Theme",
+                    SketchCanvasBackgroundMode::Solid => "Solid",
+                })
+                .show_ui(ui, |ui| {
+                    appearance_changed |= ui
+                        .selectable_value(
+                            &mut sketch.appearance.canvas_background_mode,
+                            SketchCanvasBackgroundMode::Theme,
+                            "Theme",
+                        )
+                        .changed();
+                    appearance_changed |= ui
+                        .selectable_value(
+                            &mut sketch.appearance.canvas_background_mode,
+                            SketchCanvasBackgroundMode::Solid,
+                            "Solid",
+                        )
+                        .changed();
+                });
+            ui.end_row();
+
+            if sketch.appearance.canvas_background_mode == SketchCanvasBackgroundMode::Solid {
+                ui.label(appearance_control_label("Canvas Color"));
+                appearance_changed |= ui
+                    .color_edit_button_srgba_unmultiplied(
+                        &mut sketch.appearance.canvas_background_color,
+                    )
+                    .changed();
+                ui.end_row();
+            }
+
+            ui.label(appearance_control_label("Grid"));
+            egui::ComboBox::from_id_salt("sketch_grid_mode")
+                .selected_text(match sketch.appearance.grid_mode {
+                    SketchGridMode::Hidden => "Off",
+                    SketchGridMode::Lines => "Lines",
+                    SketchGridMode::Dots => "Dots",
+                })
+                .show_ui(ui, |ui| {
+                    appearance_changed |= ui
+                        .selectable_value(
+                            &mut sketch.appearance.grid_mode,
+                            SketchGridMode::Hidden,
+                            "Off",
+                        )
+                        .changed();
+                    appearance_changed |= ui
+                        .selectable_value(
+                            &mut sketch.appearance.grid_mode,
+                            SketchGridMode::Lines,
+                            "Lines",
+                        )
+                        .changed();
+                    appearance_changed |= ui
+                        .selectable_value(
+                            &mut sketch.appearance.grid_mode,
+                            SketchGridMode::Dots,
+                            "Dots",
+                        )
+                        .changed();
+                });
+            ui.end_row();
+
+            ui.label(appearance_control_label("Grid Spacing"));
+            appearance_changed |= ui
+                .add(egui::Slider::new(&mut sketch.appearance.grid_spacing, 4.0..=128.0).text("px"))
+                .changed();
+            ui.end_row();
+
+            ui.label(appearance_control_label("Grid Opacity"));
+            appearance_changed |= ui
+                .add(egui::Slider::new(&mut sketch.appearance.grid_opacity, 0.0..=1.0).text(""))
+                .changed();
+            ui.end_row();
+
+            ui.label(appearance_control_label("Stroke Color"));
+            ui.color_edit_button_srgba_unmultiplied(&mut sketch.style.stroke_color);
+            ui.end_row();
+
+            ui.label(appearance_control_label("Fill Color"));
+            let mut fill_enabled = sketch.style.fill_color.is_some();
+            ui.horizontal(|ui| {
+                if ui.checkbox(&mut fill_enabled, "").changed() {
+                    sketch.style.fill_color = fill_enabled.then_some([80, 140, 220, 72]);
+                }
+                if let Some(fill) = &mut sketch.style.fill_color {
+                    ui.color_edit_button_srgba_unmultiplied(fill);
+                }
+            });
+            ui.end_row();
+
+            ui.label(appearance_control_label("Stroke Width"));
+            ui.add(egui::Slider::new(&mut sketch.style.stroke_width, 1.0..=14.0).text("px"));
+            ui.end_row();
+
+            ui.label(appearance_control_label("Text Size"));
+            ui.add(egui::Slider::new(&mut sketch.style.font_size, 10.0..=48.0).text("px"));
+            ui.end_row();
+
+            ui.label(appearance_control_label("Selection Color"));
+            appearance_changed |= ui
+                .color_edit_button_srgba_unmultiplied(
+                    &mut sketch.appearance.selection_outline_color,
+                )
+                .changed();
+            ui.end_row();
+
+            ui.label(appearance_control_label("Handle Size"));
+            appearance_changed |= ui
+                .add(egui::Slider::new(&mut sketch.appearance.handle_size, 2.0..=24.0).text("px"))
+                .changed();
+            ui.end_row();
+
+            ui.label(appearance_control_label("Canvas Border"));
+            appearance_changed |= ui
+                .add(egui::Checkbox::without_text(
+                    &mut sketch.appearance.canvas_border_visible,
+                ))
+                .changed();
+            ui.end_row();
+
+            ui.label(appearance_control_label("Canvas Shadow"));
+            appearance_changed |= ui
+                .add(egui::Checkbox::without_text(
+                    &mut sketch.appearance.canvas_shadow_visible,
+                ))
+                .changed();
+            ui.end_row();
+        });
+
+    if appearance_changed {
+        sketch.appearance = sketch.appearance.normalized();
+        if let Err(err) = save_appearance_settings(&sketch.appearance) {
+            log::warn!("Failed to save sketch appearance settings: {err}");
+        }
+    }
+}
+
+fn appearance_control_label(text: &str) -> egui::RichText {
+    egui::RichText::new(text).size(16.0)
 }
 
 fn render_preview_column(
     ui: &mut egui::Ui,
     state: &mut SettingsUiState,
     config: &Config,
+    sketch: &SketchState,
     width: f32,
     height: f32,
 ) {
@@ -245,16 +521,298 @@ fn render_preview_column(
             ui.set_max_width(inner_w);
             ui.set_min_height(inner_h);
             ui.set_max_height(inner_h);
-            if matches!(state.active_appearance, AppearancePage::Terminal) {
-                render_terminal_mock_preview(ui, config, state);
-            } else {
-                ui.label(
-                    egui::RichText::new("Preview")
-                        .size(14.0)
-                        .color(egui::Color32::from_rgb(235, 240, 250)),
-                );
+            match state.active_appearance {
+                AppearancePage::Terminal => render_terminal_mock_preview(ui, config, state),
+                AppearancePage::CodeEditor => render_code_editor_mock_preview(ui, config),
+                AppearancePage::Sketch => render_sketch_mock_preview(ui, config, sketch),
             }
         });
+}
+
+fn render_sketch_mock_preview(ui: &mut egui::Ui, config: &Config, sketch: &SketchState) {
+    let available = ui.available_size();
+    let preview_w = available.x.max(1.0);
+    let preview_h = available.y.max(1.0);
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(preview_w, preview_h), egui::Sense::hover());
+    let painter = ui.painter_at(rect).with_clip_rect(rect);
+    let bg = config.colors.background;
+    let fg = config.colors.foreground;
+    let canvas = rect.shrink2(egui::vec2(18.0, 18.0));
+
+    painter.rect_filled(
+        rect,
+        egui::Rounding::same(4.0),
+        egui::Color32::from_rgb(bg[0], bg[1], bg[2]),
+    );
+    if sketch.appearance.canvas_shadow_visible {
+        painter.rect_filled(
+            canvas.translate(egui::vec2(5.0, 5.0)),
+            egui::Rounding::same(5.0),
+            egui::Color32::from_rgba_unmultiplied(0, 0, 0, 70),
+        );
+    }
+    let canvas_bg = match sketch.appearance.canvas_background_mode {
+        SketchCanvasBackgroundMode::Theme => {
+            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 16)
+        }
+        SketchCanvasBackgroundMode::Solid => sketch_rgba(sketch.appearance.canvas_background_color),
+    };
+    painter.rect_filled(canvas, egui::Rounding::same(4.0), canvas_bg);
+    if sketch.appearance.canvas_border_visible {
+        painter.rect_stroke(
+            canvas,
+            egui::Rounding::same(4.0),
+            egui::Stroke::new(
+                1.0,
+                egui::Color32::from_rgba_unmultiplied(255, 255, 255, 45),
+            ),
+        );
+    }
+
+    if sketch.appearance.grid_visible() {
+        let grid_alpha =
+            (sketch.appearance.effective_grid_opacity() * 255.0).clamp(0.0, 255.0) as u8;
+        let grid_color = egui::Color32::from_rgba_unmultiplied(fg[0], fg[1], fg[2], grid_alpha);
+        let spacing = sketch.appearance.effective_grid_spacing();
+        let mut x = canvas.left() + spacing;
+        while x < canvas.right() {
+            match sketch.appearance.grid_mode {
+                SketchGridMode::Hidden => {}
+                SketchGridMode::Lines => {
+                    painter.line_segment(
+                        [egui::pos2(x, canvas.top()), egui::pos2(x, canvas.bottom())],
+                        egui::Stroke::new(1.0, grid_color),
+                    );
+                }
+                SketchGridMode::Dots => {
+                    let mut y = canvas.top() + spacing;
+                    while y < canvas.bottom() {
+                        painter.circle_filled(egui::pos2(x, y), 1.2, grid_color);
+                        y += spacing;
+                    }
+                }
+            }
+            x += spacing;
+        }
+        if sketch.appearance.grid_mode == SketchGridMode::Lines {
+            let mut y = canvas.top() + spacing;
+            while y < canvas.bottom() {
+                painter.line_segment(
+                    [egui::pos2(canvas.left(), y), egui::pos2(canvas.right(), y)],
+                    egui::Stroke::new(1.0, grid_color),
+                );
+                y += spacing;
+            }
+        }
+    }
+
+    let stroke_color = sketch_rgba(sketch.style.stroke_color);
+    let stroke = egui::Stroke::new(sketch.style.stroke_width.max(1.0), stroke_color);
+    let marker_points = [
+        egui::pos2(canvas.left() + 34.0, canvas.top() + 62.0),
+        egui::pos2(canvas.left() + 82.0, canvas.top() + 42.0),
+        egui::pos2(canvas.left() + 132.0, canvas.top() + 74.0),
+        egui::pos2(canvas.left() + 190.0, canvas.top() + 50.0),
+    ];
+    painter.add(egui::Shape::line(marker_points.to_vec(), stroke));
+
+    let rect_preview = egui::Rect::from_min_size(
+        egui::pos2(canvas.left() + 44.0, canvas.center().y + 2.0),
+        egui::vec2((canvas.width() * 0.42).clamp(80.0, 180.0), 72.0),
+    );
+    if let Some(fill) = sketch.style.fill_color {
+        painter.rect_filled(rect_preview, egui::Rounding::same(4.0), sketch_rgba(fill));
+    }
+    painter.rect_stroke(
+        rect_preview,
+        egui::Rounding::same(4.0),
+        egui::Stroke::new(sketch.style.stroke_width.max(1.0), stroke_color),
+    );
+
+    painter.text(
+        egui::pos2(rect_preview.right() + 24.0, rect_preview.top() + 8.0),
+        egui::Align2::LEFT_TOP,
+        "Sketch",
+        egui::FontId::proportional(sketch.style.font_size),
+        stroke_color,
+    );
+
+    let handle_color = sketch_rgba(sketch.appearance.selection_outline_color);
+    let handle_size = sketch.appearance.effective_handle_size();
+    painter.rect_stroke(
+        rect_preview.expand(handle_size * 0.7),
+        egui::Rounding::same(4.0),
+        egui::Stroke::new(1.0, handle_color),
+    );
+    for corner in [
+        rect_preview.left_top(),
+        rect_preview.right_top(),
+        rect_preview.left_bottom(),
+        rect_preview.right_bottom(),
+    ] {
+        painter.rect_filled(
+            egui::Rect::from_center_size(corner, egui::vec2(handle_size, handle_size)),
+            egui::Rounding::same(2.0),
+            handle_color,
+        );
+    }
+}
+
+fn sketch_rgba(color: [u8; 4]) -> egui::Color32 {
+    egui::Color32::from_rgba_unmultiplied(color[0], color[1], color[2], color[3])
+}
+
+fn render_code_editor_mock_preview(ui: &mut egui::Ui, config: &Config) {
+    let available = ui.available_size();
+    let preview_w = available.x.max(1.0);
+    let preview_h = available.y.max(1.0);
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(preview_w, preview_h), egui::Sense::hover());
+    let painter = ui.painter_at(rect).with_clip_rect(rect);
+
+    let bg = config.colors.background;
+    let fg = config.colors.foreground;
+    let accent = config.colors.cursor;
+    let selection = config.colors.selection;
+    let font_size = config
+        .editor
+        .font_size
+        .unwrap_or((config.font_size - 2.0).max(10.0));
+    let line_h = (font_size * config.editor.line_height.clamp(1.0, 2.2)).max(17.0);
+    let font = egui::FontId::monospace(font_size);
+
+    painter.rect_filled(
+        rect,
+        egui::Rounding::same(4.0),
+        egui::Color32::from_rgb(bg[0], bg[1], bg[2]),
+    );
+
+    let gutter_w = if config.editor.show_line_numbers {
+        42.0
+    } else {
+        24.0
+    };
+    let editor = rect.shrink2(egui::vec2(14.0, 14.0));
+    let gutter = egui::Rect::from_min_max(
+        editor.min,
+        egui::pos2(
+            (editor.left() + gutter_w).min(editor.right()),
+            editor.bottom(),
+        ),
+    );
+    painter.rect_filled(
+        gutter,
+        egui::Rounding::ZERO,
+        egui::Color32::from_rgba_unmultiplied(0, 0, 0, 35),
+    );
+
+    let current_line = egui::Rect::from_min_size(
+        egui::pos2(editor.left(), editor.top() + line_h),
+        egui::vec2(editor.width(), line_h),
+    );
+    if config.editor.highlight_current_line {
+        painter.rect_filled(
+            current_line,
+            egui::Rounding::ZERO,
+            egui::Color32::from_rgba_unmultiplied(accent[0], accent[1], accent[2], 28),
+        );
+    }
+
+    let code_left = editor.left() + gutter_w + 12.0;
+    for ruler in &config.editor.rulers {
+        let x = code_left + (*ruler as f32 * font_size * 0.34);
+        if x < editor.right() {
+            painter.line_segment(
+                [egui::pos2(x, editor.top()), egui::pos2(x, editor.bottom())],
+                egui::Stroke::new(
+                    1.0,
+                    egui::Color32::from_rgba_unmultiplied(255, 255, 255, 24),
+                ),
+            );
+        }
+    }
+
+    let selection_rect = egui::Rect::from_min_size(
+        egui::pos2(code_left + font_size * 4.0, editor.top() + line_h + 2.0),
+        egui::vec2(font_size * 8.0, line_h - 2.0),
+    );
+    painter.rect_filled(
+        selection_rect,
+        egui::Rounding::same(2.0),
+        egui::Color32::from_rgba_unmultiplied(selection[0], selection[1], selection[2], 120),
+    );
+
+    let sample = [
+        (
+            "fn render_preview() {",
+            egui::Color32::from_rgb(198, 120, 221),
+        ),
+        (
+            "    let title = \"LLNZY\";",
+            egui::Color32::from_rgb(171, 178, 191),
+        ),
+        (
+            "    diagnostics.push(title);",
+            egui::Color32::from_rgb(97, 175, 239),
+        ),
+        ("}", egui::Color32::from_rgb(fg[0], fg[1], fg[2])),
+    ];
+    for (idx, (line, color)) in sample.iter().enumerate() {
+        let y = editor.top() + idx as f32 * line_h + 3.0;
+        if config.editor.show_line_numbers {
+            painter.text(
+                egui::pos2(gutter.right() - 10.0, y),
+                egui::Align2::RIGHT_TOP,
+                (idx + 1).to_string(),
+                font.clone(),
+                egui::Color32::from_rgba_unmultiplied(fg[0], fg[1], fg[2], 120),
+            );
+        }
+        let display_line = if config.editor.visible_whitespace {
+            line.replace(' ', "·")
+        } else {
+            (*line).to_string()
+        };
+        painter.text(
+            egui::pos2(code_left, y),
+            egui::Align2::LEFT_TOP,
+            display_line,
+            font.clone(),
+            *color,
+        );
+    }
+
+    let diagnostic_y = editor.top() + 2.0 * line_h + line_h - 4.0;
+    let diagnostic_start = code_left + font_size * 4.0;
+    let diagnostic_end = (diagnostic_start + font_size * 13.0).min(editor.right() - 8.0);
+    let diagnostic_color = egui::Color32::from_rgb(230, 85, 85);
+    let mut x = diagnostic_start;
+    while x < diagnostic_end {
+        let next = (x + 5.0).min(diagnostic_end);
+        let y = diagnostic_y
+            + if ((x - diagnostic_start) / 5.0) as i32 % 2 == 0 {
+                0.0
+            } else {
+                2.0
+            };
+        painter.line_segment(
+            [
+                egui::pos2(x, y),
+                egui::pos2(next, diagnostic_y + 2.0 - (y - diagnostic_y)),
+            ],
+            egui::Stroke::new(1.3, diagnostic_color),
+        );
+        x = next;
+    }
+
+    if config.editor.word_wrap {
+        painter.text(
+            egui::pos2(code_left, editor.bottom() - line_h),
+            egui::Align2::LEFT_TOP,
+            "// wrap preview enabled",
+            egui::FontId::monospace((font_size - 1.0).max(9.0)),
+            egui::Color32::from_rgba_unmultiplied(fg[0], fg[1], fg[2], 135),
+        );
+    }
 }
 
 fn render_terminal_mock_preview(ui: &mut egui::Ui, config: &Config, state: &mut SettingsUiState) {
@@ -301,7 +859,8 @@ fn render_terminal_mock_preview(ui: &mut egui::Ui, config: &Config, state: &mut 
     render_preview_terminal_background(ui, &painter, terminal, config, state);
 
     let text_origin = terminal.left_top() + egui::vec2(18.0, 18.0);
-    let line_h = 22.0;
+    let preview_font_size = (config.font_size * 0.85).clamp(10.0, 18.0);
+    let line_h = (preview_font_size * config.line_height.clamp(1.0, 2.2)).max(16.0);
     let fg_rgb = config.fg();
     let cursor_rgb = config.cursor_color();
     let fg = egui::Color32::from_rgb(fg_rgb[0], fg_rgb[1], fg_rgb[2]);
@@ -310,6 +869,7 @@ fn render_terminal_mock_preview(ui: &mut egui::Ui, config: &Config, state: &mut 
     let lines = [
         ("llnzy:~ $", fg),
         ("cargo build --release", accent),
+        ("https://llnzy.local/docs", accent),
         ("Finished release profile", muted),
         ("llnzy:~ $", fg),
     ];
@@ -333,13 +893,38 @@ fn render_terminal_mock_preview(ui: &mut egui::Ui, config: &Config, state: &mut 
         );
     }
 
+    let selection_rgb = config.colors.selection;
+    let selection_rect = egui::Rect::from_min_size(
+        text_origin + egui::vec2(preview_font_size * 7.6, line_h + 1.0),
+        egui::vec2(preview_font_size * 6.2, (line_h - 3.0).max(12.0)),
+    );
+    painter.rect_filled(
+        selection_rect,
+        egui::Rounding::same(2.0),
+        egui::Color32::from_rgba_unmultiplied(
+            selection_rgb[0],
+            selection_rgb[1],
+            selection_rgb[2],
+            (config.colors.selection_alpha.clamp(0.0, 1.0) * 255.0) as u8,
+        ),
+    );
+
     for (idx, (text, color)) in lines.iter().enumerate() {
         let pos = text_origin + egui::vec2(0.0, idx as f32 * line_h);
         paint_preview_text(&painter, pos, text, *color, config);
     }
 
+    let url_y = text_origin.y + 2.0 * line_h + preview_font_size + 2.0;
+    painter.line_segment(
+        [
+            egui::pos2(text_origin.x, url_y),
+            egui::pos2(text_origin.x + preview_font_size * 12.2, url_y),
+        ],
+        egui::Stroke::new(1.0, accent),
+    );
+
     let cursor_x = text_origin.x + 76.0;
-    let cursor_y = text_origin.y + 3.0 * line_h + 1.0;
+    let cursor_y = text_origin.y + 4.0 * line_h + 1.0;
     if effects_active && (config.effects.cursor_glow || bloom_active) {
         painter.circle_filled(
             egui::pos2(cursor_x + 3.5, cursor_y + 7.5),
@@ -348,7 +933,10 @@ fn render_terminal_mock_preview(ui: &mut egui::Ui, config: &Config, state: &mut 
         );
     }
     painter.rect_filled(
-        egui::Rect::from_min_size(egui::pos2(cursor_x, cursor_y), egui::vec2(7.0, 15.0)),
+        egui::Rect::from_min_size(
+            egui::pos2(cursor_x, cursor_y),
+            egui::vec2((preview_font_size * 0.5).max(6.0), (line_h - 4.0).max(12.0)),
+        ),
         egui::Rounding::same(1.0),
         accent,
     );
@@ -553,7 +1141,7 @@ fn paint_preview_text(
     color: egui::Color32,
     config: &Config,
 ) {
-    let font = egui::FontId::monospace(13.0);
+    let font = egui::FontId::monospace((config.font_size * 0.85).clamp(10.0, 18.0));
     let effects_active = config.effects.enabled;
     let bloom_active = effects_active && config.effects.bloom_enabled;
     let crt_active = effects_active && config.effects.crt_enabled;

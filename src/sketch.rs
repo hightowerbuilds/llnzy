@@ -8,6 +8,7 @@ pub(super) const DEFAULT_SYMBOL_H: f32 = 70.0;
 pub const MIN_SKETCH_ZOOM: f32 = 0.5;
 pub const MAX_SKETCH_ZOOM: f32 = 2.0;
 
+mod appearance;
 mod commands;
 mod export;
 mod geometry;
@@ -18,6 +19,11 @@ mod serialization;
 mod state;
 mod tools;
 
+pub use appearance::{
+    appearance_settings_path, load_appearance_settings, load_appearance_settings_from_path,
+    save_appearance_settings, save_appearance_settings_to_path, SketchAppearanceSettings,
+    SketchCanvasBackgroundMode, SketchGridMode,
+};
 pub use export::{default_export_file_name, export_svg_to_path};
 pub use media::{fit_image_size, import_sketch_image};
 pub use model::{

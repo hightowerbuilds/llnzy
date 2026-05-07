@@ -260,26 +260,6 @@ pub(crate) fn render_themes_tab(ui: &mut egui::Ui, config: &mut Config) {
             ui.end_row();
         });
 
-    ui.add_space(4.0);
-    ui.label(
-        egui::RichText::new("Apply theme to:")
-            .size(13.0)
-            .color(egui::Color32::from_rgb(170, 175, 190)),
-    );
-
-    let flags_id = ui.id().with("save_theme_flags");
-    let mut terminal_flag: bool = ui.data_mut(|d| d.get_temp(flags_id.with("t")).unwrap_or(true));
-    let mut editor_flag: bool = ui.data_mut(|d| d.get_temp(flags_id.with("e")).unwrap_or(false));
-    let mut sketch_flag: bool = ui.data_mut(|d| d.get_temp(flags_id.with("s")).unwrap_or(false));
-    let mut stacker_flag: bool = ui.data_mut(|d| d.get_temp(flags_id.with("st")).unwrap_or(false));
-
-    ui.horizontal(|ui| {
-        ui.checkbox(&mut terminal_flag, "Terminal");
-        ui.checkbox(&mut editor_flag, "Editor");
-        ui.checkbox(&mut sketch_flag, "Sketch");
-        ui.checkbox(&mut stacker_flag, "Stacker");
-    });
-
     ui.add_space(8.0);
     if ui
         .add(
@@ -294,10 +274,10 @@ pub(crate) fn render_themes_tab(ui: &mut egui::Ui, config: &mut Config) {
     {
         if !theme_name.trim().is_empty() {
             let flags = theme_store::ThemeViewFlags {
-                terminal: terminal_flag,
-                editor: editor_flag,
-                sketch: sketch_flag,
-                stacker: stacker_flag,
+                terminal: true,
+                editor: false,
+                sketch: false,
+                stacker: false,
             };
             match theme_store::save_theme(theme_name.trim(), theme_desc.trim(), config, &flags) {
                 Ok(_) => {
@@ -312,9 +292,5 @@ pub(crate) fn render_themes_tab(ui: &mut egui::Ui, config: &mut Config) {
     ui.data_mut(|d| {
         d.insert_temp(theme_name_id, theme_name);
         d.insert_temp(theme_desc_id, theme_desc);
-        d.insert_temp(flags_id.with("t"), terminal_flag);
-        d.insert_temp(flags_id.with("e"), editor_flag);
-        d.insert_temp(flags_id.with("s"), sketch_flag);
-        d.insert_temp(flags_id.with("st"), stacker_flag);
     });
 }

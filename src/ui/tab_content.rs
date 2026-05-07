@@ -75,7 +75,9 @@ pub(super) fn render_tab_content(
         Some(TabKind::Sketch) => render_sketch(ctx, &appearance, state),
         Some(TabKind::Git) => render_git(ctx, state),
         Some(TabKind::Appearances) => {
-            state.settings.render_appearances(ctx, config);
+            state
+                .settings
+                .render_appearances(ctx, config, &mut state.sketch.state);
         }
         Some(TabKind::Settings) => {
             let output = state.settings.render_settings(ctx, config);
@@ -338,7 +340,9 @@ fn render_joined_pane(
                 egui::Color32::from_rgb(36, 36, 36),
                 18.0,
                 |ui| {
-                    state.settings.render_appearances_ui(ui, config);
+                    state
+                        .settings
+                        .render_appearances_ui(ui, config, &mut state.sketch.state);
                 },
             );
         }

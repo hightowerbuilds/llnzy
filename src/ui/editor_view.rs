@@ -69,8 +69,12 @@ pub(crate) fn render_text_editor(
     }
     let editor_font_size = editor_config.font_size.clamp(8.0, 40.0);
     let char_width = (editor_font_size * 0.62).max(5.0);
-    let line_height = (editor_font_size * 1.38).max(14.0);
-    let gutter_width = (gutter_digits as f32 + 1.5) * char_width;
+    let line_height = (editor_font_size * editor_config.line_height.clamp(1.0, 2.2)).max(14.0);
+    let gutter_width = if editor_config.show_line_numbers {
+        (gutter_digits as f32 + 1.5) * char_width
+    } else {
+        (char_width * 2.4).max(22.0)
+    };
     let text_margin = 2.0;
 
     // Handle keyboard input (may modify buffer). Drop any stale edit record so

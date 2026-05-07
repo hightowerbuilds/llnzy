@@ -222,8 +222,17 @@ impl Config {
             if let Some(font_size) = editor.font_size {
                 self.editor.font_size = Some(font_size.clamp(8.0, 40.0));
             }
+            if let Some(line_height) = editor.line_height {
+                self.editor.line_height = line_height.clamp(1.0, 2.2);
+            }
             if let Some(sidebar_font_size) = editor.sidebar_font_size {
                 self.editor.sidebar_font_size = sidebar_font_size.clamp(8.0, 24.0);
+            }
+            if let Some(show_line_numbers) = editor.show_line_numbers {
+                self.editor.show_line_numbers = show_line_numbers;
+            }
+            if let Some(highlight_current_line) = editor.highlight_current_line {
+                self.editor.highlight_current_line = highlight_current_line;
             }
             if let Some(preset) = editor.keybinding_preset {
                 self.editor.keybinding_preset = KeybindingPreset::from_str(&preset);

@@ -95,6 +95,9 @@ fn default_config_values_match_existing_defaults() {
     assert_eq!(config.opacity, 1.0);
     assert_eq!(config.scroll_lines, 3);
     assert!(!config.terminal.copy_on_select);
+    assert_eq!(config.editor.line_height, 1.38);
+    assert!(config.editor.show_line_numbers);
+    assert!(config.editor.highlight_current_line);
 }
 
 #[test]
@@ -193,6 +196,9 @@ fn apply_editor_settings_and_language_overrides() {
             visible_whitespace = false
             word_wrap = true
             font_size = 15.5
+            line_height = 1.65
+            show_line_numbers = false
+            highlight_current_line = false
 
             [editor.languages.rust]
             tab_size = 2
@@ -207,6 +213,9 @@ fn apply_editor_settings_and_language_overrides() {
     assert_eq!(config.editor.rulers, vec![80, 120]);
     assert!(config.editor.word_wrap);
     assert_eq!(config.editor.font_size, Some(15.5));
+    assert_eq!(config.editor.line_height, 1.65);
+    assert!(!config.editor.show_line_numbers);
+    assert!(!config.editor.highlight_current_line);
 
     let effective = config.editor.effective_for(Some("rust"), 16.0);
     assert_eq!(effective.tab_size, 2);

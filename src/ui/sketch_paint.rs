@@ -1,8 +1,8 @@
 use std::path::Path;
 
 use crate::sketch::{
-    DraftElement, ImageElement, RectElement, SketchElement, SketchPoint, SketchState,
-    SketchSymbolKind, SymbolElement,
+    DraftElement, ImageElement, RectElement, SketchAppearanceSettings, SketchElement, SketchPoint,
+    SketchState, SketchSymbolKind, SymbolElement,
 };
 
 pub(super) fn paint_sketch_document(
@@ -45,6 +45,7 @@ pub(super) fn paint_sketch_document(
                 element,
                 sketch.selected == Some(index),
                 sketch.zoom,
+                &sketch.appearance,
             );
         }
     }
@@ -62,7 +63,14 @@ pub(super) fn paint_sketch_document(
         }
         Some(DraftElement::Rectangle { .. }) => {
             if let Some(rect) = sketch.draft_rectangle() {
-                paint_rectangle(painter, canvas_rect, &rect, false, sketch.zoom);
+                paint_rectangle(
+                    painter,
+                    canvas_rect,
+                    &rect,
+                    false,
+                    sketch.zoom,
+                    &sketch.appearance,
+                );
             }
         }
         None => {}
@@ -75,6 +83,7 @@ fn paint_sketch_element(
     element: &SketchElement,
     selected: bool,
     zoom: f32,
+    appearance: &SketchAppearanceSettings,
 ) {
     match element {
         SketchElement::Stroke(stroke) => {
@@ -88,7 +97,7 @@ fn paint_sketch_element(
             );
         }
         SketchElement::Rectangle(rect) => {
-            paint_rectangle(painter, canvas_rect, rect, selected, zoom);
+            paint_rectangle(painter, canvas_rect, rect, selected, zoom, appearance);
         }
         SketchElement::Text(text) => {
             if text.text.is_empty() {
@@ -105,11 +114,15 @@ fn paint_sketch_element(
                 color32(text.style.stroke_color),
             );
             if selected {
-                paint_selection(painter, screen_rect);
+                paint_selection(painter, screen_rect, appearance);
             }
         }
-        SketchElement::Image(image) => paint_image(painter, canvas_rect, image, selected, zoom),
-        SketchElement::Symbol(symbol) => paint_symbol(painter, canvas_rect, symbol, selected, zoom),
+        SketchElement::Image(image) => {
+            paint_image(painter, canvas_rect, image, selected, zoom, appearance)
+        }
+        SketchElement::Symbol(symbol) => {
+            paint_symbol(painter, canvas_rect, symbol, selected, zoom, appearance)
+        }
     }
 }
 
@@ -188,6 +201,7 @@ fn paint_rectangle(
     rect: &RectElement,
     selected: bool,
     zoom: f32,
+    appearance: &SketchAppearanceSettings,
 ) {
     let screen_rect = egui::Rect::from_min_size(
         canvas_to_screen(canvas_rect, SketchPoint::new(rect.x, rect.y), zoom),
@@ -205,7 +219,7 @@ fn paint_rectangle(
         ),
     );
     if selected {
-        paint_selection(painter, screen_rect);
+        paint_selection(painter, screen_rect, appearance);
     }
 }
 
@@ -215,6 +229,7 @@ fn paint_image(
     image: &ImageElement,
     selected: bool,
     zoom: f32,
+    appearance: &SketchAppearanceSettings,
 ) {
     let screen_rect = egui::Rect::from_min_size(
         canvas_to_screen(canvas_rect, SketchPoint::new(image.x, image.y), zoom),
@@ -242,7 +257,7 @@ fn paint_image(
         );
     }
     if selected {
-        paint_selection(painter, screen_rect);
+        paint_selection(painter, screen_rect, appearance);
     }
 }
 
@@ -252,6 +267,7 @@ fn paint_symbol(
     symbol: &SymbolElement,
     selected: bool,
     zoom: f32,
+    appearance: &SketchAppearanceSettings,
 ) {
     let screen_rect = egui::Rect::from_min_size(
         canvas_to_screen(canvas_rect, SketchPoint::new(symbol.x, symbol.y), zoom),
@@ -272,7 +288,7 @@ fn paint_symbol(
         color32(symbol.style.stroke_color),
     );
     if selected {
-        paint_selection(painter, screen_rect);
+        paint_selection(painter, screen_rect, appearance);
     }
 }
 
@@ -363,12 +379,32 @@ pub(super) fn paint_symbol_shape(
     }
 }
 
-fn paint_selection(painter: &egui::Painter, rect: egui::Rect) {
+fn paint_selection(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    appearance: &SketchAppearanceSettings,
+) {
+    let color = color32(appearance.selection_outline_color);
+    let handle_size = appearance.effective_handle_size();
+    let expanded = rect.expand(handle_size * 0.7);
     painter.rect_stroke(
-        rect.expand(4.0),
+        expanded,
         egui::Rounding::same(3.0),
-        egui::Stroke::new(1.0, egui::Color32::from_rgb(60, 130, 255)),
+        egui::Stroke::new(1.0, color),
     );
+
+    for corner in [
+        expanded.left_top(),
+        expanded.right_top(),
+        expanded.left_bottom(),
+        expanded.right_bottom(),
+    ] {
+        painter.rect_filled(
+            egui::Rect::from_center_size(corner, egui::vec2(handle_size, handle_size)),
+            egui::Rounding::same(2.0),
+            color,
+        );
+    }
 }
 
 fn load_sketch_image_texture(

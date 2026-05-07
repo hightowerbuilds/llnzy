@@ -1,12 +1,14 @@
 use super::{
-    load_document_from_path, sketch_path, DraftElement, MoveDraft, SketchDocument, SketchStyle,
-    SketchTool, TextDraft, MAX_SKETCH_ZOOM, MIN_SKETCH_ZOOM,
+    load_appearance_settings, load_document_from_path, sketch_path, DraftElement, MoveDraft,
+    SketchAppearanceSettings, SketchDocument, SketchStyle, SketchTool, TextDraft, MAX_SKETCH_ZOOM,
+    MIN_SKETCH_ZOOM,
 };
 
 pub struct SketchState {
     pub document: SketchDocument,
     pub tool: SketchTool,
     pub style: SketchStyle,
+    pub appearance: SketchAppearanceSettings,
     pub draft: Option<DraftElement>,
     pub selected: Option<usize>,
     pub text_draft: Option<TextDraft>,
@@ -37,6 +39,7 @@ impl Default for SketchState {
             document: SketchDocument::default(),
             tool: SketchTool::Marker,
             style: SketchStyle::default(),
+            appearance: SketchAppearanceSettings::default(),
             draft: None,
             selected: None,
             text_draft: None,
@@ -62,8 +65,10 @@ impl SketchState {
         let document = sketch_path()
             .and_then(|path| load_document_from_path(&path).ok())
             .unwrap_or_default();
+        let appearance = load_appearance_settings();
         Self {
             document,
+            appearance,
             ..Self::default()
         }
     }
@@ -98,6 +103,10 @@ impl SketchState {
 
     pub fn reset_zoom(&mut self) {
         self.zoom = 1.0;
+    }
+
+    pub fn set_appearance(&mut self, appearance: SketchAppearanceSettings) {
+        self.appearance = appearance.normalized();
     }
 
     pub(super) fn push_undo(&mut self) {

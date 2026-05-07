@@ -103,7 +103,10 @@ pub struct EditorConfig {
     pub word_wrap: bool,
     pub visible_whitespace: bool,
     pub font_size: Option<f32>,
+    pub line_height: f32,
     pub sidebar_font_size: f32,
+    pub show_line_numbers: bool,
+    pub highlight_current_line: bool,
     pub keybinding_preset: KeybindingPreset,
     pub languages: HashMap<String, EditorLanguageConfig>,
 }
@@ -125,6 +128,9 @@ pub struct EffectiveEditorConfig {
     pub word_wrap: bool,
     pub visible_whitespace: bool,
     pub font_size: f32,
+    pub line_height: f32,
+    pub show_line_numbers: bool,
+    pub highlight_current_line: bool,
 }
 
 impl Default for EditorConfig {
@@ -136,7 +142,10 @@ impl Default for EditorConfig {
             word_wrap: false,
             visible_whitespace: false,
             font_size: None,
+            line_height: 1.38,
             sidebar_font_size: 14.0,
+            show_line_numbers: true,
+            highlight_current_line: true,
             keybinding_preset: KeybindingPreset::VsCode,
             languages: HashMap::new(),
         }
@@ -158,6 +167,9 @@ impl EditorConfig {
             font_size: self
                 .font_size
                 .unwrap_or((terminal_font_size - 2.0).max(10.0)),
+            line_height: self.line_height.clamp(1.0, 2.2),
+            show_line_numbers: self.show_line_numbers,
+            highlight_current_line: self.highlight_current_line,
         };
 
         if let Some(lang) = lang_id.and_then(|id| self.languages.get(id)) {

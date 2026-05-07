@@ -48,6 +48,22 @@ Related future roadmap:
 - [ ] Add non-blocking notification toasts.
 - [ ] Keep README, config docs, known limitations, and product claims aligned with actual behavior.
 
+## Appearance Future Backlog
+
+- [ ] Add terminal font family selection only after a stable font discovery and selection path exists.
+- [ ] Add imported terminal theme formats if there is real demand: `.itermcolors`, Alacritty, Kitty, WezTerm, Ghostty.
+- [ ] Add per-shell prompt styling only after prompt/title handling has a stable product model.
+- [ ] Add per-command visual rules only after command identity and history are reliable enough to support them.
+- [ ] Add advanced shader authoring UI only after the existing shader/background system is stable.
+- [ ] Add editor indent guide visibility controls if indentation guide behavior remains useful enough to expose.
+- [ ] Add editor minimap visibility controls if minimap behavior remains in the product.
+- [ ] Add editor git gutter visibility/intensity controls if the git gutter remains active.
+- [ ] Add diagnostic underline and bracket matching intensity controls only if current defaults are not enough.
+- [ ] Add Markdown preview reading-comfort controls and preview sample after Markdown preview has a stable appearance contract.
+- [ ] Keep Vim/Emacs behavior settings, keybinding presets, LSP server controls, and per-language token theme editing out of Appearances unless they get their own focused settings model.
+- [ ] Consider full editor chrome skins only if the app grows beyond simple theme/color surfaces.
+- [ ] Add Sketch brush libraries, texture packs, whiteboard templates, large custom shape libraries, and per-tool palette systems only if Sketch becomes a deeper design surface.
+
 ## Source Editor
 
 - [ ] Finish find-and-replace behavior and tests if replacement remains deferred.

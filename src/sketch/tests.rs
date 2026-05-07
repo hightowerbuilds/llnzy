@@ -217,6 +217,92 @@ fn selected_image_resizes_proportionally() {
 }
 
 #[test]
+fn sketch_appearance_defaults_preserve_current_canvas_behavior() {
+    let state = SketchState::default();
+
+    assert_eq!(
+        state.appearance.canvas_background_mode,
+        SketchCanvasBackgroundMode::Theme
+    );
+    assert_eq!(state.appearance.grid_mode, SketchGridMode::Hidden);
+    assert!(!state.appearance.grid_visible());
+    assert_eq!(
+        state.appearance.selection_outline_color,
+        [60, 130, 255, 255]
+    );
+    assert!(state.appearance.canvas_border_visible);
+    assert!(!state.appearance.canvas_shadow_visible);
+}
+
+#[test]
+fn sketch_appearance_normalizes_numeric_controls() {
+    let mut state = SketchState::default();
+    state.set_appearance(SketchAppearanceSettings {
+        grid_mode: SketchGridMode::Lines,
+        grid_spacing: 1.0,
+        grid_opacity: 2.0,
+        handle_size: 100.0,
+        ..SketchAppearanceSettings::default()
+    });
+
+    assert_eq!(state.appearance.effective_grid_spacing(), 4.0);
+    assert_eq!(state.appearance.effective_grid_opacity(), 1.0);
+    assert_eq!(state.appearance.effective_handle_size(), 24.0);
+    assert!(state.appearance.grid_visible());
+}
+
+#[test]
+fn sketch_appearance_settings_round_trip_via_path() {
+    let dir = std::env::temp_dir().join("llnzy_test_sketch_appearance");
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join("appearance.json");
+    let settings = SketchAppearanceSettings {
+        canvas_background_mode: SketchCanvasBackgroundMode::Solid,
+        canvas_background_color: [12, 24, 36, 255],
+        grid_mode: SketchGridMode::Dots,
+        grid_spacing: 32.0,
+        grid_opacity: 0.4,
+        selection_outline_color: [220, 120, 80, 255],
+        handle_size: 8.0,
+        canvas_border_visible: false,
+        canvas_shadow_visible: true,
+    };
+
+    save_appearance_settings_to_path(&settings, &path).unwrap();
+    let loaded = load_appearance_settings_from_path(&path).unwrap();
+
+    assert_eq!(loaded, settings);
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn sketch_appearance_settings_load_missing_fields_from_defaults() {
+    let dir = std::env::temp_dir().join("llnzy_test_sketch_appearance_partial");
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join("appearance.json");
+    std::fs::write(
+        &path,
+        r#"{
+  "canvas_background_mode": "solid",
+  "canvas_background_color": [1, 2, 3, 255]
+}"#,
+    )
+    .unwrap();
+
+    let loaded = load_appearance_settings_from_path(&path).unwrap();
+
+    assert_eq!(
+        loaded.canvas_background_mode,
+        SketchCanvasBackgroundMode::Solid
+    );
+    assert_eq!(loaded.canvas_background_color, [1, 2, 3, 255]);
+    assert_eq!(loaded.grid_mode, SketchGridMode::Hidden);
+    assert_eq!(loaded.effective_grid_spacing(), 24.0);
+    assert!(loaded.canvas_border_visible);
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
 fn serialization_round_trip() {
     let mut document = SketchDocument::default();
     document.elements.push(SketchElement::Text(TextElement {
