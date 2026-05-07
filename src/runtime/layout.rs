@@ -271,16 +271,6 @@ impl App {
         }
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn content_rect(&self) -> Option<PaneRect> {
-        self.screen_layout.as_ref().map(|l| PaneRect {
-            x: l.content.x,
-            y: l.content.y,
-            w: l.content.w,
-            h: l.content.h,
-        })
-    }
-
     pub(crate) fn invalidate_and_redraw(&mut self) {
         if let Some(r) = &mut self.renderer {
             r.invalidate_text_cache();

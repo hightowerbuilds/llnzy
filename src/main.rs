@@ -7,7 +7,7 @@ mod runtime;
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, Ime, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
-use winit::keyboard::{Key, KeyCode, ModifiersState, NamedKey, PhysicalKey};
+use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::window::{Window, WindowAttributes, WindowId};
 
 use llnzy::app::click_state::ClickState;
@@ -16,6 +16,7 @@ use llnzy::app::file_location::parse_file_location;
 use llnzy::app::keybinding_commands::app_command_for_keybinding;
 use llnzy::app::terminal_events::terminal_input_event;
 use llnzy::app::window_state;
+use llnzy::app::zoom_shortcuts::app_zoom_shortcut_command;
 use llnzy::config::Config;
 use llnzy::diagnostics::write_diagnostic;
 use llnzy::error_log::{ErrorLog, ErrorPanel};
@@ -654,43 +655,6 @@ fn rect_contains(rect: llnzy::session::Rect, x: f32, y: f32) -> bool {
     x >= rect.x && x < rect.x + rect.w && y >= rect.y && y < rect.y + rect.h
 }
 
-fn app_zoom_shortcut_command(
-    key_event: &winit::event::KeyEvent,
-    modifiers: ModifiersState,
-) -> Option<AppCommand> {
-    app_zoom_shortcut_command_for_key(&key_event.logical_key, key_event.physical_key, modifiers)
-}
-
-fn app_zoom_shortcut_command_for_key(
-    logical_key: &Key,
-    physical_key: PhysicalKey,
-    modifiers: ModifiersState,
-) -> Option<AppCommand> {
-    if !primary_modifier(modifiers) || modifiers.alt_key() {
-        return None;
-    }
-
-    match physical_key {
-        PhysicalKey::Code(KeyCode::Equal) | PhysicalKey::Code(KeyCode::NumpadAdd) => {
-            Some(AppCommand::ZoomIn)
-        }
-        PhysicalKey::Code(KeyCode::Minus) | PhysicalKey::Code(KeyCode::NumpadSubtract) => {
-            Some(AppCommand::ZoomOut)
-        }
-        PhysicalKey::Code(KeyCode::Digit0) | PhysicalKey::Code(KeyCode::Numpad0) => {
-            Some(AppCommand::ZoomReset)
-        }
-        _ => match logical_key {
-            Key::Character(ch) if ch.as_str() == "+" || ch.as_str() == "=" => {
-                Some(AppCommand::ZoomIn)
-            }
-            Key::Character(ch) if ch.as_str() == "-" => Some(AppCommand::ZoomOut),
-            Key::Character(ch) if ch.as_str() == "0" => Some(AppCommand::ZoomReset),
-            _ => None,
-        },
-    }
-}
-
 fn store_stacker_webview_selection(ui: &mut UiState, selection: StackerSelection) {
     let editor_id = egui::Id::new(STACKER_PROMPT_EDITOR_ID);
     let ctx = ui.ctx.clone();
@@ -870,36 +834,6 @@ mod tests {
             stacker_editor_shortcut(&ch("b"), ModifiersState::empty()),
             None
         );
-    }
-
-    #[test]
-    fn app_zoom_shortcuts_use_physical_plus_minus_keys() {
-        assert!(matches!(
-            app_zoom_shortcut_command_for_key(
-                &ch("="),
-                PhysicalKey::Code(KeyCode::Equal),
-                primary_mods()
-            ),
-            Some(AppCommand::ZoomIn)
-        ));
-        assert!(matches!(
-            app_zoom_shortcut_command_for_key(
-                &ch("-"),
-                PhysicalKey::Code(KeyCode::Minus),
-                primary_mods()
-            ),
-            Some(AppCommand::ZoomOut)
-        ));
-    }
-
-    #[test]
-    fn app_zoom_shortcuts_block_plain_plus_minus() {
-        assert!(app_zoom_shortcut_command_for_key(
-            &ch("="),
-            PhysicalKey::Code(KeyCode::Equal),
-            ModifiersState::empty()
-        )
-        .is_none());
     }
 }
 

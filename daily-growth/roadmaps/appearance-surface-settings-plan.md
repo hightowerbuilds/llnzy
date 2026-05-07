@@ -1,371 +1,279 @@
 # Appearance Surface Settings Plan
 
+Status: active roadmap cleanup
+
 ## Purpose
 
-The Appearances area should help users make LLNZY feel familiar without turning
-the core app into an unlimited theme builder. Core appearance settings should
-cover the durable, high-impact controls users expect in a terminal, code editor,
-prompt editor, and sketch surface. Highly custom themes, marketplace palettes,
-deep CSS-like styling, and specialized visual packs should live at the extension
-level.
+This plan describes what should happen inside LLNZY's Appearances tab now. It is not a full theme marketplace plan, extension plan, or generalized design-system roadmap. The goal is to make the existing Appearances tab useful, predictable, and aligned with the current app surfaces.
 
-This document describes what belongs in the core Appearances tab, how the
-surface pages should be organized, and what should intentionally stay out of
-core.
+## Current Relevance Check
 
-## Product Principle
+Still relevant:
+- Keep Appearances separate from Settings.
+- Organize Appearances around user-facing surfaces.
+- Keep Terminal appearance work as the first priority.
+- Preserve immediate previews for appearance changes.
+- Keep background images, shaders, CRT, bloom, particles, cursor glow, cursor trail, and text animation in Appearances.
+- Keep user-saved themes and background image library behavior in core.
+- Keep behavior-heavy controls in Settings or the owning feature.
 
-Users should be able to make LLNZY resemble a familiar daily-driver environment:
+Trimmed from this document:
+- Stacker as a dedicated Appearances page. Stacker should inherit the main visual system for now.
+- A separate Shared page. Shared inheritance can wait until Terminal, Code Editor, and Sketch are working.
+- Large familiarity preset systems for VS Code, JetBrains, Vim, Emacs, iTerm, and similar products.
+- Theme marketplace, community theme browsing, imported terminal theme formats, and extension shader packs.
+- Deep per-widget styling, CSS-like styling, and open-ended theme authoring.
+- Full Sketch design-tool customization such as brush libraries, texture packs, and whiteboard templates.
 
-- a classic macOS Terminal or iTerm-style terminal
-- a VS Code, JetBrains, Vim, or Emacs-like editor feel
-- a quiet writing surface for Stacker
-- a plain or gridded sketch canvas
+Related future work:
+- Extension and marketplace-style appearance work belongs in `daily-growth/roadmaps/future/future-laundry.md`.
+- Crossover platform concerns belong in `daily-growth/roadmaps/future/crossover-compatibility.md`.
 
-They should not need to construct a fully custom visual language from scratch.
-Core should provide sane presets, inheritance, reset controls, and a focused set
-of controls. Extensions can provide richer theme packs, niche palettes, branded
-styles, and deeper surface-specific decoration.
+## Product Boundary
 
-## Recommended Information Architecture
+Appearances should control what users see:
+- colors
+- typography
+- backgrounds
+- visual effects
+- cursor style
+- preview behavior
+- surface-specific visual defaults
 
-Keep Appearances as a surface-oriented area:
+Settings should own behavior:
+- keybindings
+- shell program and process behavior
+- LSP configuration
+- Git refresh behavior
+- file watcher behavior
+- save and recovery behavior
+- workspace launch behavior
+- command behavior
 
-- `Terminal`
-- `Code Editor`
-- `Stacker`
-- `Sketch`
-- `Shared`
+## Current App Shape
 
-The current app already separates Appearances from broader Settings. Keep that
-boundary: behavior-heavy settings such as keybindings, save behavior, LSP
-behavior, build tasks, Git behavior, and file handling should remain in Settings
-or other feature-specific surfaces. Appearances should focus on what users see
-and visually scan.
+The Appearances tab currently has three surface buttons:
+- Terminal
+- Code Editor
+- Sketch
 
-## Shared Appearance Settings
+The current layout is a two-column surface:
+- left column: controls
+- right column: preview
+- bottom bar: surface navigation
 
-Shared settings define defaults that each surface can inherit or override.
+Current implementation state:
+- Terminal has live controls for background/effects and a terminal-style preview.
+- Code Editor currently shows placeholder controls.
+- Sketch currently shows placeholder controls.
+- Theme apply/save UI exists in older render helpers, but it is not currently part of the active Appearances panel.
+- Cursor/text controls exist in older render helpers, but they are not currently part of the active Appearances panel.
 
-Core controls:
+## Target Shape
 
-- App font scale: compact, standard, comfortable.
-- Base monospace font: bundled default, system default, or custom installed
-  family.
-- UI density: compact, standard, spacious.
-- Corner radius: square, subtle, soft.
-- Base color mode: dark, light, system.
-- Accent color: small curated list, not arbitrary full-theme editing.
-- Selection color and opacity.
-- Focus ring intensity.
-- Animation intensity: off, reduced, standard.
-- Effects scope: terminal only, active surface, all eligible surfaces.
-- Reset all appearance settings.
+Keep the three-page model:
+- Terminal
+- Code Editor
+- Sketch
 
-Core presets:
+Do not add Stacker or Shared pages right now. If Stacker needs visual settings later, add them only after the prompt editor has a clear visual need that is not solved by inherited app theme settings.
 
-- Minimal
-- Classic Terminal
-- Modern Editor
-- High Contrast
-- Low Distraction
-
-Out of core:
-
-- Arbitrary per-widget colors.
-- Full custom CSS-like surface styling.
-- User-authored theme packages.
-- Marketplace or community theme browsing.
-- Per-project automatic theme switching beyond workspace-level saved
-  appearance choices.
+Every page should have:
+- a focused control column
+- an immediate preview column
+- no dead buttons
+- no placeholder panels once the page is marked complete
+- responsive behavior inside joined panes
+- clear empty/unavailable states for assets
 
 ## Terminal Page
 
-The Terminal page is the most important familiarity page. Terminal users often
-have strong muscle memory around typography, cursor behavior, contrast, padding,
-and color palette.
+Terminal is the priority because it is the surface where backgrounds, CRT lines, bloom, opacity, and shader effects matter most.
 
-Core controls:
+Keep and verify:
+- [ ] Global effects enabled/disabled.
+- [ ] Background mode selector.
+- [ ] Built-in shader choices.
+- [ ] Custom shader choices when installed.
+- [ ] Background image mode.
+- [ ] Background image import.
+- [ ] Saved background list.
+- [ ] Background delete behavior.
+- [ ] Unavailable background warning.
+- [ ] Background intensity.
+- [ ] Background speed.
+- [ ] Custom shader colors where supported.
+- [ ] Bloom controls.
+- [ ] Particle controls.
+- [ ] Cursor glow.
+- [ ] Cursor trail.
+- [ ] Text animation.
+- [ ] CRT enabled/disabled.
+- [ ] Scanline intensity.
+- [ ] Curvature.
+- [ ] Vignette.
+- [ ] Chromatic aberration.
+- [ ] Grain.
+- [ ] Live preview for background images, shaders, bloom, CRT, and cursor effects.
 
-- Font family, font size, weight, italic style, ligatures, and line height.
-- Cell padding: compact, standard, spacious, plus advanced numeric padding.
-- Cursor style: block, beam, underline.
-- Cursor blink rate and blink enabled/disabled.
-- Cursor glow and cursor trail toggles.
-- Text animation toggle.
-- ANSI palette preset: One Dark, Dracula, Nord, Solarized Dark, Monokai,
-  Classic Terminal, High Contrast.
-- Foreground, background, cursor, and selection colors.
-- Selection opacity.
-- Window opacity.
-- Visual bell intensity.
-- Background mode: none, built-in shader, image.
-- Background intensity and animation speed.
-- Bloom, particles, CRT, scanline, vignette, grain, and chromatic aberration.
-- Effects preview mask: full terminal, terminal content only, none.
-- URL underline visibility.
-- Dim inactive joined terminal pane.
+Bring back or finish in the active Terminal page:
+- [ ] Theme apply controls for built-in themes.
+- [ ] User theme apply/delete controls.
+- [ ] Save current appearance as a user theme.
+- [ ] Theme view flags if they still map to real behavior.
+- [ ] Cursor style: block, beam, underline.
+- [ ] Cursor blink rate.
+- [ ] Time-of-day warmth if it still exists as a real config feature.
+- [ ] Terminal font size if it should live here instead of only global zoom.
+- [ ] Terminal font family only if we have a stable font selection path.
 
-Familiarity presets:
-
-- `LLNZY Minimal`: current clean terminal baseline.
-- `Classic Terminal`: dark background, high contrast text, no shader effects.
-- `iTerm-like`: compact padding, bright cursor, familiar ANSI contrast.
-- `VS Code Terminal`: editor-aligned font size, subtle background, no heavy
-  effects.
-- `CRT`: smoke, scanlines, bloom, low UI effect scope.
-
-Keep out of core:
-
-- Importing `.itermcolors`, Alacritty, Kitty, WezTerm, or Ghostty themes.
-- Per-command visual rules.
-- Per-shell prompt styling.
-- Custom WGSL shader management beyond selecting built-in or installed
-  extension shaders.
-
-These belong in extensions because they are open-ended compatibility and theme
-ecosystems.
+Do not add now:
+- [ ] Imported `.itermcolors`, Alacritty, Kitty, WezTerm, or Ghostty theme support.
+- [ ] Per-shell prompt styling.
+- [ ] Per-command visual rules.
+- [ ] Advanced shader authoring UI.
 
 ## Code Editor Page
 
-The Code Editor page should make editing feel familiar and legible while keeping
-language tooling and editing behavior elsewhere.
+The Code Editor page should focus on legibility and scanning. It should not own editing behavior.
 
-Core controls:
+Add first:
+- [ ] Editor font size.
+- [ ] Optional inherit-from-terminal font size.
+- [ ] Editor line height.
+- [ ] Sidebar file tree font size if we want that visual control in Appearances.
+- [ ] Line number visibility.
+- [ ] Current line highlight.
+- [ ] Selection color preview.
+- [ ] Indent guide visibility.
+- [ ] Ruler visibility or ruler column display.
+- [ ] Word wrap visual preference if the behavior already exists.
+- [ ] Minimap visibility only if minimap behavior exists.
+- [ ] Git gutter visibility/intensity only if the Git gutter is active.
+- [ ] Diagnostic underline intensity.
+- [ ] Bracket matching highlight intensity.
+- [ ] Markdown preview padding/reading comfort if preview mode is active.
 
-- Editor font size and optional inherit-from-terminal setting.
-- Editor font family override.
-- Line height.
-- Sidebar font size.
-- Editor density: compact, standard, spacious.
-- Line number visibility.
-- Relative line number visibility for Vim-oriented users.
-- Current line highlight.
-- Active selection color and inactive selection color.
-- Visible whitespace.
-- Indent guides.
-- Ruler columns.
-- Word wrap visual preference.
-- Minimap visibility and opacity.
-- Gutter visibility.
-- Git gutter visibility and intensity.
-- Diagnostic underline style: subtle, standard, high visibility.
-- Inlay hint visibility and opacity.
-- Code lens visibility.
-- Bracket pair highlight intensity.
-- Matching bracket highlight.
-- Fold marker visibility.
-- Markdown preview mode default: source, preview, split.
-- Syntax color preset: One Dark, LLNZY Minimal, High Contrast, Terminal Match.
+Preview should show:
+- [ ] syntax-colored sample code
+- [ ] line numbers
+- [ ] selection
+- [ ] current line
+- [ ] diagnostics
+- [ ] git gutter sample if enabled
+- [ ] Markdown preview sample only when preview controls are present
 
-Familiarity presets:
-
-- `VS Code-like`: line numbers, minimap optional, standard rulers, familiar
-  diagnostic styling.
-- `JetBrains-like`: stronger gutters, current line highlight, visible structure.
-- `Vim-like`: relative line numbers, compact density, minimal popups.
-- `Writing Mode`: larger line height, wrap on, minimap off.
-
-Keep out of core:
-
-- Per-language theme authoring.
-- Per-token custom color editing beyond a small semantic override surface.
-- Custom minimap rendering styles.
-- Extension-defined semantic token themes.
-- Full editor chrome skins.
-
-The editor can expose a small semantic color override later, but the default
-path should be curated presets and inheritance from shared settings.
-
-## Stacker Page
-
-Stacker is a writing and prompt-management surface. Its appearance controls
-should make prompt drafting feel calm, readable, and fast.
-
-Core controls:
-
-- Editor font family and size.
-- Editor line height.
-- Prompt editor width: narrow, standard, wide.
-- Prompt list density.
-- Category label visibility.
-- Queue bar visibility.
-- Queue preview density.
-- Toolbar density.
-- Markdown helper visibility.
-- Link and code span color intensity.
-- Active draft highlight.
-- Unsaved draft indicator style.
-- Focus mode: hide prompt list while editing.
-- Dictation/external input indicator visibility.
-- Apply terminal/editor accent color or use neutral Stacker accent.
-
-Familiarity presets:
-
-- `Compact Queue`: dense list, smaller editor, queue-first workflow.
-- `Writing Desk`: wider editor, larger line height, subdued chrome.
-- `Command Center`: visible toolbar, queue bar, categories, and draft state.
-
-Keep out of core:
-
-- Custom prompt card templates.
-- User-authored prompt list layouts.
-- Rich markdown preview themes.
-- Per-category colors beyond a small built-in accent set.
-- External tool branded input states.
-
-Those are better extension territory because Stacker could become a platform
-for very different prompt workflows.
+Do not add now:
+- [ ] Vim/Emacs behavior settings.
+- [ ] Keybinding presets.
+- [ ] LSP server controls.
+- [ ] Per-language token theme editing.
+- [ ] Full editor chrome skins.
 
 ## Sketch Page
 
-Sketch can come later, but the core appearance model should be clear now. Sketch
-appearance should focus on the canvas and drawing defaults, not turning the app
-into a full design tool.
+The Sketch page should focus on canvas appearance and drawing defaults. It should not become a full design-tool settings page.
 
-Core controls:
+Add first:
+- [ ] Canvas background: transparent, solid, paper, dark paper.
+- [ ] Canvas grid: off, dot grid, line grid.
+- [ ] Grid spacing.
+- [ ] Grid opacity.
+- [ ] Default stroke color.
+- [ ] Default fill color.
+- [ ] Default stroke width.
+- [ ] Default text size.
+- [ ] Selection outline color.
+- [ ] Handle size.
+- [ ] Canvas border or shadow visibility.
 
-- Canvas background: transparent, solid, paper, dark paper.
-- Canvas grid: off, dot grid, line grid.
-- Grid spacing.
-- Grid opacity.
-- Snap-to-grid visual indicator.
-- Default stroke color.
-- Default fill color.
-- Default stroke width.
-- Default text size.
-- Selection outline color.
-- Handle size: compact, standard, large.
-- Toolbar density.
-- Canvas shadow/border visibility.
-- Effects on canvas: off, background only, full surface.
+Preview should show:
+- [ ] canvas background
+- [ ] grid
+- [ ] marker stroke
+- [ ] rectangle
+- [ ] text
+- [ ] selection outline and handles
 
-Familiarity presets:
+Do not add now:
+- [ ] Brush libraries.
+- [ ] Texture packs.
+- [ ] Whiteboard templates.
+- [ ] Large custom shape libraries.
+- [ ] Per-tool palette systems beyond simple defaults.
 
-- `Blank Canvas`: no grid, neutral background.
-- `Notebook`: light paper, subtle line grid.
-- `Dark Board`: dark canvas, bright strokes.
-- `Diagramming`: grid on, snap indicator visible, clear handles.
+## Theme And Background Storage
 
-Keep out of core:
+Keep in core:
+- [ ] Saved background images.
+- [ ] User-saved themes.
+- [ ] Built-in themes.
+- [ ] Theme apply/delete.
+- [ ] Save current appearance as theme.
+- [ ] Background references that survive app rebuilds and packaged DMG use.
 
-- Brush libraries.
-- Texture packs.
-- Custom shape libraries.
-- Full whiteboard templates.
-- Per-tool custom palettes beyond defaults.
+Verify:
+- [ ] User themes round-trip current effect settings.
+- [ ] View flags are either honored or removed from the UI and saved theme schema.
+- [ ] Background references resolve from the background library, not stale absolute paths.
+- [ ] Built app can load saved background images and effects.
+- [ ] Built app shows unavailable-state messaging when an image is missing.
 
-Those are extension-level because they expand Sketch into a broader creative
-system.
+## Preview Requirements
 
-## Preview Model
+The preview is part of the feature, not decoration. It should update immediately and match the real surface closely enough to prevent confusion.
 
-Each Appearances page should show an immediate preview for that surface:
+Terminal preview:
+- [ ] ANSI colors.
+- [ ] cursor.
+- [ ] selection.
+- [ ] URL underline.
+- [ ] background shader or image.
+- [ ] bloom/CRT-style feedback where practical.
 
-- Terminal preview: ANSI colors, selection, cursor, URL underline, sample shell
-  output, and optional background/effects.
-- Code Editor preview: syntax sample, diagnostics, selection, current line,
-  line numbers, minimap, gutter, and inlay hint sample.
-- Stacker preview: prompt editor, queued prompts, category label, toolbar, and
-  draft indicator.
-- Sketch preview: canvas, grid, selection handles, stroke, rectangle, and text.
+Code Editor preview:
+- [ ] syntax sample.
+- [ ] line numbers.
+- [ ] selection.
+- [ ] current line.
+- [ ] diagnostic marker.
+- [ ] Markdown preview sample if applicable.
 
-Preview content should be fixed and representative. It should not inspect user
-files or require a live terminal/editor buffer.
+Sketch preview:
+- [ ] grid.
+- [ ] stroke.
+- [ ] fill.
+- [ ] text.
+- [ ] selection handles.
 
-## Configuration Model
-
-Recommended shape:
-
-- Shared settings provide defaults.
-- Each surface can inherit shared settings or override a small number of values.
-- Presets apply a bundle of core settings, not a full theme object.
-- Workspaces can remember which preset or surface overrides were active.
-- Extensions can register additional presets or richer theme packs later.
-
-Important rule: core presets should be reversible. Every surface page should
-offer:
-
-- Apply preset.
-- Reset this surface.
-- Inherit shared defaults.
-- Reset all appearances.
-
-## What Belongs In Settings Instead
-
-These should not move into Appearances:
-
-- Keybinding presets and individual keybindings.
-- Shell program and terminal process behavior.
-- Copy/paste behavior except visual selection affordances.
-- LSP enablement, server configuration, and code actions.
-- Save behavior and recovery behavior.
-- File watcher behavior.
-- Git refresh behavior.
-- Workspace launch behavior.
-- Sketch command behavior such as undo limits or serialization.
-
-Some current settings may visually sit near appearance controls, but behavior
-settings should remain outside Appearances to keep the mental model clean.
-
-## Extension Boundary
-
-Extensions should own anything that is broad, ecosystem-specific, or
-brand/theme-driven:
-
-- Theme imports from other terminals/editors.
-- Community color schemes.
-- Additional syntax themes.
-- Shader packs.
-- Stacker prompt card templates.
-- Sketch brushes, textures, shapes, and templates.
-- Per-language visual packs.
-- Per-project theme automation.
-- Advanced semantic token styling.
-
-Core should expose the stable settings API that extensions write into, but core
-does not need to provide every customization itself.
+Preview content should be fixed sample content. It should not inspect user project files.
 
 ## Suggested Rollout
 
-1. Terminal completeness
-   - Finish the Terminal page because it is the strongest familiarity surface.
-   - Include typography, cursor, palette, background, and effects controls.
+1. Terminal completion
+   - Keep the current background/effects controls.
+   - Reconnect active theme and cursor/text controls if they still belong in Appearances.
+   - Verify behavior in a packaged build.
 
-2. Code Editor fundamentals
-   - Add legibility and scanning controls: font, line height, line numbers,
-     rulers, whitespace, minimap, gutter, diagnostics, syntax preset.
+2. Code Editor page
+   - Replace placeholder with real legibility controls and a code preview.
+   - Keep behavior controls out of the page.
 
-3. Stacker page
-   - Add writing comfort and prompt-list density controls.
-   - Keep it calm and workflow-focused.
+3. Sketch page
+   - Replace placeholder with canvas/grid/default drawing controls and a sketch preview.
 
-4. Shared page
-   - Add inheritance, app density, accent, animation intensity, and reset
-     controls.
+4. Cleanup
+   - Remove unused appearance render helpers if they are no longer part of the active page.
+   - Remove or honor theme view flags.
+   - Keep Appearances responsive in joined panes.
 
-5. Sketch page
-   - Add canvas/grid/default drawing controls after Sketch behavior settles.
-
-6. Extension hook
-   - Define how external preset packs can register additional appearance
-     presets without changing core UI complexity.
-
-## Open Questions
-
-- Should user-saved themes remain in core, or should they become the first
-  extension-backed theme mechanism?
-- Should Terminal and Code Editor share one monospace font by default, or should
-  Code Editor default to terminal minus two pixels as it does today?
-- Should Stacker inherit editor typography or have a writing-first default?
-- Should background/effects be globally scoped, surface-scoped, or both?
-- Should built-in familiarity presets name real products directly, or use
-  descriptive labels such as `Classic Terminal` and `Modern Editor`?
+5. Manual verification
+   - Switch between Terminal, Code Editor, and Sketch pages.
+   - Apply built-in themes.
+   - Save, apply, and delete a user theme.
+   - Import, apply, and delete a background image.
+   - Verify CRT, bloom, background image, and shader effects in a packaged build.
 
 ## Bottom Line
 
-The core Appearances tab should make LLNZY feel familiar, legible, and
-comfortable across its main surfaces. It should provide curated presets and a
-small set of durable controls. Anything that turns appearance into an open-ended
-theme ecosystem should be designed as an extension capability instead of being
-absorbed into core.
+The Appearances tab should become a practical visual control center for Terminal, Code Editor, and Sketch. Terminal gets finished first. Code Editor and Sketch should stop being placeholders. Everything broader than that belongs in future backlog or extension planning.

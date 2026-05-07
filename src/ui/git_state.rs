@@ -281,14 +281,13 @@ impl GitUiState {
     }
 
     fn start_refresh(&mut self, candidate: PathBuf, force: bool) {
-        if !force
-            && self.loading
-            && self
-                .refresh_requested
-                .as_ref()
-                .is_some_and(|request| request.candidate == candidate)
-        {
-            return;
+        if self.loading {
+            let same_request = self.refresh_requested.as_ref().is_some_and(|request| {
+                request.candidate == candidate && request.options == self.log_options
+            });
+            if same_request || !force {
+                return;
+            }
         }
         let (tx, rx) = mpsc::channel();
         let request = RefreshRequest {
@@ -309,11 +308,14 @@ impl GitUiState {
     }
 
     fn poll_repo_watcher(&mut self) {
-        let Some(watcher) = &mut self.repo_watcher else {
-            return;
-        };
-        if watcher.poll() {
-            self.refresh();
+        let should_refresh = self
+            .repo_watcher
+            .as_mut()
+            .is_some_and(|watcher| watcher.poll());
+        if should_refresh {
+            if let Some(candidate) = self.candidate_root.clone() {
+                self.start_refresh(candidate, false);
+            }
         }
     }
 
@@ -687,6 +689,43 @@ mod tests {
 
         assert!(!state.refresh_result_is_current(&first));
         assert!(state.refresh_result_is_current(&second));
+    }
+
+    #[test]
+    fn manual_refresh_does_not_restart_identical_in_flight_refresh() {
+        let current = refresh_request(1, "/tmp/repo");
+        let (_tx, rx) = mpsc::channel();
+        let mut state = GitUiState {
+            candidate_root: Some(PathBuf::from("/tmp/repo")),
+            loading: true,
+            refresh_rx: Some(rx),
+            refresh_requested: Some(current.clone()),
+            ..GitUiState::default()
+        };
+
+        state.refresh();
+
+        assert_eq!(state.refresh_requested, Some(current));
+    }
+
+    #[test]
+    fn automatic_refresh_does_not_replace_in_flight_refresh() {
+        let current = refresh_request(1, "/tmp/repo");
+        let (_tx, rx) = mpsc::channel();
+        let mut state = GitUiState {
+            loading: true,
+            refresh_rx: Some(rx),
+            refresh_requested: Some(current.clone()),
+            log_options: GitLogOptions {
+                all_branches: true,
+                ..GitLogOptions::default()
+            },
+            ..GitUiState::default()
+        };
+
+        state.start_refresh(PathBuf::from("/tmp/repo"), false);
+
+        assert_eq!(state.refresh_requested, Some(current));
     }
 
     #[test]

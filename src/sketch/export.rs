@@ -1,8 +1,8 @@
 use std::path::Path;
 
 use super::{
-    RectElement, SketchDocument, SketchElement, SketchPoint, SketchSymbolKind, StrokeElement,
-    SymbolElement, TextElement,
+    RectElement, SketchDocument, SketchElement, SketchSymbolKind, StrokeElement, SymbolElement,
+    TextElement,
 };
 
 pub fn default_export_file_name(active_name: Option<&str>) -> String {
@@ -204,11 +204,6 @@ fn escape_text(value: &str) -> String {
         .replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
-}
-
-#[allow(dead_code)]
-fn point_attr(point: SketchPoint) -> String {
-    format!("{:.1},{:.1}", point.x, point.y)
 }
 
 #[cfg(test)]

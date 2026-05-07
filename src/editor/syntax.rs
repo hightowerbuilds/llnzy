@@ -127,8 +127,6 @@ impl SyntaxEngine {
         self.register("go", tree_sitter_go::LANGUAGE.into(), GO_HL);
         self.register("c", tree_sitter_c::LANGUAGE.into(), C_HL);
         self.register("json", tree_sitter_json::LANGUAGE.into(), JSON_HL);
-        // tree-sitter-toml 0.20 uses an older tree-sitter API — skipped until it updates
-        // self.register("toml", tree_sitter_toml::language().into(), TOML_HL);
         self.register("html", tree_sitter_html::LANGUAGE.into(), HTML_HL);
         self.register("css", tree_sitter_css::LANGUAGE.into(), CSS_HL);
         self.register("bash", tree_sitter_bash::LANGUAGE.into(), BASH_HL);
@@ -513,21 +511,6 @@ const JSON_HL: &str = r#"
 (false) @constant
 (pair key: (string) @property)
 ["," ":" "{" "}" "[" "]"] @punctuation
-"#;
-
-#[allow(dead_code)] // reserved for when tree-sitter-toml updates to 0.26
-const TOML_HL: &str = r#"
-(comment) @comment
-(string) @string
-(integer) @number
-(float) @number
-(boolean) @constant
-(bare_key) @property
-(quoted_key) @property
-(table (bare_key) @type)
-(table (dotted_key) @type)
-["=" "." ","] @operator
-["[" "]" "[[" "]]" "{" "}"] @punctuation
 "#;
 
 const HTML_HL: &str = r#"

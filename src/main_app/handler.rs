@@ -37,7 +37,11 @@ impl ApplicationHandler<UserEvent> for App {
         } = &event
         {
             if key_event.state == ElementState::Pressed {
-                if let Some(command) = app_zoom_shortcut_command(key_event, self.modifiers) {
+                if let Some(command) = app_zoom_shortcut_command(
+                    &key_event.logical_key,
+                    key_event.physical_key,
+                    self.modifiers,
+                ) {
                     let mut sidebar_changed = false;
                     self.handle_app_command(command, &mut sidebar_changed);
                     return;

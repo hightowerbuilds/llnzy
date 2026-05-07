@@ -101,23 +101,6 @@ fn render_header(ui: &mut egui::Ui, state: &mut GitUiState, snapshot: Option<&Gi
                         state.set_active_file_history(active_file);
                     }
                 }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let text = if state.loading {
-                        "Refreshing"
-                    } else {
-                        "Refresh"
-                    };
-                    if ui
-                        .add(
-                            egui::Button::new(egui::RichText::new(text).size(13.0).color(TEXT))
-                                .fill(egui::Color32::from_rgb(48, 50, 52))
-                                .rounding(egui::Rounding::same(4.0)),
-                        )
-                        .clicked()
-                    {
-                        state.refresh();
-                    }
-                });
             });
             ui.add_space(8.0);
             ui.horizontal(|ui| {

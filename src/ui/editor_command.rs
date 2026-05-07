@@ -7,5 +7,3 @@ mod tests;
 mod types;
 
 pub(crate) use types::EditorCommand;
-#[allow(unused_imports)]
-pub(crate) use types::EditorCommandOutcome;
