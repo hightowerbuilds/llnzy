@@ -36,6 +36,22 @@ pub fn add_prompt(queue: &mut Vec<QueuedPrompt>, prompt: &StackerPrompt) -> bool
     true
 }
 
+pub fn remove_prompt(queue: &mut Vec<QueuedPrompt>, prompt: &StackerPrompt) -> bool {
+    let Some(index) = queue.iter().position(|queued| queued.text == prompt.text) else {
+        return false;
+    };
+    queue.remove(index);
+    true
+}
+
+pub fn toggle_prompt(queue: &mut Vec<QueuedPrompt>, prompt: &StackerPrompt) -> bool {
+    if remove_prompt(queue, prompt) {
+        true
+    } else {
+        add_prompt(queue, prompt)
+    }
+}
+
 pub fn contains_prompt(queue: &[QueuedPrompt], prompt: &StackerPrompt) -> bool {
     queue.iter().any(|queued| queued.text == prompt.text)
 }
@@ -92,6 +108,36 @@ mod tests {
         assert!(!add_prompt(&mut queue, &prompt("prompt 1")));
         assert!(!add_prompt(&mut queue, &prompt("prompt 5")));
         assert_eq!(queue.len(), 5);
+    }
+
+    #[test]
+    fn remove_prompt_deletes_matching_prompt_by_text() {
+        let mut queue = vec![
+            QueuedPrompt::from_prompt(&prompt("one")),
+            QueuedPrompt::from_prompt(&prompt("two")),
+        ];
+
+        assert!(remove_prompt(&mut queue, &prompt("one")));
+        assert!(!remove_prompt(&mut queue, &prompt("missing")));
+        assert_eq!(
+            queue
+                .iter()
+                .map(|prompt| prompt.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["two"]
+        );
+    }
+
+    #[test]
+    fn toggle_prompt_adds_or_removes_prompt() {
+        let mut queue = Vec::new();
+        let prompt = prompt("toggle me");
+
+        assert!(toggle_prompt(&mut queue, &prompt));
+        assert!(contains_prompt(&queue, &prompt));
+
+        assert!(toggle_prompt(&mut queue, &prompt));
+        assert!(!contains_prompt(&queue, &prompt));
     }
 
     #[test]

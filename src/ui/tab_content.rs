@@ -257,6 +257,7 @@ fn render_joined_pane(
                     &mut state.stacker.editor_font_size,
                     &mut state.stacker.web_editor_rect,
                     &mut state.stacker.queued_prompts,
+                    &mut state.stacker.prompt_view_mode,
                 );
             });
         }
@@ -380,6 +381,7 @@ fn render_stacker(ctx: &egui::Context, state: TabContentState<'_>) {
                 &mut state.stacker.editor_font_size,
                 &mut state.stacker.web_editor_rect,
                 &mut state.stacker.queued_prompts,
+                &mut state.stacker.prompt_view_mode,
             );
         });
 }

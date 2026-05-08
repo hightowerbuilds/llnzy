@@ -7,7 +7,7 @@
 - [x] Sketcher: make rectangles resizable.
 - [x] Sketcher: verify and fix hotkey command handling.
 - [x] Sketcher: remove zoom
-- [ ] Stacker: make the layout responsive so the queue and related controls stay visible in smaller windows.
+- [x] Stacker: make the layout responsive so the queue and related controls stay visible in smaller windows.
 - [x] Joined tabs: fix shell input/interaction when a shell and Sketch page are joined; currently only Sketch works.
   - Deferred remaining polish to Future Laundry: clicking the Sketch pane works, tab hotkeys work, and the tab bar can select the terminal, but clicking inside the terminal body still does not reliably reselect terminal focus.
 - [x] Joined Markdown tabs: make scroll positions independent when two Markdown file tabs are joined.

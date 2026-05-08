@@ -2,7 +2,10 @@ use crate::stacker::{
     document::StackerDocumentEditor, draft::StackerDraft, queue::QueuedPrompt, StackerPrompt,
 };
 
-use super::{stacker_state::PendingStackerDraftSwitch, STACKER_PROMPT_EDITOR_ID};
+use super::{
+    stacker_state::{PendingStackerDraftSwitch, StackerPromptViewMode},
+    STACKER_PROMPT_EDITOR_ID,
+};
 
 mod actions;
 mod editor_panel;
@@ -32,6 +35,7 @@ pub(crate) fn render_stacker_view(
     editor_font_size: &mut f32,
     web_editor_rect: &mut Option<egui::Rect>,
     queued_prompts: &mut Vec<QueuedPrompt>,
+    prompt_view_mode: &mut StackerPromptViewMode,
 ) {
     *web_editor_rect = None;
 
@@ -51,23 +55,31 @@ pub(crate) fn render_stacker_view(
         *pending_delete = None;
     }
 
+    ui.add_space(12.0);
     ui.horizontal(|ui| {
+        ui.add_space(12.0);
         ui.label(
             egui::RichText::new("Stacker")
                 .size(20.0)
                 .color(layout::HEADING_COLOR),
         );
-        ui.label(
-            egui::RichText::new("Prompt editor")
-                .size(12.0)
-                .color(layout::DIM),
-        );
+        ui.add_space(10.0);
+        if ui
+            .add_sized(
+                [104.0, 24.0],
+                egui::Button::new(egui::RichText::new(prompt_view_mode.toggle_label()).size(12.0)),
+            )
+            .on_hover_text("Switch saved prompts view")
+            .clicked()
+        {
+            prompt_view_mode.toggle();
+        }
     });
 
     ui.add_space(10.0);
 
     let available_h = ui.available_height();
-    let list_h = (available_h * 0.24).clamp(120.0, 220.0);
+    let list_h = (available_h * 0.34).clamp(160.0, 300.0);
 
     prompts::render_prompt_list_panel(
         ui,
@@ -79,6 +91,7 @@ pub(crate) fn render_stacker_view(
         pending_switch,
         pending_delete,
         queued_prompts,
+        *prompt_view_mode,
     );
 
     ui.add_space(12.0);

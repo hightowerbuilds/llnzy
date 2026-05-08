@@ -14,6 +14,28 @@ pub enum PendingStackerDraftSwitch {
     SavedPrompt(usize),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StackerPromptViewMode {
+    List,
+    Thumbnails,
+}
+
+impl StackerPromptViewMode {
+    pub fn toggle(&mut self) {
+        *self = match self {
+            Self::List => Self::Thumbnails,
+            Self::Thumbnails => Self::List,
+        };
+    }
+
+    pub fn toggle_label(self) -> &'static str {
+        match self {
+            Self::List => "Thumbnails",
+            Self::Thumbnails => "List",
+        }
+    }
+}
+
 pub struct StackerUiState {
     pub prompts: Vec<StackerPrompt>,
     pub editor: StackerDocumentEditor,
@@ -27,6 +49,7 @@ pub struct StackerUiState {
     pub editor_font_size: f32,
     pub web_editor_rect: Option<egui::Rect>,
     pub queued_prompts: Vec<QueuedPrompt>,
+    pub prompt_view_mode: StackerPromptViewMode,
     last_persisted_queue: Vec<QueuedPrompt>,
 }
 
@@ -45,6 +68,7 @@ impl Default for StackerUiState {
             editor_font_size: stacker_view::DEFAULT_EDITOR_FONT_SIZE,
             web_editor_rect: None,
             queued_prompts: Vec::new(),
+            prompt_view_mode: StackerPromptViewMode::List,
             last_persisted_queue: Vec::new(),
         }
     }

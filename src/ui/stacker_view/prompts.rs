@@ -11,7 +11,7 @@ use super::{
         header_label, small, truncate_line, DIM, HEADING_COLOR, MUTED, PANEL_BG, QUEUE_GREEN,
         ROW_BG, ROW_HOVER,
     },
-    PendingStackerDraftSwitch,
+    PendingStackerDraftSwitch, StackerPromptViewMode,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -20,6 +20,22 @@ enum SavedPromptRowAction {
     Edit,
     Delete,
 }
+
+const THUMBNAIL_CARD_WIDTH: f32 = 276.0;
+const THUMBNAIL_PREVIEW_WIDTH: f32 = 142.0;
+const THUMBNAIL_PREVIEW_HEIGHT: f32 = 112.0;
+const THUMBNAIL_ACTION_WIDTH: f32 = THUMBNAIL_CARD_WIDTH - 16.0;
+const THUMBNAIL_BUTTON_WIDTH: f32 = 82.0;
+const THUMBNAIL_BUTTON_HEIGHT: f32 = 24.0;
+const THUMBNAIL_ROW_HEIGHT: f32 = THUMBNAIL_PREVIEW_HEIGHT + 32.0;
+const QUEUED_BUTTON_FILL: egui::Color32 = egui::Color32::from_rgb(24, 58, 32);
+const QUEUED_BUTTON_STROKE: egui::Color32 = egui::Color32::from_rgb(63, 214, 99);
+const QUEUED_BUTTON_TEXT: egui::Color32 = egui::Color32::from_rgb(95, 255, 130);
+const DEFAULT_BUTTON_TEXT: egui::Color32 = egui::Color32::from_rgb(210, 210, 216);
+const LIST_QUEUE_BUTTON_WIDTH: f32 = 104.0;
+const LIST_EDIT_BUTTON_WIDTH: f32 = 44.0;
+const LIST_DELETE_BUTTON_WIDTH: f32 = 56.0;
+const LIST_CHARS_WIDTH: f32 = 48.0;
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn render_prompt_list_panel(
@@ -32,6 +48,7 @@ pub(super) fn render_prompt_list_panel(
     pending_switch: &mut Option<PendingStackerDraftSwitch>,
     pending_delete: &mut Option<usize>,
     queued_prompts: &mut Vec<QueuedPrompt>,
+    view_mode: StackerPromptViewMode,
 ) {
     queue::sanitize_prompt_queue(queued_prompts);
 
@@ -42,7 +59,7 @@ pub(super) fn render_prompt_list_panel(
         .show(ui, |ui| {
             ui.set_height(height);
             ui.horizontal_wrapped(|ui| {
-                let queue_w = 380.0_f32.min((ui.available_width() * 0.5).max(260.0));
+                let queue_w = 190.0_f32.min((ui.available_width() * 0.25).max(150.0));
                 ui.vertical(|ui| {
                     ui.set_width(queue_w);
                     render_queue_bank(ui, queue_w, height, queued_prompts);
@@ -51,7 +68,7 @@ pub(super) fn render_prompt_list_panel(
                 ui.add_space(10.0);
 
                 ui.vertical(|ui| {
-                    render_saved_prompt_list(
+                    render_saved_prompt_panel(
                         ui,
                         height,
                         prompts,
@@ -61,6 +78,7 @@ pub(super) fn render_prompt_list_panel(
                         pending_switch,
                         pending_delete,
                         queued_prompts,
+                        view_mode,
                     );
                 });
             });
@@ -98,6 +116,7 @@ fn render_queue_bank(ui: &mut egui::Ui, width: f32, height: f32, queued_prompts:
                 .show(ui, |ui| {
                     ui.spacing_mut().item_spacing.y = 4.0;
                     for prompt in queued_prompts {
+                        let label = prompt.label.lines().next().unwrap_or("").to_uppercase();
                         egui::Frame::none()
                             .fill(egui::Color32::from_rgb(26, 32, 26))
                             .rounding(egui::Rounding::same(3.0))
@@ -106,14 +125,14 @@ fn render_queue_bank(ui: &mut egui::Ui, width: f32, height: f32, queued_prompts:
                                 ui.add_sized(
                                     [ui.available_width(), 18.0],
                                     egui::Label::new(
-                                        egui::RichText::new(
-                                            truncate_line(&prompt.label, 46).to_uppercase(),
-                                        )
-                                        .size(12.0)
-                                        .strong()
-                                        .color(QUEUE_GREEN),
-                                    ),
-                                );
+                                        egui::RichText::new(label)
+                                            .size(12.0)
+                                            .strong()
+                                            .color(QUEUE_GREEN),
+                                    )
+                                    .truncate(),
+                                )
+                                .on_hover_text(&prompt.label);
                             });
                     }
                 });
@@ -121,7 +140,7 @@ fn render_queue_bank(ui: &mut egui::Ui, width: f32, height: f32, queued_prompts:
 }
 
 #[allow(clippy::too_many_arguments)]
-fn render_saved_prompt_list(
+fn render_saved_prompt_panel(
     ui: &mut egui::Ui,
     height: f32,
     prompts: &mut Vec<StackerPrompt>,
@@ -131,6 +150,7 @@ fn render_saved_prompt_list(
     pending_switch: &mut Option<PendingStackerDraftSwitch>,
     pending_delete: &mut Option<usize>,
     queued_prompts: &mut Vec<QueuedPrompt>,
+    view_mode: StackerPromptViewMode,
 ) {
     ui.set_height(height - 20.0);
     ui.horizontal(|ui| {
@@ -142,20 +162,58 @@ fn render_saved_prompt_list(
     });
     ui.add_space(8.0);
 
-    ui.horizontal(|ui| {
-        let prompt_w = (ui.available_width() - 294.0).max(40.0);
-        ui.add_sized([prompt_w, 18.0], header_label("Prompt"));
-        ui.add_sized([48.0, 18.0], header_label("Chars"));
-        ui.add_sized([104.0, 18.0], header_label("Queue"));
-        ui.add_sized([44.0, 18.0], header_label("Edit"));
-        ui.add_sized([56.0, 18.0], header_label("Delete"));
-    });
-    ui.separator();
-
     if prompts.is_empty() {
         ui.add_space(20.0);
         ui.label(small("No prompts yet.").color(DIM));
+        return;
     }
+
+    match view_mode {
+        StackerPromptViewMode::List => render_saved_prompt_list(
+            ui,
+            prompts,
+            editing,
+            editor,
+            draft,
+            pending_switch,
+            pending_delete,
+            queued_prompts,
+        ),
+        StackerPromptViewMode::Thumbnails => render_saved_prompt_thumbnails(
+            ui,
+            prompts,
+            editing,
+            editor,
+            draft,
+            pending_switch,
+            pending_delete,
+            queued_prompts,
+        ),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_saved_prompt_list(
+    ui: &mut egui::Ui,
+    prompts: &mut Vec<StackerPrompt>,
+    editing: &mut Option<usize>,
+    editor: &mut StackerDocumentEditor,
+    draft: &mut StackerDraft,
+    pending_switch: &mut Option<PendingStackerDraftSwitch>,
+    pending_delete: &mut Option<usize>,
+    queued_prompts: &mut Vec<QueuedPrompt>,
+) {
+    ui.horizontal(|ui| {
+        ui.add_sized([LIST_QUEUE_BUTTON_WIDTH, 18.0], header_label("Queue"));
+        ui.add_sized([LIST_EDIT_BUTTON_WIDTH, 18.0], header_label("Edit"));
+        ui.add_sized([LIST_DELETE_BUTTON_WIDTH, 18.0], header_label("Delete"));
+        ui.add_sized([LIST_CHARS_WIDTH, 18.0], header_label("Chars"));
+        ui.add_sized(
+            [ui.available_width().max(40.0), 18.0],
+            header_label("Prompt"),
+        );
+    });
+    ui.separator();
 
     egui::ScrollArea::vertical()
         .id_salt("stacker_prompt_list")
@@ -174,28 +232,9 @@ fn render_saved_prompt_list(
                     .inner_margin(egui::Margin::symmetric(8.0, 5.0))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            let title_w = (ui.available_width() - 286.0).max(40.0);
-                            ui.add_sized(
-                                [title_w, 20.0],
-                                egui::Label::new(
-                                    egui::RichText::new(truncate_line(&prompt.label, 64))
-                                        .size(13.0)
-                                        .color(egui::Color32::from_rgb(210, 210, 216)),
-                                )
-                                .sense(egui::Sense::click()),
-                            );
-                            ui.add_sized(
-                                [48.0, 20.0],
-                                egui::Label::new(
-                                    egui::RichText::new(prompt.text.chars().count().to_string())
-                                        .size(12.0)
-                                        .color(MUTED),
-                                ),
-                            );
-
                             let already_queued = queue::contains_prompt(queued_prompts, prompt);
-                            let can_add =
-                                queued_prompts.len() < queue::MAX_QUEUE_PROMPTS && !already_queued;
+                            let can_toggle =
+                                already_queued || queued_prompts.len() < queue::MAX_QUEUE_PROMPTS;
                             let label = if already_queued {
                                 "Queued"
                             } else {
@@ -203,19 +242,19 @@ fn render_saved_prompt_list(
                             };
                             if ui
                                 .add_enabled(
-                                    can_add,
-                                    egui::Button::new(egui::RichText::new(label).size(12.0))
-                                        .min_size(egui::vec2(104.0, 22.0)),
+                                    can_toggle,
+                                    queue_button(label, already_queued, 12.0)
+                                        .min_size(egui::vec2(LIST_QUEUE_BUTTON_WIDTH, 22.0)),
                                 )
                                 .clicked()
                             {
                                 child_button_clicked = true;
-                                queue::add_prompt(queued_prompts, prompt);
+                                queue::toggle_prompt(queued_prompts, prompt);
                             }
                             if ui
                                 .add(
                                     egui::Button::new(egui::RichText::new("Edit").size(12.0))
-                                        .min_size(egui::vec2(44.0, 22.0)),
+                                        .min_size(egui::vec2(LIST_EDIT_BUTTON_WIDTH, 22.0)),
                                 )
                                 .clicked()
                             {
@@ -229,13 +268,30 @@ fn render_saved_prompt_list(
                                             .size(12.0)
                                             .color(egui::Color32::from_rgb(245, 125, 125)),
                                     )
-                                    .min_size(egui::vec2(56.0, 22.0)),
+                                    .min_size(egui::vec2(LIST_DELETE_BUTTON_WIDTH, 22.0)),
                                 )
                                 .clicked()
                             {
                                 child_button_clicked = true;
                                 row_action = Some(SavedPromptRowAction::Delete);
                             }
+                            ui.add_sized(
+                                [LIST_CHARS_WIDTH, 20.0],
+                                egui::Label::new(
+                                    egui::RichText::new(prompt.text.chars().count().to_string())
+                                        .size(12.0)
+                                        .color(MUTED),
+                                ),
+                            );
+                            ui.add_sized(
+                                [ui.available_width().max(40.0), 20.0],
+                                egui::Label::new(
+                                    egui::RichText::new(truncate_line(&prompt.label, 64))
+                                        .size(13.0)
+                                        .color(egui::Color32::from_rgb(210, 210, 216)),
+                                )
+                                .sense(egui::Sense::click()),
+                            );
                         });
                     })
                     .response;
@@ -263,4 +319,262 @@ fn render_saved_prompt_list(
                 }
             }
         });
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_saved_prompt_thumbnails(
+    ui: &mut egui::Ui,
+    prompts: &mut Vec<StackerPrompt>,
+    editing: &mut Option<usize>,
+    editor: &mut StackerDocumentEditor,
+    draft: &mut StackerDraft,
+    pending_switch: &mut Option<PendingStackerDraftSwitch>,
+    pending_delete: &mut Option<usize>,
+    queued_prompts: &mut Vec<QueuedPrompt>,
+) {
+    egui::ScrollArea::horizontal()
+        .id_salt("stacker_prompt_thumbnails")
+        .auto_shrink([false; 2])
+        .max_height(THUMBNAIL_ROW_HEIGHT)
+        .show(ui, |ui| {
+            apply_thumbnail_wheel_scroll(ui);
+            ui.set_min_height(THUMBNAIL_ROW_HEIGHT);
+            ui.spacing_mut().item_spacing = egui::vec2(10.0, 0.0);
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::TOP), |ui| {
+                for i in 0..prompts.len() {
+                    let prompt = &prompts[i];
+                    let selected = *editing == Some(i);
+                    let mut row_action = None;
+                    let mut child_button_clicked = false;
+                    let card_resp = egui::Frame::none()
+                        .fill(if selected { ROW_HOVER } else { ROW_BG })
+                        .rounding(egui::Rounding::same(4.0))
+                        .inner_margin(egui::Margin::same(8.0))
+                        .show(ui, |ui| {
+                            ui.set_min_width(THUMBNAIL_ACTION_WIDTH);
+                            ui.set_max_width(THUMBNAIL_ACTION_WIDTH);
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 10.0;
+                                render_prompt_thumbnail_preview(ui, prompt, selected);
+                                ui.with_layout(egui::Layout::top_down(egui::Align::RIGHT), |ui| {
+                                    ui.set_width(THUMBNAIL_BUTTON_WIDTH);
+                                    ui.spacing_mut().item_spacing.y = 6.0;
+                                    let already_queued =
+                                        queue::contains_prompt(queued_prompts, prompt);
+                                    let can_toggle = already_queued
+                                        || queued_prompts.len() < queue::MAX_QUEUE_PROMPTS;
+                                    let queue_label =
+                                        if already_queued { "Queued" } else { "Queue" };
+                                    if ui
+                                        .add_enabled(
+                                            can_toggle,
+                                            queue_button(queue_label, already_queued, 11.0)
+                                                .min_size(egui::vec2(
+                                                    THUMBNAIL_BUTTON_WIDTH,
+                                                    THUMBNAIL_BUTTON_HEIGHT,
+                                                )),
+                                        )
+                                        .clicked()
+                                    {
+                                        child_button_clicked = true;
+                                        queue::toggle_prompt(queued_prompts, prompt);
+                                    }
+                                    if ui
+                                        .add(sized_thumbnail_button(
+                                            "Edit",
+                                            egui::Color32::from_rgb(210, 210, 216),
+                                        ))
+                                        .clicked()
+                                    {
+                                        child_button_clicked = true;
+                                        row_action = Some(SavedPromptRowAction::Edit);
+                                    }
+                                    if ui
+                                        .add(sized_thumbnail_button(
+                                            "Delete",
+                                            egui::Color32::from_rgb(245, 125, 125),
+                                        ))
+                                        .clicked()
+                                    {
+                                        child_button_clicked = true;
+                                        row_action = Some(SavedPromptRowAction::Delete);
+                                    }
+                                });
+                            });
+                        })
+                        .response
+                        .on_hover_text(&prompt.label);
+
+                    if row_action.is_none() && !child_button_clicked && card_resp.clicked() {
+                        row_action = Some(SavedPromptRowAction::Open);
+                    }
+
+                    match row_action {
+                        Some(SavedPromptRowAction::Open | SavedPromptRowAction::Edit) => {
+                            request_load_saved_prompt(
+                                ui.ctx(),
+                                prompts,
+                                editor,
+                                draft,
+                                pending_switch,
+                                editing,
+                                i,
+                            );
+                        }
+                        Some(SavedPromptRowAction::Delete) => {
+                            *pending_delete = Some(i);
+                        }
+                        None => {}
+                    }
+                }
+            });
+        });
+}
+
+fn sized_thumbnail_button(label: &str, color: egui::Color32) -> egui::Button<'_> {
+    egui::Button::new(egui::RichText::new(label).size(11.0).color(color))
+        .min_size(egui::vec2(THUMBNAIL_BUTTON_WIDTH, THUMBNAIL_BUTTON_HEIGHT))
+}
+
+fn queue_button(label: &str, queued: bool, text_size: f32) -> egui::Button<'_> {
+    let button = egui::Button::new(egui::RichText::new(label).size(text_size).color(if queued {
+        QUEUED_BUTTON_TEXT
+    } else {
+        DEFAULT_BUTTON_TEXT
+    }));
+    if queued {
+        button
+            .fill(QUEUED_BUTTON_FILL)
+            .stroke(egui::Stroke::new(1.0, QUEUED_BUTTON_STROKE))
+    } else {
+        button
+    }
+}
+
+fn apply_thumbnail_wheel_scroll(ui: &mut egui::Ui) {
+    if !ui.rect_contains_pointer(ui.clip_rect()) {
+        return;
+    }
+
+    let scroll_delta = ui.ctx().input(|input| input.smooth_scroll_delta);
+    let horizontal_delta = scroll_delta.x - scroll_delta.y;
+    if horizontal_delta.abs() <= f32::EPSILON {
+        return;
+    }
+
+    ui.scroll_with_delta(egui::vec2(horizontal_delta, 0.0));
+    ui.ctx().input_mut(|input| {
+        input.smooth_scroll_delta = egui::Vec2::ZERO;
+    });
+}
+
+fn render_prompt_thumbnail_preview(ui: &mut egui::Ui, prompt: &StackerPrompt, selected: bool) {
+    let preview_size = egui::vec2(THUMBNAIL_PREVIEW_WIDTH, THUMBNAIL_PREVIEW_HEIGHT);
+    ui.horizontal_centered(|ui| {
+        render_prompt_thumbnail_preview_box(ui, prompt, selected, preview_size);
+    });
+}
+
+fn render_prompt_thumbnail_preview_box(
+    ui: &mut egui::Ui,
+    prompt: &StackerPrompt,
+    selected: bool,
+    preview_size: egui::Vec2,
+) {
+    egui::Frame::none()
+        .fill(egui::Color32::from_rgb(24, 24, 26))
+        .stroke(egui::Stroke::new(
+            1.0,
+            if selected {
+                QUEUE_GREEN
+            } else {
+                egui::Color32::from_rgb(48, 48, 52)
+            },
+        ))
+        .rounding(egui::Rounding::same(3.0))
+        .inner_margin(egui::Margin::same(11.0))
+        .show(ui, |ui| {
+            ui.set_min_size(preview_size);
+            ui.set_max_size(preview_size);
+            let text = thumbnail_preview_text(prompt);
+            ui.add_sized(
+                [preview_size.x, preview_size.y],
+                egui::Label::new(
+                    egui::RichText::new(text)
+                        .size(11.0)
+                        .color(egui::Color32::from_rgb(210, 210, 216)),
+                )
+                .wrap(),
+            );
+        });
+}
+
+fn thumbnail_preview_text(prompt: &StackerPrompt) -> String {
+    let source = if prompt.text.trim().is_empty() {
+        prompt.label.as_str()
+    } else {
+        prompt.text.as_str()
+    };
+
+    let mut lines = Vec::new();
+    for source_line in source
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+    {
+        for wrapped in wrap_thumbnail_line(source_line, 22) {
+            lines.push(wrapped);
+            if lines.len() >= 8 {
+                break;
+            }
+        }
+        if lines.len() >= 8 {
+            break;
+        }
+    }
+
+    if lines.is_empty() {
+        lines.push(truncate_thumbnail_word(prompt.label.trim(), 22));
+    }
+    if lines.len() == 8 {
+        if let Some(last) = lines.last_mut() {
+            if !last.ends_with("...") {
+                last.push_str("...");
+            }
+        }
+    }
+    lines.join("\n")
+}
+
+fn wrap_thumbnail_line(line: &str, max_chars: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    for word in line.split_whitespace() {
+        let word = truncate_thumbnail_word(word, max_chars);
+        let next_len = current.chars().count() + usize::from(!current.is_empty()) + word.len();
+        if !current.is_empty() && next_len > max_chars {
+            lines.push(current);
+            current = word;
+        } else {
+            if !current.is_empty() {
+                current.push(' ');
+            }
+            current.push_str(&word);
+        }
+    }
+    if !current.is_empty() {
+        lines.push(current);
+    }
+    lines
+}
+
+fn truncate_thumbnail_word(word: &str, max_chars: usize) -> String {
+    if word.chars().count() <= max_chars {
+        word.to_string()
+    } else {
+        let keep = max_chars.saturating_sub(3);
+        let mut text = word.chars().take(keep).collect::<String>();
+        text.push_str("...");
+        text
+    }
 }
