@@ -46,6 +46,20 @@ impl ApplicationHandler<UserEvent> for App {
                     self.handle_app_command(command, &mut sidebar_changed);
                     return;
                 }
+
+                if let Some(action) = self.config.keybindings.match_key(key_event, self.modifiers) {
+                    if let Some(command) =
+                        app_command_for_keybinding(&action, self.active_tab, self.tabs.len())
+                    {
+                        let mut sidebar_changed = false;
+                        if self.handle_app_command(command, &mut sidebar_changed) && sidebar_changed
+                        {
+                            self.recompute_layout();
+                            self.resize_terminal_tabs();
+                        }
+                        return;
+                    }
+                }
             }
 
             if self.active_session().is_some() && key_event.state == ElementState::Pressed {
@@ -77,11 +91,11 @@ impl ApplicationHandler<UserEvent> for App {
                 }
 
                 if let Some(history_command) =
-                    stacker_history_shortcut(&key_event.logical_key, self.modifiers)
+                    document_history_shortcut(&key_event.logical_key, self.modifiers)
                 {
                     let handled = match history_command {
-                        StackerHistoryCommand::Undo => self.undo_stacker_editor(),
-                        StackerHistoryCommand::Redo => self.redo_stacker_editor(),
+                        HistoryCommand::Undo => self.undo_stacker_editor(),
+                        HistoryCommand::Redo => self.redo_stacker_editor(),
                     };
                     if handled {
                         return;
@@ -107,6 +121,20 @@ impl ApplicationHandler<UserEvent> for App {
                 }
             }
 
+            if self.active_sketch_tab() && key_event.state == ElementState::Pressed {
+                if let Some(history_command) =
+                    document_history_shortcut(&key_event.logical_key, self.modifiers)
+                {
+                    let action = match history_command {
+                        HistoryCommand::Undo => ExternalAction::Undo,
+                        HistoryCommand::Redo => ExternalAction::Redo,
+                    };
+                    if self.dispatch_active_external_action(action).was_handled() {
+                        return;
+                    }
+                }
+            }
+
             if self.route_code_editor_keybinding(key_event) {
                 return;
             }
@@ -119,15 +147,22 @@ impl ApplicationHandler<UserEvent> for App {
         } = &event
         {
             if let Some(tab_idx) = self.joined_tab_at_cursor() {
+                if self
+                    .tabs
+                    .get(tab_idx)
+                    .is_some_and(|tab| matches!(tab.content, TabContent::Terminal(_)))
+                {
+                    self.clear_egui_keyboard_focus();
+                }
                 if tab_idx != self.active_tab {
                     self.switch_tab(tab_idx);
                 }
             }
 
             if let Some(tab_idx) = self.joined_terminal_tab_at_cursor() {
+                self.clear_egui_keyboard_focus();
                 if tab_idx != self.active_tab {
                     self.switch_tab(tab_idx);
-                    return;
                 }
             }
         }

@@ -11,6 +11,10 @@ use super::{
 };
 
 fn tree_connector_color() -> egui::Color32 {
+    egui::Color32::WHITE
+}
+
+fn folder_drop_valid_stroke_color() -> egui::Color32 {
     egui::Color32::from_rgb(100, 220, 140)
 }
 
@@ -412,7 +416,7 @@ fn paint_folder_drop_target(
         egui::Color32::from_rgba_unmultiplied(150, 65, 65, 75)
     };
     let stroke = if is_valid {
-        egui::Stroke::new(1.0, tree_connector_color())
+        egui::Stroke::new(1.0, folder_drop_valid_stroke_color())
     } else {
         egui::Stroke::new(1.0, egui::Color32::from_rgb(220, 90, 90))
     };
@@ -641,9 +645,14 @@ mod tests {
     }
 
     #[test]
-    fn folder_connector_uses_drag_drop_green() {
+    fn folder_connector_matches_tree_text_color() {
+        assert_eq!(tree_connector_color(), egui::Color32::WHITE);
+    }
+
+    #[test]
+    fn valid_folder_drop_stroke_stays_green() {
         assert_eq!(
-            tree_connector_color(),
+            folder_drop_valid_stroke_color(),
             egui::Color32::from_rgb(100, 220, 140)
         );
     }

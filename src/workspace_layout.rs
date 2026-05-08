@@ -129,6 +129,30 @@ pub fn joined_content_rects(layout: &ScreenLayout, ratio: f32) -> (Rect, Rect) {
     (left, right)
 }
 
+pub fn joined_pane_rects(layout: &ScreenLayout, ratio: f32) -> (Rect, Rect) {
+    let pane_y = if layout.show_tab_bar {
+        layout.tab_bar.y + layout.tab_bar.h
+    } else {
+        layout.tab_bar.y
+    };
+    let pane_w = layout.tab_bar.w.max(1.0);
+    let pane_h = (layout.window_h - pane_y - crate::layout::FOOTER_HEIGHT).max(1.0);
+    let (left_w, right_w) = joined_split_widths(pane_w, ratio);
+    let left = Rect {
+        x: layout.tab_bar.x,
+        y: pane_y,
+        w: left_w,
+        h: pane_h,
+    };
+    let right = Rect {
+        x: layout.tab_bar.x + left_w + JOINED_DIVIDER_GAP,
+        y: pane_y,
+        w: right_w,
+        h: pane_h,
+    };
+    (left, right)
+}
+
 pub fn joined_split_widths(total_width: f32, ratio: f32) -> (f32, f32) {
     let usable_w = (total_width - JOINED_DIVIDER_GAP).max(2.0);
     let ratio = ratio.clamp(JoinedTabs::MIN_RATIO, JoinedTabs::MAX_RATIO);
@@ -308,6 +332,43 @@ mod tests {
         groups.join_pair(10, 11);
 
         assert_eq!(active_joined_tabs(&tabs, 0, &groups), None);
+    }
+
+    #[test]
+    fn joined_pane_rects_cover_rendered_pane_area_not_terminal_grid_only() {
+        let layout = ScreenLayout {
+            window_w: 1000.0,
+            window_h: 700.0,
+            sidebar_w: 200.0,
+            tab_bar: crate::layout::Zone {
+                x: 200.0,
+                y: 0.0,
+                w: 800.0,
+                h: crate::layout::TAB_BAR_HEIGHT,
+            },
+            content: crate::layout::Zone {
+                x: 212.0,
+                y: 114.0,
+                w: 776.0,
+                h: 480.0,
+            },
+            content_padding_x: 12.0,
+            content_padding_y: 70.0,
+            cell_w: 10.0,
+            cell_h: 20.0,
+            grid_cols: 77,
+            grid_rows: 24,
+            show_tab_bar: true,
+        };
+
+        let (left_pane, right_pane) = joined_pane_rects(&layout, 0.5);
+        let (left_grid, _) = joined_content_rects(&layout, 0.5);
+
+        assert_eq!(left_pane.x, layout.tab_bar.x);
+        assert_eq!(left_pane.y, crate::layout::TAB_BAR_HEIGHT);
+        assert!(left_pane.y < left_grid.y);
+        assert!(left_pane.h > left_grid.h);
+        assert_eq!(right_pane.y, left_pane.y);
     }
 
     fn tabs_with_ids(ids: &[u64]) -> Vec<WorkspaceTab> {

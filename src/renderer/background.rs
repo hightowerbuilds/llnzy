@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use super::state::GpuState;
+use crate::config::BackgroundImageFit;
 
 /// Uniforms for the background effect shader.
 #[repr(C)]
@@ -14,6 +15,13 @@ pub struct BackgroundUniforms {
     pub color1: [f32; 4],
     pub color2: [f32; 4],
     pub color3: [f32; 4],
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Pod, Zeroable)]
+struct ImageUniforms {
+    screen_and_image_size: [f32; 4],
+    mode: [f32; 4],
 }
 
 // ── Shared vertex + noise preamble for all background shaders ──
@@ -207,6 +215,12 @@ const IMAGE_SHADER: &str = r#"
 @group(0) @binding(0) var img_tex: texture_2d<f32>;
 @group(0) @binding(1) var img_sampler: sampler;
 
+struct ImageUniforms {
+    screen_and_image_size: vec4<f32>,
+    mode: vec4<f32>,
+};
+@group(0) @binding(2) var<uniform> img_params: ImageUniforms;
+
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) uv: vec2<f32>,
@@ -224,7 +238,33 @@ fn vs_main(@builtin(vertex_index) vi: u32) -> VertexOutput {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    return textureSample(img_tex, img_sampler, in.uv);
+    let screen = max(img_params.screen_and_image_size.xy, vec2<f32>(1.0, 1.0));
+    let img = max(img_params.screen_and_image_size.zw, vec2<f32>(1.0, 1.0));
+    let frag_px = in.uv * screen;
+
+    var sample_uv = in.uv;
+    if (img_params.mode.x < 0.5) {
+        let scale = max(screen.x / img.x, screen.y / img.y);
+        let draw_size = img * scale;
+        let origin = (screen - draw_size) * 0.5;
+        sample_uv = (frag_px - origin) / draw_size;
+    } else if (img_params.mode.x < 1.5) {
+        let scale = min(screen.x / img.x, screen.y / img.y);
+        let draw_size = img * scale;
+        let origin = (screen - draw_size) * 0.5;
+        sample_uv = (frag_px - origin) / draw_size;
+    } else if (img_params.mode.x < 2.5) {
+        sample_uv = fract(frag_px / img);
+        return textureSample(img_tex, img_sampler, sample_uv);
+    } else {
+        let origin = (screen - img) * 0.5;
+        sample_uv = (frag_px - origin) / img;
+    }
+
+    if (sample_uv.x < 0.0 || sample_uv.x > 1.0 || sample_uv.y < 0.0 || sample_uv.y > 1.0) {
+        return vec4<f32>(0.0, 0.0, 0.0, 0.0);
+    }
+    return textureSample(img_tex, img_sampler, sample_uv);
 }
 "#;
 
@@ -236,8 +276,10 @@ pub struct BackgroundRenderer {
     image_pipeline: wgpu::RenderPipeline,
     image_tex_layout: wgpu::BindGroupLayout,
     image_sampler: wgpu::Sampler,
+    image_uniform_buffer: wgpu::Buffer,
     image_bind_group: Option<wgpu::BindGroup>,
     loaded_image_path: Option<String>,
+    loaded_image_size: [f32; 2],
 }
 
 impl BackgroundRenderer {
@@ -325,8 +367,25 @@ impl BackgroundRenderer {
                             ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                             count: None,
                         },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 2,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
                     ],
                 });
+
+        let image_uniform_buffer = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("bg_image_uniforms"),
+            size: std::mem::size_of::<ImageUniforms>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
 
         let image_sampler = gpu.device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("bg_image_sampler"),
@@ -366,7 +425,7 @@ impl BackgroundRenderer {
                     entry_point: "fs_main",
                     targets: &[Some(wgpu::ColorTargetState {
                         format: gpu.surface_config.format,
-                        blend: None,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
                     compilation_options: Default::default(),
@@ -388,8 +447,10 @@ impl BackgroundRenderer {
             image_pipeline,
             image_tex_layout,
             image_sampler,
+            image_uniform_buffer,
             image_bind_group: None,
             loaded_image_path: None,
+            loaded_image_size: [1.0, 1.0],
         }
     }
 
@@ -602,17 +663,42 @@ impl BackgroundRenderer {
                     binding: 1,
                     resource: wgpu::BindingResource::Sampler(&self.image_sampler),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: self.image_uniform_buffer.as_entire_binding(),
+                },
             ],
         }));
 
         self.loaded_image_path = Some(path.to_string());
+        self.loaded_image_size = [width as f32, height as f32];
     }
 
     /// Draw the background image to the target view.
-    pub fn draw_image(&self, encoder: &mut wgpu::CommandEncoder, target: &wgpu::TextureView) {
+    pub fn draw_image(
+        &self,
+        gpu: &GpuState,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        image_fit: BackgroundImageFit,
+    ) {
         let Some(bind_group) = &self.image_bind_group else {
             return;
         };
+        let uniforms = ImageUniforms {
+            screen_and_image_size: [
+                gpu.surface_config.width as f32,
+                gpu.surface_config.height as f32,
+                self.loaded_image_size[0],
+                self.loaded_image_size[1],
+            ],
+            mode: [image_fit.shader_mode(), 0.0, 0.0, 0.0],
+        };
+        gpu.queue.write_buffer(
+            &self.image_uniform_buffer,
+            0,
+            bytemuck::cast_slice(&[uniforms]),
+        );
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("background_image_pass"),

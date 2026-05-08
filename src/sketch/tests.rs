@@ -157,6 +157,92 @@ fn selected_rectangle_can_move() {
 }
 
 #[test]
+fn selected_rectangle_can_resize_from_corner() {
+    let mut state = SketchState::default();
+    state.begin_rectangle(point(10.0, 10.0));
+    state.update_rectangle(point(40.0, 30.0));
+    state.finish_rectangle();
+    state.selected = Some(0);
+
+    assert!(state.begin_resize_selected(ResizeHandle::BottomRight, point(40.0, 30.0)));
+    assert!(state.update_resize_selected(point(70.0, 55.0)));
+    assert!(state.finish_resize_selected());
+
+    let SketchElement::Rectangle(rect) = &state.document.elements[0] else {
+        panic!("expected rectangle");
+    };
+    assert_eq!(rect.x, 10.0);
+    assert_eq!(rect.y, 10.0);
+    assert_eq!(rect.w, 60.0);
+    assert_eq!(rect.h, 45.0);
+    assert!(state.undo());
+    let SketchElement::Rectangle(rect) = &state.document.elements[0] else {
+        panic!("expected rectangle");
+    };
+    assert_eq!(rect.w, 30.0);
+    assert_eq!(rect.h, 20.0);
+}
+
+#[test]
+fn selected_symbol_can_resize_from_corner() {
+    let mut state = SketchState::default();
+    let index = state.add_symbol(SketchSymbolKind::Database, point(30.0, 40.0));
+
+    assert!(state.begin_resize_selected(ResizeHandle::TopLeft, point(30.0, 40.0)));
+    assert!(state.update_resize_selected(point(10.0, 15.0)));
+    assert!(state.finish_resize_selected());
+
+    let SketchElement::Symbol(symbol) = &state.document.elements[index] else {
+        panic!("expected symbol");
+    };
+    assert_eq!(symbol.x, 10.0);
+    assert_eq!(symbol.y, 15.0);
+    assert_eq!(symbol.w, DEFAULT_SYMBOL_W + 20.0);
+    assert_eq!(symbol.h, DEFAULT_SYMBOL_H + 25.0);
+}
+
+#[test]
+fn resize_handle_hit_test_uses_selected_resizable_element() {
+    let mut state = SketchState::default();
+    state.begin_rectangle(point(10.0, 10.0));
+    state.update_rectangle(point(40.0, 30.0));
+    state.finish_rectangle();
+    state.selected = Some(0);
+
+    assert_eq!(
+        state.selected_resize_handle_at(point(40.0, 30.0)),
+        Some(ResizeHandle::BottomRight)
+    );
+    assert_eq!(state.selected_resize_handle_at(point(25.0, 20.0)), None);
+}
+
+#[test]
+fn resize_from_painted_handle_does_not_jump_by_handle_offset() {
+    let mut state = SketchState::default();
+    state.begin_rectangle(point(10.0, 10.0));
+    state.update_rectangle(point(40.0, 30.0));
+    state.finish_rectangle();
+    state.selected = Some(0);
+    let painted_handle = point(
+        40.0 + state.appearance.effective_handle_size() * 0.7,
+        30.0 + state.appearance.effective_handle_size() * 0.7,
+    );
+
+    assert_eq!(
+        state.selected_resize_handle_at(painted_handle),
+        Some(ResizeHandle::BottomRight)
+    );
+    assert!(state.begin_resize_selected(ResizeHandle::BottomRight, painted_handle));
+    assert!(state.update_resize_selected(point(painted_handle.x + 10.0, painted_handle.y + 5.0)));
+
+    let SketchElement::Rectangle(rect) = &state.document.elements[0] else {
+        panic!("expected rectangle");
+    };
+    assert_eq!(rect.w, 40.0);
+    assert_eq!(rect.h, 25.0);
+}
+
+#[test]
 fn undo_redo_round_trip() {
     let mut state = SketchState::default();
     state.begin_stroke(point(1.0, 1.0));
@@ -225,6 +311,10 @@ fn sketch_appearance_defaults_preserve_current_canvas_behavior() {
         SketchCanvasBackgroundMode::Theme
     );
     assert_eq!(state.appearance.grid_mode, SketchGridMode::Hidden);
+    assert_eq!(
+        state.appearance.toolbar_position,
+        SketchToolbarPosition::Top
+    );
     assert!(!state.appearance.grid_visible());
     assert_eq!(
         state.appearance.selection_outline_color,
@@ -266,6 +356,7 @@ fn sketch_appearance_settings_round_trip_via_path() {
         handle_size: 8.0,
         canvas_border_visible: false,
         canvas_shadow_visible: true,
+        toolbar_position: SketchToolbarPosition::Left,
     };
 
     save_appearance_settings_to_path(&settings, &path).unwrap();
@@ -297,6 +388,7 @@ fn sketch_appearance_settings_load_missing_fields_from_defaults() {
     );
     assert_eq!(loaded.canvas_background_color, [1, 2, 3, 255]);
     assert_eq!(loaded.grid_mode, SketchGridMode::Hidden);
+    assert_eq!(loaded.toolbar_position, SketchToolbarPosition::Top);
     assert_eq!(loaded.effective_grid_spacing(), 24.0);
     assert!(loaded.canvas_border_visible);
     let _ = std::fs::remove_file(&path);

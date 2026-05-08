@@ -8,6 +8,7 @@ const PREVIEW_MAX_PAGE_WIDTH: f32 = 840.0;
 const PREVIEW_RIGHT_GUTTER: f32 = 18.0;
 const PREVIEW_SURFACE_X_PADDING: f32 = 34.0;
 const PREVIEW_SURFACE_Y_PADDING: f32 = 30.0;
+const MODE_BAR_HEIGHT: f32 = 24.0;
 
 #[derive(Clone, Copy)]
 pub(crate) struct MarkdownPreviewTheme {
@@ -34,19 +35,26 @@ pub(crate) fn render_markdown_mode_bar(
 ) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
-        ui.label(
-            egui::RichText::new("Markdown")
-                .size(12.0)
-                .color(theme.muted)
-                .monospace(),
-        );
-        ui.add_space(8.0);
+        ui.set_min_height(MODE_BAR_HEIGHT);
+        mode_bar_label(ui, "MD", 24.0, theme);
+        mode_bar_label(ui, "→", 18.0, theme);
 
         mode_button(ui, mode, MarkdownViewMode::Source, "Source", theme);
         mode_button(ui, mode, MarkdownViewMode::Preview, "Preview", theme);
         mode_button(ui, mode, MarkdownViewMode::Split, "Split", theme);
     });
     ui.add_space(6.0);
+}
+
+fn mode_bar_label(ui: &mut egui::Ui, text: &str, width: f32, theme: MarkdownPreviewTheme) {
+    let rich_text = egui::RichText::new(text)
+        .size(12.0)
+        .color(theme.muted)
+        .monospace();
+    ui.add_sized(
+        [width, MODE_BAR_HEIGHT],
+        egui::Label::new(rich_text).selectable(false),
+    );
 }
 
 fn mode_button(
@@ -71,7 +79,7 @@ fn mode_button(
         .add(
             egui::Button::new(egui::RichText::new(label).size(12.0).color(text_color))
                 .fill(fill)
-                .min_size(egui::vec2(58.0, 24.0)),
+                .min_size(egui::vec2(58.0, MODE_BAR_HEIGHT)),
         )
         .clicked()
     {
@@ -86,17 +94,25 @@ pub(crate) fn render_markdown_preview(
 ) {
     let text = buf.text();
     let base_dir = buf.path().and_then(|path| path.parent());
-    render_markdown_text(ui, &text, base_dir, theme);
+    render_markdown_text(
+        ui,
+        &text,
+        base_dir,
+        markdown_preview_scroll_salt(buf),
+        theme,
+    );
 }
 
 pub(crate) fn render_markdown_text(
     ui: &mut egui::Ui,
     text: &str,
     base_dir: Option<&Path>,
+    scroll_salt: impl std::hash::Hash,
     theme: MarkdownPreviewTheme,
 ) {
     egui::Frame::none().fill(theme.background).show(ui, |ui| {
         let output = egui::ScrollArea::vertical()
+            .id_salt(scroll_salt)
             .auto_shrink([false; 2])
             .show(ui, |ui| {
                 let layout = markdown_preview_layout(ui.available_width());
@@ -120,6 +136,12 @@ pub(crate) fn render_markdown_text(
             });
         apply_markdown_preview_drag_cursor(ui.ctx(), &output);
     });
+}
+
+fn markdown_preview_scroll_salt(buf: &Buffer) -> String {
+    buf.path()
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "untitled".to_string())
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -302,7 +324,7 @@ fn render_markdown_blocks(
     base_dir: Option<&Path>,
     theme: MarkdownPreviewTheme,
 ) {
-    for block in blocks {
+    for (block_index, block) in blocks.iter().enumerate() {
         match block {
             MarkdownBlock::Paragraph(text) => render_paragraph(ui, text, theme),
             MarkdownBlock::Heading { level, text } => render_heading(ui, *level, text, theme),
@@ -315,7 +337,9 @@ fn render_markdown_blocks(
                 text,
                 indent_level,
             } => render_list_item(ui, marker, text, *indent_level, theme),
-            MarkdownBlock::Table { headers, rows } => render_table(ui, headers, rows, theme),
+            MarkdownBlock::Table { headers, rows } => {
+                render_table(ui, block_index, headers, rows, theme)
+            }
             MarkdownBlock::Image { alt, target } => render_image(ui, alt, target, base_dir, theme),
             MarkdownBlock::HorizontalRule => {
                 ui.add_space(8.0);
@@ -629,6 +653,7 @@ fn render_list_item(
 
 fn render_table(
     ui: &mut egui::Ui,
+    block_index: usize,
     headers: &[String],
     rows: &[Vec<String>],
     theme: MarkdownPreviewTheme,
@@ -638,7 +663,7 @@ fn render_table(
         .rounding(egui::Rounding::same(6.0))
         .inner_margin(egui::Margin::symmetric(10.0, 8.0))
         .show(ui, |ui| {
-            egui::Grid::new(format!("markdown_table_{:p}", headers.as_ptr()))
+            egui::Grid::new(("markdown_table", block_index))
                 .striped(true)
                 .spacing(egui::vec2(18.0, 8.0))
                 .show(ui, |ui| {
@@ -775,6 +800,23 @@ mod tests {
         assert_eq!(MarkdownViewMode::Source.cycle(), MarkdownViewMode::Preview);
         assert_eq!(MarkdownViewMode::Preview.cycle(), MarkdownViewMode::Split);
         assert_eq!(MarkdownViewMode::Split.cycle(), MarkdownViewMode::Source);
+    }
+
+    #[test]
+    fn preview_scroll_salt_tracks_markdown_file_path() {
+        let mut left = Buffer::empty();
+        let mut right = Buffer::empty();
+        left.set_path(PathBuf::from("/tmp/left.md"));
+        right.set_path(PathBuf::from("/tmp/right.md"));
+
+        assert_ne!(
+            markdown_preview_scroll_salt(&left),
+            markdown_preview_scroll_salt(&right)
+        );
+        assert_eq!(
+            markdown_preview_scroll_salt(&left),
+            "/tmp/left.md".to_string()
+        );
     }
 
     #[test]

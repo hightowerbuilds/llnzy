@@ -27,6 +27,15 @@ pub enum SketchGridMode {
     Dots,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SketchToolbarPosition {
+    #[default]
+    Top,
+    Left,
+    Right,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct SketchAppearanceSettings {
@@ -40,6 +49,7 @@ pub struct SketchAppearanceSettings {
     pub handle_size: f32,
     pub canvas_border_visible: bool,
     pub canvas_shadow_visible: bool,
+    pub toolbar_position: SketchToolbarPosition,
 }
 
 impl Default for SketchAppearanceSettings {
@@ -54,6 +64,7 @@ impl Default for SketchAppearanceSettings {
             handle_size: DEFAULT_HANDLE_SIZE,
             canvas_border_visible: true,
             canvas_shadow_visible: false,
+            toolbar_position: SketchToolbarPosition::Top,
         }
     }
 }

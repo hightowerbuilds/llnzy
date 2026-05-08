@@ -4,6 +4,7 @@ use super::types::SettingsTab;
 use crate::config::Config;
 use crate::sketch::{
     save_appearance_settings, SketchCanvasBackgroundMode, SketchGridMode, SketchState,
+    SketchToolbarPosition,
 };
 use crate::theme_store;
 use crate::workspace_store::SavedWorkspace;
@@ -431,6 +432,36 @@ fn render_sketch_appearance_controls(ui: &mut egui::Ui, sketch: &mut SketchState
                 .changed();
             ui.end_row();
 
+            ui.label(appearance_control_label("Toolbar"));
+            egui::ComboBox::from_id_salt("sketch_toolbar_position")
+                .selected_text(sketch_toolbar_position_label(
+                    sketch.appearance.toolbar_position,
+                ))
+                .show_ui(ui, |ui| {
+                    appearance_changed |= ui
+                        .selectable_value(
+                            &mut sketch.appearance.toolbar_position,
+                            SketchToolbarPosition::Top,
+                            "Top",
+                        )
+                        .changed();
+                    appearance_changed |= ui
+                        .selectable_value(
+                            &mut sketch.appearance.toolbar_position,
+                            SketchToolbarPosition::Left,
+                            "Left",
+                        )
+                        .changed();
+                    appearance_changed |= ui
+                        .selectable_value(
+                            &mut sketch.appearance.toolbar_position,
+                            SketchToolbarPosition::Right,
+                            "Right",
+                        )
+                        .changed();
+                });
+            ui.end_row();
+
             ui.label(appearance_control_label("Stroke Color"));
             ui.color_edit_button_srgba_unmultiplied(&mut sketch.style.stroke_color);
             ui.end_row();
@@ -498,6 +529,14 @@ fn appearance_control_label(text: &str) -> egui::RichText {
     egui::RichText::new(text).size(16.0)
 }
 
+fn sketch_toolbar_position_label(position: SketchToolbarPosition) -> &'static str {
+    match position {
+        SketchToolbarPosition::Top => "Top",
+        SketchToolbarPosition::Left => "Left",
+        SketchToolbarPosition::Right => "Right",
+    }
+}
+
 fn render_preview_column(
     ui: &mut egui::Ui,
     state: &mut SettingsUiState,
@@ -537,12 +576,32 @@ fn render_sketch_mock_preview(ui: &mut egui::Ui, config: &Config, sketch: &Sketc
     let painter = ui.painter_at(rect).with_clip_rect(rect);
     let bg = config.colors.background;
     let fg = config.colors.foreground;
-    let canvas = rect.shrink2(egui::vec2(18.0, 18.0));
+    let app_rect = rect.shrink2(egui::vec2(18.0, 18.0));
+    let toolbar_thickness = if matches!(
+        sketch.appearance.toolbar_position,
+        SketchToolbarPosition::Top
+    ) {
+        28.0
+    } else {
+        34.0
+    };
+    let (toolbar, canvas) = sketch_preview_layout(
+        app_rect,
+        sketch.appearance.toolbar_position,
+        toolbar_thickness,
+    );
 
     painter.rect_filled(
         rect,
         egui::Rounding::same(4.0),
         egui::Color32::from_rgb(bg[0], bg[1], bg[2]),
+    );
+    paint_sketch_toolbar_preview(
+        &painter,
+        toolbar,
+        sketch.appearance.toolbar_position,
+        fg,
+        config.colors.cursor,
     );
     if sketch.appearance.canvas_shadow_visible {
         painter.rect_filled(
@@ -655,6 +714,110 @@ fn render_sketch_mock_preview(ui: &mut egui::Ui, config: &Config, sketch: &Sketc
             egui::Rounding::same(2.0),
             handle_color,
         );
+    }
+}
+
+fn sketch_preview_layout(
+    rect: egui::Rect,
+    position: SketchToolbarPosition,
+    toolbar_thickness: f32,
+) -> (egui::Rect, egui::Rect) {
+    let gap = 8.0;
+    match position {
+        SketchToolbarPosition::Top => {
+            let toolbar = egui::Rect::from_min_size(
+                rect.min,
+                egui::vec2(rect.width(), toolbar_thickness.min(rect.height() * 0.35)),
+            );
+            let canvas = egui::Rect::from_min_max(
+                egui::pos2(rect.left(), toolbar.bottom() + gap),
+                rect.right_bottom(),
+            );
+            (toolbar, canvas)
+        }
+        SketchToolbarPosition::Left => {
+            let toolbar = egui::Rect::from_min_size(
+                rect.min,
+                egui::vec2(toolbar_thickness.min(rect.width() * 0.35), rect.height()),
+            );
+            let canvas = egui::Rect::from_min_max(
+                egui::pos2(toolbar.right() + gap, rect.top()),
+                rect.right_bottom(),
+            );
+            (toolbar, canvas)
+        }
+        SketchToolbarPosition::Right => {
+            let toolbar = egui::Rect::from_min_max(
+                egui::pos2(
+                    rect.right() - toolbar_thickness.min(rect.width() * 0.35),
+                    rect.top(),
+                ),
+                rect.right_bottom(),
+            );
+            let canvas = egui::Rect::from_min_max(
+                rect.left_top(),
+                egui::pos2(toolbar.left() - gap, rect.bottom()),
+            );
+            (toolbar, canvas)
+        }
+    }
+}
+
+fn paint_sketch_toolbar_preview(
+    painter: &egui::Painter,
+    toolbar: egui::Rect,
+    position: SketchToolbarPosition,
+    fg: [u8; 3],
+    accent: [u8; 3],
+) {
+    painter.rect_filled(
+        toolbar,
+        egui::Rounding::same(4.0),
+        egui::Color32::from_rgba_unmultiplied(fg[0], fg[1], fg[2], 18),
+    );
+    painter.rect_stroke(
+        toolbar,
+        egui::Rounding::same(4.0),
+        egui::Stroke::new(
+            1.0,
+            egui::Color32::from_rgba_unmultiplied(fg[0], fg[1], fg[2], 42),
+        ),
+    );
+
+    let button_color = egui::Color32::from_rgba_unmultiplied(accent[0], accent[1], accent[2], 170);
+    let muted = egui::Color32::from_rgba_unmultiplied(fg[0], fg[1], fg[2], 70);
+    match position {
+        SketchToolbarPosition::Top => {
+            let mut x = toolbar.left() + 10.0;
+            for i in 0..6 {
+                let w = if i == 0 { 46.0 } else { 28.0 };
+                let button = egui::Rect::from_min_size(
+                    egui::pos2(x, toolbar.center().y - 6.0),
+                    egui::vec2(w, 12.0),
+                );
+                painter.rect_filled(
+                    button,
+                    egui::Rounding::same(2.0),
+                    if i == 1 { button_color } else { muted },
+                );
+                x += w + 7.0;
+            }
+        }
+        SketchToolbarPosition::Left | SketchToolbarPosition::Right => {
+            let mut y = toolbar.top() + 10.0;
+            for i in 0..7 {
+                let button = egui::Rect::from_min_size(
+                    egui::pos2(toolbar.left() + 7.0, y),
+                    egui::vec2((toolbar.width() - 14.0).max(8.0), 11.0),
+                );
+                painter.rect_filled(
+                    button,
+                    egui::Rounding::same(2.0),
+                    if i == 1 { button_color } else { muted },
+                );
+                y += 18.0;
+            }
+        }
     }
 }
 

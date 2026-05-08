@@ -1,7 +1,6 @@
 use super::{
     load_appearance_settings, load_document_from_path, sketch_path, DraftElement, MoveDraft,
-    SketchAppearanceSettings, SketchDocument, SketchStyle, SketchTool, TextDraft, MAX_SKETCH_ZOOM,
-    MIN_SKETCH_ZOOM,
+    ResizeDraft, SketchAppearanceSettings, SketchDocument, SketchStyle, SketchTool, TextDraft,
 };
 
 pub struct SketchState {
@@ -13,6 +12,7 @@ pub struct SketchState {
     pub selected: Option<usize>,
     pub text_draft: Option<TextDraft>,
     pub move_draft: Option<MoveDraft>,
+    pub resize_draft: Option<ResizeDraft>,
     /// Name of the currently active named sketch (None = default scratch).
     pub active_sketch_name: Option<String>,
     /// Transient UI state for the "Save As" name prompt.
@@ -23,8 +23,8 @@ pub struct SketchState {
     pub browser_open: bool,
     /// Cached list of saved sketch names (refreshed on open).
     pub saved_sketch_names: Vec<String>,
-    /// Visual zoom for the canvas. This is transient UI state, not document data.
-    pub zoom: f32,
+    /// Saved sketch waiting for delete confirmation from the browser.
+    pub pending_delete_sketch_name: Option<String>,
     pub last_canvas_size: [f32; 2],
     pub status_message: Option<String>,
     pub clipboard_in: Option<String>,
@@ -44,12 +44,13 @@ impl Default for SketchState {
             selected: None,
             text_draft: None,
             move_draft: None,
+            resize_draft: None,
             active_sketch_name: None,
             save_as_input: String::new(),
             save_as_open: false,
             browser_open: false,
             saved_sketch_names: Vec::new(),
-            zoom: 1.0,
+            pending_delete_sketch_name: None,
             last_canvas_size: [1200.0, 800.0],
             status_message: None,
             clipboard_in: None,
@@ -87,22 +88,6 @@ impl SketchState {
 
     pub fn can_redo(&self) -> bool {
         !self.redo_stack.is_empty()
-    }
-
-    pub fn set_zoom(&mut self, zoom: f32) {
-        self.zoom = zoom.clamp(MIN_SKETCH_ZOOM, MAX_SKETCH_ZOOM);
-    }
-
-    pub fn zoom_in(&mut self) {
-        self.set_zoom((self.zoom + 0.1).clamp(MIN_SKETCH_ZOOM, MAX_SKETCH_ZOOM));
-    }
-
-    pub fn zoom_out(&mut self) {
-        self.set_zoom((self.zoom - 0.1).clamp(MIN_SKETCH_ZOOM, MAX_SKETCH_ZOOM));
-    }
-
-    pub fn reset_zoom(&mut self) {
-        self.zoom = 1.0;
     }
 
     pub fn set_appearance(&mut self, appearance: SketchAppearanceSettings) {

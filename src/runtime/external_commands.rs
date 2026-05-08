@@ -31,6 +31,7 @@ impl App {
         let result = match target.surface {
             SurfaceKind::Stacker => self.dispatch_stacker_command(tab_idx, target, &command),
             SurfaceKind::CodeEditor => self.dispatch_code_editor_command(tab_idx, target, &command),
+            SurfaceKind::Sketch => self.dispatch_sketch_command(target, &command),
             SurfaceKind::Terminal => self.dispatch_terminal_command(tab_idx, target, &command),
         };
 
@@ -294,6 +295,40 @@ impl App {
         ExternalCommandResult::handled(command.id, target, true)
     }
 
+    fn dispatch_sketch_command(
+        &mut self,
+        target: ResolvedTarget,
+        command: &ExternalCommand,
+    ) -> ExternalCommandResult {
+        let Some(ui) = self.ui.as_mut() else {
+            return ExternalCommandResult::failed(
+                command.id,
+                CommandStatus::NoTarget,
+                Some(target),
+                "Sketch UI state is unavailable",
+            );
+        };
+
+        let changed = match command.action {
+            ExternalAction::Undo => ui.sketch.state.undo(),
+            ExternalAction::Redo => ui.sketch.state.redo(),
+            _ => {
+                return ExternalCommandResult::failed(
+                    command.id,
+                    CommandStatus::UnsupportedAction,
+                    Some(target),
+                    "Sketch only supports undo and redo external actions",
+                );
+            }
+        };
+
+        if changed {
+            self.request_redraw();
+        }
+
+        ExternalCommandResult::handled(command.id, target, changed)
+    }
+
     fn dispatch_terminal_command(
         &mut self,
         tab_idx: usize,
@@ -377,6 +412,7 @@ fn surface_for_content(content: &TabContent) -> Option<SurfaceKind> {
     match content {
         TabContent::Stacker => Some(SurfaceKind::Stacker),
         TabContent::CodeFile { .. } => Some(SurfaceKind::CodeEditor),
+        TabContent::Sketch => Some(SurfaceKind::Sketch),
         TabContent::Terminal(_) => Some(SurfaceKind::Terminal),
         _ => None,
     }
@@ -454,6 +490,14 @@ mod tests {
                 text: "hello".to_string()
             }),
             None
+        );
+    }
+
+    #[test]
+    fn sketch_tabs_resolve_to_sketch_command_surface() {
+        assert_eq!(
+            surface_for_content(&TabContent::Sketch),
+            Some(SurfaceKind::Sketch)
         );
     }
 }

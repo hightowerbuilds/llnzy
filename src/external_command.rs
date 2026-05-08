@@ -24,6 +24,7 @@ pub enum CommandSource {
 pub enum SurfaceKind {
     Stacker,
     CodeEditor,
+    Sketch,
     Terminal,
 }
 

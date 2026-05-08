@@ -125,6 +125,7 @@ Related future roadmap:
 - [ ] Keep drag and drop as a command-producing interaction layer, not feature business logic.
 - [ ] Support internal app payloads for editor text movement, tab reorder/split/detach, Stacker prompt/queue movement, Sketch object movement, and cross-surface workflows.
 - [ ] Continue joined-tab polish for mixed groups such as Terminal+CodeFile, Git+Stacker, and CodeFile+Sketch.
+- [ ] Revisit joined Sketch+Terminal mouse focus routing: clicking from terminal into Sketch works, tab hotkeys work, and terminal can be selected from the tab bar, but clicking inside the terminal body should reliably reselect terminal focus and show the active terminal cursor.
 - [ ] Move joined-tab internals toward stable group IDs if index-based state becomes fragile again.
 - [ ] Verify singleton tabs focus existing tabs, keep stable titles, and preserve persisted state after close/reopen.
 - [ ] Verify joined panes keep divider bounds, close/remap behavior, tab switching, context menus, and narrow-pane degradation correct.

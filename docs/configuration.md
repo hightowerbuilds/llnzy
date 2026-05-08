@@ -132,6 +132,7 @@ opacity = 0.95
 | `background_speed` | float | `1.0` | Background shader animation speed. |
 | `background_color` | string | _(none)_ | Optional `"#RRGGBB"` color seed for shader backgrounds. |
 | `background_image` | string | _(none)_ | Path to an image used when `background = "image"`. |
+| `background_image_fit` | string | `"fill"` | Image placement when `background = "image"`: `"fill"`, `"fit"`, `"tile"`, or `"center"`. |
 | `effects_on_ui` | boolean | `true` | Applies post-processing effects to UI views that opt in. |
 
 ```toml

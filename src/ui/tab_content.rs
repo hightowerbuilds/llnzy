@@ -225,7 +225,7 @@ fn render_joined_pane(
     );
     pane_ui.set_clip_rect(rect);
 
-    match pane.kind {
+    pane_ui.push_id(("joined_pane", pane.tab_id), |pane_ui| match pane.kind {
         TabKind::Terminal => {
             if active {
                 pane_ui.painter().rect_stroke(
@@ -236,60 +236,43 @@ fn render_joined_pane(
             }
         }
         TabKind::Home => {
-            render_pane_frame(
-                &mut pane_ui,
-                egui::Color32::from_rgb(36, 36, 36),
-                0.0,
-                |ui| {
-                    apply_home_action(
-                        home_view::render_home_view_ui(ui, state.recent_projects),
-                        state,
-                    );
-                },
-            );
+            render_pane_frame(pane_ui, egui::Color32::from_rgb(36, 36, 36), 0.0, |ui| {
+                let action = home_view::render_home_view_ui(ui, state.recent_projects);
+                apply_home_action(action, state);
+            });
         }
         TabKind::Stacker => {
-            render_pane_frame(
-                &mut pane_ui,
-                egui::Color32::from_rgb(36, 36, 36),
-                0.0,
-                |ui| {
-                    stacker_view::render_stacker_view(
-                        ui,
-                        &mut state.stacker.prompts,
-                        &mut state.stacker.editor,
-                        &mut state.stacker.draft,
-                        &mut state.stacker.pending_draft_switch,
-                        &mut state.stacker.pending_prompt_delete,
-                        &mut state.stacker.editing,
-                        &mut state.stacker.edit_text,
-                        &mut state.stacker.dirty,
-                        state.saved_edit_idx,
-                        &mut state.stacker.editor_font_size,
-                        &mut state.stacker.web_editor_rect,
-                        &mut state.stacker.queued_prompts,
-                    );
-                },
-            );
+            render_pane_frame(pane_ui, egui::Color32::from_rgb(36, 36, 36), 0.0, |ui| {
+                stacker_view::render_stacker_view(
+                    ui,
+                    &mut state.stacker.prompts,
+                    &mut state.stacker.editor,
+                    &mut state.stacker.draft,
+                    &mut state.stacker.pending_draft_switch,
+                    &mut state.stacker.pending_prompt_delete,
+                    &mut state.stacker.editing,
+                    &mut state.stacker.edit_text,
+                    &mut state.stacker.dirty,
+                    state.saved_edit_idx,
+                    &mut state.stacker.editor_font_size,
+                    &mut state.stacker.web_editor_rect,
+                    &mut state.stacker.queued_prompts,
+                );
+            });
         }
         TabKind::CodeFile => {
             if let Some(buffer_id) = pane.buffer_id {
                 state.editor_view.editor.switch_to_id(buffer_id);
             }
-            render_pane_frame(&mut pane_ui, color_from_rgb(appearance.bg), 12.0, |ui| {
+            render_pane_frame(pane_ui, color_from_rgb(appearance.bg), 12.0, |ui| {
                 explorer_view::render_explorer_view(ui, state.explorer, state.editor_view, config);
             });
         }
         TabKind::ImageFile => {
             if let Some(path) = pane.image_path {
-                render_pane_frame(
-                    &mut pane_ui,
-                    egui::Color32::from_rgb(20, 20, 20),
-                    12.0,
-                    |ui| {
-                        render_image_file_ui(ui, path, state.explorer);
-                    },
-                );
+                render_pane_frame(pane_ui, egui::Color32::from_rgb(20, 20, 20), 12.0, |ui| {
+                    render_image_file_ui(ui, path, state.explorer);
+                });
             }
         }
         TabKind::Sketch => {
@@ -299,13 +282,14 @@ fn render_joined_pane(
                 text_color: appearance.text_color,
                 active_btn: appearance.active_btn,
             };
-            render_pane_frame(&mut pane_ui, sketch_bg, 12.0, |ui| {
+            render_pane_frame(pane_ui, sketch_bg, 12.0, |ui| {
                 let canvas_rect = sketch_view::render_sketch_view(
                     ctx,
                     ui,
                     &mut state.sketch.state,
                     &sketch_appearance,
                     &state.explorer.root,
+                    active,
                 );
                 let ppp = ctx.pixels_per_point();
                 state.sketch.canvas_px = Some([
@@ -317,49 +301,34 @@ fn render_joined_pane(
             });
         }
         TabKind::Git => {
-            render_pane_frame(
-                &mut pane_ui,
-                egui::Color32::from_rgb(30, 31, 32),
-                10.0,
-                |ui| {
-                    let active_editor_file = active_editor_file(state.editor_view);
-                    git_view::render_git_view_ui(
-                        ui,
-                        state.git,
-                        &state.explorer.root,
-                        active_editor_file,
-                        Some(state.editor_view),
-                        state.commands,
-                    );
-                },
-            );
+            render_pane_frame(pane_ui, egui::Color32::from_rgb(30, 31, 32), 10.0, |ui| {
+                let active_editor_file = active_editor_file(state.editor_view);
+                git_view::render_git_view_ui(
+                    ui,
+                    state.git,
+                    &state.explorer.root,
+                    active_editor_file,
+                    Some(state.editor_view),
+                    state.commands,
+                );
+            });
         }
         TabKind::Appearances => {
-            render_pane_frame(
-                &mut pane_ui,
-                egui::Color32::from_rgb(36, 36, 36),
-                18.0,
-                |ui| {
-                    state
-                        .settings
-                        .render_appearances_ui(ui, config, &mut state.sketch.state);
-                },
-            );
+            render_pane_frame(pane_ui, egui::Color32::from_rgb(36, 36, 36), 18.0, |ui| {
+                state
+                    .settings
+                    .render_appearances_ui(ui, config, &mut state.sketch.state);
+            });
         }
         TabKind::Settings => {
-            render_pane_frame(
-                &mut pane_ui,
-                egui::Color32::from_rgb(36, 36, 36),
-                20.0,
-                |ui| {
-                    let output = state.settings.render_settings_ui(ui, config);
-                    if let Some(workspace) = output.launch_workspace {
-                        state.commands.push(AppCommand::LaunchWorkspace(workspace));
-                    }
-                },
-            );
+            render_pane_frame(pane_ui, egui::Color32::from_rgb(36, 36, 36), 20.0, |ui| {
+                let output = state.settings.render_settings_ui(ui, config);
+                if let Some(workspace) = output.launch_workspace {
+                    state.commands.push(AppCommand::LaunchWorkspace(workspace));
+                }
+            });
         }
-    }
+    });
 }
 
 fn render_pane_frame(
@@ -473,6 +442,7 @@ fn render_sketch(
                 &mut state.sketch.state,
                 &sketch_appearance,
                 &state.explorer.root,
+                true,
             ));
         });
 

@@ -24,16 +24,12 @@ pub(super) fn paint_sketch_document(
                     .map(|d| d.text.as_str())
                     .unwrap_or("");
                 if !draft_text.is_empty() {
-                    let pos = canvas_to_screen(
-                        canvas_rect,
-                        SketchPoint::new(text_el.x, text_el.y),
-                        sketch.zoom,
-                    );
+                    let pos = canvas_to_screen(canvas_rect, SketchPoint::new(text_el.x, text_el.y));
                     painter.text(
                         pos,
                         egui::Align2::LEFT_TOP,
                         draft_text,
-                        egui::FontId::proportional(text_el.style.font_size * sketch.zoom),
+                        egui::FontId::proportional(text_el.style.font_size),
                         color32(text_el.style.stroke_color),
                     );
                 }
@@ -44,7 +40,6 @@ pub(super) fn paint_sketch_document(
                 canvas_rect,
                 element,
                 sketch.selected == Some(index),
-                sketch.zoom,
                 &sketch.appearance,
             );
         }
@@ -58,19 +53,11 @@ pub(super) fn paint_sketch_document(
                 &stroke.points,
                 stroke.style.stroke_color,
                 stroke.style.stroke_width,
-                sketch.zoom,
             );
         }
         Some(DraftElement::Rectangle { .. }) => {
             if let Some(rect) = sketch.draft_rectangle() {
-                paint_rectangle(
-                    painter,
-                    canvas_rect,
-                    &rect,
-                    false,
-                    sketch.zoom,
-                    &sketch.appearance,
-                );
+                paint_rectangle(painter, canvas_rect, &rect, false, &sketch.appearance);
             }
         }
         None => {}
@@ -82,7 +69,6 @@ fn paint_sketch_element(
     canvas_rect: egui::Rect,
     element: &SketchElement,
     selected: bool,
-    zoom: f32,
     appearance: &SketchAppearanceSettings,
 ) {
     match element {
@@ -93,24 +79,22 @@ fn paint_sketch_element(
                 &stroke.points,
                 stroke.style.stroke_color,
                 stroke.style.stroke_width,
-                zoom,
             );
         }
         SketchElement::Rectangle(rect) => {
-            paint_rectangle(painter, canvas_rect, rect, selected, zoom, appearance);
+            paint_rectangle(painter, canvas_rect, rect, selected, appearance);
         }
         SketchElement::Text(text) => {
             if text.text.is_empty() {
                 return;
             }
-            let pos = canvas_to_screen(canvas_rect, SketchPoint::new(text.x, text.y), zoom);
-            let screen_rect =
-                egui::Rect::from_min_size(pos, egui::Vec2::new(text.w * zoom, text.h * zoom));
+            let pos = canvas_to_screen(canvas_rect, SketchPoint::new(text.x, text.y));
+            let screen_rect = egui::Rect::from_min_size(pos, egui::Vec2::new(text.w, text.h));
             painter.text(
                 pos,
                 egui::Align2::LEFT_TOP,
                 &text.text,
-                egui::FontId::proportional(text.style.font_size * zoom),
+                egui::FontId::proportional(text.style.font_size),
                 color32(text.style.stroke_color),
             );
             if selected {
@@ -118,10 +102,10 @@ fn paint_sketch_element(
             }
         }
         SketchElement::Image(image) => {
-            paint_image(painter, canvas_rect, image, selected, zoom, appearance)
+            paint_image(painter, canvas_rect, image, selected, appearance)
         }
         SketchElement::Symbol(symbol) => {
-            paint_symbol(painter, canvas_rect, symbol, selected, zoom, appearance)
+            paint_symbol(painter, canvas_rect, symbol, selected, appearance)
         }
     }
 }
@@ -140,18 +124,14 @@ pub(super) fn paint_inline_text_cursor(
         return;
     };
 
-    let pos = canvas_to_screen(
-        canvas_rect,
-        SketchPoint::new(text_el.x, text_el.y),
-        sketch.zoom,
-    );
-    let font_id = egui::FontId::proportional(text_el.style.font_size * sketch.zoom);
+    let pos = canvas_to_screen(canvas_rect, SketchPoint::new(text_el.x, text_el.y));
+    let font_id = egui::FontId::proportional(text_el.style.font_size);
     let text_color = color32(text_el.style.stroke_color);
 
     // Measure text width to place cursor after the last character
     let galley = painter.layout_no_wrap(draft.text.clone(), font_id.clone(), text_color);
     let text_width = galley.rect.width();
-    let text_height = text_el.style.font_size * sketch.zoom;
+    let text_height = text_el.style.font_size;
 
     // Blinking: visible for ~500ms, hidden for ~500ms
     let time = ctx.input(|i| i.time);
@@ -180,18 +160,17 @@ fn paint_stroke(
     points: &[SketchPoint],
     color: [u8; 4],
     width: f32,
-    zoom: f32,
 ) {
     if points.len() < 2 {
         return;
     }
     let screen_points: Vec<egui::Pos2> = points
         .iter()
-        .map(|point| canvas_to_screen(canvas_rect, *point, zoom))
+        .map(|point| canvas_to_screen(canvas_rect, *point))
         .collect();
     painter.add(egui::Shape::line(
         screen_points,
-        egui::Stroke::new(width * zoom, color32(color)),
+        egui::Stroke::new(width, color32(color)),
     ));
 }
 
@@ -200,12 +179,11 @@ fn paint_rectangle(
     canvas_rect: egui::Rect,
     rect: &RectElement,
     selected: bool,
-    zoom: f32,
     appearance: &SketchAppearanceSettings,
 ) {
     let screen_rect = egui::Rect::from_min_size(
-        canvas_to_screen(canvas_rect, SketchPoint::new(rect.x, rect.y), zoom),
-        egui::Vec2::new(rect.w * zoom, rect.h * zoom),
+        canvas_to_screen(canvas_rect, SketchPoint::new(rect.x, rect.y)),
+        egui::Vec2::new(rect.w, rect.h),
     );
     if let Some(fill) = rect.style.fill_color {
         painter.rect_filled(screen_rect, egui::Rounding::same(2.0), color32(fill));
@@ -213,10 +191,7 @@ fn paint_rectangle(
     painter.rect_stroke(
         screen_rect,
         egui::Rounding::same(2.0),
-        egui::Stroke::new(
-            rect.style.stroke_width * zoom,
-            color32(rect.style.stroke_color),
-        ),
+        egui::Stroke::new(rect.style.stroke_width, color32(rect.style.stroke_color)),
     );
     if selected {
         paint_selection(painter, screen_rect, appearance);
@@ -228,12 +203,11 @@ fn paint_image(
     canvas_rect: egui::Rect,
     image: &ImageElement,
     selected: bool,
-    zoom: f32,
     appearance: &SketchAppearanceSettings,
 ) {
     let screen_rect = egui::Rect::from_min_size(
-        canvas_to_screen(canvas_rect, SketchPoint::new(image.x, image.y), zoom),
-        egui::vec2(image.w * zoom, image.h * zoom),
+        canvas_to_screen(canvas_rect, SketchPoint::new(image.x, image.y)),
+        egui::vec2(image.w, image.h),
     );
     if let Some(texture) = load_sketch_image_texture(painter.ctx(), Path::new(&image.path)) {
         painter.image(
@@ -252,7 +226,7 @@ fn paint_image(
             screen_rect.center(),
             egui::Align2::CENTER_CENTER,
             "Image missing",
-            egui::FontId::proportional(12.0 * zoom),
+            egui::FontId::proportional(12.0),
             egui::Color32::from_rgb(220, 140, 120),
         );
     }
@@ -266,25 +240,24 @@ fn paint_symbol(
     canvas_rect: egui::Rect,
     symbol: &SymbolElement,
     selected: bool,
-    zoom: f32,
     appearance: &SketchAppearanceSettings,
 ) {
     let screen_rect = egui::Rect::from_min_size(
-        canvas_to_screen(canvas_rect, SketchPoint::new(symbol.x, symbol.y), zoom),
-        egui::vec2(symbol.w * zoom, symbol.h * zoom),
+        canvas_to_screen(canvas_rect, SketchPoint::new(symbol.x, symbol.y)),
+        egui::vec2(symbol.w, symbol.h),
     );
     paint_symbol_shape(
         painter,
         screen_rect,
         symbol.kind,
         color32(symbol.style.stroke_color),
-        symbol.style.stroke_width * zoom,
+        symbol.style.stroke_width,
     );
     painter.text(
-        egui::pos2(screen_rect.center().x, screen_rect.bottom() + 16.0 * zoom),
+        egui::pos2(screen_rect.center().x, screen_rect.bottom() + 16.0),
         egui::Align2::CENTER_CENTER,
         symbol.kind.label(),
-        egui::FontId::proportional(12.0 * zoom),
+        egui::FontId::proportional(12.0),
         color32(symbol.style.stroke_color),
     );
     if selected {
@@ -387,10 +360,20 @@ fn paint_selection(
     let color = color32(appearance.selection_outline_color);
     let handle_size = appearance.effective_handle_size();
     let expanded = rect.expand(handle_size * 0.7);
+    painter.rect_filled(
+        expanded,
+        egui::Rounding::same(3.0),
+        egui::Color32::from_rgba_unmultiplied(
+            appearance.selection_outline_color[0],
+            appearance.selection_outline_color[1],
+            appearance.selection_outline_color[2],
+            28,
+        ),
+    );
     painter.rect_stroke(
         expanded,
         egui::Rounding::same(3.0),
-        egui::Stroke::new(1.0, color),
+        egui::Stroke::new(1.5, color),
     );
 
     for corner in [
@@ -430,19 +413,15 @@ fn load_sketch_image_texture(
     Some(texture)
 }
 
-pub(super) fn screen_to_canvas(pos: egui::Pos2, canvas_rect: egui::Rect, zoom: f32) -> SketchPoint {
-    let zoom = zoom.max(0.01);
+pub(super) fn screen_to_canvas(pos: egui::Pos2, canvas_rect: egui::Rect) -> SketchPoint {
     SketchPoint::new(
-        ((pos.x - canvas_rect.min.x) / zoom).clamp(0.0, canvas_rect.width() / zoom),
-        ((pos.y - canvas_rect.min.y) / zoom).clamp(0.0, canvas_rect.height() / zoom),
+        (pos.x - canvas_rect.min.x).clamp(0.0, canvas_rect.width()),
+        (pos.y - canvas_rect.min.y).clamp(0.0, canvas_rect.height()),
     )
 }
 
-fn canvas_to_screen(canvas_rect: egui::Rect, point: SketchPoint, zoom: f32) -> egui::Pos2 {
-    egui::pos2(
-        canvas_rect.min.x + point.x * zoom,
-        canvas_rect.min.y + point.y * zoom,
-    )
+fn canvas_to_screen(canvas_rect: egui::Rect, point: SketchPoint) -> egui::Pos2 {
+    egui::pos2(canvas_rect.min.x + point.x, canvas_rect.min.y + point.y)
 }
 
 fn color32(color: [u8; 4]) -> egui::Color32 {

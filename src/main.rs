@@ -20,6 +20,7 @@ use llnzy::app::zoom_shortcuts::app_zoom_shortcut_command;
 use llnzy::config::Config;
 use llnzy::diagnostics::write_diagnostic;
 use llnzy::error_log::{ErrorLog, ErrorPanel};
+use llnzy::external_command::ExternalAction;
 use llnzy::keybindings::{primary_modifier, Action};
 use llnzy::layout::{logical_to_physical_width, LayoutInputs, ScreenLayout};
 use llnzy::performance::PowerSource;
@@ -33,7 +34,7 @@ use llnzy::ui::{stacker_cursor, STACKER_PROMPT_EDITOR_ID};
 use llnzy::ui::{ActiveView, UiFrameOutput, UiState, BUMPER_WIDTH};
 use llnzy::workspace::{TabContent, TabKind, WorkspaceTab};
 use llnzy::workspace_layout::{
-    active_joined_tabs, joined_content_rects, joined_terminal_content_rects, terminal_effect_rect,
+    active_joined_tabs, joined_pane_rects, joined_terminal_content_rects, terminal_effect_rect,
     JoinedTabs,
 };
 use llnzy::UserEvent;
@@ -47,7 +48,8 @@ struct TerminalPaneHit {
     col: usize,
 }
 
-enum StackerHistoryCommand {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HistoryCommand {
     Undo,
     Redo,
 }
@@ -150,6 +152,17 @@ impl App {
     fn active_stacker_tab(&self) -> bool {
         self.active_tab()
             .is_some_and(|tab| matches!(tab.content, TabContent::Stacker))
+    }
+
+    fn active_sketch_tab(&self) -> bool {
+        self.active_tab()
+            .is_some_and(|tab| matches!(tab.content, TabContent::Sketch))
+    }
+
+    fn clear_egui_keyboard_focus(&self) {
+        if let Some(ui) = &self.ui {
+            ui.ctx.memory_mut(|memory| memory.stop_text_input());
+        }
     }
 
     fn stacker_visible_in_active_context(&self) -> bool {
@@ -341,7 +354,7 @@ impl App {
             .ui
             .as_ref()
             .and_then(|ui| active_joined_tabs(&self.tabs, self.active_tab, &ui.tab_groups))?;
-        let (left_rect, right_rect) = joined_content_rects(layout, joined.ratio);
+        let (left_rect, right_rect) = joined_pane_rects(layout, joined.ratio);
 
         if rect_contains(left_rect, x, y) {
             Some(joined.primary)
@@ -552,14 +565,10 @@ impl App {
                 self.start_renaming_active_tab();
             }
             menu::COMMAND_UNDO => {
-                if !self.undo_stacker_editor() {
-                    self.route_code_editor_command(CommandId::Undo);
-                }
+                self.dispatch_active_external_action(ExternalAction::Undo);
             }
             menu::COMMAND_REDO => {
-                if !self.redo_stacker_editor() {
-                    self.route_code_editor_command(CommandId::Redo);
-                }
+                self.dispatch_active_external_action(ExternalAction::Redo);
             }
             menu::COMMAND_COPY => {
                 if self.route_code_editor_command(CommandId::Copy) {
@@ -669,7 +678,7 @@ fn local_terminal_selection_requested(
     mouse_reporting && (shift_key || terminal_selection_drag)
 }
 
-fn stacker_history_shortcut(key: &Key, modifiers: ModifiersState) -> Option<StackerHistoryCommand> {
+fn document_history_shortcut(key: &Key, modifiers: ModifiersState) -> Option<HistoryCommand> {
     if !primary_modifier(modifiers) || modifiers.alt_key() {
         return None;
     }
@@ -679,8 +688,8 @@ fn stacker_history_shortcut(key: &Key, modifiers: ModifiersState) -> Option<Stac
     };
 
     match (key.to_lowercase().as_str(), modifiers.shift_key()) {
-        ("z", false) => Some(StackerHistoryCommand::Undo),
-        ("z", true) | ("y", false) => Some(StackerHistoryCommand::Redo),
+        ("z", false) => Some(HistoryCommand::Undo),
+        ("z", true) | ("y", false) => Some(HistoryCommand::Redo),
         _ => None,
     }
 }
@@ -814,6 +823,38 @@ mod tests {
 
     fn ch(s: &str) -> Key {
         Key::Character(s.into())
+    }
+
+    #[test]
+    fn document_history_shortcut_maps_primary_z_to_undo() {
+        assert_eq!(
+            document_history_shortcut(&ch("z"), primary_mods()),
+            Some(HistoryCommand::Undo)
+        );
+    }
+
+    #[test]
+    fn document_history_shortcut_maps_primary_shift_z_to_redo() {
+        assert_eq!(
+            document_history_shortcut(&ch("z"), primary_mods() | ModifiersState::SHIFT),
+            Some(HistoryCommand::Redo)
+        );
+    }
+
+    #[test]
+    fn document_history_shortcut_maps_primary_y_to_redo() {
+        assert_eq!(
+            document_history_shortcut(&ch("y"), primary_mods()),
+            Some(HistoryCommand::Redo)
+        );
+    }
+
+    #[test]
+    fn document_history_shortcut_ignores_plain_z() {
+        assert_eq!(
+            document_history_shortcut(&ch("z"), ModifiersState::empty()),
+            None
+        );
     }
 
     #[test]

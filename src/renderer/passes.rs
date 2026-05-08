@@ -228,7 +228,12 @@ impl Renderer {
                     if let Some(path) = crate::theme_store::resolve_background_path(&path) {
                         let path = path.to_string_lossy();
                         self.background.load_image(&self.gpu, &path);
-                        self.background.draw_image(encoder, &self.gpu.scene_view);
+                        self.background.draw_image(
+                            &self.gpu,
+                            encoder,
+                            &self.gpu.scene_view,
+                            self.config.effects.background_image_fit,
+                        );
                     }
                 }
             } else {

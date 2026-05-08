@@ -161,6 +161,7 @@ fn apply_cursor_window_shell_and_effect_options() {
             background_color2 = "#445566"
             background_color3 = "#778899"
             background_image = "/tmp/background.png"
+            background_image_fit = "tile"
             effects_on_ui = false
         "##,
     )
@@ -180,6 +181,10 @@ fn apply_cursor_window_shell_and_effect_options() {
     assert_eq!(
         config.effects.background_image,
         Some("/tmp/background.png".to_string())
+    );
+    assert_eq!(
+        config.effects.background_image_fit,
+        BackgroundImageFit::Tile
     );
     assert!(!config.effects.effects_on_ui);
 }

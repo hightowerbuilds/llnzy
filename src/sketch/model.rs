@@ -176,3 +176,24 @@ pub struct MoveDraft {
     pub last_point: SketchPoint,
     pub moved: bool,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResizeHandle {
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ResizeDraft {
+    pub index: usize,
+    pub handle: ResizeHandle,
+    pub original_x: f32,
+    pub original_y: f32,
+    pub original_w: f32,
+    pub original_h: f32,
+    pub grab_offset_x: f32,
+    pub grab_offset_y: f32,
+    pub resized: bool,
+}

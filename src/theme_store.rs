@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use crate::config::{ColorScheme, Config, CursorStyle, EffectsConfig};
+use crate::config::{BackgroundImageFit, ColorScheme, Config, CursorStyle, EffectsConfig};
 use crate::theme::VisualTheme;
 
 // ── Background Image Library ──
@@ -142,6 +142,8 @@ struct ThemeFile {
     effects_background_color2: Option<String>,
     effects_background_color3: Option<String>,
     effects_background_image: Option<String>,
+    #[serde(default)]
+    effects_background_image_fit: Option<String>,
     effects_bloom_enabled: bool,
     effects_bloom_threshold: f32,
     effects_bloom_intensity: f32,
@@ -261,6 +263,9 @@ fn save_theme_to_dir(
         effects_background_color2: config.effects.background_color2.map(|c| rgb_to_hex(c)),
         effects_background_color3: config.effects.background_color3.map(|c| rgb_to_hex(c)),
         effects_background_image: config.effects.background_image.clone(),
+        effects_background_image_fit: Some(
+            config.effects.background_image_fit.as_str().to_string(),
+        ),
         effects_bloom_enabled: config.effects.bloom_enabled,
         effects_bloom_threshold: config.effects.bloom_threshold,
         effects_bloom_intensity: config.effects.bloom_intensity,
@@ -343,6 +348,11 @@ fn load_user_themes_from_dir(dir: &Path) -> Vec<(VisualTheme, ThemeViewFlags)> {
                 background_color2: tf.effects_background_color2.map(|s| hex_to_rgb(&s)),
                 background_color3: tf.effects_background_color3.map(|s| hex_to_rgb(&s)),
                 background_image: tf.effects_background_image,
+                background_image_fit: tf
+                    .effects_background_image_fit
+                    .as_deref()
+                    .and_then(BackgroundImageFit::from_str)
+                    .unwrap_or_default(),
                 bloom_enabled: tf.effects_bloom_enabled,
                 bloom_threshold: tf.effects_bloom_threshold,
                 bloom_intensity: tf.effects_bloom_intensity,

@@ -8,8 +8,8 @@ mod schema;
 
 pub use colors::{apply_time_of_day, indexed_color, ColorTransition};
 pub use model::{
-    ColorScheme, Config, CursorStyle, EditorConfig, EditorLanguageConfig, EffectiveEditorConfig,
-    EffectsConfig,
+    BackgroundImageFit, ColorScheme, Config, CursorStyle, EditorConfig, EditorLanguageConfig,
+    EffectiveEditorConfig, EffectsConfig,
 };
 
 #[cfg(test)]

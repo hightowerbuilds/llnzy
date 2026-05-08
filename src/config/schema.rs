@@ -92,6 +92,7 @@ pub(super) struct EffectsFileConfig {
     pub(super) background_color2: Option<String>,
     pub(super) background_color3: Option<String>,
     pub(super) background_image: Option<String>,
+    pub(super) background_image_fit: Option<String>,
     pub(super) bloom_enabled: Option<bool>,
     pub(super) bloom_threshold: Option<f32>,
     pub(super) bloom_intensity: Option<f32>,

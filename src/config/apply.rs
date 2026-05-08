@@ -3,7 +3,7 @@ use crate::keybindings::KeybindingPreset;
 
 use super::colors::parse_hex;
 use super::keybinding_mapping::apply_keybindings;
-use super::model::{Config, CursorStyle};
+use super::model::{BackgroundImageFit, Config, CursorStyle};
 use super::presets::preset_scheme;
 use super::schema::ConfigFile;
 
@@ -149,6 +149,13 @@ impl Config {
             }
             if let Some(p) = effects.background_image {
                 self.effects.background_image = Some(p);
+            }
+            if let Some(fit) = effects
+                .background_image_fit
+                .as_deref()
+                .and_then(BackgroundImageFit::from_str)
+            {
+                self.effects.background_image_fit = fit;
             }
             if let Some(b) = effects.bloom_enabled {
                 self.effects.bloom_enabled = b;

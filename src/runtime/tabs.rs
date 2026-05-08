@@ -426,6 +426,7 @@ impl App {
         };
 
         ui.active_view = ActiveView::Shells;
+        ui.active_tab_kind = Some(tab.content.kind());
         if let TabContent::CodeFile { buffer_id, .. } = &tab.content {
             if ui.editor_view.editor.switch_to_id(*buffer_id) {
                 ui.editor_view.request_hints_and_lenses();

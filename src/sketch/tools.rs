@@ -1,17 +1,20 @@
 use super::geometry::{distance, rect_from_drag, translate_element};
 use super::{
     fit_image_size, import_sketch_image, DraftElement, ImageElement, MoveDraft, RectElement,
-    SketchElement, SketchPoint, SketchState, SketchSymbolKind, SketchTool, StrokeElement,
-    SymbolElement, TextDraft, TextElement, DEFAULT_SYMBOL_H, DEFAULT_SYMBOL_W, DEFAULT_TEXT_H,
-    DEFAULT_TEXT_W, MIN_POINTS_FOR_STROKE, MIN_RECT_SIZE,
+    ResizeDraft, ResizeHandle, SketchElement, SketchPoint, SketchState, SketchSymbolKind,
+    SketchTool, StrokeElement, SymbolElement, TextDraft, TextElement, DEFAULT_SYMBOL_H,
+    DEFAULT_SYMBOL_W, DEFAULT_TEXT_H, DEFAULT_TEXT_W, MIN_POINTS_FOR_STROKE, MIN_RECT_SIZE,
 };
 use std::path::Path;
+
+const MIN_RESIZE_SIZE: f32 = 12.0;
 
 impl SketchState {
     pub fn set_tool(&mut self, tool: SketchTool) {
         self.tool = tool;
         self.draft = None;
         self.move_draft = None;
+        self.resize_draft = None;
         if tool != SketchTool::Select {
             self.selected = None;
         }
@@ -308,6 +311,79 @@ impl SketchState {
         true
     }
 
+    pub fn begin_resize_selected(&mut self, handle: ResizeHandle, point: SketchPoint) -> bool {
+        let Some(index) = self.selected else {
+            return false;
+        };
+        let Some(bounds) = self
+            .document
+            .elements
+            .get(index)
+            .and_then(resizable_element_bounds)
+        else {
+            return false;
+        };
+        self.push_undo();
+        self.move_draft = None;
+        let handle_point = resize_handle_anchor(bounds, handle);
+        self.resize_draft = Some(ResizeDraft {
+            index,
+            handle,
+            original_x: bounds.x,
+            original_y: bounds.y,
+            original_w: bounds.w,
+            original_h: bounds.h,
+            grab_offset_x: point.x - handle_point.x,
+            grab_offset_y: point.y - handle_point.y,
+            resized: false,
+        });
+        true
+    }
+
+    pub fn update_resize_selected(&mut self, point: SketchPoint) -> bool {
+        let Some(draft) = &mut self.resize_draft else {
+            return false;
+        };
+        if draft.index >= self.document.elements.len() {
+            self.resize_draft = None;
+            self.selected = None;
+            return false;
+        }
+        let Some(bounds) = resized_bounds_from_handle(draft, point) else {
+            return false;
+        };
+        if bounds_approximately_equal(
+            bounds,
+            ElementBounds {
+                x: draft.original_x,
+                y: draft.original_y,
+                w: draft.original_w,
+                h: draft.original_h,
+            },
+        ) {
+            return false;
+        }
+        if apply_resizable_element_bounds(&mut self.document.elements[draft.index], bounds) {
+            draft.resized = true;
+            self.dirty = true;
+            return true;
+        }
+        false
+    }
+
+    pub fn finish_resize_selected(&mut self) -> bool {
+        let Some(draft) = self.resize_draft.take() else {
+            return false;
+        };
+        if draft.resized {
+            self.dirty = true;
+            true
+        } else {
+            self.undo_stack.pop();
+            false
+        }
+    }
+
     pub fn update_move_selected(&mut self, point: SketchPoint) -> bool {
         let Some(draft) = &mut self.move_draft else {
             return false;
@@ -355,6 +431,7 @@ impl SketchState {
         self.selected = None;
         self.text_draft = None;
         self.move_draft = None;
+        self.resize_draft = None;
         self.dirty = true;
         true
     }
@@ -378,6 +455,105 @@ impl SketchState {
             *from_center,
         ))
     }
+}
+
+#[derive(Clone, Copy)]
+struct ElementBounds {
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+}
+
+fn resizable_element_bounds(element: &SketchElement) -> Option<ElementBounds> {
+    match element {
+        SketchElement::Rectangle(rect) => Some(ElementBounds {
+            x: rect.x,
+            y: rect.y,
+            w: rect.w,
+            h: rect.h,
+        }),
+        SketchElement::Symbol(symbol) => Some(ElementBounds {
+            x: symbol.x,
+            y: symbol.y,
+            w: symbol.w,
+            h: symbol.h,
+        }),
+        _ => None,
+    }
+}
+
+fn apply_resizable_element_bounds(element: &mut SketchElement, bounds: ElementBounds) -> bool {
+    match element {
+        SketchElement::Rectangle(rect) => {
+            rect.x = bounds.x;
+            rect.y = bounds.y;
+            rect.w = bounds.w;
+            rect.h = bounds.h;
+            true
+        }
+        SketchElement::Symbol(symbol) => {
+            symbol.x = bounds.x;
+            symbol.y = bounds.y;
+            symbol.w = bounds.w;
+            symbol.h = bounds.h;
+            true
+        }
+        _ => false,
+    }
+}
+
+fn resized_bounds_from_handle(draft: &ResizeDraft, point: SketchPoint) -> Option<ElementBounds> {
+    let min = MIN_RESIZE_SIZE.max(MIN_RECT_SIZE);
+    let point = SketchPoint::new(point.x - draft.grab_offset_x, point.y - draft.grab_offset_y);
+    let mut left = draft.original_x;
+    let mut top = draft.original_y;
+    let mut right = draft.original_x + draft.original_w;
+    let mut bottom = draft.original_y + draft.original_h;
+
+    match draft.handle {
+        ResizeHandle::TopLeft => {
+            left = point.x.min(right - min);
+            top = point.y.min(bottom - min);
+        }
+        ResizeHandle::TopRight => {
+            right = point.x.max(left + min);
+            top = point.y.min(bottom - min);
+        }
+        ResizeHandle::BottomLeft => {
+            left = point.x.min(right - min);
+            bottom = point.y.max(top + min);
+        }
+        ResizeHandle::BottomRight => {
+            right = point.x.max(left + min);
+            bottom = point.y.max(top + min);
+        }
+    }
+
+    let w = right - left;
+    let h = bottom - top;
+    (w >= min && h >= min).then_some(ElementBounds {
+        x: left,
+        y: top,
+        w,
+        h,
+    })
+}
+
+fn resize_handle_anchor(bounds: ElementBounds, handle: ResizeHandle) -> SketchPoint {
+    match handle {
+        ResizeHandle::TopLeft => SketchPoint::new(bounds.x, bounds.y),
+        ResizeHandle::TopRight => SketchPoint::new(bounds.x + bounds.w, bounds.y),
+        ResizeHandle::BottomLeft => SketchPoint::new(bounds.x, bounds.y + bounds.h),
+        ResizeHandle::BottomRight => SketchPoint::new(bounds.x + bounds.w, bounds.y + bounds.h),
+    }
+}
+
+fn bounds_approximately_equal(a: ElementBounds, b: ElementBounds) -> bool {
+    (a.x - b.x).abs() < 0.5
+        && (a.y - b.y).abs() < 0.5
+        && (a.w - b.w).abs() < 0.5
+        && (a.h - b.h).abs() < 0.5
 }
 
 fn pasted_text_box_size(text: &str, font_size: f32) -> (f32, f32) {

@@ -207,6 +207,7 @@ pub struct EffectsConfig {
     pub background_color2: Option<[u8; 3]>,
     pub background_color3: Option<[u8; 3]>,
     pub background_image: Option<String>,
+    pub background_image_fit: BackgroundImageFit,
     pub bloom_enabled: bool,
     pub bloom_threshold: f32,
     pub bloom_intensity: f32,
@@ -224,6 +225,61 @@ pub struct EffectsConfig {
     pub chromatic_aberration: f32,
     pub grain_intensity: f32,
     pub effects_on_ui: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BackgroundImageFit {
+    Fill,
+    Fit,
+    Tile,
+    Center,
+}
+
+impl BackgroundImageFit {
+    pub const ALL: [Self; 4] = [Self::Fill, Self::Fit, Self::Tile, Self::Center];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Fill => "fill",
+            Self::Fit => "fit",
+            Self::Tile => "tile",
+            Self::Center => "center",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Fill => "Fill Screen",
+            Self::Fit => "Fit Screen",
+            Self::Tile => "Tile",
+            Self::Center => "Center",
+        }
+    }
+
+    pub fn shader_mode(self) -> f32 {
+        match self {
+            Self::Fill => 0.0,
+            Self::Fit => 1.0,
+            Self::Tile => 2.0,
+            Self::Center => 3.0,
+        }
+    }
+
+    pub fn from_str(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "fill" | "fill_screen" | "fill-screen" | "cover" => Some(Self::Fill),
+            "fit" | "fit_screen" | "fit-screen" | "contain" => Some(Self::Fit),
+            "tile" | "tiled" => Some(Self::Tile),
+            "center" | "centered" => Some(Self::Center),
+            _ => None,
+        }
+    }
+}
+
+impl Default for BackgroundImageFit {
+    fn default() -> Self {
+        Self::Fill
+    }
 }
 
 impl EffectsConfig {
@@ -250,6 +306,7 @@ impl Default for EffectsConfig {
             background_color2: None,
             background_color3: None,
             background_image: None,
+            background_image_fit: BackgroundImageFit::Fill,
             bloom_enabled: false,
             bloom_threshold: 0.35,
             bloom_intensity: 0.6,

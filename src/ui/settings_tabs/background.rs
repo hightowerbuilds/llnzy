@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::config::{BackgroundImageFit, Config};
 use crate::renderer::background::{custom_shader_names_from_dir, BUILTIN_SHADER_NAMES};
 use crate::theme_store;
 
@@ -209,6 +209,20 @@ pub(crate) fn render_background_tab(ui: &mut egui::Ui, config: &mut Config) {
                 }
             });
             ui.end_row();
+
+            if config.effects.background_image.is_some() || config.effects.background == "image" {
+                ui.label(label("Image Fit"));
+                ui.horizontal_wrapped(|ui| {
+                    for fit in BackgroundImageFit::ALL {
+                        ui.selectable_value(
+                            &mut config.effects.background_image_fit,
+                            fit,
+                            fit.label(),
+                        );
+                    }
+                });
+                ui.end_row();
+            }
         });
 
     if let Some(path) = config.effects.background_image.as_deref() {
