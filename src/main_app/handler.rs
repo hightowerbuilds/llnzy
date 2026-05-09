@@ -246,13 +246,6 @@ impl ApplicationHandler<UserEvent> for App {
             }
 
             WindowEvent::Focused(focused) => {
-                #[cfg(target_os = "macos")]
-                {
-                    self.stacker_bridge_active = None;
-                    if focused {
-                        self.sync_macos_text_bridge();
-                    }
-                }
                 if focused {
                     if self.active_stacker_tab() {
                         if let Some(window) = &self.window {

@@ -63,7 +63,7 @@ impl App {
         self.window = Some(window);
         self.renderer = Some(renderer);
         self.ui = Some(ui_state);
-        self.create_stacker_webview();
+        self.create_stacker_native_view();
         self.restore_last_session();
         if self.tabs.is_empty() {
             self.open_singleton_tab(llnzy::workspace::TabKind::Home);
@@ -71,14 +71,5 @@ impl App {
 
         #[cfg(target_os = "macos")]
         llnzy::menu::setup_menu_bar(self.proxy.clone());
-        #[cfg(target_os = "macos")]
-        {
-            llnzy::macos_text_bridge::setup(self.proxy.clone());
-            if self.stacker_webview.is_none() {
-                if let Some(window) = &self.window {
-                    llnzy::macos_text_bridge::install(window);
-                }
-            }
-        }
     }
 }

@@ -6,12 +6,14 @@ impl App {
             UserEvent::PtyOutput => self.request_redraw(),
             UserEvent::LspMessage => self.request_redraw(),
             UserEvent::FileChanged(_) => self.request_redraw(),
-            UserEvent::StackerWebViewMessage(raw) => {
-                self.apply_stacker_webview_message(raw);
-            }
             #[cfg(target_os = "macos")]
-            UserEvent::StackerNativeEdit(edit) => {
-                self.apply_stacker_native_edit(edit);
+            UserEvent::StackerNativeTextChanged {
+                kind,
+                text,
+                utf16_start,
+                utf16_end,
+            } => {
+                self.apply_stacker_native_text_changed(kind, text, utf16_start, utf16_end);
             }
             #[cfg(target_os = "macos")]
             UserEvent::MenuCommand(command_id) => {

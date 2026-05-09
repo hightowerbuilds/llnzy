@@ -4,8 +4,6 @@ impl App {
     pub(super) fn handle_redraw_requested(&mut self, event_loop: &ActiveEventLoop) {
         self.process_all_output();
         self.update_ime_cursor_area();
-        #[cfg(target_os = "macos")]
-        self.sync_macos_text_bridge();
 
         if let (Some(renderer), Some(ui)) = (&self.renderer, &mut self.ui) {
             ui.record_frame_time(renderer.gpu_delta_time());
@@ -132,7 +130,7 @@ impl App {
                     effects_mask,
                 });
                 self.handle_ui_frame_output(ui_frame_output, event_loop);
-                self.sync_stacker_webview();
+                self.sync_stacker_native_view();
             }
         }
         if project_tree_changed {

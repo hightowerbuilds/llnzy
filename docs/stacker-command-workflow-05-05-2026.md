@@ -18,8 +18,11 @@ selection, undo history, and redo history.
   dispatch as `ExternalAction::ApplyFormatting`.
 - App-level Stacker insert, paste, copy, select all, undo, redo, and formatting
   route through the internal external-command dispatcher.
-- The WebView/native text path is an input bridge. It must sync changes back
+- The native text path (a visible `NSTextView` overlay on macOS, see
+  `src/stacker_native_view.rs`) is an input bridge. It must sync changes back
   into `StackerDocumentEditor` instead of becoming separate durable state.
+  The earlier WKWebView-backed editor and the hidden AppKit text bridge it
+  replaced have been removed.
 
 The remaining controlled escape hatch is egui's direct `TextEdit` string
 access. That path must continue to reconcile changes through the document
@@ -49,7 +52,8 @@ input or UI changes:
 - Toolbar and command-palette formatting with selected text.
 - Saved prompt edit, save, delete, delete cancel, and Escape cancel.
 - Prompt queue add behavior.
-- Dictation or external text delivery latency and focused-surface routing.
+- Dictation or external text delivery latency and focused-surface routing
+  through the native `NSTextView` overlay.
 
 These manual checks are tracked in `daily-growth/roadmaps/manual laundry.md`.
 
@@ -58,7 +62,7 @@ These manual checks are tracked in `daily-growth/roadmaps/manual laundry.md`.
 Set `LLNZY_TRACE_EXTERNAL_INPUT` to a non-empty value other than `0`, `false`,
 `FALSE`, `off`, or `OFF` to log external-input diagnostics to stderr. The trace
 path is intentionally lightweight and is for future debugging of keyboard,
-WebView/native text, command dispatcher, and terminal paste routing.
+native text, command dispatcher, and terminal paste routing.
 
 ## Saved Prompt Workflow
 

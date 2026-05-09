@@ -217,7 +217,10 @@ impl App {
             command.focus_policy,
             FocusPolicy::FocusTarget | FocusPolicy::FocusAfter
         ) {
-            self.stacker_webview_pending_focus = true;
+            #[cfg(target_os = "macos")]
+            {
+                self.stacker_native_view_pending_focus = true;
+            }
             self.request_redraw();
         }
 

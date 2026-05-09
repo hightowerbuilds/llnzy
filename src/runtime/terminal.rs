@@ -1,14 +1,11 @@
 use std::time::{Duration, Instant};
 
 use llnzy::external_command::ExternalAction;
-use llnzy::external_input_trace;
 use llnzy::session::Session;
 use llnzy::stacker::commands::StackerCommandId;
 use llnzy::stacker::input::StackerSelection;
 use llnzy::ui::{stacker_cursor, STACKER_PROMPT_EDITOR_ID};
 use llnzy::workspace::{TabContent, WorkspaceTab};
-#[cfg(target_os = "macos")]
-use llnzy::StackerNativeEdit;
 
 use crate::App;
 
@@ -116,54 +113,6 @@ impl App {
             text: text.to_string(),
         })
         .was_handled()
-    }
-
-    #[cfg(target_os = "macos")]
-    pub(crate) fn apply_stacker_native_edit(&mut self, edit: StackerNativeEdit) -> bool {
-        let Some(tab) = self.active_tab() else {
-            return false;
-        };
-        if !matches!(tab.content, TabContent::Stacker) {
-            return false;
-        }
-
-        let Some(ui) = &mut self.ui else {
-            return false;
-        };
-
-        if ui.stacker.editor.text() == edit.result {
-            return true;
-        }
-
-        let selection = StackerSelection {
-            start: edit.start,
-            end: edit.end,
-        };
-        let outcome = ui.stacker.editor.insert_text(selection, &edit.text);
-        let cursor = if ui.stacker.editor.text() == edit.result {
-            outcome.cursor
-        } else {
-            let cursor = edit.result.chars().count();
-            ui.stacker
-                .editor
-                .replace_all_with_history(edit.result, StackerSelection::collapsed(cursor));
-            cursor
-        };
-        external_input_trace::trace("stacker.native_edit", || {
-            format!(
-                "replacement={}..{}, chars={}, cursor={}",
-                selection.start,
-                selection.end,
-                edit.text.chars().count(),
-                cursor
-            )
-        });
-        store_stacker_cursor(ui, cursor);
-        ui.stacker
-            .draft
-            .record_current_text(ui.stacker.editor.text().to_string());
-        self.request_redraw();
-        true
     }
 
     pub(crate) fn copy_stacker_editor_selection(&mut self) -> bool {

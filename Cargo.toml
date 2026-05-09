@@ -25,8 +25,6 @@ taffy = "0.7"
 egui = "0.29"
 egui-wgpu = "0.29"
 egui-winit = "0.29"
-wry = "0.55"
-dpi = "0.1"
 libc = "0.2"
 ropey = "1"
 unicode-segmentation = "1"
@@ -52,5 +50,5 @@ sha2 = "0.10"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSMenu", "NSMenuItem", "NSResponder", "NSText", "NSTextView", "NSView", "NSWindow"] }
+objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSColor", "NSFont", "NSMenu", "NSMenuItem", "NSResponder", "NSScrollView", "NSText", "NSTextView", "NSView", "NSWindow"] }
 objc2-foundation = { version = "0.3", features = ["NSGeometry", "NSString"] }

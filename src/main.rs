@@ -27,9 +27,12 @@ use llnzy::performance::PowerSource;
 use llnzy::renderer::{RenderRequest, Renderer, TerminalPane};
 use llnzy::search::Search;
 use llnzy::stacker::commands::{stacker_command_registry, StackerCommandId};
+#[cfg(target_os = "macos")]
 use llnzy::stacker::input::StackerSelection;
-use llnzy::stacker_webview::{StackerWebView, StackerWebViewMessage};
+#[cfg(target_os = "macos")]
+use llnzy::stacker_native_view::StackerNativeView;
 use llnzy::ui::command_palette::CommandId;
+#[cfg(target_os = "macos")]
 use llnzy::ui::{stacker_cursor, STACKER_PROMPT_EDITOR_ID};
 use llnzy::ui::{ActiveView, UiFrameOutput, UiState, BUMPER_WIDTH};
 use llnzy::workspace::{TabContent, TabKind, WorkspaceTab};
@@ -84,8 +87,10 @@ struct App {
     terminal_pending_mouse_press: Option<(usize, usize)>,
     selection_rect_cache: Option<SelectionRectCache>,
     click_state: ClickState,
-    stacker_webview: Option<StackerWebView>,
-    stacker_webview_pending_focus: bool,
+    #[cfg(target_os = "macos")]
+    stacker_native_view: Option<StackerNativeView>,
+    #[cfg(target_os = "macos")]
+    stacker_native_view_pending_focus: bool,
     ui: Option<UiState>,
     screen_layout: Option<ScreenLayout>,
     visual_bell_until: Option<Instant>,
@@ -96,10 +101,6 @@ struct App {
     last_power_check: Instant,
     current_power_source: PowerSource,
     last_editor_recovery_save: Instant,
-    #[cfg(target_os = "macos")]
-    stacker_bridge_active: Option<bool>,
-    #[cfg(target_os = "macos")]
-    stacker_bridge_text: String,
 }
 
 impl App {
@@ -124,8 +125,10 @@ impl App {
             terminal_pending_mouse_press: None,
             selection_rect_cache: None,
             click_state: ClickState::new(),
-            stacker_webview: None,
-            stacker_webview_pending_focus: false,
+            #[cfg(target_os = "macos")]
+            stacker_native_view: None,
+            #[cfg(target_os = "macos")]
+            stacker_native_view_pending_focus: false,
             ui: None,
             screen_layout: None,
             visual_bell_until: None,
@@ -136,10 +139,6 @@ impl App {
             last_power_check: Instant::now() - Duration::from_secs(60),
             current_power_source: PowerSource::Unknown,
             last_editor_recovery_save: Instant::now(),
-            #[cfg(target_os = "macos")]
-            stacker_bridge_active: None,
-            #[cfg(target_os = "macos")]
-            stacker_bridge_text: String::new(),
         }
     }
 
@@ -185,16 +184,17 @@ impl App {
         })
     }
 
-    fn create_stacker_webview(&mut self) {
-        if self.stacker_webview.is_some() {
+    #[cfg(target_os = "macos")]
+    fn create_stacker_native_view(&mut self) {
+        if self.stacker_native_view.is_some() {
             return;
         }
         let Some(window) = &self.window else { return };
-        match StackerWebView::new(window.as_ref(), self.proxy.clone()) {
-            Ok(webview) => {
-                self.stacker_webview = Some(webview);
+        match StackerNativeView::new(window.as_ref(), self.proxy.clone()) {
+            Ok(view) => {
+                self.stacker_native_view = Some(view);
                 self.error_log
-                    .info("Stacker WebView editor initialized for native text input");
+                    .info("Stacker native NSTextView initialized for system text input");
             }
             Err(err) => {
                 self.error_log.error(err);
@@ -202,93 +202,96 @@ impl App {
         }
     }
 
-    fn sync_stacker_webview(&mut self) {
+    #[cfg(not(target_os = "macos"))]
+    fn create_stacker_native_view(&mut self) {}
+
+    #[cfg(target_os = "macos")]
+    fn sync_stacker_native_view(&mut self) {
         let active = self.stacker_visible_in_active_context();
         let focus_when_shown = self.active_stacker_tab();
-        let Some(webview) = &mut self.stacker_webview else {
+        let Some(view) = &mut self.stacker_native_view else {
             return;
         };
         if !active {
-            webview.set_visible(false);
-            self.stacker_webview_pending_focus = false;
+            view.set_visible(false);
+            self.stacker_native_view_pending_focus = false;
             return;
         }
 
         let Some(ui) = &self.ui else {
-            webview.set_visible(false);
+            view.set_visible(false);
             return;
         };
         let modal_open = ui.stacker.pending_draft_switch.is_some()
             || ui.stacker.pending_prompt_delete.is_some()
             || ui.pending_close.is_some();
         let Some(rect) = ui.stacker.web_editor_rect else {
-            webview.set_visible(false);
+            view.set_visible(false);
             return;
         };
         if modal_open {
-            webview.set_visible(false);
+            view.set_visible(false);
             return;
         }
 
-        webview.set_bounds(rect);
-        webview.set_font_size(ui.stacker.editor_font_size);
-        webview.set_document(ui.stacker.editor.text(), ui.stacker.editor.selection());
-        let became_visible = webview.set_visible(true);
+        view.set_bounds(rect);
+        view.set_font_size(ui.stacker.editor_font_size);
+        view.set_document(ui.stacker.editor.text(), ui.stacker.editor.selection());
+        let became_visible = view.set_visible(true);
         let should_focus =
-            focus_when_shown && (self.stacker_webview_pending_focus || became_visible);
+            focus_when_shown && (self.stacker_native_view_pending_focus || became_visible);
         if should_focus {
-            webview.focus();
-            self.stacker_webview_pending_focus = false;
+            view.focus();
+            self.stacker_native_view_pending_focus = false;
         }
     }
 
-    fn apply_stacker_webview_message(&mut self, raw: String) -> bool {
-        let Ok(message) = serde_json::from_str::<StackerWebViewMessage>(&raw) else {
-            self.error_log
-                .error(format!("Invalid Stacker WebView message: {raw}"));
-            return false;
-        };
+    #[cfg(not(target_os = "macos"))]
+    fn sync_stacker_native_view(&mut self) {}
+
+    #[cfg(target_os = "macos")]
+    fn apply_stacker_native_text_changed(
+        &mut self,
+        kind: &'static str,
+        text: String,
+        utf16_start: usize,
+        utf16_end: usize,
+    ) -> bool {
         let Some(stacker_tab_idx) = self.stacker_tab_in_active_context() else {
             return false;
         };
-        let should_activate_stacker = matches!(
-            message.message_type.as_str(),
+        if matches!(
+            kind,
             "pointerDown" | "focus" | "textChanged" | "selectionChanged"
-        ) && stacker_tab_idx != self.active_tab;
-        if should_activate_stacker {
+        ) && stacker_tab_idx != self.active_tab
+        {
             self.switch_tab(stacker_tab_idx);
-            self.stacker_webview_pending_focus = true;
+            self.stacker_native_view_pending_focus = true;
         }
 
         let Some(ui) = &mut self.ui else {
             return false;
         };
         let selection = StackerSelection {
-            start: llnzy::stacker_webview::utf16_index_to_char_index(
-                &message.text,
-                message.selection_start,
-            ),
-            end: llnzy::stacker_webview::utf16_index_to_char_index(
-                &message.text,
-                message.selection_end,
-            ),
+            start: llnzy::stacker_native_view::utf16_index_to_char_index(&text, utf16_start),
+            end: llnzy::stacker_native_view::utf16_index_to_char_index(&text, utf16_end),
         };
 
-        match message.message_type.as_str() {
+        match kind {
             "textChanged" => {
                 let changed = ui
                     .stacker
                     .editor
-                    .replace_all_with_history(message.text.clone(), selection);
-                store_stacker_webview_selection(ui, selection);
+                    .replace_all_with_history(text.clone(), selection);
+                store_stacker_native_selection(ui, selection);
                 ui.stacker
                     .draft
                     .record_current_text(ui.stacker.editor.text().to_string());
-                if let Some(webview) = &mut self.stacker_webview {
-                    webview.note_webview_document(ui.stacker.editor.text(), selection);
+                if let Some(view) = &mut self.stacker_native_view {
+                    view.note_view_document(ui.stacker.editor.text(), selection);
                 }
                 if changed {
-                    llnzy::external_input_trace::trace("stacker.webview_text_changed", || {
+                    llnzy::external_input_trace::trace("stacker.native_text_changed", || {
                         format!("chars={}", ui.stacker.editor.text().chars().count())
                     });
                 }
@@ -296,48 +299,19 @@ impl App {
                 true
             }
             "selectionChanged" | "focus" => {
-                store_stacker_webview_selection(ui, selection);
-                if let Some(webview) = &mut self.stacker_webview {
-                    webview.note_webview_document(ui.stacker.editor.text(), selection);
+                store_stacker_native_selection(ui, selection);
+                if let Some(view) = &mut self.stacker_native_view {
+                    view.note_view_document(ui.stacker.editor.text(), selection);
                 }
                 true
             }
             "pointerDown" => {
-                self.stacker_webview_pending_focus = true;
+                self.stacker_native_view_pending_focus = true;
                 self.request_redraw();
                 true
             }
             _ => false,
         }
-    }
-
-    #[cfg(target_os = "macos")]
-    fn sync_macos_text_bridge(&mut self) {
-        let Some(window) = &self.window else { return };
-        if self.stacker_webview.is_some() {
-            if self.stacker_bridge_active != Some(false) {
-                llnzy::macos_text_bridge::set_stacker_active(window, false, "");
-                self.stacker_bridge_active = Some(false);
-                self.stacker_bridge_text.clear();
-            }
-            return;
-        }
-        let active = self.active_stacker_tab();
-        let text = if active {
-            self.ui
-                .as_ref()
-                .map(|ui| ui.stacker.editor.text())
-                .unwrap_or("")
-                .to_string()
-        } else {
-            String::new()
-        };
-        if !active && self.stacker_bridge_active == Some(false) {
-            return;
-        }
-        llnzy::macos_text_bridge::set_stacker_active(window, active, &text);
-        self.stacker_bridge_active = Some(active);
-        self.stacker_bridge_text = text;
     }
 
     fn joined_terminal_tab_at_cursor(&self) -> Option<usize> {
@@ -664,7 +638,8 @@ fn rect_contains(rect: llnzy::session::Rect, x: f32, y: f32) -> bool {
     x >= rect.x && x < rect.x + rect.w && y >= rect.y && y < rect.y + rect.h
 }
 
-fn store_stacker_webview_selection(ui: &mut UiState, selection: StackerSelection) {
+#[cfg(target_os = "macos")]
+fn store_stacker_native_selection(ui: &mut UiState, selection: StackerSelection) {
     let editor_id = egui::Id::new(STACKER_PROMPT_EDITOR_ID);
     let ctx = ui.ctx.clone();
     stacker_cursor::store_document_selection(&ctx, editor_id, &mut ui.stacker.editor, selection);
