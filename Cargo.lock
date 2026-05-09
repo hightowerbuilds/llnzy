@@ -2714,8 +2714,10 @@ dependencies = [
  "regex",
  "rfd",
  "ropey",
+ "rustc-hash 2.1.2",
  "serde",
  "serde_json",
+ "sha2",
  "streaming-iterator",
  "taffy",
  "tokio",
@@ -2731,6 +2733,7 @@ dependencies = [
  "tree-sitter-python",
  "tree-sitter-rust",
  "tree-sitter-typescript",
+ "ulid",
  "unicode-segmentation",
  "wgpu",
  "winit",
@@ -5319,6 +5322,16 @@ dependencies = [
  "memoffset 0.9.1",
  "tempfile",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "ulid"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "470dbf6591da1b39d43c14523b2b469c86879a53e8b758c8e090a470fe7b1fbe"
+dependencies = [
+ "rand",
+ "web-time",
 ]
 
 [[package]]

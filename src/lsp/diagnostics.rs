@@ -1,6 +1,6 @@
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use rustc_hash::FxHashMap;
 use serde_json::Value;
 
 use super::client::uri_to_path;
@@ -46,14 +46,14 @@ fn diagnostics_from_publish_params(params: Value) -> Option<(PathBuf, Vec<FileDi
 }
 
 pub(super) fn clear_document_diagnostics(
-    diagnostics: &mut HashMap<PathBuf, Vec<FileDiagnostic>>,
+    diagnostics: &mut FxHashMap<PathBuf, Vec<FileDiagnostic>>,
     path: &Path,
 ) {
     diagnostics.remove(path);
 }
 
 pub(super) fn remap_document_diagnostics(
-    diagnostics: &mut HashMap<PathBuf, Vec<FileDiagnostic>>,
+    diagnostics: &mut FxHashMap<PathBuf, Vec<FileDiagnostic>>,
     old_path: &Path,
     new_path: PathBuf,
 ) {
@@ -86,7 +86,7 @@ mod tests {
     fn clearing_document_diagnostics_removes_only_that_file() {
         let first = PathBuf::from("/workspace/src/main.rs");
         let second = PathBuf::from("/workspace/src/lib.rs");
-        let mut diagnostics = HashMap::from([
+        let mut diagnostics = FxHashMap::from_iter([
             (first.clone(), vec![diagnostic("first")]),
             (second.clone(), vec![diagnostic("second")]),
         ]);
@@ -101,7 +101,7 @@ mod tests {
     fn remapping_document_diagnostics_moves_existing_entries() {
         let old_path = PathBuf::from("/workspace/src/old.rs");
         let new_path = PathBuf::from("/workspace/src/new.rs");
-        let mut diagnostics = HashMap::from([(old_path.clone(), vec![diagnostic("moved")])]);
+        let mut diagnostics = FxHashMap::from_iter([(old_path.clone(), vec![diagnostic("moved")])]);
 
         remap_document_diagnostics(&mut diagnostics, &old_path, new_path.clone());
 

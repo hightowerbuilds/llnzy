@@ -1,10 +1,11 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use notify::event::{ModifyKind, RenameMode};
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use rustc_hash::FxHashMap;
 
 /// Debounce interval for file change notifications.
 const DEBOUNCE_MS: u128 = 500;
@@ -15,7 +16,7 @@ pub struct FileWatcher {
     /// Channel receiving raw file events from notify.
     event_rx: mpsc::Receiver<notify::Result<Event>>,
     /// Files currently being watched.
-    watched: HashMap<PathBuf, WatchState>,
+    watched: FxHashMap<PathBuf, WatchState>,
 }
 
 struct WatchState {
@@ -56,7 +57,7 @@ impl FileWatcher {
         Ok(Self {
             watcher,
             event_rx: rx,
-            watched: HashMap::new(),
+            watched: FxHashMap::default(),
         })
     }
 
@@ -128,7 +129,10 @@ impl FileChange {
     }
 }
 
-fn classify_notify_event(event: &Event, watched: &HashMap<PathBuf, WatchState>) -> Vec<FileChange> {
+fn classify_notify_event(
+    event: &Event,
+    watched: &FxHashMap<PathBuf, WatchState>,
+) -> Vec<FileChange> {
     match event.kind {
         EventKind::Modify(ModifyKind::Name(RenameMode::Both)) => {
             let Some(from) = event
@@ -165,7 +169,7 @@ fn classify_notify_event(event: &Event, watched: &HashMap<PathBuf, WatchState>) 
     }
 }
 
-fn watched_key(path: &Path, watched: &HashMap<PathBuf, WatchState>) -> Option<PathBuf> {
+fn watched_key(path: &Path, watched: &FxHashMap<PathBuf, WatchState>) -> Option<PathBuf> {
     let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     if watched.contains_key(&canonical) {
         return Some(canonical);
@@ -185,7 +189,7 @@ fn dedup_changes(changes: &mut Vec<FileChange>) {
 mod tests {
     use super::*;
 
-    fn watched(paths: &[PathBuf]) -> HashMap<PathBuf, WatchState> {
+    fn watched(paths: &[PathBuf]) -> FxHashMap<PathBuf, WatchState> {
         paths
             .iter()
             .cloned()

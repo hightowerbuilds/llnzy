@@ -1,32 +1,39 @@
-use crate::stacker::{document::StackerDocumentEditor, draft::StackerDraft, StackerPrompt};
+use crate::stacker::{
+    archive_inbox_prompt, archive_saved_prompt, document::StackerDocumentEditor,
+    draft::StackerDraft, StackerPrompt,
+};
 
 use super::{
-    actions::{load_saved_prompt_into_editor, start_scratch_prompt},
+    actions::{load_inbox_prompt_into_editor, load_saved_prompt_into_editor, start_scratch_prompt},
     layout::truncate_line,
-    PendingStackerDraftSwitch,
+    PendingStackerDraftSwitch, PendingStackerPromptDelete,
 };
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn render_delete_prompt_modal(
     ctx: &egui::Context,
     prompts: &mut Vec<StackerPrompt>,
+    inbox_prompts: &mut Vec<StackerPrompt>,
     editor: &mut StackerDocumentEditor,
     draft: &mut StackerDraft,
     editing: &mut Option<usize>,
     dirty: &mut bool,
-    pending_delete: &mut Option<usize>,
+    pending_delete: &mut Option<PendingStackerPromptDelete>,
 ) {
-    let Some(index) = *pending_delete else {
+    let Some(target) = pending_delete.clone() else {
         return;
     };
-    let Some(prompt) = prompts.get(index) else {
+    let Some(prompt) = delete_target_prompt(&target, prompts, inbox_prompts) else {
         *pending_delete = None;
         return;
     };
 
     let mut confirm = false;
     let mut cancel = false;
-    let currently_editing = draft.active_prompt_index() == Some(index);
+    let currently_editing = match &target {
+        PendingStackerPromptDelete::Saved(index) => draft.active_prompt_index() == Some(*index),
+        PendingStackerPromptDelete::Inbox(id) => draft.active_inbox_id() == Some(id.as_str()),
+    };
     let title = truncate_line(&prompt.label, 54);
     egui::Window::new("Delete saved prompt?")
         .id(egui::Id::new("stacker_delete_prompt_modal"))
@@ -88,10 +95,30 @@ pub(super) fn render_delete_prompt_modal(
         });
 
     if confirm {
-        delete_saved_prompt(ctx, prompts, editor, draft, editing, dirty, index);
+        match target {
+            PendingStackerPromptDelete::Saved(index) => {
+                delete_saved_prompt(ctx, prompts, editor, draft, editing, dirty, index);
+            }
+            PendingStackerPromptDelete::Inbox(id) => {
+                delete_inbox_prompt(ctx, inbox_prompts, editor, draft, editing, &id);
+            }
+        }
         *pending_delete = None;
     } else if cancel {
         *pending_delete = None;
+    }
+}
+
+fn delete_target_prompt<'a>(
+    target: &PendingStackerPromptDelete,
+    prompts: &'a [StackerPrompt],
+    inbox_prompts: &'a [StackerPrompt],
+) -> Option<&'a StackerPrompt> {
+    match target {
+        PendingStackerPromptDelete::Saved(index) => prompts.get(*index),
+        PendingStackerPromptDelete::Inbox(id) => inbox_prompts
+            .iter()
+            .find(|prompt| prompt.id.as_deref() == Some(id.as_str())),
     }
 }
 
@@ -106,6 +133,13 @@ fn delete_saved_prompt(
 ) {
     if index >= prompts.len() {
         return;
+    }
+    if let Some(prompt) = prompts.get(index) {
+        if prompt.id.is_some() {
+            if let Err(err) = archive_saved_prompt(prompt) {
+                log::warn!("failed to archive saved prompt before delete: {err}");
+            }
+        }
     }
     prompts.remove(index);
     *dirty = true;
@@ -124,15 +158,41 @@ fn delete_saved_prompt(
     }
 }
 
+fn delete_inbox_prompt(
+    ctx: &egui::Context,
+    inbox_prompts: &mut Vec<StackerPrompt>,
+    editor: &mut StackerDocumentEditor,
+    draft: &mut StackerDraft,
+    editing: &mut Option<usize>,
+    id: &str,
+) {
+    let Some(index) = inbox_prompts
+        .iter()
+        .position(|prompt| prompt.id.as_deref() == Some(id))
+    else {
+        return;
+    };
+    let prompt = inbox_prompts[index].clone();
+    if let Err(err) = archive_inbox_prompt(&prompt) {
+        log::warn!("failed to archive inbox prompt {id}: {err}");
+        return;
+    }
+    inbox_prompts.remove(index);
+    if draft.active_inbox_id() == Some(id) {
+        start_scratch_prompt(ctx, editor, draft, editing);
+    }
+}
+
 pub(super) fn render_discard_draft_modal(
     ctx: &egui::Context,
     prompts: &[StackerPrompt],
+    inbox_prompts: &[StackerPrompt],
     editor: &mut StackerDocumentEditor,
     draft: &mut StackerDraft,
     pending_switch: &mut Option<PendingStackerDraftSwitch>,
     editing: &mut Option<usize>,
 ) {
-    let Some(target) = *pending_switch else {
+    let Some(target) = pending_switch.clone() else {
         return;
     };
 
@@ -194,6 +254,21 @@ pub(super) fn render_discard_draft_modal(
             }
             PendingStackerDraftSwitch::SavedPrompt(index) => {
                 load_saved_prompt_into_editor(ctx, prompts, editor, draft, editing, index);
+            }
+            PendingStackerDraftSwitch::InboxPrompt(id) => {
+                if let Some(index) = inbox_prompts
+                    .iter()
+                    .position(|prompt| prompt.id.as_deref() == Some(id.as_str()))
+                {
+                    load_inbox_prompt_into_editor(
+                        ctx,
+                        inbox_prompts,
+                        editor,
+                        draft,
+                        editing,
+                        index,
+                    );
+                }
             }
         }
         *pending_switch = None;

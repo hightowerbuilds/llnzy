@@ -62,7 +62,7 @@ struct SelectionRectCache {
     cell_h_bits: u32,
     color: [u8; 3],
     alpha_bits: u32,
-    rects: Vec<SelectionRect>,
+    rects: Arc<[SelectionRect]>,
 }
 
 struct App {
@@ -413,14 +413,15 @@ impl App {
         })
     }
 
-    fn active_selection_rects(&mut self, cell_w: f32, cell_h: f32) -> Vec<SelectionRect> {
+    fn active_selection_rects(&mut self, cell_w: f32, cell_h: f32) -> Arc<[SelectionRect]> {
+        let empty: Arc<[SelectionRect]> = Arc::from(Vec::<SelectionRect>::new().into_boxed_slice());
         let Some(tab) = self.tabs.get(self.active_tab) else {
             self.selection_rect_cache = None;
-            return Vec::new();
+            return empty;
         };
         let Some(session) = tab.content.as_terminal() else {
             self.selection_rect_cache = None;
-            return Vec::new();
+            return empty;
         };
 
         let tab_id = tab.id;
@@ -439,13 +440,14 @@ impl App {
                 && cache.color == color
                 && cache.alpha_bits == alpha_bits
             {
-                return cache.rects.clone();
+                return Arc::clone(&cache.rects);
             }
         }
 
-        let rects = session
+        let rects: Arc<[SelectionRect]> = session
             .terminal
-            .selection_rects(cell_w, cell_h, color, alpha);
+            .selection_rects(cell_w, cell_h, color, alpha)
+            .into();
         self.selection_rect_cache = Some(SelectionRectCache {
             tab_id,
             revision,
@@ -453,7 +455,7 @@ impl App {
             cell_h_bits,
             color,
             alpha_bits,
-            rects: rects.clone(),
+            rects: Arc::clone(&rects),
         });
         rects
     }
@@ -786,6 +788,15 @@ fn rect_to_uv(rect: llnzy::session::Rect, size: winit::dpi::PhysicalSize<u32>) -
 
 fn main() {
     env_logger::init();
+
+    // Headless CLI dispatch — must run before any GUI/winit/wgpu setup so
+    // agents calling `llnzy prompt add ...` never spin up a window.
+    {
+        let argv: Vec<String> = std::env::args().collect();
+        if argv.get(1).map(String::as_str) == Some("prompt") {
+            std::process::exit(llnzy::stacker::cli::run_from_env());
+        }
+    }
 
     // Install panic handler that logs to disk so panics remain visible when stderr is lost.
     let default_hook = std::panic::take_hook();

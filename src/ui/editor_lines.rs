@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use crate::config::EffectiveEditorConfig;
 use crate::editor::syntax::{FoldRange, HighlightGroup, HighlightSpan};
@@ -24,7 +24,7 @@ pub(super) fn render_editor_lines(
     buf: &crate::editor::buffer::Buffer,
     view: &BufferView,
     editor_config: &EffectiveEditorConfig,
-    syntax_colors: &HashMap<HighlightGroup, [u8; 3]>,
+    syntax_colors: &FxHashMap<HighlightGroup, [u8; 3]>,
     inlay_hints: &[InlayHintInfo],
     code_lenses: &[CodeLensInfo],
     highlight_spans: &[Vec<HighlightSpan>],
@@ -130,7 +130,7 @@ fn render_wrapped_lines(
     buf: &crate::editor::buffer::Buffer,
     view: &BufferView,
     editor_config: &EffectiveEditorConfig,
-    syntax_colors: &HashMap<HighlightGroup, [u8; 3]>,
+    syntax_colors: &FxHashMap<HighlightGroup, [u8; 3]>,
     highlight_spans: &[Vec<HighlightSpan>],
     visible_wrap_window: &[WrapRow],
     rect: egui::Rect,
@@ -223,7 +223,7 @@ fn render_wrapped_lines(
 fn render_wrapped_row_text(
     painter: &egui::Painter,
     text_clip: egui::Rect,
-    syntax_colors: &HashMap<HighlightGroup, [u8; 3]>,
+    syntax_colors: &FxHashMap<HighlightGroup, [u8; 3]>,
     row: &WrapRow,
     row_text: &str,
     text_x_base: f32,
@@ -297,7 +297,7 @@ fn render_unwrapped_lines(
     buf: &crate::editor::buffer::Buffer,
     view: &BufferView,
     editor_config: &EffectiveEditorConfig,
-    syntax_colors: &HashMap<HighlightGroup, [u8; 3]>,
+    syntax_colors: &FxHashMap<HighlightGroup, [u8; 3]>,
     inlay_hints: &[InlayHintInfo],
     code_lenses: &[CodeLensInfo],
     highlight_spans: &[Vec<HighlightSpan>],

@@ -3,7 +3,7 @@ use crate::stacker::{
 };
 
 use super::{
-    stacker_state::{PendingStackerDraftSwitch, StackerPromptViewMode},
+    stacker_state::{PendingStackerDraftSwitch, PendingStackerPromptDelete, StackerPromptViewMode},
     STACKER_PROMPT_EDITOR_ID,
 };
 
@@ -24,10 +24,11 @@ pub(crate) const DEFAULT_EDITOR_FONT_SIZE: f32 = 16.0;
 pub(crate) fn render_stacker_view(
     ui: &mut egui::Ui,
     prompts: &mut Vec<StackerPrompt>,
+    inbox_prompts: &mut Vec<StackerPrompt>,
     editor: &mut StackerDocumentEditor,
     draft: &mut StackerDraft,
     pending_switch: &mut Option<PendingStackerDraftSwitch>,
-    pending_delete: &mut Option<usize>,
+    pending_delete: &mut Option<PendingStackerPromptDelete>,
     editing: &mut Option<usize>,
     edit_text: &mut String,
     dirty: &mut bool,
@@ -45,13 +46,33 @@ pub(crate) fn render_stacker_view(
             edit_text.clear();
         }
     }
-    if matches!(
-        *pending_switch,
-        Some(PendingStackerDraftSwitch::SavedPrompt(idx)) if idx >= prompts.len()
-    ) {
+    if pending_switch
+        .as_ref()
+        .is_some_and(|target| matches!(target, PendingStackerDraftSwitch::SavedPrompt(idx) if *idx >= prompts.len()))
+    {
         *pending_switch = None;
     }
-    if matches!(*pending_delete, Some(idx) if idx >= prompts.len()) {
+    if pending_switch.as_ref().is_some_and(|target| {
+        matches!(
+            target,
+            PendingStackerDraftSwitch::InboxPrompt(id)
+                if !inbox_prompts.iter().any(|prompt| prompt.id.as_deref() == Some(id.as_str()))
+        )
+    }) {
+        *pending_switch = None;
+    }
+    if pending_delete.as_ref().is_some_and(
+        |target| matches!(target, PendingStackerPromptDelete::Saved(idx) if *idx >= prompts.len()),
+    ) {
+        *pending_delete = None;
+    }
+    if pending_delete.as_ref().is_some_and(|target| {
+        matches!(
+            target,
+            PendingStackerPromptDelete::Inbox(id)
+                if !inbox_prompts.iter().any(|prompt| prompt.id.as_deref() == Some(id.as_str()))
+        )
+    }) {
         *pending_delete = None;
     }
 
@@ -85,6 +106,7 @@ pub(crate) fn render_stacker_view(
         ui,
         list_h,
         prompts,
+        inbox_prompts,
         editing,
         editor,
         draft,
@@ -101,6 +123,7 @@ pub(crate) fn render_stacker_view(
         ui,
         editor_h,
         prompts,
+        inbox_prompts,
         editor,
         draft,
         pending_switch,
@@ -110,10 +133,19 @@ pub(crate) fn render_stacker_view(
         web_editor_rect,
     );
 
-    modals::render_discard_draft_modal(ui.ctx(), prompts, editor, draft, pending_switch, editing);
+    modals::render_discard_draft_modal(
+        ui.ctx(),
+        prompts,
+        inbox_prompts,
+        editor,
+        draft,
+        pending_switch,
+        editing,
+    );
     modals::render_delete_prompt_modal(
         ui.ctx(),
         prompts,
+        inbox_prompts,
         editor,
         draft,
         editing,

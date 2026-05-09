@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use crate::config::EffectiveEditorConfig;
 use crate::editor::buffer::{BufferEdit, IndentStyle};
@@ -46,7 +46,7 @@ pub(crate) struct TextEditorState<'a> {
 pub(crate) struct TextEditorInput<'a> {
     pub syntax: &'a SyntaxEngine,
     pub editor_config: &'a EffectiveEditorConfig,
-    pub syntax_colors: &'a HashMap<HighlightGroup, [u8; 3]>,
+    pub syntax_colors: &'a FxHashMap<HighlightGroup, [u8; 3]>,
     pub diagnostics: Option<&'a [FileDiagnostic]>,
     pub hover_text: Option<&'a str>,
     pub completions: Option<(&'a [&'a CompletionItem], usize)>,

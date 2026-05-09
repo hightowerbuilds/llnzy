@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
+use rustc_hash::FxHashMap;
+
 use crate::editor::syntax::HighlightGroup;
 use crate::keybindings::{KeyBindings, KeybindingPreset};
 
@@ -74,7 +76,7 @@ pub struct Config {
     pub terminal: TerminalConfig,
     pub effects: EffectsConfig,
     pub editor: EditorConfig,
-    pub syntax_colors: HashMap<HighlightGroup, [u8; 3]>,
+    pub syntax_colors: FxHashMap<HighlightGroup, [u8; 3]>,
     pub keybindings: KeyBindings,
     pub transition: Option<ColorTransition>,
     pub time_of_day_enabled: bool,
@@ -336,7 +338,7 @@ impl Default for Config {
             terminal: TerminalConfig::default(),
             effects: EffectsConfig::default(),
             editor: EditorConfig::default(),
-            syntax_colors: HashMap::new(),
+            syntax_colors: FxHashMap::default(),
             keybindings: KeyBindings::default_bindings(),
             transition: None,
             time_of_day_enabled: false,

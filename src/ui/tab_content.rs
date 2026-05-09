@@ -270,6 +270,7 @@ fn render_joined_pane(
                 stacker_view::render_stacker_view(
                     ui,
                     &mut state.stacker.prompts,
+                    &mut state.stacker.inbox_prompts,
                     &mut state.stacker.editor,
                     &mut state.stacker.draft,
                     &mut state.stacker.pending_draft_switch,
@@ -394,6 +395,7 @@ fn render_stacker(ctx: &egui::Context, state: TabContentState<'_>) {
             stacker_view::render_stacker_view(
                 ui,
                 &mut state.stacker.prompts,
+                &mut state.stacker.inbox_prompts,
                 &mut state.stacker.editor,
                 &mut state.stacker.draft,
                 &mut state.stacker.pending_draft_switch,

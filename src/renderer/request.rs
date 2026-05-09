@@ -20,7 +20,6 @@ pub struct RenderRequest<'a> {
     pub tab_id: u64,
     /// Optional explicit terminal panes for joined-tab rendering.
     pub terminal_panes: &'a [TerminalPane<'a>],
-    pub tab_titles: &'a [(String, bool)],
     pub selection_rects: &'a [(f32, f32, f32, f32, [f32; 4])],
     pub search_rects: &'a [(f32, f32, f32, f32, [f32; 4])],
     pub search_bar: Option<(&'a str, &'a str)>,

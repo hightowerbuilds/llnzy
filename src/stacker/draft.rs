@@ -2,6 +2,7 @@
 pub enum StackerDraftSource {
     Scratch,
     SavedPrompt(usize),
+    InboxPrompt(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -33,6 +34,13 @@ impl StackerDraft {
         self.current_text = text;
     }
 
+    pub fn load_inbox_prompt(&mut self, id: impl Into<String>, text: impl Into<String>) {
+        let text = text.into();
+        self.source = StackerDraftSource::InboxPrompt(id.into());
+        self.original_text = text.clone();
+        self.current_text = text;
+    }
+
     pub fn record_current_text(&mut self, text: impl Into<String>) -> bool {
         let text = text.into();
         let changed = self.current_text != text;
@@ -52,6 +60,14 @@ impl StackerDraft {
         match self.source {
             StackerDraftSource::Scratch => None,
             StackerDraftSource::SavedPrompt(index) => Some(index),
+            StackerDraftSource::InboxPrompt(_) => None,
+        }
+    }
+
+    pub fn active_inbox_id(&self) -> Option<&str> {
+        match &self.source {
+            StackerDraftSource::InboxPrompt(id) => Some(id.as_str()),
+            _ => None,
         }
     }
 
@@ -69,6 +85,10 @@ impl StackerDraft {
 
     pub fn switching_to_saved_prompt_would_discard_changes(&self, index: usize) -> bool {
         self.is_dirty() && self.source != StackerDraftSource::SavedPrompt(index)
+    }
+
+    pub fn switching_to_inbox_prompt_would_discard_changes(&self, id: &str) -> bool {
+        self.is_dirty() && self.source != StackerDraftSource::InboxPrompt(id.to_string())
     }
 
     pub fn switching_to_scratch_would_discard_changes(&self) -> bool {

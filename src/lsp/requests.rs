@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
+use std::sync::Arc;
 
 use serde_json::Value;
 use tokio::sync::oneshot;
@@ -33,7 +34,56 @@ impl LspRequestExecutor for Transport {
 }
 
 impl LspManager {
-    /// Spawn a hover request. Returns a receiver for the result.
+    /// Run an async closure on the tokio runtime against the language server
+    /// for `lang_id`, scoped to a document URI resolved from `path`. Returns
+    /// `None` if the server is not running or the document is unknown.
+    fn spawn_doc_request<R, F, Fut>(
+        &self,
+        path: &Path,
+        lang_id: &str,
+        f: F,
+    ) -> Option<oneshot::Receiver<R>>
+    where
+        R: Send + 'static,
+        F: FnOnce(Arc<Transport>, lsp_types::Uri) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = R> + Send + 'static,
+    {
+        let client = self.clients.get(lang_id)?;
+        if !client.is_running() {
+            return None;
+        }
+        let transport = client.transport().clone();
+        let uri = client.doc_uri(path)?;
+        let (tx, rx) = oneshot::channel();
+        self.runtime.spawn(async move {
+            let result = f(transport, uri).await;
+            let _ = tx.send(result);
+        });
+        Some(rx)
+    }
+
+    /// Run an async closure on the tokio runtime against the language server
+    /// for `lang_id` without resolving a document URI. Used for workspace-wide
+    /// requests such as workspace symbols.
+    fn spawn_lang_request<R, F, Fut>(&self, lang_id: &str, f: F) -> Option<oneshot::Receiver<R>>
+    where
+        R: Send + 'static,
+        F: FnOnce(Arc<Transport>) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = R> + Send + 'static,
+    {
+        let client = self.clients.get(lang_id)?;
+        if !client.is_running() {
+            return None;
+        }
+        let transport = client.transport().clone();
+        let (tx, rx) = oneshot::channel();
+        self.runtime.spawn(async move {
+            let result = f(transport).await;
+            let _ = tx.send(result);
+        });
+        Some(rx)
+    }
+
     pub fn hover_async(
         &self,
         path: &Path,
@@ -41,21 +91,11 @@ impl LspManager {
         line: u32,
         col: u32,
     ) -> Option<oneshot::Receiver<Option<String>>> {
-        let client = self.clients.get(lang_id)?;
-        if !client.is_running() {
-            return None;
-        }
-        let transport = client.transport().clone();
-        let uri = client.doc_uri(path)?;
-        let (tx, rx) = oneshot::channel();
-        self.runtime.spawn(async move {
-            let result = async_hover(transport.as_ref(), &uri, line, col).await;
-            let _ = tx.send(result);
-        });
-        Some(rx)
+        self.spawn_doc_request(path, lang_id, move |transport, uri| async move {
+            async_hover(transport.as_ref(), &uri, line, col).await
+        })
     }
 
-    /// Spawn a completion request. Returns a receiver for the result.
     pub fn completion_async(
         &self,
         path: &Path,
@@ -63,21 +103,11 @@ impl LspManager {
         line: u32,
         col: u32,
     ) -> Option<oneshot::Receiver<Vec<CompletionItem>>> {
-        let client = self.clients.get(lang_id)?;
-        if !client.is_running() {
-            return None;
-        }
-        let transport = client.transport().clone();
-        let uri = client.doc_uri(path)?;
-        let (tx, rx) = oneshot::channel();
-        self.runtime.spawn(async move {
-            let result = async_completion(transport.as_ref(), &uri, line, col).await;
-            let _ = tx.send(result);
-        });
-        Some(rx)
+        self.spawn_doc_request(path, lang_id, move |transport, uri| async move {
+            async_completion(transport.as_ref(), &uri, line, col).await
+        })
     }
 
-    /// Spawn a goto-definition request. Returns a receiver for the result.
     pub fn definition_async(
         &self,
         path: &Path,
@@ -85,21 +115,11 @@ impl LspManager {
         line: u32,
         col: u32,
     ) -> Option<oneshot::Receiver<Option<(PathBuf, u32, u32)>>> {
-        let client = self.clients.get(lang_id)?;
-        if !client.is_running() {
-            return None;
-        }
-        let transport = client.transport().clone();
-        let uri = client.doc_uri(path)?;
-        let (tx, rx) = oneshot::channel();
-        self.runtime.spawn(async move {
-            let result = async_definition(transport.as_ref(), &uri, line, col).await;
-            let _ = tx.send(result);
-        });
-        Some(rx)
+        self.spawn_doc_request(path, lang_id, move |transport, uri| async move {
+            async_definition(transport.as_ref(), &uri, line, col).await
+        })
     }
 
-    /// Spawn a signature help request. Returns a receiver for the result.
     pub fn signature_help_async(
         &self,
         path: &Path,
@@ -107,21 +127,11 @@ impl LspManager {
         line: u32,
         col: u32,
     ) -> Option<oneshot::Receiver<Option<SignatureInfo>>> {
-        let client = self.clients.get(lang_id)?;
-        if !client.is_running() {
-            return None;
-        }
-        let transport = client.transport().clone();
-        let uri = client.doc_uri(path)?;
-        let (tx, rx) = oneshot::channel();
-        self.runtime.spawn(async move {
-            let result = async_signature_help(transport.as_ref(), &uri, line, col).await;
-            let _ = tx.send(result);
-        });
-        Some(rx)
+        self.spawn_doc_request(path, lang_id, move |transport, uri| async move {
+            async_signature_help(transport.as_ref(), &uri, line, col).await
+        })
     }
 
-    /// Spawn a references request. Returns a receiver for the result.
     pub fn references_async(
         &self,
         path: &Path,
@@ -129,41 +139,21 @@ impl LspManager {
         line: u32,
         col: u32,
     ) -> Option<oneshot::Receiver<Vec<ReferenceLocation>>> {
-        let client = self.clients.get(lang_id)?;
-        if !client.is_running() {
-            return None;
-        }
-        let transport = client.transport().clone();
-        let uri = client.doc_uri(path)?;
-        let (tx, rx) = oneshot::channel();
-        self.runtime.spawn(async move {
-            let result = async_references(transport.as_ref(), &uri, line, col).await;
-            let _ = tx.send(result);
-        });
-        Some(rx)
+        self.spawn_doc_request(path, lang_id, move |transport, uri| async move {
+            async_references(transport.as_ref(), &uri, line, col).await
+        })
     }
 
-    /// Spawn a formatting request. Returns a receiver for the result.
     pub fn format_async(
         &self,
         path: &Path,
         lang_id: &str,
     ) -> Option<oneshot::Receiver<Vec<FormatEdit>>> {
-        let client = self.clients.get(lang_id)?;
-        if !client.is_running() {
-            return None;
-        }
-        let transport = client.transport().clone();
-        let uri = client.doc_uri(path)?;
-        let (tx, rx) = oneshot::channel();
-        self.runtime.spawn(async move {
-            let result = async_format(transport.as_ref(), &uri).await;
-            let _ = tx.send(result);
-        });
-        Some(rx)
+        self.spawn_doc_request(path, lang_id, move |transport, uri| async move {
+            async_format(transport.as_ref(), &uri).await
+        })
     }
 
-    /// Spawn an inlay hints request. Returns a receiver for the result.
     pub fn inlay_hints_async(
         &self,
         path: &Path,
@@ -171,41 +161,21 @@ impl LspManager {
         start_line: u32,
         end_line: u32,
     ) -> Option<oneshot::Receiver<Vec<InlayHintInfo>>> {
-        let client = self.clients.get(lang_id)?;
-        if !client.is_running() {
-            return None;
-        }
-        let transport = client.transport().clone();
-        let uri = client.doc_uri(path)?;
-        let (tx, rx) = oneshot::channel();
-        self.runtime.spawn(async move {
-            let result = async_inlay_hints(transport.as_ref(), &uri, start_line, end_line).await;
-            let _ = tx.send(result);
-        });
-        Some(rx)
+        self.spawn_doc_request(path, lang_id, move |transport, uri| async move {
+            async_inlay_hints(transport.as_ref(), &uri, start_line, end_line).await
+        })
     }
 
-    /// Spawn a code lens request. Returns a receiver for the result.
     pub fn code_lens_async(
         &self,
         path: &Path,
         lang_id: &str,
     ) -> Option<oneshot::Receiver<Vec<CodeLensInfo>>> {
-        let client = self.clients.get(lang_id)?;
-        if !client.is_running() {
-            return None;
-        }
-        let transport = client.transport().clone();
-        let uri = client.doc_uri(path)?;
-        let (tx, rx) = oneshot::channel();
-        self.runtime.spawn(async move {
-            let result = async_code_lens(transport.as_ref(), &uri).await;
-            let _ = tx.send(result);
-        });
-        Some(rx)
+        self.spawn_doc_request(path, lang_id, move |transport, uri| async move {
+            async_code_lens(transport.as_ref(), &uri).await
+        })
     }
 
-    /// Spawn a code action request. Returns a receiver for the result.
     pub fn code_actions_async(
         &self,
         path: &Path,
@@ -215,12 +185,6 @@ impl LspManager {
         end_line: u32,
         end_col: u32,
     ) -> Option<oneshot::Receiver<Vec<CodeAction>>> {
-        let client = self.clients.get(lang_id)?;
-        if !client.is_running() {
-            return None;
-        }
-        let transport = client.transport().clone();
-        let uri = client.doc_uri(path)?;
         let diagnostics = diagnostics_for_range(
             self.diagnostics.get(path),
             start_line,
@@ -228,9 +192,8 @@ impl LspManager {
             end_line,
             end_col,
         );
-        let (tx, rx) = oneshot::channel();
-        self.runtime.spawn(async move {
-            let result = async_code_actions(
+        self.spawn_doc_request(path, lang_id, move |transport, uri| async move {
+            async_code_actions(
                 transport.as_ref(),
                 &uri,
                 start_line,
@@ -239,13 +202,10 @@ impl LspManager {
                 end_col,
                 diagnostics,
             )
-            .await;
-            let _ = tx.send(result);
-        });
-        Some(rx)
+            .await
+        })
     }
 
-    /// Spawn a rename request. Returns a receiver for workspace edits.
     pub fn rename_async(
         &self,
         path: &Path,
@@ -254,59 +214,31 @@ impl LspManager {
         col: u32,
         new_name: &str,
     ) -> Option<oneshot::Receiver<WorkspaceEdits>> {
-        let client = self.clients.get(lang_id)?;
-        if !client.is_running() {
-            return None;
-        }
-        let transport = client.transport().clone();
-        let uri = client.doc_uri(path)?;
         let new_name = new_name.to_string();
-        let (tx, rx) = oneshot::channel();
-        self.runtime.spawn(async move {
-            let result = async_rename(transport.as_ref(), &uri, line, col, &new_name).await;
-            let _ = tx.send(result);
-        });
-        Some(rx)
+        self.spawn_doc_request(path, lang_id, move |transport, uri| async move {
+            async_rename(transport.as_ref(), &uri, line, col, &new_name).await
+        })
     }
 
-    /// Spawn a document symbols request. Returns a receiver for the result.
     pub fn document_symbols_async(
         &self,
         path: &Path,
         lang_id: &str,
     ) -> Option<oneshot::Receiver<Vec<SymbolInfo>>> {
-        let client = self.clients.get(lang_id)?;
-        if !client.is_running() {
-            return None;
-        }
-        let transport = client.transport().clone();
-        let uri = client.doc_uri(path)?;
-        let (tx, rx) = oneshot::channel();
-        self.runtime.spawn(async move {
-            let result = async_document_symbols(transport.as_ref(), &uri).await;
-            let _ = tx.send(result);
-        });
-        Some(rx)
+        self.spawn_doc_request(path, lang_id, move |transport, uri| async move {
+            async_document_symbols(transport.as_ref(), &uri).await
+        })
     }
 
-    /// Spawn a workspace symbols request. Returns a receiver for the result.
     pub fn workspace_symbols_async(
         &self,
         lang_id: &str,
         query: &str,
     ) -> Option<oneshot::Receiver<Vec<WorkspaceSymbol>>> {
-        let client = self.clients.get(lang_id)?;
-        if !client.is_running() {
-            return None;
-        }
-        let transport = client.transport().clone();
         let query = query.to_string();
-        let (tx, rx) = oneshot::channel();
-        self.runtime.spawn(async move {
-            let result = async_workspace_symbols(transport.as_ref(), &query).await;
-            let _ = tx.send(result);
-        });
-        Some(rx)
+        self.spawn_lang_request(lang_id, move |transport| async move {
+            async_workspace_symbols(transport.as_ref(), &query).await
+        })
     }
 }
 

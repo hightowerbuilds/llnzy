@@ -1,5 +1,6 @@
-use std::collections::HashMap;
 use std::path::Path;
+
+use rustc_hash::FxHashMap;
 
 use crate::path_utils::{
     extension_matches, CSS_SYNTAX_EXTS, C_EXTS, GO_EXTS, HTML_EXTS, JAVASCRIPT_EXTS,
@@ -336,7 +337,7 @@ pub fn group_color(group: HighlightGroup) -> [u8; 3] {
 
 pub fn group_color_with_overrides(
     group: HighlightGroup,
-    overrides: &HashMap<HighlightGroup, [u8; 3]>,
+    overrides: &FxHashMap<HighlightGroup, [u8; 3]>,
 ) -> [u8; 3] {
     overrides
         .get(&group)

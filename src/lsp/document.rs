@@ -1,7 +1,7 @@
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use lsp_types::Uri;
+use rustc_hash::FxHashMap;
 
 pub(crate) fn path_to_uri(path: &Path) -> Result<Uri, String> {
     let abs = document_key(path);
@@ -46,7 +46,7 @@ pub(crate) struct DocumentMove {
 /// Owns client-side LSP text document lifecycle state.
 #[derive(Debug, Default)]
 pub(crate) struct DocumentStore {
-    docs: HashMap<PathBuf, DocumentSnapshot>,
+    docs: FxHashMap<PathBuf, DocumentSnapshot>,
 }
 
 impl DocumentStore {

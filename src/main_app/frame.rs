@@ -20,11 +20,6 @@ impl App {
 
         let tab_info = self.tab_titles();
         let tab_pane_info = self.tab_panes();
-        let render_titles: Vec<(String, bool)> = tab_info
-            .iter()
-            .enumerate()
-            .map(|(i, tab)| (tab.title.clone(), i == self.active_tab))
-            .collect();
         let (cw, ch) = self
             .renderer
             .as_ref()
@@ -50,6 +45,7 @@ impl App {
 
         let sidebar_w_before = self.sidebar_width_px();
         let mut project_tree_changed = false;
+        let mut stacker_inbox_changed = false;
 
         if let Some(renderer) = &mut self.renderer {
             if let Some(layout) = &self.screen_layout {
@@ -59,6 +55,10 @@ impl App {
                         ui.sketch.state.clipboard_in = Some(text);
                     }
                     ui.editor_view.init_lsp(self.proxy.clone());
+                    ui.stacker.ensure_inbox_watcher(self.proxy.clone());
+                    if ui.stacker.poll_inbox_watcher() {
+                        stacker_inbox_changed = true;
+                    }
                     ui.explorer.ensure_project_watcher(self.proxy.clone());
                     if ui.explorer.poll_project_watcher() {
                         project_tree_changed = true;
@@ -72,8 +72,8 @@ impl App {
                         ui.active_tab_kind,
                         Some(TabKind::CodeFile)
                     ));
-                    ui.tab_names = tab_info.clone();
-                    ui.tab_panes = tab_pane_info.clone();
+                    ui.tab_names = tab_info;
+                    ui.tab_panes = tab_pane_info;
                 }
 
                 let active_tab = self.tabs.get(self.active_tab);
@@ -120,8 +120,7 @@ impl App {
                     terminal: terminal_session,
                     tab_id,
                     terminal_panes: &terminal_panes,
-                    tab_titles: &render_titles,
-                    selection_rects: &sel_info,
+                    selection_rects: &sel_info[..],
                     search_rects: &search_rects,
                     search_bar: search_bar_ref,
                     error_panel: err_panel,
@@ -137,6 +136,9 @@ impl App {
             }
         }
         if project_tree_changed {
+            self.request_redraw();
+        }
+        if stacker_inbox_changed {
             self.request_redraw();
         }
 

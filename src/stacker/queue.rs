@@ -95,6 +95,7 @@ mod tests {
             text: text.to_string(),
             label: prompt_label(text),
             category: String::new(),
+            ..StackerPrompt::default()
         }
     }
 

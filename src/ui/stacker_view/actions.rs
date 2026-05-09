@@ -26,6 +26,35 @@ pub(super) fn request_load_saved_prompt(
     }
 }
 
+pub(super) fn request_load_inbox_prompt(
+    ctx: &egui::Context,
+    inbox_prompts: &[StackerPrompt],
+    editor: &mut StackerDocumentEditor,
+    draft: &mut StackerDraft,
+    pending_switch: &mut Option<PendingStackerDraftSwitch>,
+    editing: &mut Option<usize>,
+    index: usize,
+) {
+    let Some(prompt) = inbox_prompts.get(index) else {
+        return;
+    };
+    let Some(id) = prompt.id.as_deref() else {
+        return;
+    };
+    if draft.active_inbox_id() == Some(id) {
+        stacker_cursor::store_document_selection(
+            ctx,
+            egui::Id::new(STACKER_PROMPT_EDITOR_ID),
+            editor,
+            editor.selection(),
+        );
+    } else if draft.switching_to_inbox_prompt_would_discard_changes(id) {
+        *pending_switch = Some(PendingStackerDraftSwitch::InboxPrompt(id.to_string()));
+    } else {
+        load_inbox_prompt_into_editor(ctx, inbox_prompts, editor, draft, editing, index);
+    }
+}
+
 pub(super) fn load_saved_prompt_into_editor(
     ctx: &egui::Context,
     prompts: &[StackerPrompt],
@@ -40,6 +69,32 @@ pub(super) fn load_saved_prompt_into_editor(
     *editing = Some(index);
     editor.set_text(prompt.text.clone());
     draft.load_saved_prompt(index, prompt.text.clone());
+    let cursor = editor.char_count();
+    stacker_cursor::store_document_cursor(
+        ctx,
+        egui::Id::new(STACKER_PROMPT_EDITOR_ID),
+        editor,
+        cursor,
+    );
+}
+
+pub(super) fn load_inbox_prompt_into_editor(
+    ctx: &egui::Context,
+    inbox_prompts: &[StackerPrompt],
+    editor: &mut StackerDocumentEditor,
+    draft: &mut StackerDraft,
+    editing: &mut Option<usize>,
+    index: usize,
+) {
+    let Some(prompt) = inbox_prompts.get(index) else {
+        return;
+    };
+    let Some(id) = prompt.id.as_deref() else {
+        return;
+    };
+    *editing = None;
+    editor.set_text(prompt.text.clone());
+    draft.load_inbox_prompt(id.to_string(), prompt.text.clone());
     let cursor = editor.char_count();
     stacker_cursor::store_document_cursor(
         ctx,

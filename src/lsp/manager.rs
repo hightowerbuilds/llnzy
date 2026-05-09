@@ -1,7 +1,8 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use rustc_hash::FxHashMap;
 use serde_json::Value;
 use tokio::runtime::Runtime;
 use tokio::sync::oneshot;
@@ -19,14 +20,14 @@ use super::types::FileDiagnostic;
 /// Manages all LSP clients and provides a synchronous interface for the editor.
 pub struct LspManager {
     pub(super) runtime: Runtime,
-    pub(super) clients: HashMap<&'static str, LspClient>,
-    pub(super) starting: HashMap<&'static str, oneshot::Receiver<Result<LspClient, String>>>,
-    pub(super) health_checks: HashMap<&'static str, oneshot::Receiver<bool>>,
+    pub(super) clients: FxHashMap<&'static str, LspClient>,
+    pub(super) starting: FxHashMap<&'static str, oneshot::Receiver<Result<LspClient, String>>>,
+    pub(super) health_checks: FxHashMap<&'static str, oneshot::Receiver<bool>>,
     crashed_servers: HashSet<&'static str>,
-    pub(super) pending_open_docs: HashMap<&'static str, Vec<PendingOpenDoc>>,
-    pub(super) unavailable: HashMap<&'static str, String>,
-    pub(super) progress: HashMap<&'static str, String>,
-    pub diagnostics: HashMap<PathBuf, Vec<FileDiagnostic>>,
+    pub(super) pending_open_docs: FxHashMap<&'static str, Vec<PendingOpenDoc>>,
+    pub(super) unavailable: FxHashMap<&'static str, String>,
+    pub(super) progress: FxHashMap<&'static str, String>,
+    pub diagnostics: FxHashMap<PathBuf, Vec<FileDiagnostic>>,
     pub(super) workspace_roots: Vec<PathBuf>,
     pub(super) proxy: winit::event_loop::EventLoopProxy<crate::UserEvent>,
 }
@@ -52,14 +53,14 @@ impl LspManager {
         let runtime = Runtime::new().expect("failed to create tokio runtime");
         LspManager {
             runtime,
-            clients: HashMap::new(),
-            starting: HashMap::new(),
-            health_checks: HashMap::new(),
+            clients: FxHashMap::default(),
+            starting: FxHashMap::default(),
+            health_checks: FxHashMap::default(),
             crashed_servers: HashSet::new(),
-            pending_open_docs: HashMap::new(),
-            unavailable: HashMap::new(),
-            progress: HashMap::new(),
-            diagnostics: HashMap::new(),
+            pending_open_docs: FxHashMap::default(),
+            unavailable: FxHashMap::default(),
+            progress: FxHashMap::default(),
+            diagnostics: FxHashMap::default(),
             workspace_roots: Vec::new(),
             proxy,
         }

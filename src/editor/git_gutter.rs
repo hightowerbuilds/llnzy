@@ -232,10 +232,10 @@ fn lcs_lines(a: &[String], b: &[&str]) -> Vec<String> {
 
 /// Fast approximate LCS for large files using line hashing.
 fn lcs_lines_fast(a: &[String], b: &[&str]) -> Vec<String> {
-    use std::collections::HashMap;
+    use rustc_hash::FxHashMap;
 
     // Build index of b lines
-    let mut b_index: HashMap<&str, Vec<usize>> = HashMap::new();
+    let mut b_index: FxHashMap<&str, Vec<usize>> = FxHashMap::default();
     for (j, line) in b.iter().enumerate() {
         b_index.entry(line).or_default().push(j);
     }

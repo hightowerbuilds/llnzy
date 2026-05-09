@@ -5,7 +5,8 @@ use crate::stacker::{
     },
     document::StackerDocumentEditor,
     draft::StackerDraft,
-    import_prompts, merge_unique_prompts, new_prompt, prompt_label, stacker_path, StackerPrompt,
+    import_prompts, merge_unique_prompts, new_prompt, promote_inbox_prompt, prompt_label,
+    stacker_path, StackerPrompt,
 };
 
 use super::{
@@ -20,6 +21,7 @@ pub(super) fn render_editor_toolbar(
     ui: &mut egui::Ui,
     editor_id: egui::Id,
     prompts: &mut Vec<StackerPrompt>,
+    inbox_prompts: &mut Vec<StackerPrompt>,
     editor: &mut StackerDocumentEditor,
     draft: &mut StackerDraft,
     pending_switch: &mut Option<PendingStackerDraftSwitch>,
@@ -135,6 +137,29 @@ pub(super) fn render_editor_toolbar(
                     prompt.category.clear();
                     draft.load_saved_prompt(idx, prompt.text.clone());
                     *dirty = true;
+                }
+            } else if let Some(id) = draft.active_inbox_id().map(str::to_string) {
+                if let Some(inbox_idx) = inbox_prompts
+                    .iter()
+                    .position(|prompt| prompt.id.as_deref() == Some(id.as_str()))
+                {
+                    let mut prompt = inbox_prompts[inbox_idx].clone();
+                    prompt.text = editor.text().trim().to_string();
+                    prompt.label = prompt_label(&prompt.text);
+                    prompt.category.clear();
+                    match promote_inbox_prompt(&prompt) {
+                        Ok(saved) => {
+                            inbox_prompts.remove(inbox_idx);
+                            prompts.push(saved);
+                            let saved_idx = prompts.len() - 1;
+                            *editing = Some(saved_idx);
+                            if let Some(prompt) = prompts.get(saved_idx) {
+                                draft.load_saved_prompt(saved_idx, prompt.text.clone());
+                            }
+                            *dirty = true;
+                        }
+                        Err(err) => log::warn!("failed to promote inbox prompt {id}: {err}"),
+                    }
                 }
             } else if let Some(prompt) = new_prompt(editor.text(), "") {
                 prompts.push(prompt);

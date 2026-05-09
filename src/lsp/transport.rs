@@ -1,8 +1,8 @@
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use rustc_hash::FxHashMap;
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout};
@@ -34,7 +34,7 @@ pub struct Transport {
     writer: Arc<Mutex<ChildStdin>>,
     next_id: AtomicI64,
     /// Pending request callbacks: id -> oneshot sender for the response.
-    pending: Arc<Mutex<HashMap<i64, oneshot::Sender<ServerMessage>>>>,
+    pending: Arc<Mutex<FxHashMap<i64, oneshot::Sender<ServerMessage>>>>,
     _child: Child,
 }
 
@@ -58,8 +58,8 @@ impl Transport {
         let stderr = child.stderr.take();
 
         let writer = Arc::new(Mutex::new(stdin));
-        let pending: Arc<Mutex<HashMap<i64, oneshot::Sender<ServerMessage>>>> =
-            Arc::new(Mutex::new(HashMap::new()));
+        let pending: Arc<Mutex<FxHashMap<i64, oneshot::Sender<ServerMessage>>>> =
+            Arc::new(Mutex::new(FxHashMap::default()));
         let (notif_tx, notif_rx) = mpsc::unbounded_channel();
 
         // Spawn reader task
@@ -165,7 +165,7 @@ impl Transport {
 async fn read_loop(
     stdout: ChildStdout,
     writer: Arc<Mutex<ChildStdin>>,
-    pending: Arc<Mutex<HashMap<i64, oneshot::Sender<ServerMessage>>>>,
+    pending: Arc<Mutex<FxHashMap<i64, oneshot::Sender<ServerMessage>>>>,
     notif_tx: mpsc::UnboundedSender<ServerMessage>,
     proxy: winit::event_loop::EventLoopProxy<crate::UserEvent>,
 ) -> Result<(), String> {

@@ -1,4 +1,6 @@
-use std::collections::{hash_map::DefaultHasher, HashMap, HashSet};
+use std::collections::{hash_map::DefaultHasher, HashSet};
+
+use rustc_hash::FxHashMap;
 use std::hash::{Hash, Hasher};
 
 use alacritty_terminal::term::cell::Flags;
@@ -55,7 +57,7 @@ pub struct TextSystem {
     // One grid renderer per terminal pane/tab. Each GlyphonRenderer owns
     // an internal vertex buffer; preparing one pane must not invalidate
     // another pane's recorded draw commands before queue submission.
-    grid_renderers: HashMap<TextCacheKey, GlyphonRenderer>,
+    grid_renderers: FxHashMap<TextCacheKey, GlyphonRenderer>,
     viewport: Viewport,
     pub cell_width: f32,
     pub cell_height: f32,
@@ -65,7 +67,7 @@ pub struct TextSystem {
     font_family: String,
     shaping: Shaping,
     // Line-level cache per rendered terminal pane.
-    line_caches: HashMap<TextCacheKey, LineCache>,
+    line_caches: FxHashMap<TextCacheKey, LineCache>,
 }
 
 impl TextSystem {
@@ -143,7 +145,7 @@ impl TextSystem {
             swash_cache,
             atlas,
             overlay_renderer,
-            grid_renderers: HashMap::new(),
+            grid_renderers: FxHashMap::default(),
             viewport,
             cell_width,
             cell_height,
@@ -152,7 +154,7 @@ impl TextSystem {
             font_size: physical_font_size,
             font_family,
             shaping,
-            line_caches: HashMap::new(),
+            line_caches: FxHashMap::default(),
         }
     }
 

@@ -1,5 +1,5 @@
 use bytemuck::{Pod, Zeroable};
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
 
 use super::state::GpuState;
@@ -269,7 +269,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 "#;
 
 pub struct BackgroundRenderer {
-    pipelines: HashMap<String, wgpu::RenderPipeline>,
+    pipelines: FxHashMap<String, wgpu::RenderPipeline>,
     uniform_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     // Image background support
@@ -325,7 +325,7 @@ impl BackgroundRenderer {
             });
 
         // Build a pipeline for each built-in shader
-        let mut pipelines = HashMap::new();
+        let mut pipelines = FxHashMap::default();
         for (name, source) in builtin_shaders() {
             if let Some(pipeline) = Self::compile_pipeline(gpu, &pipeline_layout, &source, name) {
                 pipelines.insert(name.to_string(), pipeline);

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use crate::editor::perf;
 use crate::editor::syntax::{HighlightGroup, HighlightSpan};
@@ -10,7 +10,7 @@ pub(super) fn render_minimap(
     painter: &egui::Painter,
     buf: &crate::editor::buffer::Buffer,
     diagnostics: Option<&[FileDiagnostic]>,
-    syntax_colors: &HashMap<HighlightGroup, [u8; 3]>,
+    syntax_colors: &FxHashMap<HighlightGroup, [u8; 3]>,
     highlight_spans: &[Vec<HighlightSpan>],
     visible_doc_lines: &[usize],
     rect: egui::Rect,

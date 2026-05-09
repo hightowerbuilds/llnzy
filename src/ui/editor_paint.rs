@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use crate::editor::buffer::{IndentStyle, Position};
 use crate::editor::syntax::HighlightGroup;
@@ -120,7 +120,7 @@ pub(super) struct HighlightedLineRenderInput<'a> {
     pub painter: &'a egui::Painter,
     pub clip: egui::Rect,
     pub spans: &'a [crate::editor::syntax::HighlightSpan],
-    pub syntax_colors: &'a HashMap<HighlightGroup, [u8; 3]>,
+    pub syntax_colors: &'a FxHashMap<HighlightGroup, [u8; 3]>,
     pub line_text: &'a str,
     pub text_x_base: f32,
     pub y: f32,
@@ -194,7 +194,7 @@ pub(super) fn render_visible_whitespace_line(
     painter: &egui::Painter,
     clip: egui::Rect,
     spans: &[crate::editor::syntax::HighlightSpan],
-    syntax_colors: &HashMap<HighlightGroup, [u8; 3]>,
+    syntax_colors: &FxHashMap<HighlightGroup, [u8; 3]>,
     line_text: &str,
     text_x_base: f32,
     y: f32,

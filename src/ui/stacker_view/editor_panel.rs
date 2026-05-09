@@ -1,6 +1,6 @@
 use crate::stacker::{
-    document::StackerDocumentEditor, draft::StackerDraft, formatting::maybe_continue_list,
-    StackerPrompt,
+    document::StackerDocumentEditor, draft::StackerDraft, draft::StackerDraftSource,
+    formatting::maybe_continue_list, StackerPrompt,
 };
 
 use super::{
@@ -15,6 +15,7 @@ pub(super) fn render_prompt_editor_panel(
     ui: &mut egui::Ui,
     height: f32,
     prompts: &mut Vec<StackerPrompt>,
+    inbox_prompts: &mut Vec<StackerPrompt>,
     editor: &mut StackerDocumentEditor,
     draft: &mut StackerDraft,
     pending_switch: &mut Option<PendingStackerDraftSwitch>,
@@ -33,6 +34,7 @@ pub(super) fn render_prompt_editor_panel(
                 ui,
                 editor_id,
                 prompts,
+                inbox_prompts,
                 editor,
                 draft,
                 pending_switch,
@@ -131,10 +133,13 @@ fn render_editor_status(
     let selected = editor.selection().start.abs_diff(editor.selection().end);
     let words = editor.text().split_whitespace().count();
     let lines = editor.text().lines().count().max(1);
-    let source = match editing {
-        Some(idx) if draft.active_prompt_index() == Some(idx) => format!("Prompt {}", idx + 1),
-        Some(idx) => format!("Prompt {}", idx + 1),
-        None => "Scratch".to_string(),
+    let source = match draft.source() {
+        StackerDraftSource::SavedPrompt(idx) => format!("Prompt {}", idx + 1),
+        StackerDraftSource::InboxPrompt(_) => "Agent prompt".to_string(),
+        StackerDraftSource::Scratch => match editing {
+            Some(idx) => format!("Prompt {}", idx + 1),
+            None => "Scratch".to_string(),
+        },
     };
     let dirty = if draft.is_dirty() { "Unsaved" } else { "Saved" };
 

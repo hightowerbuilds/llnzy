@@ -116,6 +116,26 @@ impl PlatformPathSet {
     pub fn sketch_scratch_file(&self) -> PathBuf {
         self.sketches_dir().join("scratch.json")
     }
+
+    pub fn prompts_root(&self) -> PathBuf {
+        self.config_dir.join("prompts")
+    }
+
+    pub fn prompts_inbox_dir(&self) -> PathBuf {
+        self.prompts_root().join("inbox")
+    }
+
+    pub fn prompts_saved_dir(&self) -> PathBuf {
+        self.prompts_root().join("saved")
+    }
+
+    pub fn prompts_archive_dir(&self) -> PathBuf {
+        self.prompts_root().join("archive")
+    }
+
+    pub fn prompts_tmp_dir(&self) -> PathBuf {
+        self.prompts_root().join(".tmp")
+    }
 }
 
 pub fn current_paths() -> Option<PlatformPathSet> {
@@ -149,6 +169,12 @@ mod tests {
             paths.sketch_scratch_file(),
             paths.config_dir.join("sketches").join("scratch.json")
         );
+        let prompts_root = paths.config_dir.join("prompts");
+        assert_eq!(paths.prompts_root(), prompts_root);
+        assert_eq!(paths.prompts_inbox_dir(), prompts_root.join("inbox"));
+        assert_eq!(paths.prompts_saved_dir(), prompts_root.join("saved"));
+        assert_eq!(paths.prompts_archive_dir(), prompts_root.join("archive"));
+        assert_eq!(paths.prompts_tmp_dir(), prompts_root.join(".tmp"));
     }
 
     #[test]

@@ -1,18 +1,19 @@
 use crate::stacker::{
     document::StackerDocumentEditor,
     draft::StackerDraft,
+    promote_inbox_prompt,
     queue::{self, QueuedPrompt},
     StackerPrompt,
 };
 use crate::text_utils::truncate_chars;
 
 use super::{
-    actions::request_load_saved_prompt,
+    actions::{request_load_inbox_prompt, request_load_saved_prompt},
     layout::{
         header_label, small, truncate_line, DIM, HEADING_COLOR, MUTED, PANEL_BG, QUEUE_GREEN,
         ROW_BG, ROW_HOVER,
     },
-    PendingStackerDraftSwitch, StackerPromptViewMode,
+    PendingStackerDraftSwitch, PendingStackerPromptDelete, StackerPromptViewMode,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -42,12 +43,13 @@ const LIST_CHARS_WIDTH: f32 = 48.0;
 pub(super) fn render_prompt_list_panel(
     ui: &mut egui::Ui,
     height: f32,
-    prompts: &mut [StackerPrompt],
+    prompts: &mut Vec<StackerPrompt>,
+    inbox_prompts: &mut Vec<StackerPrompt>,
     editing: &mut Option<usize>,
     editor: &mut StackerDocumentEditor,
     draft: &mut StackerDraft,
     pending_switch: &mut Option<PendingStackerDraftSwitch>,
-    pending_delete: &mut Option<usize>,
+    pending_delete: &mut Option<PendingStackerPromptDelete>,
     queued_prompts: &mut Vec<QueuedPrompt>,
     view_mode: StackerPromptViewMode,
 ) {
@@ -73,6 +75,7 @@ pub(super) fn render_prompt_list_panel(
                         ui,
                         height,
                         prompts,
+                        inbox_prompts,
                         editing,
                         editor,
                         draft,
@@ -144,12 +147,13 @@ fn render_queue_bank(ui: &mut egui::Ui, width: f32, height: f32, queued_prompts:
 fn render_saved_prompt_panel(
     ui: &mut egui::Ui,
     height: f32,
-    prompts: &mut [StackerPrompt],
+    prompts: &mut Vec<StackerPrompt>,
+    inbox_prompts: &mut Vec<StackerPrompt>,
     editing: &mut Option<usize>,
     editor: &mut StackerDocumentEditor,
     draft: &mut StackerDraft,
     pending_switch: &mut Option<PendingStackerDraftSwitch>,
-    pending_delete: &mut Option<usize>,
+    pending_delete: &mut Option<PendingStackerPromptDelete>,
     queued_prompts: &mut Vec<QueuedPrompt>,
     view_mode: StackerPromptViewMode,
 ) {
@@ -163,7 +167,7 @@ fn render_saved_prompt_panel(
     });
     ui.add_space(8.0);
 
-    if prompts.is_empty() {
+    if prompts.is_empty() && inbox_prompts.is_empty() {
         ui.add_space(20.0);
         ui.label(small("No prompts yet.").color(DIM));
         return;
@@ -173,6 +177,7 @@ fn render_saved_prompt_panel(
         StackerPromptViewMode::List => render_saved_prompt_list(
             ui,
             prompts,
+            inbox_prompts,
             editing,
             editor,
             draft,
@@ -183,6 +188,7 @@ fn render_saved_prompt_panel(
         StackerPromptViewMode::Thumbnails => render_saved_prompt_thumbnails(
             ui,
             prompts,
+            inbox_prompts,
             editing,
             editor,
             draft,
@@ -196,12 +202,13 @@ fn render_saved_prompt_panel(
 #[allow(clippy::too_many_arguments)]
 fn render_saved_prompt_list(
     ui: &mut egui::Ui,
-    prompts: &mut [StackerPrompt],
+    prompts: &mut Vec<StackerPrompt>,
+    inbox_prompts: &mut Vec<StackerPrompt>,
     editing: &mut Option<usize>,
     editor: &mut StackerDocumentEditor,
     draft: &mut StackerDraft,
     pending_switch: &mut Option<PendingStackerDraftSwitch>,
-    pending_delete: &mut Option<usize>,
+    pending_delete: &mut Option<PendingStackerPromptDelete>,
     queued_prompts: &mut Vec<QueuedPrompt>,
 ) {
     ui.horizontal(|ui| {
@@ -221,6 +228,143 @@ fn render_saved_prompt_list(
         .auto_shrink([false; 2])
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 3.0;
+
+            if !inbox_prompts.is_empty() {
+                ui.label(
+                    egui::RichText::new(format!("From agent ({})", inbox_prompts.len()))
+                        .size(11.0)
+                        .italics()
+                        .color(MUTED),
+                );
+                ui.add_space(2.0);
+
+                let mut i = 0;
+                while i < inbox_prompts.len() {
+                    let prompt = &inbox_prompts[i];
+                    let selected = draft.active_inbox_id() == prompt.id.as_deref();
+                    let mut row_action = None;
+                    let mut queue_clicked = false;
+                    let mut child_button_clicked = false;
+                    let row_resp = egui::Frame::none()
+                        .fill(if selected { ROW_HOVER } else { ROW_BG })
+                        .rounding(egui::Rounding::same(3.0))
+                        .inner_margin(egui::Margin::symmetric(8.0, 5.0))
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                let already_queued = queue::contains_prompt(queued_prompts, prompt);
+                                let can_queue = already_queued
+                                    || queued_prompts.len() < queue::MAX_QUEUE_PROMPTS;
+                                let label = if already_queued {
+                                    "Queued"
+                                } else {
+                                    "Add to queue"
+                                };
+                                if ui
+                                    .add_enabled(
+                                        can_queue,
+                                        queue_button(label, already_queued, 12.0)
+                                            .min_size(egui::vec2(LIST_QUEUE_BUTTON_WIDTH, 22.0)),
+                                    )
+                                    .clicked()
+                                {
+                                    child_button_clicked = true;
+                                    queue_clicked = true;
+                                }
+                                if ui
+                                    .add(
+                                        egui::Button::new(egui::RichText::new("Edit").size(12.0))
+                                            .min_size(egui::vec2(LIST_EDIT_BUTTON_WIDTH, 22.0)),
+                                    )
+                                    .clicked()
+                                {
+                                    child_button_clicked = true;
+                                    row_action = Some(SavedPromptRowAction::Edit);
+                                }
+                                if ui
+                                    .add(
+                                        egui::Button::new(
+                                            egui::RichText::new("Delete")
+                                                .size(12.0)
+                                                .color(egui::Color32::from_rgb(245, 125, 125)),
+                                        )
+                                        .min_size(egui::vec2(LIST_DELETE_BUTTON_WIDTH, 22.0)),
+                                    )
+                                    .clicked()
+                                {
+                                    child_button_clicked = true;
+                                    row_action = Some(SavedPromptRowAction::Delete);
+                                }
+                                ui.add_sized(
+                                    [LIST_CHARS_WIDTH, 20.0],
+                                    egui::Label::new(
+                                        egui::RichText::new(
+                                            prompt.text.chars().count().to_string(),
+                                        )
+                                        .size(12.0)
+                                        .color(MUTED),
+                                    ),
+                                );
+                                ui.horizontal(|ui| {
+                                    ui.label(
+                                        egui::RichText::new("•").size(13.0).color(QUEUE_GREEN),
+                                    );
+                                    ui.add_sized(
+                                        [ui.available_width().max(40.0), 20.0],
+                                        egui::Label::new(
+                                            egui::RichText::new(truncate_line(&prompt.label, 64))
+                                                .size(13.0)
+                                                .italics()
+                                                .color(egui::Color32::from_rgb(190, 198, 206)),
+                                        )
+                                        .sense(egui::Sense::click()),
+                                    );
+                                });
+                            });
+                        })
+                        .response
+                        .on_hover_text(inbox_hover_text(prompt));
+
+                    if row_action.is_none() && !child_button_clicked && row_resp.clicked() {
+                        row_action = Some(SavedPromptRowAction::Open);
+                    }
+
+                    if queue_clicked {
+                        if let Some(saved_idx) = promote_inbox_at(prompts, inbox_prompts, i) {
+                            if let Some(prompt) = prompts.get(saved_idx) {
+                                if !queue::contains_prompt(queued_prompts, prompt) {
+                                    queue::add_prompt(queued_prompts, prompt);
+                                }
+                            }
+                            continue;
+                        }
+                    }
+
+                    match row_action {
+                        Some(SavedPromptRowAction::Open | SavedPromptRowAction::Edit) => {
+                            request_load_inbox_prompt(
+                                ui.ctx(),
+                                inbox_prompts,
+                                editor,
+                                draft,
+                                pending_switch,
+                                editing,
+                                i,
+                            );
+                        }
+                        Some(SavedPromptRowAction::Delete) => {
+                            if let Some(id) = inbox_prompts[i].id.clone() {
+                                *pending_delete = Some(PendingStackerPromptDelete::Inbox(id));
+                            }
+                        }
+                        None => {}
+                    }
+                    i += 1;
+                }
+
+                ui.add_space(5.0);
+                ui.separator();
+                ui.add_space(5.0);
+            }
 
             for i in 0..prompts.len() {
                 let prompt = &prompts[i];
@@ -314,7 +458,7 @@ fn render_saved_prompt_list(
                         );
                     }
                     Some(SavedPromptRowAction::Delete) => {
-                        *pending_delete = Some(i);
+                        *pending_delete = Some(PendingStackerPromptDelete::Saved(i));
                     }
                     None => {}
                 }
@@ -325,12 +469,13 @@ fn render_saved_prompt_list(
 #[allow(clippy::too_many_arguments)]
 fn render_saved_prompt_thumbnails(
     ui: &mut egui::Ui,
-    prompts: &mut [StackerPrompt],
+    prompts: &mut Vec<StackerPrompt>,
+    inbox_prompts: &mut Vec<StackerPrompt>,
     editing: &mut Option<usize>,
     editor: &mut StackerDocumentEditor,
     draft: &mut StackerDraft,
     pending_switch: &mut Option<PendingStackerDraftSwitch>,
-    pending_delete: &mut Option<usize>,
+    pending_delete: &mut Option<PendingStackerPromptDelete>,
     queued_prompts: &mut Vec<QueuedPrompt>,
 ) {
     egui::ScrollArea::horizontal()
@@ -342,6 +487,132 @@ fn render_saved_prompt_thumbnails(
             ui.set_min_height(THUMBNAIL_ROW_HEIGHT);
             ui.spacing_mut().item_spacing = egui::vec2(10.0, 0.0);
             ui.with_layout(egui::Layout::left_to_right(egui::Align::TOP), |ui| {
+                if !inbox_prompts.is_empty() {
+                    ui.vertical(|ui| {
+                        ui.set_width(96.0);
+                        ui.label(
+                            egui::RichText::new(format!("From agent ({})", inbox_prompts.len()))
+                                .size(11.0)
+                                .italics()
+                                .color(MUTED),
+                        );
+                    });
+
+                    let mut i = 0;
+                    while i < inbox_prompts.len() {
+                        let prompt = &inbox_prompts[i];
+                        let selected = draft.active_inbox_id() == prompt.id.as_deref();
+                        let mut row_action = None;
+                        let mut queue_clicked = false;
+                        let mut child_button_clicked = false;
+                        let card_resp = egui::Frame::none()
+                            .fill(if selected { ROW_HOVER } else { ROW_BG })
+                            .rounding(egui::Rounding::same(4.0))
+                            .inner_margin(egui::Margin::same(8.0))
+                            .show(ui, |ui| {
+                                ui.set_min_width(THUMBNAIL_ACTION_WIDTH);
+                                ui.set_max_width(THUMBNAIL_ACTION_WIDTH);
+                                ui.horizontal(|ui| {
+                                    ui.spacing_mut().item_spacing.x = 10.0;
+                                    render_prompt_thumbnail_preview(ui, prompt, selected);
+                                    ui.with_layout(
+                                        egui::Layout::top_down(egui::Align::RIGHT),
+                                        |ui| {
+                                            ui.set_width(THUMBNAIL_BUTTON_WIDTH);
+                                            ui.spacing_mut().item_spacing.y = 6.0;
+                                            ui.label(
+                                                egui::RichText::new("• agent")
+                                                    .size(11.0)
+                                                    .italics()
+                                                    .color(QUEUE_GREEN),
+                                            );
+                                            let already_queued =
+                                                queue::contains_prompt(queued_prompts, prompt);
+                                            let can_queue = already_queued
+                                                || queued_prompts.len() < queue::MAX_QUEUE_PROMPTS;
+                                            let queue_label =
+                                                if already_queued { "Queued" } else { "Queue" };
+                                            if ui
+                                                .add_enabled(
+                                                    can_queue,
+                                                    queue_button(queue_label, already_queued, 11.0)
+                                                        .min_size(egui::vec2(
+                                                            THUMBNAIL_BUTTON_WIDTH,
+                                                            THUMBNAIL_BUTTON_HEIGHT,
+                                                        )),
+                                                )
+                                                .clicked()
+                                            {
+                                                child_button_clicked = true;
+                                                queue_clicked = true;
+                                            }
+                                            if ui
+                                                .add(sized_thumbnail_button(
+                                                    "Edit",
+                                                    egui::Color32::from_rgb(210, 210, 216),
+                                                ))
+                                                .clicked()
+                                            {
+                                                child_button_clicked = true;
+                                                row_action = Some(SavedPromptRowAction::Edit);
+                                            }
+                                            if ui
+                                                .add(sized_thumbnail_button(
+                                                    "Delete",
+                                                    egui::Color32::from_rgb(245, 125, 125),
+                                                ))
+                                                .clicked()
+                                            {
+                                                child_button_clicked = true;
+                                                row_action = Some(SavedPromptRowAction::Delete);
+                                            }
+                                        },
+                                    );
+                                });
+                            })
+                            .response
+                            .on_hover_text(inbox_hover_text(prompt));
+
+                        if row_action.is_none() && !child_button_clicked && card_resp.clicked() {
+                            row_action = Some(SavedPromptRowAction::Open);
+                        }
+
+                        if queue_clicked {
+                            if let Some(saved_idx) = promote_inbox_at(prompts, inbox_prompts, i) {
+                                if let Some(prompt) = prompts.get(saved_idx) {
+                                    if !queue::contains_prompt(queued_prompts, prompt) {
+                                        queue::add_prompt(queued_prompts, prompt);
+                                    }
+                                }
+                                continue;
+                            }
+                        }
+
+                        match row_action {
+                            Some(SavedPromptRowAction::Open | SavedPromptRowAction::Edit) => {
+                                request_load_inbox_prompt(
+                                    ui.ctx(),
+                                    inbox_prompts,
+                                    editor,
+                                    draft,
+                                    pending_switch,
+                                    editing,
+                                    i,
+                                );
+                            }
+                            Some(SavedPromptRowAction::Delete) => {
+                                if let Some(id) = inbox_prompts[i].id.clone() {
+                                    *pending_delete = Some(PendingStackerPromptDelete::Inbox(id));
+                                }
+                            }
+                            None => {}
+                        }
+                        i += 1;
+                    }
+
+                    ui.separator();
+                }
+
                 for i in 0..prompts.len() {
                     let prompt = &prompts[i];
                     let selected = *editing == Some(i);
@@ -423,13 +694,42 @@ fn render_saved_prompt_thumbnails(
                             );
                         }
                         Some(SavedPromptRowAction::Delete) => {
-                            *pending_delete = Some(i);
+                            *pending_delete = Some(PendingStackerPromptDelete::Saved(i));
                         }
                         None => {}
                     }
                 }
             });
         });
+}
+
+fn promote_inbox_at(
+    prompts: &mut Vec<StackerPrompt>,
+    inbox_prompts: &mut Vec<StackerPrompt>,
+    inbox_index: usize,
+) -> Option<usize> {
+    let prompt = inbox_prompts.get(inbox_index)?.clone();
+    let id = prompt.id.clone().unwrap_or_else(|| "<missing>".to_string());
+    match promote_inbox_prompt(&prompt) {
+        Ok(saved) => {
+            inbox_prompts.remove(inbox_index);
+            prompts.push(saved);
+            Some(prompts.len() - 1)
+        }
+        Err(err) => {
+            log::warn!("failed to promote inbox prompt {id}: {err}");
+            None
+        }
+    }
+}
+
+fn inbox_hover_text(prompt: &StackerPrompt) -> String {
+    match prompt.source_agent.as_deref() {
+        Some(agent) if !agent.trim().is_empty() => {
+            format!("Suggested by {agent}\n{}", prompt.label)
+        }
+        _ => prompt.label.clone(),
+    }
 }
 
 fn sized_thumbnail_button(label: &str, color: egui::Color32) -> egui::Button<'_> {
