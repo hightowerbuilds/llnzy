@@ -2,6 +2,7 @@ use crate::editor::buffer::Buffer;
 use crate::editor::file_watcher::FileChange;
 use crate::editor::BufferId;
 use crate::path_utils::same_path;
+use crate::text_utils::normalize_crlf_to_lf;
 
 use super::explorer_view::EditorViewState;
 
@@ -367,7 +368,7 @@ fn buffer_matches_file_content(buffer: &Buffer, path: &std::path::Path) -> bool 
     let Ok(text) = std::fs::read_to_string(path) else {
         return false;
     };
-    text.replace("\r\n", "\n") == buffer.text()
+    normalize_crlf_to_lf(&text).as_ref() == buffer.text()
 }
 
 #[cfg(test)]

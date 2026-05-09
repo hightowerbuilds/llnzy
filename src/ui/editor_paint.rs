@@ -4,6 +4,8 @@ use crate::editor::buffer::{IndentStyle, Position};
 use crate::editor::syntax::HighlightGroup;
 use crate::lsp::{DiagSeverity, FileDiagnostic};
 
+use super::editor_line_decorations::visible_line_offset;
+
 #[expect(
     clippy::too_many_arguments,
     reason = "layout geometry must be passed explicitly"
@@ -25,7 +27,7 @@ pub(super) fn render_bracket_match(
     let fill = egui::Color32::from_rgba_unmultiplied(120, 170, 255, 35);
 
     for pos in [a, b] {
-        let Some(visible_offset) = visible_window.iter().position(|&line| line == pos.line) else {
+        let Some(visible_offset) = visible_line_offset(visible_window, pos.line) else {
             continue;
         };
         let y = rect.top() + visible_offset as f32 * line_height;
@@ -140,9 +142,9 @@ pub(super) fn render_highlighted_line(input: HighlightedLineRenderInput<'_>) {
         font,
         default_color,
     } = input;
-    let chars: Vec<char> = line_text.chars().collect();
     let mut col = 0;
-    while col < chars.len() {
+    let mut chars = line_text.char_indices().peekable();
+    while let Some((chunk_start, _)) = chars.next() {
         let color = spans
             .iter()
             .find(|s| col >= s.col_start && col < s.col_end)
@@ -152,17 +154,12 @@ pub(super) fn render_highlighted_line(input: HighlightedLineRenderInput<'_>) {
             })
             .unwrap_or(default_color);
 
-        let span_end = spans
-            .iter()
-            .find(|s| col >= s.col_start && col < s.col_end)
-            .map(|s| s.col_end.min(chars.len()))
-            .unwrap_or(chars.len());
-
-        let mut batch_end = col + 1;
-        while batch_end < span_end {
+        let mut chunk_end = line_text.len();
+        let mut next_col = col + 1;
+        while let Some(&(next_byte, _)) = chars.peek() {
             let next_color = spans
                 .iter()
-                .find(|s| batch_end >= s.col_start && batch_end < s.col_end)
+                .find(|s| next_col >= s.col_start && next_col < s.col_end)
                 .map(|s| {
                     let rgb =
                         crate::editor::syntax::group_color_with_overrides(s.group, syntax_colors);
@@ -170,21 +167,22 @@ pub(super) fn render_highlighted_line(input: HighlightedLineRenderInput<'_>) {
                 })
                 .unwrap_or(default_color);
             if next_color != color {
+                chunk_end = next_byte;
                 break;
             }
-            batch_end += 1;
+            chars.next();
+            next_col += 1;
         }
 
-        let chunk: String = chars[col..batch_end].iter().collect();
         let x = text_x_base + col as f32 * char_width;
         painter.with_clip_rect(clip).text(
             egui::pos2(x, y + 1.0),
             egui::Align2::LEFT_TOP,
-            &chunk,
+            &line_text[chunk_start..chunk_end],
             font.clone(),
             color,
         );
-        col = batch_end;
+        col = next_col;
     }
 }
 
@@ -205,7 +203,9 @@ pub(super) fn render_visible_whitespace_line(
     default_color: egui::Color32,
 ) {
     let whitespace_color = egui::Color32::from_rgb(85, 92, 112);
-    for (col, ch) in line_text.chars().enumerate() {
+    let mut chars = line_text.char_indices().peekable();
+    let mut col = 0;
+    while let Some((byte_idx, ch)) = chars.next() {
         let (display, color) = match ch {
             ' ' => ("·", whitespace_color),
             '\t' => ("→", whitespace_color),
@@ -225,10 +225,14 @@ pub(super) fn render_visible_whitespace_line(
                 painter.with_clip_rect(clip).text(
                     egui::pos2(x, y + 1.0),
                     egui::Align2::LEFT_TOP,
-                    ch.to_string(),
+                    chars
+                        .peek()
+                        .map(|(next_byte, _)| &line_text[byte_idx..*next_byte])
+                        .unwrap_or(&line_text[byte_idx..]),
                     font.clone(),
                     color,
                 );
+                col += 1;
                 continue;
             }
         };
@@ -241,6 +245,7 @@ pub(super) fn render_visible_whitespace_line(
             font.clone(),
             color,
         );
+        col += 1;
     }
 }
 
@@ -262,10 +267,7 @@ pub(super) fn render_diagnostics(
 ) {
     let Some(diags) = diagnostics else { return };
     for diag in diags {
-        let Some(visible_offset) = visible_window
-            .iter()
-            .position(|&line| line == diag.line as usize)
-        else {
+        let Some(visible_offset) = visible_line_offset(visible_window, diag.line as usize) else {
             continue;
         };
         let vis_y = visible_offset as f32 * line_height;

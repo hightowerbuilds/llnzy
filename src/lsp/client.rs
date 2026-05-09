@@ -5,6 +5,8 @@ use lsp_types::*;
 use serde_json::Value;
 use tokio::sync::mpsc;
 
+use crate::path_utils::file_name_or_display;
+
 use super::document::{path_to_uri, DocumentStore, OpenAction};
 use super::transport::{ServerMessage, Transport};
 
@@ -950,11 +952,7 @@ fn workspace_folders_from_paths(paths: &[PathBuf]) -> Vec<WorkspaceFolder> {
 }
 
 fn workspace_folder_name(path: &Path) -> String {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .filter(|name| !name.is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(|| path.display().to_string())
+    file_name_or_display(path).into_owned()
 }
 
 fn workspace_folder_additions(

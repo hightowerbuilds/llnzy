@@ -2,8 +2,9 @@ use super::explorer_view::EditorViewState;
 use crate::app::commands::AppCommand;
 use crate::app::drag_drop::DragDropCommand;
 use crate::explorer::ExplorerState;
-use crate::path_utils::{path_contains, same_path};
+use crate::path_utils::{contains_path_case_insensitive, path_contains, same_path};
 use crate::sidebar_move::collect_sidebar_move_destinations;
+use crate::text_utils::contains_case_insensitive;
 use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 
@@ -380,17 +381,13 @@ fn render_move_picker(
     let mut close = false;
     let mut selected_destination = None;
     let destinations = collect_sidebar_move_destinations(&explorer.root, &picker.sources);
-    let filter = picker.filter.trim().to_lowercase();
+    let filter = picker.filter.trim();
     let visible = destinations
         .iter()
         .filter(|destination| {
             filter.is_empty()
-                || destination.label.to_lowercase().contains(&filter)
-                || destination
-                    .path
-                    .to_string_lossy()
-                    .to_lowercase()
-                    .contains(&filter)
+                || contains_case_insensitive(&destination.label, filter)
+                || contains_path_case_insensitive(&destination.path, filter)
         })
         .collect::<Vec<_>>();
     if !visible.is_empty() && picker.selected >= visible.len() {

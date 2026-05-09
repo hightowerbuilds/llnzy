@@ -1,6 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use crate::config::{BackgroundImageFit, ColorScheme, Config, CursorStyle, EffectsConfig};
+use crate::path_utils::{
+    path_extension_is, path_extension_matches, safe_config_stem, BACKGROUND_IMAGE_EXTS, TOML_EXT,
+};
 use crate::theme::VisualTheme;
 
 // ── Background Image Library ──
@@ -92,18 +95,7 @@ fn list_backgrounds_in_dir(dir: &Path) -> Vec<PathBuf> {
     };
     let mut images: Vec<PathBuf> = entries
         .flatten()
-        .filter(|e| {
-            let ext = e
-                .path()
-                .extension()
-                .and_then(|s| s.to_str())
-                .unwrap_or("")
-                .to_lowercase();
-            matches!(
-                ext.as_str(),
-                "png" | "jpg" | "jpeg" | "bmp" | "webp" | "gif"
-            )
-        })
+        .filter(|e| path_extension_matches(&e.path(), BACKGROUND_IMAGE_EXTS))
         .map(|e| e.path())
         .collect();
     images.sort();
@@ -235,16 +227,7 @@ fn save_theme_to_dir(
 ) -> Result<PathBuf, String> {
     std::fs::create_dir_all(dir).map_err(|e| format!("Failed to create themes dir: {e}"))?;
 
-    let safe_name: String = name
-        .chars()
-        .map(|c| {
-            if c.is_alphanumeric() || c == '-' || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
+    let safe_name = safe_config_stem(name);
     let path = dir.join(format!("{safe_name}.toml"));
 
     let theme_file = ThemeFile {
@@ -312,7 +295,7 @@ fn load_user_themes_from_dir(dir: &Path) -> Vec<(VisualTheme, ThemeViewFlags)> {
     let mut themes = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) != Some("toml") {
+        if !path_extension_is(&path, TOML_EXT) {
             continue;
         }
         let Ok(text) = std::fs::read_to_string(&path) else {
@@ -394,16 +377,7 @@ pub fn delete_user_theme(name: &str) -> Result<(), String> {
 }
 
 fn delete_user_theme_from_dir(name: &str, dir: &Path) -> Result<(), String> {
-    let safe_name: String = name
-        .chars()
-        .map(|c| {
-            if c.is_alphanumeric() || c == '-' || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
+    let safe_name = safe_config_stem(name);
     let path = dir.join(format!("{safe_name}.toml"));
     if path.exists() {
         std::fs::remove_file(&path).map_err(|e| format!("Delete failed: {e}"))?;

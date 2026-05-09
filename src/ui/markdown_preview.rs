@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use crate::editor::buffer::Buffer;
 use crate::editor::MarkdownViewMode;
+use crate::path_utils::{path_extension_matches, MARKDOWN_EXTS};
 use egui::scroll_area::ScrollAreaOutput;
 
 const PREVIEW_MAX_PAGE_WIDTH: f32 = 840.0;
@@ -20,12 +21,7 @@ pub(crate) struct MarkdownPreviewTheme {
 }
 
 pub(crate) fn is_markdown_path(path: &Path) -> bool {
-    let ext = path
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    matches!(ext.as_str(), "md" | "mdx" | "markdown")
+    path_extension_matches(path, MARKDOWN_EXTS)
 }
 
 pub(crate) fn render_markdown_mode_bar(

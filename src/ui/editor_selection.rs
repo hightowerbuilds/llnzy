@@ -2,6 +2,7 @@ use crate::editor::buffer::Position;
 use crate::editor::search::EditorSearch;
 use crate::editor::BufferView;
 
+use super::editor_line_decorations::visible_line_offset;
 use super::editor_wrap::WrapRow;
 
 #[allow(clippy::too_many_arguments)]
@@ -101,13 +102,28 @@ pub(super) fn render_search_matches(
     editor_search.update_if_dirty(buf);
     let match_bg = egui::Color32::from_rgba_unmultiplied(230, 180, 50, 40);
     let focus_bg = egui::Color32::from_rgba_unmultiplied(230, 180, 50, 100);
+
+    let mut matches_by_visible_line = vec![Vec::new(); visible_window.len()];
     for (i, m) in editor_search.matches.iter().enumerate() {
         let start_line = m.start.line;
         let end_line = m.end.line;
-        for (visible_offset, &line_idx) in visible_window.iter().enumerate() {
-            if line_idx < start_line || line_idx > end_line {
-                continue;
+        let first_visible = visible_window.partition_point(|&line| line < start_line);
+        for (visible_offset, &line_idx) in visible_window.iter().enumerate().skip(first_visible) {
+            if line_idx > end_line {
+                break;
             }
+            matches_by_visible_line[visible_offset].push((i, m));
+        }
+    }
+
+    for (visible_offset, (&line_idx, line_matches)) in visible_window
+        .iter()
+        .zip(matches_by_visible_line.iter())
+        .enumerate()
+    {
+        for &(i, m) in line_matches {
+            let start_line = m.start.line;
+            let end_line = m.end.line;
             let vis_y = visible_offset as f32 * line_height;
             let col_start = if line_idx == start_line {
                 m.start.col
@@ -155,10 +171,7 @@ pub(super) fn render_extra_cursors(
     h_offset: f32,
 ) {
     for extra in &view.cursor.extra_cursors {
-        if let Some(extra_visible_offset) = visible_window
-            .iter()
-            .position(|&line| line == extra.pos.line)
-        {
+        if let Some(extra_visible_offset) = visible_line_offset(visible_window, extra.pos.line) {
             let vis_y = extra_visible_offset as f32 * line_height;
             let cursor_x =
                 rect.left() + gutter_width + text_margin + extra.pos.col as f32 * char_width
@@ -222,9 +235,10 @@ fn render_selection_range(
     sel_end: Position,
 ) {
     let sel_color = egui::Color32::from_rgba_unmultiplied(60, 100, 180, 80);
-    for (visible_offset, &line_idx) in visible_window.iter().enumerate() {
-        if line_idx < sel_start.line || line_idx > sel_end.line {
-            continue;
+    let first_visible = visible_window.partition_point(|&line| line < sel_start.line);
+    for (visible_offset, &line_idx) in visible_window.iter().enumerate().skip(first_visible) {
+        if line_idx > sel_end.line {
+            break;
         }
         let vis_y = visible_offset as f32 * line_height;
         let line_len = buf.line_len(line_idx);

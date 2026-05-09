@@ -10,7 +10,7 @@ use llnzy::app::drag_drop::{
 };
 use llnzy::editor::git_gutter::GitGutter;
 use llnzy::explorer::is_image_path;
-use llnzy::path_utils::{comparable_path, path_contains, same_path};
+use llnzy::path_utils::{comparable_path, file_name_or_display, path_contains, same_path};
 use llnzy::sidebar_move::{
     plan_sidebar_move, MoveOrigin, SidebarMovePlan, SidebarMovePlanItem, SidebarMoveRequest,
 };
@@ -448,10 +448,7 @@ fn external_copy_error_message(source: &Path, error: std::io::Error) -> String {
 }
 
 fn dropped_file_name(path: &Path) -> String {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .map(str::to_string)
-        .unwrap_or_else(|| path.display().to_string())
+    file_name_or_display(path).into_owned()
 }
 
 #[cfg(test)]

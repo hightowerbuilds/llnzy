@@ -1,4 +1,5 @@
 use crate::stacker::commands::{stacker_command_registry, StackerCommandId};
+use crate::text_utils::fuzzy_match_case_insensitive_ascii;
 
 /// A command that can be executed from the palette.
 #[derive(Clone)]
@@ -329,16 +330,19 @@ pub struct PaletteState {
     pub query: String,
     pub selected: usize,
     pub filtered: Vec<Command>,
+    commands: Vec<Command>,
     context: CommandPaletteContext,
 }
 
 impl Default for PaletteState {
     fn default() -> Self {
+        let commands = all_commands_for_context(CommandPaletteContext::Default);
         Self {
             open: false,
             query: String::new(),
             selected: 0,
-            filtered: all_commands_for_context(CommandPaletteContext::Default),
+            filtered: commands.clone(),
+            commands,
             context: CommandPaletteContext::Default,
         }
     }
@@ -350,6 +354,7 @@ impl PaletteState {
             return;
         }
         self.context = context;
+        self.commands = all_commands_for_context(context);
         self.update_filter();
     }
 
@@ -357,7 +362,7 @@ impl PaletteState {
         self.open = true;
         self.query.clear();
         self.selected = 0;
-        self.filtered = all_commands_for_context(self.context);
+        self.filtered = self.commands.clone();
     }
 
     pub fn close(&mut self) {
@@ -368,11 +373,13 @@ impl PaletteState {
     pub fn update_filter(&mut self) {
         let q = self.query.to_lowercase();
         if q.is_empty() {
-            self.filtered = all_commands_for_context(self.context);
+            self.filtered = self.commands.clone();
         } else {
-            self.filtered = all_commands_for_context(self.context)
-                .into_iter()
+            self.filtered = self
+                .commands
+                .iter()
                 .filter(|c| fuzzy_match_case_insensitive_ascii(&q, c.name))
+                .cloned()
                 .collect();
         }
         self.selected = 0;
@@ -382,20 +389,6 @@ impl PaletteState {
     pub fn selected_command(&self) -> Option<CommandId> {
         self.filtered.get(self.selected).map(|c| c.id)
     }
-}
-
-fn fuzzy_match_case_insensitive_ascii(query: &str, target: &str) -> bool {
-    let mut target_chars = target.chars();
-    for qc in query.chars() {
-        loop {
-            match target_chars.next() {
-                Some(tc) if tc.to_ascii_lowercase() == qc => break,
-                Some(_) => continue,
-                None => return false,
-            }
-        }
-    }
-    true
 }
 
 /// Render the command palette overlay. Returns the selected CommandId if the user confirms.

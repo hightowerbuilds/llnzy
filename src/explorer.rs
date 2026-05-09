@@ -5,7 +5,8 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::thread;
 
 use crate::editor::buffer::Buffer;
-use crate::path_utils::comparable_path;
+use crate::path_utils::{comparable_path, path_extension_matches, PREVIEW_IMAGE_EXTS};
+use crate::text_utils::sort_by_cached_lowercase;
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 
 const MAX_IMAGE_SIZE: u64 = 20_971_520; // 20 MB
@@ -155,8 +156,8 @@ fn read_dir_sorted(path: &Path) -> Vec<TreeNode> {
         }
     }
 
-    dirs.sort_by_cached_key(|node| node.name.to_lowercase());
-    files.sort_by_cached_key(|node| node.name.to_lowercase());
+    sort_by_cached_lowercase(&mut dirs, |node| &node.name);
+    sort_by_cached_lowercase(&mut files, |node| &node.name);
 
     let mut result = Vec::with_capacity(dirs.len() + files.len());
     result.append(&mut dirs);
@@ -605,13 +606,12 @@ fn walk_files_capped(root: &Path, max_files: usize) -> Vec<IndexedFile> {
         }
     }
 
-    files.sort_by_cached_key(|entry| {
+    sort_by_cached_lowercase(&mut files, |entry| {
         entry
             .path
             .file_name()
             .and_then(|name| name.to_str())
             .unwrap_or("")
-            .to_lowercase()
     });
     files
 }
@@ -632,12 +632,7 @@ fn fuzzy_match(query: &str, target: &str) -> bool {
 }
 
 pub fn is_image_path(path: &Path) -> bool {
-    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-    [
-        "png", "jpg", "jpeg", "gif", "bmp", "webp", "tiff", "tif", "ico",
-    ]
-    .iter()
-    .any(|candidate| ext.eq_ignore_ascii_case(candidate))
+    path_extension_matches(path, PREVIEW_IMAGE_EXTS)
 }
 
 pub fn format_size(bytes: u64) -> String {

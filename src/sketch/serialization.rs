@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+use crate::path_utils::{path_extension_is, JSON_EXT};
+
 use super::SketchDocument;
 
 pub fn sketch_path() -> Option<PathBuf> {
@@ -77,7 +79,7 @@ pub fn list_saved_sketches() -> Vec<String> {
         .filter_map(|entry| {
             let entry = entry.ok()?;
             let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            if !path_extension_is(&path, JSON_EXT) {
                 return None;
             }
             let stem = path.file_stem()?.to_str()?.to_string();

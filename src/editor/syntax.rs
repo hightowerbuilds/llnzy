@@ -1,6 +1,10 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use crate::path_utils::{
+    extension_matches, CSS_SYNTAX_EXTS, C_EXTS, GO_EXTS, HTML_EXTS, JAVASCRIPT_EXTS,
+    JSON_CODE_EXTS, PYTHON_EXTS, RUST_EXTS, SHELL_SYNTAX_EXTS, TOML_EXT, TYPESCRIPT_SYNTAX_EXTS,
+};
 use streaming_iterator::StreamingIterator;
 use tree_sitter::{Language, Parser, Query, QueryCursor, Tree};
 
@@ -158,21 +162,33 @@ impl SyntaxEngine {
     }
 
     pub fn detect_language(&self, path: &Path) -> Option<&'static str> {
-        let ext = path.extension()?.to_str()?.to_lowercase();
-        match ext.as_str() {
-            "rs" => Some("rust"),
-            "js" | "mjs" | "cjs" | "jsx" => Some("javascript"),
-            "ts" | "mts" | "cts" => Some("typescript"),
-            "tsx" => Some("tsx"),
-            "py" | "pyi" => Some("python"),
-            "go" => Some("go"),
-            "c" | "h" => Some("c"),
-            "json" | "jsonc" => Some("json"),
-            "toml" => Some("toml"),
-            "html" | "htm" => Some("html"),
-            "css" | "scss" => Some("css"),
-            "sh" | "bash" | "zsh" => Some("bash"),
-            _ => None,
+        let ext = path.extension()?.to_str()?;
+        if extension_matches(ext, RUST_EXTS) {
+            Some("rust")
+        } else if extension_matches(ext, JAVASCRIPT_EXTS) {
+            Some("javascript")
+        } else if extension_matches(ext, TYPESCRIPT_SYNTAX_EXTS) {
+            Some("typescript")
+        } else if ext.eq_ignore_ascii_case("tsx") {
+            Some("tsx")
+        } else if extension_matches(ext, PYTHON_EXTS) {
+            Some("python")
+        } else if extension_matches(ext, GO_EXTS) {
+            Some("go")
+        } else if extension_matches(ext, C_EXTS) {
+            Some("c")
+        } else if extension_matches(ext, JSON_CODE_EXTS) {
+            Some("json")
+        } else if ext.eq_ignore_ascii_case(TOML_EXT) {
+            Some("toml")
+        } else if extension_matches(ext, HTML_EXTS) {
+            Some("html")
+        } else if extension_matches(ext, CSS_SYNTAX_EXTS) {
+            Some("css")
+        } else if extension_matches(ext, SHELL_SYNTAX_EXTS) {
+            Some("bash")
+        } else {
+            None
         }
     }
 

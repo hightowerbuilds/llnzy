@@ -4,10 +4,12 @@ use crate::config::EffectiveEditorConfig;
 use crate::editor::syntax::{FoldRange, HighlightGroup, HighlightSpan};
 use crate::editor::BufferView;
 use crate::lsp::{CodeLensInfo, InlayHintInfo};
+use crate::text_utils::char_range_slice;
 
 use super::editor_gutter::{render_fold_marker, render_git_gutter_change};
 use super::editor_line_decorations::{
     render_fold_placeholder, render_line_code_lenses, render_line_inlay_hints,
+    LineDecorationBuckets,
 };
 use super::editor_paint::{
     indent_level, render_highlighted_line, render_indentation_guides,
@@ -192,15 +194,9 @@ fn render_wrapped_lines(
         }
 
         let line_text = buf.line(row.doc_line);
-        if line_text.is_empty() || row.col_start >= line_text.chars().count() {
+        let Some(row_text) = char_range_slice(line_text, row.col_start, row.col_end) else {
             continue;
-        }
-        let chars: Vec<char> = line_text.chars().collect();
-        let end = row.col_end.min(chars.len());
-        let row_text: String = chars[row.col_start..end].iter().collect();
-        if row_text.is_empty() {
-            continue;
-        }
+        };
 
         let text_x_base = rect.left() + gutter_width + text_margin;
         let spans = highlight_spans
@@ -212,7 +208,7 @@ fn render_wrapped_lines(
             text_clip,
             syntax_colors,
             row,
-            &row_text,
+            row_text,
             text_x_base,
             y,
             char_width,
@@ -248,9 +244,9 @@ fn render_wrapped_row_text(
         return;
     }
 
-    let row_chars: Vec<char> = row_text.chars().collect();
     let mut col = 0;
-    while col < row_chars.len() {
+    let mut chars = row_text.char_indices().peekable();
+    while let Some((chunk_start, _)) = chars.next() {
         let doc_col = row.col_start + col;
         let color = spans
             .iter()
@@ -261,9 +257,10 @@ fn render_wrapped_row_text(
             })
             .unwrap_or(text_color);
 
-        let mut batch_end = col + 1;
-        while batch_end < row_chars.len() {
-            let next_doc_col = row.col_start + batch_end;
+        let mut chunk_end = row_text.len();
+        let mut next_col = col + 1;
+        while let Some(&(next_byte, _)) = chars.peek() {
+            let next_doc_col = row.col_start + next_col;
             let next_color = spans
                 .iter()
                 .find(|s| next_doc_col >= s.col_start && next_doc_col < s.col_end)
@@ -274,21 +271,22 @@ fn render_wrapped_row_text(
                 })
                 .unwrap_or(text_color);
             if next_color != color {
+                chunk_end = next_byte;
                 break;
             }
-            batch_end += 1;
+            chars.next();
+            next_col += 1;
         }
 
-        let chunk: String = row_chars[col..batch_end].iter().collect();
         let x = text_x_base + col as f32 * char_width;
         painter.with_clip_rect(text_clip).text(
             egui::pos2(x, y + 1.0),
             egui::Align2::LEFT_TOP,
-            &chunk,
+            &row_text[chunk_start..chunk_end],
             font.clone(),
             color,
         );
-        col = batch_end;
+        col = next_col;
     }
 }
 
@@ -320,6 +318,11 @@ fn render_unwrapped_lines(
     current_line_gutter: egui::Color32,
     current_line_bg: egui::Color32,
 ) {
+    let inlay_hint_buckets =
+        LineDecorationBuckets::new(inlay_hints, visible_window, |hint| hint.line as usize);
+    let code_lens_buckets =
+        LineDecorationBuckets::new(code_lenses, visible_window, |lens| lens.line as usize);
+
     for (visible_offset, &line_idx) in visible_window.iter().enumerate() {
         let vis_y = visible_offset as f32 * line_height;
         let y = rect.top() + vis_y;
@@ -421,8 +424,7 @@ fn render_unwrapped_lines(
         render_line_inlay_hints(
             painter,
             text_clip,
-            inlay_hints,
-            line_idx,
+            inlay_hint_buckets.get(visible_offset),
             text_x_base,
             y,
             char_width,
@@ -431,8 +433,7 @@ fn render_unwrapped_lines(
         render_line_code_lenses(
             painter,
             text_clip,
-            code_lenses,
-            line_idx,
+            code_lens_buckets.get(visible_offset),
             text_x_base,
             y,
             line_height,

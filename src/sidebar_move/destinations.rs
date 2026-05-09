@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+use crate::text_utils::sort_by_cached_lowercase;
+
 use super::model::{MoveOrigin, SidebarMoveRequest};
 use super::plan::plan_sidebar_move;
 
@@ -88,7 +90,7 @@ fn collect_destination(
             (is_dir && should_show_dir(&name)).then_some((name, path))
         })
         .collect::<Vec<_>>();
-    child_dirs.sort_by(|left, right| left.0.to_lowercase().cmp(&right.0.to_lowercase()));
+    sort_by_cached_lowercase(&mut child_dirs, |(name, _)| name);
 
     for (_, child) in child_dirs {
         collect_destination(&child, depth + 1, sources, destinations);

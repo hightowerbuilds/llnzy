@@ -111,11 +111,14 @@ impl Search {
             return;
         }
 
+        let Some(matcher) = TerminalSearchMatcher::new(&self.query, self.regex_mode) else {
+            return;
+        };
         let rows = terminal.searchable_rows();
 
         for row in 0..rows {
             let line = terminal.search_row_text(row);
-            self.search_line(&line, row);
+            self.search_line_with_matcher(&line, row, &matcher);
         }
 
         // Clamp focus
@@ -124,9 +127,21 @@ impl Search {
         }
     }
 
+    #[cfg(test)]
     fn search_line(&mut self, line: &str, row: usize) {
-        if self.regex_mode {
-            if let Ok(re) = Regex::new(&self.query) {
+        if let Some(matcher) = TerminalSearchMatcher::new(&self.query, self.regex_mode) {
+            self.search_line_with_matcher(line, row, &matcher);
+        }
+    }
+
+    fn search_line_with_matcher(
+        &mut self,
+        line: &str,
+        row: usize,
+        matcher: &TerminalSearchMatcher,
+    ) {
+        match matcher {
+            TerminalSearchMatcher::Regex(re) => {
                 for m in re.find_iter(line) {
                     if m.start() < m.end() {
                         self.matches.push(SearchMatch {
@@ -137,19 +152,18 @@ impl Search {
                     }
                 }
             }
-        } else {
-            // Plain case-insensitive substring search
-            let query_lower = self.query.to_lowercase();
-            let line_lower = line.to_lowercase();
-            let mut start = 0;
-            while let Some(pos) = line_lower[start..].find(&query_lower) {
-                let abs_pos = start + pos;
-                self.matches.push(SearchMatch {
-                    row,
-                    col_start: abs_pos,
-                    col_end: abs_pos + query_lower.len() - 1,
-                });
-                start = abs_pos + 1;
+            TerminalSearchMatcher::Plain { query_lower } => {
+                let line_lower = line.to_lowercase();
+                let mut start = 0;
+                while let Some(pos) = line_lower[start..].find(query_lower) {
+                    let abs_pos = start + pos;
+                    self.matches.push(SearchMatch {
+                        row,
+                        col_start: abs_pos,
+                        col_end: abs_pos + query_lower.len() - 1,
+                    });
+                    start = abs_pos + 1;
+                }
             }
         }
     }
@@ -198,6 +212,23 @@ impl Search {
             }
         } else {
             format!("{}/{}", self.focus + 1, self.matches.len())
+        }
+    }
+}
+
+enum TerminalSearchMatcher {
+    Regex(Regex),
+    Plain { query_lower: String },
+}
+
+impl TerminalSearchMatcher {
+    fn new(query: &str, regex_mode: bool) -> Option<Self> {
+        if regex_mode {
+            Regex::new(query).ok().map(Self::Regex)
+        } else {
+            Some(Self::Plain {
+                query_lower: query.to_lowercase(),
+            })
         }
     }
 }

@@ -7,6 +7,8 @@ use crate::git::{
     file_state_label, GitCommitNode, GitErrorKind, GitFileState, GitHeadState, GitSnapshot,
     GitStatusEntry,
 };
+use crate::path_utils::file_name_or_display;
+use crate::text_utils::{contains_case_insensitive, truncate_chars};
 
 const PANEL: egui::Color32 = egui::Color32::from_rgb(38, 39, 40);
 const PANEL_DARK: egui::Color32 = egui::Color32::from_rgb(26, 27, 28);
@@ -40,15 +42,14 @@ pub(crate) fn render_git_view_ui(
             .request_repaint_after(std::time::Duration::from_millis(250));
     }
 
-    let snapshot = state.snapshot.clone();
-    render_header(ui, state, snapshot.as_ref());
+    render_header(ui, state);
 
     if let Some(error) = &state.error {
         render_empty_state(ui, state.error_kind, error, project_root);
         return;
     }
 
-    let Some(snapshot) = snapshot else {
+    let Some(snapshot) = state.snapshot.take() else {
         render_loading_state(ui, state, project_root);
         return;
     };
@@ -67,18 +68,20 @@ pub(crate) fn render_git_view_ui(
         }
         GitPanel::Readme => render_readme_dashboard(&mut content_ui, state, &snapshot),
     }
+    state.snapshot = Some(snapshot);
 }
 
-fn render_header(ui: &mut egui::Ui, state: &mut GitUiState, snapshot: Option<&GitSnapshot>) {
+fn render_header(ui: &mut egui::Ui, state: &mut GitUiState) {
     egui::Frame::none()
         .fill(PANEL_DARK)
         .inner_margin(egui::Margin::symmetric(12.0, 8.0))
         .show(ui, |ui| {
+            let has_snapshot = state.snapshot.is_some();
             ui.horizontal(|ui| {
                 render_panel_button(ui, state, GitPanel::CommitLog, "Commit Log");
                 render_panel_button(ui, state, GitPanel::Readme, "README");
                 ui.add_space(10.0);
-                if snapshot.is_some() {
+                if has_snapshot {
                     ui.add(
                         egui::TextEdit::singleline(&mut state.filter)
                             .desired_width(260.0)
@@ -100,6 +103,7 @@ fn render_header(ui: &mut egui::Ui, state: &mut GitUiState, snapshot: Option<&Gi
             });
             ui.add_space(8.0);
             ui.horizontal(|ui| {
+                let snapshot = state.snapshot.as_ref();
                 let repo_name = snapshot
                     .and_then(|s| s.repo_root.file_name())
                     .and_then(|name| name.to_str())
@@ -133,7 +137,7 @@ fn render_header(ui: &mut egui::Ui, state: &mut GitUiState, snapshot: Option<&Gi
                     }
                     badge(ui, format!("{} commits", snapshot.commits.len()), DIM);
                     if let Some(path) = &state.log_options.file_path {
-                        badge(ui, format!("file {}", path_display(path)), BLUE);
+                        badge(ui, format!("file {}", file_name_or_display(path)), BLUE);
                     }
                     if let Some(error) = &state.repo_watch_error {
                         badge(ui, "WATCH OFF", YELLOW).on_hover_text(error.as_str());
@@ -424,8 +428,8 @@ fn render_status_group<'a>(
     mut editor_state: Option<&mut EditorViewState>,
     commands: &mut Vec<AppCommand>,
 ) {
-    let entries: Vec<&GitStatusEntry> = entries.collect();
-    if entries.is_empty() {
+    let mut entries = entries.peekable();
+    if entries.peek().is_none() {
         return;
     }
     ui.add_space(4.0);
@@ -441,7 +445,7 @@ fn render_status_group<'a>(
         ui.horizontal_wrapped(|ui| {
             badge(ui, file_state_label(state), state_color(state));
             let response = ui
-                .selectable_label(false, path_display(&entry.path))
+                .selectable_label(false, file_name_or_display(&entry.path).as_ref())
                 .on_hover_text(entry.path.display().to_string());
             if response.clicked() {
                 open_repo_file(snapshot, &entry.path, editor_state.as_deref_mut(), commands);
@@ -477,51 +481,80 @@ fn render_log_panel(ui: &mut egui::Ui, state: &mut GitUiState, snapshot: &GitSna
                 if response.clicked() {
                     state.select_commit(commit.oid.clone());
                 }
-                paint_commit_row(ui, rect, &commit, selected);
+                paint_commit_row(ui, rect, commit, selected);
             }
         });
 }
 
-fn handle_log_keyboard(ui: &mut egui::Ui, state: &mut GitUiState, commits: &[GitCommitNode]) {
-    let ids = commits
-        .iter()
-        .map(|commit| commit.oid.clone())
-        .collect::<Vec<_>>();
+fn handle_log_keyboard(ui: &mut egui::Ui, state: &mut GitUiState, commits: &[&GitCommitNode]) {
+    let mut movement = None;
+    let mut toggle_detail = false;
     ui.input(|input| {
         if input.key_pressed(egui::Key::ArrowUp) {
-            state.move_selection(&ids, GitSelectionMove::Previous);
+            movement = Some(GitSelectionMove::Previous);
         }
         if input.key_pressed(egui::Key::ArrowDown) {
-            state.move_selection(&ids, GitSelectionMove::Next);
+            movement = Some(GitSelectionMove::Next);
         }
         if input.key_pressed(egui::Key::Home) {
-            state.move_selection(&ids, GitSelectionMove::First);
+            movement = Some(GitSelectionMove::First);
         }
         if input.key_pressed(egui::Key::End) {
-            state.move_selection(&ids, GitSelectionMove::Last);
+            movement = Some(GitSelectionMove::Last);
         }
         if input.key_pressed(egui::Key::Enter) || input.key_pressed(egui::Key::Space) {
-            state.detail_expanded = !state.detail_expanded;
+            toggle_detail = true;
         }
     });
+
+    if let Some(movement) = movement {
+        if let Some(oid) =
+            commit_oid_after_move(commits, state.selected_commit.as_deref(), movement)
+        {
+            state.select_commit(oid.to_string());
+        }
+    }
+    if toggle_detail {
+        state.detail_expanded = !state.detail_expanded;
+    }
 }
 
-fn filtered_commits(snapshot: &GitSnapshot, filter: &str) -> Vec<GitCommitNode> {
-    let filter = filter.trim().to_lowercase();
+fn commit_oid_after_move<'a>(
+    commits: &'a [&GitCommitNode],
+    selected_commit: Option<&str>,
+    movement: GitSelectionMove,
+) -> Option<&'a str> {
+    if commits.is_empty() {
+        return None;
+    }
+
+    let current = selected_commit
+        .and_then(|selected| commits.iter().position(|commit| commit.oid == selected));
+    let next = match (movement, current) {
+        (GitSelectionMove::First, _) => 0,
+        (GitSelectionMove::Last, _) => commits.len() - 1,
+        (GitSelectionMove::Previous, Some(idx)) => idx.saturating_sub(1),
+        (GitSelectionMove::Next, Some(idx)) => (idx + 1).min(commits.len() - 1),
+        (GitSelectionMove::Previous | GitSelectionMove::Next, None) => 0,
+    };
+    Some(commits[next].oid.as_str())
+}
+
+fn filtered_commits<'a>(snapshot: &'a GitSnapshot, filter: &str) -> Vec<&'a GitCommitNode> {
+    let filter = filter.trim();
     snapshot
         .commits
         .iter()
         .filter(|commit| {
             filter.is_empty()
-                || commit.summary.to_lowercase().contains(&filter)
+                || contains_case_insensitive(&commit.summary, filter)
                 || commit.oid.contains(&filter)
-                || commit.author_name.to_lowercase().contains(&filter)
+                || contains_case_insensitive(&commit.author_name, filter)
                 || commit
                     .refs
                     .iter()
-                    .any(|r| r.to_lowercase().contains(&filter))
+                    .any(|r| contains_case_insensitive(r, filter))
         })
-        .cloned()
         .collect()
 }
 
@@ -581,7 +614,7 @@ fn paint_commit_row(ui: &egui::Ui, rect: egui::Rect, commit: &GitCommitNode, sel
     painter.text(
         egui::pos2(summary_x, center_y),
         egui::Align2::LEFT_CENTER,
-        truncate(&commit.summary, summary_chars),
+        truncate_chars(&commit.summary, summary_chars).as_ref(),
         egui::FontId::proportional(13.0),
         TEXT,
     );
@@ -589,7 +622,7 @@ fn paint_commit_row(ui: &egui::Ui, rect: egui::Rect, commit: &GitCommitNode, sel
     painter.text(
         egui::pos2(meta_x, center_y),
         egui::Align2::LEFT_CENTER,
-        truncate(&meta, 28),
+        truncate_chars(&meta, 28).as_ref(),
         egui::FontId::proportional(11.0),
         DIM,
     );
@@ -608,7 +641,7 @@ fn paint_commit_row(ui: &egui::Ui, rect: egui::Rect, commit: &GitCommitNode, sel
             painter.text(
                 pill.center(),
                 egui::Align2::CENTER_CENTER,
-                truncate(label, 20),
+                truncate_chars(label, 20).as_ref(),
                 egui::FontId::proportional(10.5),
                 GREEN,
             );
@@ -626,7 +659,7 @@ fn render_detail_panel(
 ) {
     panel_header(ui, "Commit Detail");
     ui.add_space(6.0);
-    let Some(selected_oid) = state.selected_commit.clone() else {
+    let Some(selected_oid) = state.selected_commit.as_deref() else {
         if snapshot.commits.is_empty() {
             muted(ui, "No commits yet");
         } else {
@@ -644,7 +677,7 @@ fn render_detail_panel(
                 commit.short_oid, commit.summary, commit.relative_time
             )
         })
-        .unwrap_or_else(|| short_display(&selected_oid));
+        .unwrap_or_else(|| short_display(selected_oid));
 
     egui::Frame::none()
         .fill(PANEL_DARK)
@@ -652,7 +685,7 @@ fn render_detail_panel(
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(
-                    egui::RichText::new(truncate(&selected_summary, 110))
+                    egui::RichText::new(truncate_chars(&selected_summary, 110).as_ref())
                         .size(13.0)
                         .color(TEXT),
                 );
@@ -695,8 +728,7 @@ fn render_detail_panel(
         ui.label(egui::RichText::new(error).size(13.0).color(RED));
         return;
     }
-    let detail = state.selected_detail.clone();
-    let Some(detail) = detail else {
+    let Some(detail) = state.selected_detail.as_ref() else {
         muted(ui, "Open detail is loading");
         return;
     };
@@ -736,7 +768,10 @@ fn render_detail_panel(
                             ui.horizontal(|ui| {
                                 badge(ui, file_state_label(file.status), state_color(file.status));
                                 let response = ui
-                                    .selectable_label(false, path_display(&file.path))
+                                    .selectable_label(
+                                        false,
+                                        file_name_or_display(&file.path).as_ref(),
+                                    )
                                     .on_hover_text(file.path.display().to_string());
                                 if response.clicked() {
                                     open_repo_file(
@@ -875,22 +910,59 @@ fn state_color(state: GitFileState) -> egui::Color32 {
     }
 }
 
-fn path_display(path: &Path) -> String {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .map(ToString::to_string)
-        .unwrap_or_else(|| path.display().to_string())
-}
-
 fn short_display(oid: &str) -> String {
     oid.chars().take(7).collect()
 }
 
-fn truncate(text: &str, max_chars: usize) -> String {
-    if text.chars().count() <= max_chars {
-        return text.to_string();
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn commit(oid: &str, summary: &str, author: &str) -> GitCommitNode {
+        GitCommitNode {
+            oid: oid.to_string(),
+            short_oid: short_display(oid),
+            summary: summary.to_string(),
+            author_name: author.to_string(),
+            ..Default::default()
+        }
     }
-    let mut out: String = text.chars().take(max_chars.saturating_sub(3)).collect();
-    out.push_str("...");
-    out
+
+    #[test]
+    fn filtered_commits_borrows_matching_commits() {
+        let snapshot = GitSnapshot {
+            commits: vec![
+                commit("abc1234", "Add command palette", "Ada"),
+                commit("def5678", "Fix terminal resize", "Linus"),
+            ],
+            ..Default::default()
+        };
+
+        let matches = filtered_commits(&snapshot, "terminal");
+
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].oid, "def5678");
+    }
+
+    #[test]
+    fn commit_oid_after_move_tracks_filtered_commit_refs() {
+        let snapshot = GitSnapshot {
+            commits: vec![
+                commit("aaa1111", "First", "Ada"),
+                commit("bbb2222", "Second", "Ada"),
+                commit("ccc3333", "Third", "Ada"),
+            ],
+            ..Default::default()
+        };
+        let commits = snapshot.commits.iter().collect::<Vec<_>>();
+
+        assert_eq!(
+            commit_oid_after_move(&commits, Some("bbb2222"), GitSelectionMove::Next),
+            Some("ccc3333")
+        );
+        assert_eq!(
+            commit_oid_after_move(&commits, Some("bbb2222"), GitSelectionMove::Previous),
+            Some("aaa1111")
+        );
+    }
 }

@@ -32,6 +32,7 @@ pub mod stacker_webview;
 pub mod tab_groups;
 pub mod tasks;
 pub mod terminal;
+pub mod text_utils;
 pub mod theme;
 pub mod theme_store;
 pub mod ui;

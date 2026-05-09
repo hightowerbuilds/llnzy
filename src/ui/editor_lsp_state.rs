@@ -6,6 +6,7 @@ use crate::editor::perf;
 use crate::editor::recovery;
 use crate::editor::BufferId;
 use crate::lsp::{LspEnsureStatus, LspManager};
+use crate::text_utils::contains_case_insensitive;
 
 use super::explorer_view::{CompletionState, EditorViewState, PendingLspRequest};
 
@@ -211,11 +212,11 @@ impl EditorViewState {
         if state.filter.is_empty() {
             state.items.iter().take(20).collect()
         } else {
-            let lower = state.filter.to_lowercase();
+            let filter = state.filter.as_str();
             state
                 .items
                 .iter()
-                .filter(|i| i.label.to_lowercase().contains(&lower))
+                .filter(|i| contains_case_insensitive(&i.label, filter))
                 .take(20)
                 .collect()
         }

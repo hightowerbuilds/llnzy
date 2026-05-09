@@ -4,6 +4,7 @@ use std::path::Path;
 use ropey::Rope;
 
 use crate::editor::history::UndoHistory;
+use crate::text_utils::normalize_crlf_to_lf;
 
 use super::indent::IndentStyle;
 use super::model::content_hash;
@@ -44,8 +45,8 @@ impl Buffer {
         let indent_style = IndentStyle::detect(&text);
 
         // Normalize to LF internally; restore the original line ending on save.
-        let normalized = text.replace("\r\n", "\n");
-        let rope = Rope::from_str(&normalized);
+        let normalized = normalize_crlf_to_lf(&text);
+        let rope = Rope::from_str(normalized.as_ref());
         let hash = content_hash(&rope);
 
         Ok(Self {

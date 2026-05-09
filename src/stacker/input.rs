@@ -1,4 +1,5 @@
 use super::formatting::char_to_byte_idx;
+use crate::text_utils::normalize_crlf_and_cr_to_lf;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StackerSelection {
@@ -128,11 +129,7 @@ impl StackerInputEngine {
 }
 
 pub fn normalize_input_text(text: &str) -> String {
-    if text.contains('\r') {
-        text.replace("\r\n", "\n").replace('\r', "\n")
-    } else {
-        text.to_string()
-    }
+    normalize_crlf_and_cr_to_lf(text).into_owned()
 }
 
 fn clamp_selection(input: &str, selection: StackerSelection) -> StackerSelection {

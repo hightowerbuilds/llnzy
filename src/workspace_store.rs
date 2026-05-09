@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+use crate::path_utils::{path_extension_is, safe_config_stem, TOML_EXT};
+
 /// A saved workspace definition (theme + project + tab layout).
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct SavedWorkspace {
@@ -75,17 +77,7 @@ pub fn save_workspace(workspace: &SavedWorkspace) -> Result<PathBuf, String> {
     let dir = workspaces_dir().ok_or("No config directory")?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create dir: {e}"))?;
 
-    let safe_name: String = workspace
-        .name
-        .chars()
-        .map(|c| {
-            if c.is_alphanumeric() || c == '-' || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
+    let safe_name = safe_config_stem(&workspace.name);
     let path = dir.join(format!("{safe_name}.toml"));
 
     let toml_str =
@@ -106,7 +98,7 @@ pub fn load_workspaces() -> Vec<SavedWorkspace> {
     let mut workspaces = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) != Some("toml") {
+        if !path_extension_is(&path, TOML_EXT) {
             continue;
         }
         let Ok(text) = std::fs::read_to_string(&path) else {
@@ -124,16 +116,7 @@ pub fn load_workspaces() -> Vec<SavedWorkspace> {
 /// Delete a saved workspace by name.
 pub fn delete_workspace(name: &str) -> Result<(), String> {
     let dir = workspaces_dir().ok_or("No config directory")?;
-    let safe_name: String = name
-        .chars()
-        .map(|c| {
-            if c.is_alphanumeric() || c == '-' || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
+    let safe_name = safe_config_stem(name);
     let path = dir.join(format!("{safe_name}.toml"));
     if path.exists() {
         std::fs::remove_file(&path).map_err(|e| format!("Delete failed: {e}"))?;

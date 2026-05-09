@@ -4,6 +4,7 @@ use crate::stacker::{
     queue::{self, QueuedPrompt},
     StackerPrompt,
 };
+use crate::text_utils::truncate_chars;
 
 use super::{
     actions::request_load_saved_prompt,
@@ -569,12 +570,5 @@ fn wrap_thumbnail_line(line: &str, max_chars: usize) -> Vec<String> {
 }
 
 fn truncate_thumbnail_word(word: &str, max_chars: usize) -> String {
-    if word.chars().count() <= max_chars {
-        word.to_string()
-    } else {
-        let keep = max_chars.saturating_sub(3);
-        let mut text = word.chars().take(keep).collect::<String>();
-        text.push_str("...");
-        text
-    }
+    truncate_chars(word, max_chars).into_owned()
 }

@@ -2,6 +2,7 @@ use crate::app::commands::AppCommand;
 use crate::app::drag_drop::{DragDropCommand, DragPayload};
 use crate::explorer::{format_size, ExplorerState};
 use crate::sidebar_move::{plan_sidebar_move, MoveOrigin, SidebarMoveRequest};
+use crate::text_utils::truncate_chars;
 
 use super::{
     explorer_view::EditorViewState,
@@ -467,11 +468,7 @@ fn paint_file_drag_ghost(ctx: &egui::Context, title: &str, source_rect: egui::Re
 
 fn truncate_drag_title(title: &str, available_w: f32) -> String {
     let max_chars = (available_w / 7.5).floor().max(4.0) as usize;
-    if title.chars().count() <= max_chars {
-        return title.to_string();
-    }
-    let keep = max_chars.saturating_sub(3);
-    format!("{}...", title.chars().take(keep).collect::<String>())
+    truncate_chars(title, max_chars).into_owned()
 }
 
 fn render_tree_context_menu(

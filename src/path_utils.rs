@@ -1,4 +1,34 @@
-use std::path::{Path, PathBuf};
+use std::{
+    borrow::Cow,
+    path::{Path, PathBuf},
+};
+
+use crate::text_utils::contains_case_insensitive;
+
+pub const PREVIEW_IMAGE_EXTS: &[&str] = &[
+    "png", "jpg", "jpeg", "gif", "bmp", "webp", "tiff", "tif", "ico",
+];
+pub const IMAGE_ICON_EXTS: &[&str] = &["png", "jpg", "jpeg", "gif", "bmp", "webp", "svg", "ico"];
+pub const BACKGROUND_IMAGE_EXTS: &[&str] = &["png", "jpg", "jpeg", "bmp", "webp", "gif"];
+pub const MARKDOWN_EXTS: &[&str] = &["md", "mdx", "markdown"];
+pub const MARKDOWN_ICON_EXTS: &[&str] = &["md", "mdx"];
+pub const TOML_EXT: &str = "toml";
+pub const JSON_EXT: &str = "json";
+pub const RUST_EXTS: &[&str] = &["rs"];
+pub const JAVASCRIPT_EXTS: &[&str] = &["js", "jsx", "mjs", "cjs"];
+pub const TYPESCRIPT_SYNTAX_EXTS: &[&str] = &["ts", "mts", "cts"];
+pub const TYPESCRIPT_ICON_EXTS: &[&str] = &["ts", "tsx"];
+pub const PYTHON_EXTS: &[&str] = &["py", "pyi"];
+pub const GO_EXTS: &[&str] = &["go"];
+pub const C_EXTS: &[&str] = &["c", "h"];
+pub const CPP_EXTS: &[&str] = &["cpp", "cc", "cxx", "hpp", "hxx"];
+pub const JSON_CODE_EXTS: &[&str] = &["json", "jsonc"];
+pub const CONFIG_ICON_EXTS: &[&str] = &["toml", "yaml", "yml"];
+pub const HTML_EXTS: &[&str] = &["html", "htm"];
+pub const CSS_SYNTAX_EXTS: &[&str] = &["css", "scss"];
+pub const CSS_ICON_EXTS: &[&str] = &["css", "scss", "sass", "less"];
+pub const SHELL_SYNTAX_EXTS: &[&str] = &["sh", "bash", "zsh"];
+pub const SHELL_ICON_EXTS: &[&str] = &["sh", "bash", "zsh", "fish"];
 
 /// Return a stable comparison key for a path, falling back to the original path
 /// when canonicalization is not possible.
@@ -32,6 +62,51 @@ pub fn path_contains(parent: &Path, child: &Path) -> bool {
     }
 }
 
+pub fn extension_matches(ext: &str, candidates: &[&str]) -> bool {
+    candidates
+        .iter()
+        .any(|candidate| ext.eq_ignore_ascii_case(candidate))
+}
+
+pub fn path_extension_matches(path: &Path, candidates: &[&str]) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| extension_matches(ext, candidates))
+}
+
+pub fn path_extension_is(path: &Path, candidate: &str) -> bool {
+    path.extension().and_then(|ext| ext.to_str()) == Some(candidate)
+}
+
+pub fn contains_path_case_insensitive(path: &Path, needle: &str) -> bool {
+    match path.to_str() {
+        Some(path) => contains_case_insensitive(path, needle),
+        None => path
+            .to_string_lossy()
+            .to_lowercase()
+            .contains(&needle.to_lowercase()),
+    }
+}
+
+pub fn file_name_or_display(path: &Path) -> Cow<'_, str> {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(Cow::Borrowed)
+        .unwrap_or_else(|| Cow::Owned(path.display().to_string()))
+}
+
+pub fn safe_config_stem(name: &str) -> String {
+    name.chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -56,6 +131,51 @@ mod tests {
         assert!(path_contains(&root, &child));
 
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn path_extension_matches_case_insensitively() {
+        assert!(path_extension_matches(
+            Path::new("screenshot.PNG"),
+            PREVIEW_IMAGE_EXTS
+        ));
+        assert!(!path_extension_matches(
+            Path::new("diagram.svg"),
+            PREVIEW_IMAGE_EXTS
+        ));
+    }
+
+    #[test]
+    fn path_extension_is_preserves_exact_extension_checks() {
+        assert!(path_extension_is(Path::new("theme.toml"), TOML_EXT));
+        assert!(!path_extension_is(Path::new("theme.TOML"), TOML_EXT));
+    }
+
+    #[test]
+    fn contains_path_case_insensitive_checks_display_path() {
+        assert!(contains_path_case_insensitive(
+            Path::new("/tmp/Project/Source"),
+            "project/source"
+        ));
+    }
+
+    #[test]
+    fn file_name_or_display_borrows_utf8_file_names() {
+        assert!(matches!(
+            file_name_or_display(Path::new("/tmp/project")),
+            Cow::Borrowed("project")
+        ));
+    }
+
+    #[test]
+    fn file_name_or_display_falls_back_to_display_path() {
+        assert_eq!(file_name_or_display(Path::new("/")).as_ref(), "/");
+    }
+
+    #[test]
+    fn safe_config_stem_replaces_non_filename_chars() {
+        assert_eq!(safe_config_stem("My Theme!"), "My_Theme_");
+        assert_eq!(safe_config_stem("good-name_1"), "good-name_1");
     }
 
     fn temp_path(label: &str) -> PathBuf {

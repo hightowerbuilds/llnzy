@@ -11,6 +11,7 @@ use crate::editor::snippet::ActiveSnippet;
 use crate::editor::{BufferId, EditorState};
 use crate::explorer::ExplorerState;
 use crate::lsp::LspManager;
+use crate::text_utils::contains_case_insensitive;
 
 use super::{
     editor_file_events, editor_host, editor_lsp_events, editor_popups, project_search_view,
@@ -264,13 +265,12 @@ pub(crate) fn render_explorer_view(
         // Clone completion items to avoid borrow conflicts
         let completion_snapshot: Option<(Vec<crate::lsp::CompletionItem>, usize)> =
             editor_state.completion.as_ref().map(|c| {
-                let lower = c.filter.to_lowercase();
                 let filtered: Vec<_> = if c.filter.is_empty() {
                     c.items.iter().take(20).cloned().collect()
                 } else {
                     c.items
                         .iter()
-                        .filter(|i| i.label.to_lowercase().contains(&lower))
+                        .filter(|i| contains_case_insensitive(&i.label, &c.filter))
                         .take(20)
                         .cloned()
                         .collect()

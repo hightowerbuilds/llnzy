@@ -3,6 +3,7 @@ use super::types::UiTabInfo;
 use crate::app::commands::AppCommand;
 use crate::app::drag_drop::{tab_reorder_destination, DragDropCommand, DragPayload, TabDropZone};
 use crate::tab_groups::TabGroupState;
+use crate::text_utils::truncate_chars;
 use crate::workspace_layout::{JoinedTabs, TabBarEntry};
 use egui::text::{CCursor, CCursorRange};
 
@@ -767,12 +768,7 @@ fn tab_width(title: &str) -> f32 {
 
 pub(super) fn truncated_title(title: &str, available_w: f32) -> String {
     let max_chars = (available_w / 8.5).floor().max(4.0) as usize;
-    let char_count = title.chars().count();
-    if char_count <= max_chars {
-        return title.to_string();
-    }
-    let keep = max_chars.saturating_sub(3);
-    format!("{}...", title.chars().take(keep).collect::<String>())
+    truncate_chars(title, max_chars).into_owned()
 }
 
 pub(super) fn tab_drop_zone(response: &egui::Response) -> TabDropZone {
