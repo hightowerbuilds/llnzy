@@ -153,7 +153,7 @@ impl Config {
             if let Some(fit) = effects
                 .background_image_fit
                 .as_deref()
-                .and_then(BackgroundImageFit::from_str)
+                .and_then(BackgroundImageFit::parse)
             {
                 self.effects.background_image_fit = fit;
             }
@@ -242,7 +242,7 @@ impl Config {
                 self.editor.highlight_current_line = highlight_current_line;
             }
             if let Some(preset) = editor.keybinding_preset {
-                self.editor.keybinding_preset = KeybindingPreset::from_str(&preset);
+                self.editor.keybinding_preset = KeybindingPreset::parse(&preset);
             }
             if let Some(languages) = editor.languages {
                 for (lang, lang_config) in languages {

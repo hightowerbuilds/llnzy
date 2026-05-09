@@ -47,7 +47,6 @@ pub(super) fn handle_vim_keys(
 }
 
 /// Vim Normal mode: movement, mode switching, operators.
-#[expect(clippy::too_many_arguments, reason = "matching main handler signature")]
 fn handle_vim_normal(
     input: &egui::InputState,
     buf: &mut crate::editor::buffer::Buffer,
@@ -304,7 +303,6 @@ fn handle_vim_normal(
 }
 
 /// Vim Visual mode: movement extends selection, d/y operate on selection.
-#[expect(clippy::too_many_arguments, reason = "matching main handler signature")]
 fn handle_vim_visual(
     input: &egui::InputState,
     buf: &mut crate::editor::buffer::Buffer,

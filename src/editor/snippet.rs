@@ -79,7 +79,7 @@ pub fn parse_snippet(template: &str, filename: &str, clipboard: &str) -> Snippet
                     chars.next(); // consume '{'
                     let mut content = String::new();
                     let mut depth = 1;
-                    while let Some(c) = chars.next() {
+                    for c in chars.by_ref() {
                         if c == '{' {
                             depth += 1;
                         }

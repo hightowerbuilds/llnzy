@@ -28,27 +28,39 @@ pub(super) struct TabContentState<'a> {
     pub commands: &'a mut Vec<AppCommand>,
 }
 
-pub(super) fn render_tab_content(
-    ctx: &egui::Context,
-    active_tab_kind: Option<TabKind>,
-    active_tab_index: usize,
-    tab_groups: &mut TabGroupState,
-    tab_panes: &[UiTabPaneInfo],
-    config: &mut Config,
-    appearance: TabContentAppearance,
-    mut state: TabContentState<'_>,
-) {
+pub(super) struct TabContentRenderInput<'a> {
+    pub ctx: &'a egui::Context,
+    pub active_tab_kind: Option<TabKind>,
+    pub active_tab_index: usize,
+    pub tab_groups: &'a mut TabGroupState,
+    pub tab_panes: &'a [UiTabPaneInfo],
+    pub config: &'a mut Config,
+    pub appearance: TabContentAppearance,
+    pub state: TabContentState<'a>,
+}
+
+pub(super) fn render_tab_content(input: TabContentRenderInput<'_>) {
+    let TabContentRenderInput {
+        ctx,
+        active_tab_kind,
+        active_tab_index,
+        tab_groups,
+        tab_panes,
+        config,
+        appearance,
+        mut state,
+    } = input;
     if let Some(joined) = active_joined_tabs(tab_groups, active_tab_index, tab_panes) {
-        render_joined_tabs(
+        render_joined_tabs(JoinedTabsRenderInput {
             ctx,
             joined,
             tab_groups,
             active_tab_index,
             tab_panes,
             config,
-            &appearance,
-            &mut state,
-        );
+            appearance: &appearance,
+            state: &mut state,
+        });
         return;
     }
 
@@ -112,16 +124,28 @@ fn active_joined_tabs(
     })
 }
 
-fn render_joined_tabs(
-    ctx: &egui::Context,
+struct JoinedTabsRenderInput<'a, 'b> {
+    ctx: &'a egui::Context,
     joined: JoinedTabs,
-    tab_groups: &mut TabGroupState,
+    tab_groups: &'a mut TabGroupState,
     active_tab_index: usize,
-    tab_panes: &[UiTabPaneInfo],
-    config: &mut Config,
-    appearance: &TabContentAppearance,
-    state: &mut TabContentState<'_>,
-) {
+    tab_panes: &'a [UiTabPaneInfo],
+    config: &'a mut Config,
+    appearance: &'a TabContentAppearance,
+    state: &'a mut TabContentState<'b>,
+}
+
+fn render_joined_tabs(input: JoinedTabsRenderInput<'_, '_>) {
+    let JoinedTabsRenderInput {
+        ctx,
+        joined,
+        tab_groups,
+        active_tab_index,
+        tab_panes,
+        config,
+        appearance,
+        state,
+    } = input;
     egui::CentralPanel::default()
         .frame(egui::Frame::none().fill(egui::Color32::TRANSPARENT))
         .show(ctx, |ui| {

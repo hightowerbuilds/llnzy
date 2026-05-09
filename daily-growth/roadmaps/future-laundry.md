@@ -24,11 +24,11 @@ Related future roadmap:
 ## Reliability And Code Quality
 
 - [ ] Keep reducing large UI and runtime files so new work can land without expanding oversized modules.
-- [ ] Split `src/lsp/mod.rs` into types, lifecycle, diagnostics, requests, workspace edit, symbols, and manager modules.
-- [ ] Split `src/config.rs` into model, schema, loading, apply, colors, presets, and keybinding modules.
+- [x] Split `src/lsp/mod.rs` into types, lifecycle, diagnostics, requests, workspace edit, symbols, and manager modules.
+- [x] Split `src/config.rs` into model, schema, loading, apply, colors, presets, and keybinding modules.
 - [ ] Continue splitting `src/main.rs` into focused app modules for host state, winit handling, window lifecycle, frame prep, terminal input, Stacker bridge, platform menu, and shortcuts.
-- [ ] Split `src/editor/buffer.rs` into model, IO, editing, indent, history, and recovery modules.
-- [ ] Split `src/terminal.rs` into event, grid, selection, OSC, links, and color modules.
+- [x] Split `src/editor/buffer.rs` into model, IO, editing, indent, history, and recovery modules.
+- [x] Split `src/terminal.rs` into event, grid, selection, OSC, links, and color modules.
 - [ ] Split UI-heavy files such as editor commands, settings tabs, Stacker view, and sidebar modals into component families.
 - [ ] Finish or intentionally suppress current warnings with specific justification.
 - [ ] Run periodic manual smoke checks for tabs, splits, search, settings, Stacker, paste, terminal routing, and effects.
@@ -66,18 +66,18 @@ Related future roadmap:
 
 ## Source Editor
 
-- [ ] Finish find-and-replace behavior and tests if replacement remains deferred.
-- [ ] Add or verify indentation guides.
-- [ ] Add multi-cursor commands such as next occurrence and select all occurrences.
-- [ ] Add minimap click-to-scroll.
+- [x] Finish find-and-replace behavior and tests if replacement remains deferred.
+- [x] Add or verify indentation guides.
+- [x] Add multi-cursor commands such as next occurrence and select all occurrences.
+- [x] Add minimap click-to-scroll.
 - [ ] Add smooth scrolling and smooth caret animation only after measuring interaction quality.
-- [ ] Add configurable editor keybinding presets, including VS Code-style defaults, basic Vim mode, and optional Emacs bindings if they still fit the product.
-- [ ] Add custom key mappings in config.
+- [x] Add configurable editor keybinding presets, including VS Code-style defaults, basic Vim mode, and optional Emacs bindings if they still fit the product.
+- [x] Add custom key mappings in config.
 - [ ] Keep editor-specific settings discoverable in Settings.
-- [ ] Add or verify snippet engine behavior.
+- [x] Add or verify snippet engine behavior.
 - [ ] Audit editor documentation against actual behavior.
-- [ ] Add parser-backed Markdown preview for code files if rendered inspection remains important.
-- [ ] Add local image rendering in Markdown preview if code editor preview supports local assets.
+- [x] Add parser-backed Markdown preview for code files if rendered inspection remains important.
+- [x] Add local image rendering in Markdown preview if code editor preview supports local assets.
 - [ ] Add Markdown preview scroll sync only for the code editor preview flow.
 
 ## LSP And Code Intelligence

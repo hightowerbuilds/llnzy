@@ -49,26 +49,40 @@ pub(super) fn wrap_row_for_cursor(rows: &[WrapRow], line: usize, col: usize) -> 
         {
             return i;
         }
-        if row.doc_line == line && col >= row.col_end {
-            if rows.get(i + 1).is_none_or(|next| next.doc_line != line) {
-                return i;
-            }
+        if row.doc_line == line
+            && col >= row.col_end
+            && rows.get(i + 1).is_none_or(|next| next.doc_line != line)
+        {
+            return i;
         }
     }
     rows.len().saturating_sub(1)
 }
 
-pub(super) fn pixel_to_editor_pos_wrapped(
-    pos: egui::Pos2,
-    rect: egui::Rect,
-    gutter_width: f32,
-    text_margin: f32,
-    char_width: f32,
-    line_height: f32,
-    scroll_row: usize,
-    wrap_rows: &[WrapRow],
-    buf: &crate::editor::buffer::Buffer,
-) -> (usize, usize) {
+pub(super) struct WrappedHitTestInput<'a> {
+    pub pos: egui::Pos2,
+    pub rect: egui::Rect,
+    pub gutter_width: f32,
+    pub text_margin: f32,
+    pub char_width: f32,
+    pub line_height: f32,
+    pub scroll_row: usize,
+    pub wrap_rows: &'a [WrapRow],
+    pub buf: &'a crate::editor::buffer::Buffer,
+}
+
+pub(super) fn pixel_to_editor_pos_wrapped(input: WrappedHitTestInput<'_>) -> (usize, usize) {
+    let WrappedHitTestInput {
+        pos,
+        rect,
+        gutter_width,
+        text_margin,
+        char_width,
+        line_height,
+        scroll_row,
+        wrap_rows,
+        buf,
+    } = input;
     let rel_x = pos.x - rect.left() - gutter_width - text_margin;
     let rel_y = pos.y - rect.top();
     let visual_row = (scroll_row + (rel_y / line_height).max(0.0) as usize)
@@ -103,17 +117,17 @@ mod tests {
         let rows = compute_wrap_rows(&[0], &buf, 10);
         let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(300.0, 80.0));
 
-        let (line, col) = pixel_to_editor_pos_wrapped(
-            egui::pos2(260.0, 5.0),
+        let (line, col) = pixel_to_editor_pos_wrapped(WrappedHitTestInput {
+            pos: egui::pos2(260.0, 5.0),
             rect,
-            20.0,
-            4.0,
-            10.0,
-            20.0,
-            0,
-            &rows,
-            &buf,
-        );
+            gutter_width: 20.0,
+            text_margin: 4.0,
+            char_width: 10.0,
+            line_height: 20.0,
+            scroll_row: 0,
+            wrap_rows: &rows,
+            buf: &buf,
+        });
 
         assert_eq!((line, col), (0, 10));
     }
@@ -124,17 +138,17 @@ mod tests {
         let rows = compute_wrap_rows(&[0], &buf, 10);
         let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(300.0, 80.0));
 
-        let (line, col) = pixel_to_editor_pos_wrapped(
-            egui::pos2(44.0, 5.0),
+        let (line, col) = pixel_to_editor_pos_wrapped(WrappedHitTestInput {
+            pos: egui::pos2(44.0, 5.0),
             rect,
-            20.0,
-            4.0,
-            10.0,
-            20.0,
-            1,
-            &rows,
-            &buf,
-        );
+            gutter_width: 20.0,
+            text_margin: 4.0,
+            char_width: 10.0,
+            line_height: 20.0,
+            scroll_row: 1,
+            wrap_rows: &rows,
+            buf: &buf,
+        });
 
         assert_eq!((line, col), (0, 12));
     }

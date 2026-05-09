@@ -10,7 +10,7 @@ use super::symbols::{flatten_symbols, markup_value_to_string};
 use super::transport::Transport;
 use super::types::{
     CodeAction, CodeLensInfo, CompletionItem, DiagSeverity, FileDiagnostic, FormatEdit,
-    InlayHintInfo, ReferenceLocation, SignatureInfo, SymbolInfo, WorkspaceSymbol,
+    InlayHintInfo, ReferenceLocation, SignatureInfo, SymbolInfo, WorkspaceEdits, WorkspaceSymbol,
 };
 use super::workspace_edit::parse_workspace_edit;
 
@@ -253,7 +253,7 @@ impl LspManager {
         line: u32,
         col: u32,
         new_name: &str,
-    ) -> Option<oneshot::Receiver<Vec<(PathBuf, Vec<FormatEdit>)>>> {
+    ) -> Option<oneshot::Receiver<WorkspaceEdits>> {
         let client = self.clients.get(lang_id)?;
         if !client.is_running() {
             return None;

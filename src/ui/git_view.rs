@@ -22,7 +22,7 @@ pub(crate) fn render_git_view_ui(
     state: &mut GitUiState,
     project_root: &Path,
     active_editor_file: Option<std::path::PathBuf>,
-    mut editor_state: Option<&mut EditorViewState>,
+    editor_state: Option<&mut EditorViewState>,
     commands: &mut Vec<AppCommand>,
 ) {
     state.poll();
@@ -62,13 +62,9 @@ pub(crate) fn render_git_view_ui(
     );
     content_ui.set_clip_rect(content_rect);
     match state.active_panel {
-        GitPanel::CommitLog => render_commit_log_dashboard(
-            &mut content_ui,
-            state,
-            &snapshot,
-            editor_state.as_deref_mut(),
-            commands,
-        ),
+        GitPanel::CommitLog => {
+            render_commit_log_dashboard(&mut content_ui, state, &snapshot, editor_state, commands)
+        }
         GitPanel::Readme => render_readme_dashboard(&mut content_ui, state, &snapshot),
     }
 }
@@ -333,7 +329,7 @@ fn render_worktree_panel(
                     "Conflicts",
                     snapshot.status.iter().filter(|e| e.conflicted),
                     snapshot,
-                    editor_state.as_deref_mut(),
+                    reborrow_editor_state(&mut editor_state),
                     commands,
                 );
                 render_status_group(
@@ -344,7 +340,7 @@ fn render_worktree_panel(
                         .iter()
                         .filter(|e| e.index != GitFileState::Unmodified && !e.conflicted),
                     snapshot,
-                    editor_state.as_deref_mut(),
+                    reborrow_editor_state(&mut editor_state),
                     commands,
                 );
                 render_status_group(
@@ -355,7 +351,7 @@ fn render_worktree_panel(
                         .iter()
                         .filter(|e| e.worktree != GitFileState::Unmodified && !e.conflicted),
                     snapshot,
-                    editor_state.as_deref_mut(),
+                    reborrow_editor_state(&mut editor_state),
                     commands,
                 );
             }
@@ -412,6 +408,12 @@ fn render_worktree_panel(
                 }
             }
         });
+}
+
+fn reborrow_editor_state<'a>(
+    editor_state: &'a mut Option<&mut EditorViewState>,
+) -> Option<&'a mut EditorViewState> {
+    editor_state.as_mut().map(|state| &mut **state)
 }
 
 fn render_status_group<'a>(

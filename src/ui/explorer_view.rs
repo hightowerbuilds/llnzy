@@ -31,7 +31,7 @@ pub struct LspPending {
     pub code_actions: Option<PendingLspRequest<Vec<crate::lsp::CodeAction>>>,
     pub document_symbols: Option<PendingLspRequest<Vec<crate::lsp::SymbolInfo>>>,
     pub workspace_symbols: Option<oneshot::Receiver<Vec<crate::lsp::WorkspaceSymbol>>>,
-    pub rename: Option<PendingLspRequest<Vec<(PathBuf, Vec<crate::lsp::FormatEdit>)>>>,
+    pub rename: Option<PendingLspRequest<crate::lsp::WorkspaceEdits>>,
 }
 
 pub struct PendingLspRequest<T> {

@@ -24,16 +24,26 @@ pub enum FooterAction {
 }
 
 /// Render the footer navigation bar. Returns the action if a button was clicked.
-pub fn render_footer(
-    ctx: &egui::Context,
-    footer_height: f32,
-    _active_singleton: Option<TabKind>,
-    active_tab_kind: Option<TabKind>,
-    chrome_bg: egui::Color32,
-    active_btn: egui::Color32,
-    text_color: egui::Color32,
-    queued_prompts: &[FooterQueuePrompt],
-) -> Option<FooterAction> {
+pub struct FooterRenderInput<'a> {
+    pub ctx: &'a egui::Context,
+    pub footer_height: f32,
+    pub active_tab_kind: Option<TabKind>,
+    pub chrome_bg: egui::Color32,
+    pub active_btn: egui::Color32,
+    pub text_color: egui::Color32,
+    pub queued_prompts: &'a [FooterQueuePrompt],
+}
+
+pub fn render_footer(input: FooterRenderInput<'_>) -> Option<FooterAction> {
+    let FooterRenderInput {
+        ctx,
+        footer_height,
+        active_tab_kind,
+        chrome_bg,
+        active_btn,
+        text_color,
+        queued_prompts,
+    } = input;
     let mut result: Option<FooterAction> = None;
 
     egui::TopBottomPanel::bottom("footer")

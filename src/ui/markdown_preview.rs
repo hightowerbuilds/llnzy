@@ -374,13 +374,11 @@ fn code_fence(line: &str) -> Option<CodeFence<'_>> {
             marker: "```",
             language: code_fence_language(info),
         })
-    } else if let Some(info) = line.strip_prefix("~~~") {
-        Some(CodeFence {
+    } else {
+        line.strip_prefix("~~~").map(|info| CodeFence {
             marker: "~~~",
             language: code_fence_language(info),
         })
-    } else {
-        None
     }
 }
 
@@ -745,12 +743,7 @@ fn render_image_placeholder(
 
 fn inline_display_text(input: &str) -> String {
     let without_links = replace_markdown_links(input);
-    without_links
-        .replace("**", "")
-        .replace("__", "")
-        .replace('`', "")
-        .replace('*', "")
-        .replace('_', "")
+    without_links.replace(['`', '*', '_'], "")
 }
 
 fn replace_markdown_links(input: &str) -> String {

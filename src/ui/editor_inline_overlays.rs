@@ -218,11 +218,7 @@ fn render_completion_popup(
     let Some((items, selected)) = completions else {
         return;
     };
-    if items.is_empty()
-        || !visible_window
-            .iter()
-            .any(|&line| line == view.cursor.pos.line)
-    {
+    if items.is_empty() || !visible_window.contains(&view.cursor.pos.line) {
         return;
     }
 

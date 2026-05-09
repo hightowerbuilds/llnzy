@@ -37,6 +37,16 @@ pub(super) struct PendingOpenDoc {
     pub(super) text: String,
 }
 
+pub struct IncrementalDocumentChange<'a> {
+    pub path: &'a Path,
+    pub lang_id: &'a str,
+    pub start_line: u32,
+    pub start_col: u32,
+    pub end_line: u32,
+    pub end_col: u32,
+    pub new_text: &'a str,
+}
+
 impl LspManager {
     pub fn new(proxy: winit::event_loop::EventLoopProxy<crate::UserEvent>) -> Self {
         let runtime = Runtime::new().expect("failed to create tokio runtime");
@@ -245,16 +255,16 @@ impl LspManager {
     }
 
     /// Send an incremental document change to the server.
-    pub fn did_change_incremental(
-        &mut self,
-        path: &Path,
-        lang_id: &str,
-        start_line: u32,
-        start_col: u32,
-        end_line: u32,
-        end_col: u32,
-        new_text: &str,
-    ) {
+    pub fn did_change_incremental(&mut self, change: IncrementalDocumentChange<'_>) {
+        let IncrementalDocumentChange {
+            path,
+            lang_id,
+            start_line,
+            start_col,
+            end_line,
+            end_col,
+            new_text,
+        } = change;
         let Some(client) = self.clients.get_mut(lang_id) else {
             return;
         };

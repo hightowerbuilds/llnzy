@@ -13,8 +13,8 @@ mod types;
 mod workspace_edit;
 
 pub use lifecycle::{LspEnsureStatus, LspLifecycleState, LspLifecycleStatus};
-pub use manager::LspManager;
+pub use manager::{IncrementalDocumentChange, LspManager};
 pub use types::{
     CodeAction, CodeLensInfo, CompletionItem, DiagSeverity, FileDiagnostic, FormatEdit,
-    InlayHintInfo, ReferenceLocation, SignatureInfo, SymbolInfo, WorkspaceSymbol,
+    InlayHintInfo, ReferenceLocation, SignatureInfo, SymbolInfo, WorkspaceEdits, WorkspaceSymbol,
 };

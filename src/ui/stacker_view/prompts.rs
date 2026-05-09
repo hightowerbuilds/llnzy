@@ -41,7 +41,7 @@ const LIST_CHARS_WIDTH: f32 = 48.0;
 pub(super) fn render_prompt_list_panel(
     ui: &mut egui::Ui,
     height: f32,
-    prompts: &mut Vec<StackerPrompt>,
+    prompts: &mut [StackerPrompt],
     editing: &mut Option<usize>,
     editor: &mut StackerDocumentEditor,
     draft: &mut StackerDraft,
@@ -143,7 +143,7 @@ fn render_queue_bank(ui: &mut egui::Ui, width: f32, height: f32, queued_prompts:
 fn render_saved_prompt_panel(
     ui: &mut egui::Ui,
     height: f32,
-    prompts: &mut Vec<StackerPrompt>,
+    prompts: &mut [StackerPrompt],
     editing: &mut Option<usize>,
     editor: &mut StackerDocumentEditor,
     draft: &mut StackerDraft,
@@ -195,7 +195,7 @@ fn render_saved_prompt_panel(
 #[allow(clippy::too_many_arguments)]
 fn render_saved_prompt_list(
     ui: &mut egui::Ui,
-    prompts: &mut Vec<StackerPrompt>,
+    prompts: &mut [StackerPrompt],
     editing: &mut Option<usize>,
     editor: &mut StackerDocumentEditor,
     draft: &mut StackerDraft,
@@ -324,7 +324,7 @@ fn render_saved_prompt_list(
 #[allow(clippy::too_many_arguments)]
 fn render_saved_prompt_thumbnails(
     ui: &mut egui::Ui,
-    prompts: &mut Vec<StackerPrompt>,
+    prompts: &mut [StackerPrompt],
     editing: &mut Option<usize>,
     editor: &mut StackerDocumentEditor,
     draft: &mut StackerDraft,

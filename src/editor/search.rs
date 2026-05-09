@@ -10,6 +10,7 @@ pub struct EditorMatch {
 }
 
 /// Find & replace state for the editor.
+#[derive(Default)]
 pub struct EditorSearch {
     /// Whether the search bar is visible.
     pub active: bool,
@@ -31,23 +32,6 @@ pub struct EditorSearch {
     pub focus: usize,
     /// Whether matches need re-computation.
     dirty: bool,
-}
-
-impl Default for EditorSearch {
-    fn default() -> Self {
-        Self {
-            active: false,
-            query: String::new(),
-            replacement: String::new(),
-            replace_mode: false,
-            regex_mode: false,
-            case_sensitive: false,
-            whole_word: false,
-            matches: Vec::new(),
-            focus: 0,
-            dirty: false,
-        }
-    }
 }
 
 impl EditorSearch {
@@ -98,56 +82,52 @@ impl EditorSearch {
         }
 
         // Clamp focus
-        if self.matches.is_empty() {
-            self.focus = 0;
-        } else if self.focus >= self.matches.len() {
+        if self.matches.is_empty() || self.focus >= self.matches.len() {
             self.focus = 0;
         }
     }
 
     fn find_plain(&mut self, buf: &Buffer) {
+        let query_lower;
         let query = if self.case_sensitive {
-            self.query.clone()
+            self.query.as_str()
         } else {
-            self.query.to_lowercase()
+            query_lower = self.query.to_lowercase();
+            query_lower.as_str()
         };
-        let query_chars: Vec<char> = query.chars().collect();
-        if query_chars.is_empty() {
+        if query.is_empty() {
             return;
         }
+        let query_byte_len = query.len();
+        let query_char_len = query.chars().count();
 
         for line_idx in 0..buf.line_count() {
             let line_text = buf.line(line_idx);
+            let line_lower;
             let search_text = if self.case_sensitive {
-                line_text.to_string()
+                line_text
             } else {
-                line_text.to_lowercase()
+                line_lower = line_text.to_lowercase();
+                line_lower.as_str()
             };
-            let search_chars: Vec<char> = search_text.chars().collect();
 
-            let mut col = 0;
-            while col + query_chars.len() <= search_chars.len() {
-                if search_chars[col..col + query_chars.len()] == query_chars[..] {
-                    let end_col = col + query_chars.len();
+            let mut start_byte = 0;
+            while let Some(offset) = search_text[start_byte..].find(query) {
+                let match_start = start_byte + offset;
+                let match_end = match_start + query_byte_len;
+                let start_col = search_text[..match_start].chars().count();
+                let end_col = start_col + query_char_len;
 
-                    if self.whole_word {
-                        let word_start = col == 0 || !is_word_char(search_chars[col - 1]);
-                        let word_end =
-                            end_col >= search_chars.len() || !is_word_char(search_chars[end_col]);
-                        if !word_start || !word_end {
-                            col += 1;
-                            continue;
-                        }
-                    }
-
-                    self.matches.push(EditorMatch {
-                        start: Position::new(line_idx, col),
-                        end: Position::new(line_idx, end_col),
-                    });
-                    col = end_col; // non-overlapping
-                } else {
-                    col += 1;
+                if self.whole_word && !is_whole_word_match(search_text, match_start, match_end) {
+                    start_byte = next_char_boundary(search_text, match_start);
+                    continue;
                 }
+
+                self.matches.push(EditorMatch {
+                    start: Position::new(line_idx, start_col),
+                    end: Position::new(line_idx, end_col),
+                });
+                start_byte = match_end; // non-overlapping
             }
         }
     }
@@ -174,11 +154,7 @@ impl EditorSearch {
                 }
 
                 if self.whole_word {
-                    let chars: Vec<char> = line_text.chars().collect();
-                    let end_col = start_col + match_len;
-                    let word_start = start_col == 0 || !is_word_char(chars[start_col - 1]);
-                    let word_end = end_col >= chars.len() || !is_word_char(chars[end_col]);
-                    if !word_start || !word_end {
+                    if !is_whole_word_match(line_text, m.start(), m.end()) {
                         continue;
                     }
                 }
@@ -192,7 +168,7 @@ impl EditorSearch {
     }
 
     /// Move focus to the next match. Returns the position to scroll to.
-    pub fn next(&mut self) -> Option<Position> {
+    pub fn next_match(&mut self) -> Option<Position> {
         if self.matches.is_empty() {
             return None;
         }
@@ -201,7 +177,7 @@ impl EditorSearch {
     }
 
     /// Move focus to the previous match. Returns the position to scroll to.
-    pub fn prev(&mut self) -> Option<Position> {
+    pub fn previous_match(&mut self) -> Option<Position> {
         if self.matches.is_empty() {
             return None;
         }
@@ -282,6 +258,25 @@ fn is_word_char(ch: char) -> bool {
     ch.is_alphanumeric() || ch == '_'
 }
 
+fn is_whole_word_match(text: &str, start_byte: usize, end_byte: usize) -> bool {
+    let word_start = text[..start_byte]
+        .chars()
+        .next_back()
+        .map_or(true, |ch| !is_word_char(ch));
+    let word_end = text[end_byte..]
+        .chars()
+        .next()
+        .map_or(true, |ch| !is_word_char(ch));
+    word_start && word_end
+}
+
+fn next_char_boundary(text: &str, byte_idx: usize) -> usize {
+    text[byte_idx..]
+        .chars()
+        .next()
+        .map_or(text.len(), |ch| byte_idx + ch.len_utf8())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -301,11 +296,17 @@ mod tests {
         buf
     }
 
+    fn search_with_query(query: &str) -> EditorSearch {
+        EditorSearch {
+            query: query.to_string(),
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn plain_case_insensitive_search() {
         let buf = make_buf("Hello world\nhello World\nHELLO WORLD\n");
-        let mut search = EditorSearch::default();
-        search.query = "hello".to_string();
+        let mut search = search_with_query("hello");
         search.update_matches(&buf);
         assert_eq!(search.matches.len(), 3);
         assert_eq!(search.matches[0].start, Position::new(0, 0));
@@ -316,9 +317,10 @@ mod tests {
     #[test]
     fn plain_case_sensitive_search() {
         let buf = make_buf("Hello world\nhello World\nHELLO WORLD\n");
-        let mut search = EditorSearch::default();
-        search.query = "hello".to_string();
-        search.case_sensitive = true;
+        let mut search = EditorSearch {
+            case_sensitive: true,
+            ..search_with_query("hello")
+        };
         search.update_matches(&buf);
         assert_eq!(search.matches.len(), 1);
         assert_eq!(search.matches[0].start, Position::new(1, 0));
@@ -327,9 +329,10 @@ mod tests {
     #[test]
     fn whole_word_search() {
         let buf = make_buf("cat concatenate cats scat\n");
-        let mut search = EditorSearch::default();
-        search.query = "cat".to_string();
-        search.whole_word = true;
+        let mut search = EditorSearch {
+            whole_word: true,
+            ..search_with_query("cat")
+        };
         search.update_matches(&buf);
         assert_eq!(search.matches.len(), 1);
         assert_eq!(search.matches[0].start, Position::new(0, 0));
@@ -339,10 +342,11 @@ mod tests {
     #[test]
     fn regex_search() {
         let buf = make_buf("fn main() {\n    let x = 42;\n}\n");
-        let mut search = EditorSearch::default();
-        search.query = r"fn \w+".to_string();
-        search.regex_mode = true;
-        search.case_sensitive = true;
+        let mut search = EditorSearch {
+            regex_mode: true,
+            case_sensitive: true,
+            ..search_with_query(r"fn \w+")
+        };
         search.update_matches(&buf);
         assert_eq!(search.matches.len(), 1);
         assert_eq!(search.matches[0].start, Position::new(0, 0));
@@ -352,20 +356,19 @@ mod tests {
     #[test]
     fn next_prev_wraps() {
         let buf = make_buf("aaa\naaa\naaa\n");
-        let mut search = EditorSearch::default();
-        search.query = "aaa".to_string();
+        let mut search = search_with_query("aaa");
         search.update_matches(&buf);
         assert_eq!(search.matches.len(), 3);
         assert_eq!(search.focus, 0);
 
-        search.next();
+        search.next_match();
         assert_eq!(search.focus, 1);
-        search.next();
+        search.next_match();
         assert_eq!(search.focus, 2);
-        search.next();
+        search.next_match();
         assert_eq!(search.focus, 0); // wraps
 
-        search.prev();
+        search.previous_match();
         assert_eq!(search.focus, 2); // wraps back
     }
 
@@ -373,9 +376,10 @@ mod tests {
     fn replace_current_advances() {
         let buf_text = "foo bar foo baz foo\n";
         let mut buf = make_buf(buf_text);
-        let mut search = EditorSearch::default();
-        search.query = "foo".to_string();
-        search.replacement = "qux".to_string();
+        let mut search = EditorSearch {
+            replacement: "qux".to_string(),
+            ..search_with_query("foo")
+        };
         search.update_matches(&buf);
         assert_eq!(search.matches.len(), 3);
 
@@ -388,9 +392,10 @@ mod tests {
     #[test]
     fn replace_all() {
         let mut buf = make_buf("foo bar foo baz foo\n");
-        let mut search = EditorSearch::default();
-        search.query = "foo".to_string();
-        search.replacement = "X".to_string();
+        let mut search = EditorSearch {
+            replacement: "X".to_string(),
+            ..search_with_query("foo")
+        };
         search.update_matches(&buf);
 
         let count = search.replace_all(&mut buf);
@@ -402,9 +407,10 @@ mod tests {
     #[test]
     fn invalid_regex_no_panic() {
         let buf = make_buf("test\n");
-        let mut search = EditorSearch::default();
-        search.query = "[invalid".to_string();
-        search.regex_mode = true;
+        let mut search = EditorSearch {
+            regex_mode: true,
+            ..search_with_query("[invalid")
+        };
         search.update_matches(&buf);
         assert!(search.matches.is_empty());
     }

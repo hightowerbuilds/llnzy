@@ -254,7 +254,7 @@ impl App {
 
         if let Some(ui) = &mut self.ui {
             ui.explorer
-                .refresh_preserving_expansion(&[plan.destination_folder.clone()]);
+                .refresh_preserving_expansion(std::slice::from_ref(&plan.destination_folder));
             let copied_count = plan.items.len();
             ui.editor_view.status_msg = Some(if copied_count == 1 {
                 "Imported item".to_string()
@@ -307,7 +307,7 @@ impl App {
         }
     }
 
-    pub(crate) fn remap_open_file_path(&mut self, old_path: &PathBuf, new_path: &PathBuf) {
+    pub(crate) fn remap_open_file_path(&mut self, old_path: &Path, new_path: &Path) {
         let Some(ui) = &mut self.ui else { return };
         let old_key = comparable_path(old_path);
         let mut remapped_buffer_ids = Vec::new();
@@ -321,7 +321,7 @@ impl App {
 
             let lang_id = ui.editor_view.editor.views[idx].lang_id;
             let text = buffer.text();
-            buffer.set_path(new_path.clone());
+            buffer.set_path(new_path.to_path_buf());
             if let Some(view) = ui.editor_view.editor.views.get_mut(idx) {
                 view.tree_dirty = true;
                 view.git_gutter = GitGutter::load(new_path);

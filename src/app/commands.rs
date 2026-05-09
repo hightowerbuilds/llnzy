@@ -38,7 +38,7 @@ pub enum AppCommand {
     CloseTabsToRight(usize),
     KillTerminalTab(usize),
     RestartTerminalTab(usize),
-    ApplyConfig(Config),
+    ApplyConfig(Box<Config>),
     CopyToClipboard(String),
     OpenCodeFile {
         path: PathBuf,

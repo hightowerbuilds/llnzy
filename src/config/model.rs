@@ -82,17 +82,9 @@ pub struct Config {
     pub(super) config_mtime: Option<SystemTime>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct TerminalConfig {
     pub copy_on_select: bool,
-}
-
-impl Default for TerminalConfig {
-    fn default() -> Self {
-        Self {
-            copy_on_select: false,
-        }
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -159,7 +151,7 @@ impl EditorConfig {
         terminal_font_size: f32,
     ) -> EffectiveEditorConfig {
         let mut effective = EffectiveEditorConfig {
-            tab_size: self.tab_size.max(1).min(16),
+            tab_size: self.tab_size.clamp(1, 16),
             insert_spaces: self.insert_spaces,
             rulers: self.rulers.clone(),
             word_wrap: self.word_wrap,
@@ -174,7 +166,7 @@ impl EditorConfig {
 
         if let Some(lang) = lang_id.and_then(|id| self.languages.get(id)) {
             if let Some(tab_size) = lang.tab_size {
-                effective.tab_size = tab_size.max(1).min(16);
+                effective.tab_size = tab_size.clamp(1, 16);
             }
             if let Some(insert_spaces) = lang.insert_spaces {
                 effective.insert_spaces = insert_spaces;
@@ -227,8 +219,9 @@ pub struct EffectsConfig {
     pub effects_on_ui: bool,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum BackgroundImageFit {
+    #[default]
     Fill,
     Fit,
     Tile,
@@ -265,7 +258,7 @@ impl BackgroundImageFit {
         }
     }
 
-    pub fn from_str(value: &str) -> Option<Self> {
+    pub fn parse(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
             "fill" | "fill_screen" | "fill-screen" | "cover" => Some(Self::Fill),
             "fit" | "fit_screen" | "fit-screen" | "contain" => Some(Self::Fit),
@@ -273,12 +266,6 @@ impl BackgroundImageFit {
             "center" | "centered" => Some(Self::Center),
             _ => None,
         }
-    }
-}
-
-impl Default for BackgroundImageFit {
-    fn default() -> Self {
-        Self::Fill
     }
 }
 

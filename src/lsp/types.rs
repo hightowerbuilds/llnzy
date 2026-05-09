@@ -12,11 +12,13 @@ pub struct FormatEdit {
     pub new_text: String,
 }
 
+pub type WorkspaceEdits = Vec<(PathBuf, Vec<FormatEdit>)>;
+
 /// A simplified code action for the UI.
 #[derive(Clone, Debug)]
 pub struct CodeAction {
     pub title: String,
-    pub edits: Vec<(PathBuf, Vec<FormatEdit>)>,
+    pub edits: WorkspaceEdits,
 }
 
 /// Simplified signature help info for the UI.

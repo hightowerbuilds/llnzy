@@ -145,7 +145,7 @@ pub(crate) fn render_home_view_ui(ui: &mut egui::Ui, recent_projects: &[PathBuf]
                     for project in recent_projects {
                         let name = crate::explorer::project_name(project);
                         let path_str = project.to_string_lossy().to_string();
-                        let btn = render_recent_project_row(ui, btn_width, &name, &path_str);
+                        let btn = render_recent_project_row(ui, btn_width, name, &path_str);
                         if btn.clicked() {
                             action.open_project = Some(project.clone());
                             action.nav_target = Some(ActiveView::Shells);

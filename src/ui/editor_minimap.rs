@@ -63,7 +63,7 @@ pub(super) fn render_minimap(
         egui::Color32::from_rgba_unmultiplied(80, 120, 200, 30),
     );
 
-    let line_h = (track_h / line_count as f32).max(0.5).min(2.0);
+    let line_h = (track_h / line_count as f32).clamp(0.5, 2.0);
     let sample_step = if line_count > 2000 {
         line_count / 1000
     } else {

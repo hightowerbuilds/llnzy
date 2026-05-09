@@ -60,14 +60,14 @@ pub(super) fn apply_palette_command(
         }
         CommandId::ToggleWordWrap => {
             config.editor.word_wrap = !config.editor.word_wrap;
-            commands.push(AppCommand::ApplyConfig(config.clone()));
+            commands.push(AppCommand::ApplyConfig(Box::new(config.clone())));
         }
         CommandId::ToggleFps => {
             commands.push(AppCommand::ToggleFps);
         }
         CommandId::ToggleEffects => {
             config.effects.enabled = !config.effects.enabled;
-            commands.push(AppCommand::ApplyConfig(config.clone()));
+            commands.push(AppCommand::ApplyConfig(Box::new(config.clone())));
         }
         CommandId::Save
         | CommandId::Undo

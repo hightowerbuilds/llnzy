@@ -233,7 +233,7 @@ fn save_theme_to_dir(
     view_flags: &ThemeViewFlags,
     dir: &Path,
 ) -> Result<PathBuf, String> {
-    std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create themes dir: {e}"))?;
+    std::fs::create_dir_all(dir).map_err(|e| format!("Failed to create themes dir: {e}"))?;
 
     let safe_name: String = name
         .chars()
@@ -255,13 +255,13 @@ fn save_theme_to_dir(
         cursor: rgb_to_hex(config.colors.cursor),
         selection: rgb_to_hex(config.colors.selection),
         selection_alpha: config.colors.selection_alpha,
-        ansi: config.colors.ansi.iter().map(|c| rgb_to_hex(*c)).collect(),
+        ansi: config.colors.ansi.iter().copied().map(rgb_to_hex).collect(),
         effects_background: config.effects.background.clone(),
         effects_background_intensity: config.effects.background_intensity,
         effects_background_speed: config.effects.background_speed,
-        effects_background_color: config.effects.background_color.map(|c| rgb_to_hex(c)),
-        effects_background_color2: config.effects.background_color2.map(|c| rgb_to_hex(c)),
-        effects_background_color3: config.effects.background_color3.map(|c| rgb_to_hex(c)),
+        effects_background_color: config.effects.background_color.map(rgb_to_hex),
+        effects_background_color2: config.effects.background_color2.map(rgb_to_hex),
+        effects_background_color3: config.effects.background_color3.map(rgb_to_hex),
         effects_background_image: config.effects.background_image.clone(),
         effects_background_image_fit: Some(
             config.effects.background_image_fit.as_str().to_string(),
@@ -344,14 +344,14 @@ fn load_user_themes_from_dir(dir: &Path) -> Vec<(VisualTheme, ThemeViewFlags)> {
                 background: tf.effects_background,
                 background_intensity: tf.effects_background_intensity,
                 background_speed: tf.effects_background_speed,
-                background_color: tf.effects_background_color.map(|s| hex_to_rgb(&s)),
-                background_color2: tf.effects_background_color2.map(|s| hex_to_rgb(&s)),
-                background_color3: tf.effects_background_color3.map(|s| hex_to_rgb(&s)),
+                background_color: tf.effects_background_color.as_deref().map(hex_to_rgb),
+                background_color2: tf.effects_background_color2.as_deref().map(hex_to_rgb),
+                background_color3: tf.effects_background_color3.as_deref().map(hex_to_rgb),
                 background_image: tf.effects_background_image,
                 background_image_fit: tf
                     .effects_background_image_fit
                     .as_deref()
-                    .and_then(BackgroundImageFit::from_str)
+                    .and_then(BackgroundImageFit::parse)
                     .unwrap_or_default(),
                 bloom_enabled: tf.effects_bloom_enabled,
                 bloom_threshold: tf.effects_bloom_threshold,

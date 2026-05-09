@@ -4,7 +4,7 @@ use crate::editor::BufferView;
 
 use super::editor_folding::{best_fold_range_starting_at, toggle_fold_range};
 use super::editor_paint::pixel_to_editor_pos;
-use super::editor_wrap::{pixel_to_editor_pos_wrapped, WrapRow};
+use super::editor_wrap::{pixel_to_editor_pos_wrapped, WrapRow, WrappedHitTestInput};
 
 const MINIMAP_WIDTH: f32 = 50.0;
 
@@ -188,17 +188,17 @@ fn handle_editor_click(
     }
 
     let (click_line, click_col) = if word_wrap {
-        pixel_to_editor_pos_wrapped(
+        pixel_to_editor_pos_wrapped(WrappedHitTestInput {
             pos,
             rect,
             gutter_width,
             text_margin,
             char_width,
             line_height,
-            view.scroll_line,
+            scroll_row: view.scroll_line,
             wrap_rows,
             buf,
-        )
+        })
     } else {
         pixel_to_editor_pos(
             pos,
@@ -245,17 +245,17 @@ fn handle_editor_drag(
     }
 
     let (drag_line, drag_col) = if word_wrap {
-        pixel_to_editor_pos_wrapped(
+        pixel_to_editor_pos_wrapped(WrappedHitTestInput {
             pos,
             rect,
             gutter_width,
             text_margin,
             char_width,
             line_height,
-            view.scroll_line,
+            scroll_row: view.scroll_line,
             wrap_rows,
             buf,
-        )
+        })
     } else {
         pixel_to_editor_pos(
             pos,

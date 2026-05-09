@@ -176,9 +176,7 @@ impl App {
         let Some(ui) = &self.ui else {
             return None;
         };
-        let Some(joined) = active_joined_tabs(&self.tabs, self.active_tab, &ui.tab_groups) else {
-            return None;
-        };
+        let joined = active_joined_tabs(&self.tabs, self.active_tab, &ui.tab_groups)?;
 
         [joined.primary, joined.secondary].into_iter().find(|&idx| {
             self.tabs
@@ -786,6 +784,41 @@ fn rect_to_uv(rect: llnzy::session::Rect, size: winit::dpi::PhysicalSize<u32>) -
     ]
 }
 
+fn main() {
+    env_logger::init();
+
+    // Install panic handler that logs to disk so panics remain visible when stderr is lost.
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let msg = format!("llnzy panic: {}\n", info);
+        let _ = write_diagnostic("crash.log", &msg);
+        default_hook(info);
+    }));
+
+    // Catch signals that would silently kill the process
+    #[cfg(unix)]
+    unsafe {
+        // SIGPIPE: writing to broken pipe (dead PTY)
+        libc::signal(libc::SIGPIPE, libc::SIG_IGN);
+    }
+
+    let event_loop = EventLoop::<UserEvent>::with_user_event().build().unwrap();
+    event_loop.set_control_flow(ControlFlow::Wait);
+
+    let proxy = event_loop.create_proxy();
+    let mut app = App::new(proxy);
+
+    // Log startup
+    app.error_log.info("llnzy starting up");
+
+    let result = event_loop.run_app(&mut app);
+    if let Err(err) = &result {
+        let exit_msg = format!("llnzy event loop exited with error: {:?}\n", err);
+        let _ = write_diagnostic("exit.log", exit_msg);
+    }
+    result.unwrap();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -876,39 +909,4 @@ mod tests {
             None
         );
     }
-}
-
-fn main() {
-    env_logger::init();
-
-    // Install panic handler that logs to disk so panics remain visible when stderr is lost.
-    let default_hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |info| {
-        let msg = format!("llnzy panic: {}\n", info);
-        let _ = write_diagnostic("crash.log", &msg);
-        default_hook(info);
-    }));
-
-    // Catch signals that would silently kill the process
-    #[cfg(unix)]
-    unsafe {
-        // SIGPIPE: writing to broken pipe (dead PTY)
-        libc::signal(libc::SIGPIPE, libc::SIG_IGN);
-    }
-
-    let event_loop = EventLoop::<UserEvent>::with_user_event().build().unwrap();
-    event_loop.set_control_flow(ControlFlow::Wait);
-
-    let proxy = event_loop.create_proxy();
-    let mut app = App::new(proxy);
-
-    // Log startup
-    app.error_log.info("llnzy starting up");
-
-    let result = event_loop.run_app(&mut app);
-    if let Err(err) = &result {
-        let exit_msg = format!("llnzy event loop exited with error: {:?}\n", err);
-        let _ = write_diagnostic("exit.log", exit_msg);
-    }
-    result.unwrap();
 }

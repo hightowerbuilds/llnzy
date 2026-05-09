@@ -241,11 +241,7 @@ mod tests {
         pty.kill().unwrap();
 
         let deadline = Instant::now() + Duration::from_secs(5);
-        loop {
-            match pty.try_read() {
-                PtyReadResult::Data(_) | PtyReadResult::Empty => {}
-                PtyReadResult::Disconnected(_) => break,
-            }
+        while let PtyReadResult::Data(_) | PtyReadResult::Empty = pty.try_read() {
             assert!(
                 Instant::now() < deadline,
                 "timed out waiting for killed PTY exit"

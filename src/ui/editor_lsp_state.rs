@@ -116,15 +116,15 @@ impl EditorViewState {
         if let (Some(lang_id), Some(path)) = (view.lang_id, buf.path()) {
             if consume_last_edit {
                 if let Some((start, end, new_text)) = self.last_edit.take() {
-                    lsp.did_change_incremental(
+                    lsp.did_change_incremental(crate::lsp::IncrementalDocumentChange {
                         path,
                         lang_id,
-                        start.line as u32,
-                        start.col as u32,
-                        end.line as u32,
-                        end.col as u32,
-                        &new_text,
-                    );
+                        start_line: start.line as u32,
+                        start_col: start.col as u32,
+                        end_line: end.line as u32,
+                        end_col: end.col as u32,
+                        new_text: &new_text,
+                    });
                 } else {
                     let text = buf.text();
                     lsp.did_change(path, lang_id, &text);

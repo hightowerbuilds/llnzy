@@ -135,7 +135,7 @@ pub(super) fn paint_inline_text_cursor(
 
     // Blinking: visible for ~500ms, hidden for ~500ms
     let time = ctx.input(|i| i.time);
-    let blink_on = (time * 2.0) as u64 % 2 == 0;
+    let blink_on = ((time * 2.0) as u64).is_multiple_of(2);
 
     if blink_on {
         let cursor_x = pos.x + text_width;

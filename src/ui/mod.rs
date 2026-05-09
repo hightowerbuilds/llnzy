@@ -416,16 +416,15 @@ impl UiState {
                 };
 
             // ── Footer ──
-            if let Some(action) = footer::render_footer(
+            if let Some(action) = footer::render_footer(footer::FooterRenderInput {
                 ctx,
                 footer_height,
-                active_singleton_tab(active_tab_kind),
                 active_tab_kind,
                 chrome_bg,
                 active_btn,
                 text_color,
-                &footer_queue_prompts,
-            ) {
+                queued_prompts: &footer_queue_prompts,
+            }) {
                 apply_footer_action(action, &mut nav_target, &mut commands_out);
             }
 
@@ -443,20 +442,19 @@ impl UiState {
             );
 
             // ── Sidebar ──
-            let sidebar_result = sidebar::render_sidebar(
+            let sidebar_result = sidebar::render_sidebar(sidebar::SidebarRenderInput {
                 ctx,
-                sidebar_state.open,
-                sidebar_state.recent_open,
+                sidebar_open: sidebar_state.open,
+                recent_open: sidebar_state.recent_open,
                 chrome_bg,
-                bg,
                 text_color,
-                &mut explorer,
-                &mut editor_view,
-                &recent_projects,
-                &config_clone,
-                &mut sidebar_state,
-                &mut commands_out,
-            );
+                explorer: &mut explorer,
+                editor_view: &mut editor_view,
+                recent_projects: &recent_projects,
+                config: &config_clone,
+                sidebar_state: &mut sidebar_state,
+                commands: &mut commands_out,
+            });
             sidebar_state.open = sidebar_result.open;
             sidebar_state.recent_open = sidebar_result.recent_open;
             sidebar_state.actual_width = sidebar_result.panel_width;
@@ -469,19 +467,19 @@ impl UiState {
             }
 
             // ── Tab content views ──
-            tab_content::render_tab_content(
+            tab_content::render_tab_content(tab_content::TabContentRenderInput {
                 ctx,
                 active_tab_kind,
                 active_tab_index,
-                &mut tab_groups,
-                &tab_panes,
-                &mut config_clone,
-                tab_content::TabContentAppearance {
+                tab_groups: &mut tab_groups,
+                tab_panes: &tab_panes,
+                config: &mut config_clone,
+                appearance: tab_content::TabContentAppearance {
                     bg,
                     text_color,
                     active_btn,
                 },
-                tab_content::TabContentState {
+                state: tab_content::TabContentState {
                     settings: &mut settings,
                     stacker: &mut stacker,
                     sketch: &mut sketch,
@@ -492,7 +490,7 @@ impl UiState {
                     saved_edit_idx: &mut saved_edit_idx,
                     commands: &mut commands_out,
                 },
-            );
+            });
 
             // ── Overlays ──
             overlays::render_drag_drop_overlay(ctx, &drag_drop);
@@ -595,7 +593,7 @@ impl UiState {
             active_tab_kind,
             Some(crate::workspace::TabKind::Appearances | crate::workspace::TabKind::Settings)
         ) {
-            commands_out.push(AppCommand::ApplyConfig(config_clone));
+            commands_out.push(AppCommand::ApplyConfig(Box::new(config_clone)));
         }
 
         self.winit_state
@@ -675,19 +673,6 @@ fn app_dispatches_palette_command(command_id: command_palette::CommandId) -> boo
             | command_palette::CommandId::Paste
             | command_palette::CommandId::Stacker(_)
     )
-}
-
-fn active_singleton_tab(
-    active_tab_kind: Option<crate::workspace::TabKind>,
-) -> Option<crate::workspace::TabKind> {
-    active_tab_kind.filter(|kind| {
-        matches!(
-            kind,
-            crate::workspace::TabKind::Stacker
-                | crate::workspace::TabKind::Sketch
-                | crate::workspace::TabKind::Git
-        )
-    })
 }
 
 fn tab_bar_entries_from_ui_tabs(

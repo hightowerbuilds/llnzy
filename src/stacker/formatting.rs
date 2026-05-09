@@ -141,7 +141,7 @@ fn parse_list_marker(line: &str) -> Option<ListMarker> {
     if delimiter != '.' && delimiter != ')' {
         return None;
     }
-    if rest[digits.len() + delimiter.len_utf8()..].chars().next() != Some(' ') {
+    if !rest[digits.len() + delimiter.len_utf8()..].starts_with(' ') {
         return None;
     }
     let number = digits.parse().ok()?;

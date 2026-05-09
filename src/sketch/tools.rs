@@ -202,9 +202,7 @@ impl SketchState {
     }
 
     pub fn selected_image_scale(&self) -> Option<f32> {
-        let Some(index) = self.selected else {
-            return None;
-        };
+        let index = self.selected?;
         let Some(SketchElement::Image(image)) = self.document.elements.get(index) else {
             return None;
         };

@@ -3,7 +3,6 @@ use llnzy::external_command::{
     FocusPolicy, ResolvedTarget, SelectionPolicy, SurfaceKind, TextSelection,
 };
 use llnzy::external_input_trace;
-use llnzy::platform::input::paste_like_text_input;
 use llnzy::stacker::commands::{execute_stacker_command_at, stacker_editor_command};
 use llnzy::stacker::input::StackerSelection;
 use llnzy::ui::command_palette::CommandId;
@@ -337,11 +336,7 @@ impl App {
     ) -> ExternalCommandResult {
         match &command.action {
             ExternalAction::InsertText { text } | ExternalAction::ReplaceSelection { text } => {
-                if paste_like_text_input(text, winit::keyboard::ModifiersState::empty()).is_some() {
-                    self.paste_text_to_terminal_tab(tab_idx, text);
-                } else {
-                    self.write_to_terminal_tab(tab_idx, text.as_bytes());
-                }
+                self.paste_text_to_terminal_tab(tab_idx, text);
                 ExternalCommandResult::handled(command.id, target, !text.is_empty())
             }
             ExternalAction::Paste => {
@@ -397,15 +392,23 @@ impl App {
             format!("chars={}, bracketed={}", text.chars().count(), bracketed)
         });
         if bracketed {
-            let mut bytes = Vec::with_capacity(text.len() + 12);
-            bytes.extend_from_slice(b"\x1b[200~");
-            bytes.extend_from_slice(text.as_bytes());
-            bytes.extend_from_slice(b"\x1b[201~");
-            self.write_to_terminal_tab(tab_idx, &bytes);
+            self.write_to_terminal_tab(tab_idx, &terminal_paste_payload(text, true));
         } else {
-            self.write_to_terminal_tab(tab_idx, text.as_bytes());
+            self.write_to_terminal_tab(tab_idx, &terminal_paste_payload(text, false));
         }
     }
+}
+
+fn terminal_paste_payload(text: &str, bracketed: bool) -> Vec<u8> {
+    if !bracketed {
+        return text.as_bytes().to_vec();
+    }
+
+    let mut bytes = Vec::with_capacity(text.len() + 12);
+    bytes.extend_from_slice(b"\x1b[200~");
+    bytes.extend_from_slice(text.as_bytes());
+    bytes.extend_from_slice(b"\x1b[201~");
+    bytes
 }
 
 fn surface_for_content(content: &TabContent) -> Option<SurfaceKind> {
@@ -499,5 +502,18 @@ mod tests {
             surface_for_content(&TabContent::Sketch),
             Some(SurfaceKind::Sketch)
         );
+    }
+
+    #[test]
+    fn terminal_text_input_uses_bracketed_paste_payload_when_enabled() {
+        assert_eq!(
+            terminal_paste_payload("hello", true),
+            b"\x1b[200~hello\x1b[201~"
+        );
+    }
+
+    #[test]
+    fn terminal_text_input_keeps_plain_payload_when_bracketed_paste_is_disabled() {
+        assert_eq!(terminal_paste_payload("hello", false), b"hello");
     }
 }

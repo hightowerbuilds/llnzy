@@ -20,20 +20,34 @@ pub struct SidebarResult {
 }
 
 /// Render the sidebar (file tree + bumper) or just the bumper when closed.
-pub fn render_sidebar(
-    ctx: &egui::Context,
-    sidebar_open: bool,
-    recent_open: bool,
-    chrome_bg: egui::Color32,
-    _bg: [u8; 3],
-    text_color: egui::Color32,
-    explorer: &mut ExplorerState,
-    editor_view: &mut explorer_view::EditorViewState,
-    recent_projects: &[PathBuf],
-    config: &Config,
-    sidebar_state: &mut sidebar_state::SidebarUiState,
-    commands: &mut Vec<AppCommand>,
-) -> SidebarResult {
+pub struct SidebarRenderInput<'a> {
+    pub ctx: &'a egui::Context,
+    pub sidebar_open: bool,
+    pub recent_open: bool,
+    pub chrome_bg: egui::Color32,
+    pub text_color: egui::Color32,
+    pub explorer: &'a mut ExplorerState,
+    pub editor_view: &'a mut explorer_view::EditorViewState,
+    pub recent_projects: &'a [PathBuf],
+    pub config: &'a Config,
+    pub sidebar_state: &'a mut sidebar_state::SidebarUiState,
+    pub commands: &'a mut Vec<AppCommand>,
+}
+
+pub fn render_sidebar(input: SidebarRenderInput<'_>) -> SidebarResult {
+    let SidebarRenderInput {
+        ctx,
+        sidebar_open,
+        recent_open,
+        chrome_bg,
+        text_color,
+        explorer,
+        editor_view,
+        recent_projects,
+        config,
+        sidebar_state,
+        commands,
+    } = input;
     let mut open = sidebar_open;
     let mut recent_open = recent_open;
     let mut close_folder = false;
@@ -43,18 +57,18 @@ pub fn render_sidebar(
     let mut panel_width = SIDEBAR_WIDTH - BUMPER_WIDTH;
 
     if open {
-        let (width, close_req, open_req) = render_file_tree(
+        let (width, close_req, open_req) = render_file_tree(FileTreeRenderInput {
             ctx,
             chrome_bg,
             text_color,
             explorer,
             editor_view,
             recent_projects,
-            &mut recent_open,
+            recent_open: &mut recent_open,
             config,
             sidebar_state,
             commands,
-        );
+        });
         panel_width = width;
         close_folder = close_req;
         open_project = open_req;
@@ -76,18 +90,32 @@ pub fn render_sidebar(
 }
 
 /// Render the file tree panel.
-fn render_file_tree(
-    ctx: &egui::Context,
+struct FileTreeRenderInput<'a> {
+    ctx: &'a egui::Context,
     chrome_bg: egui::Color32,
     text_color: egui::Color32,
-    explorer: &mut ExplorerState,
-    editor_view: &mut explorer_view::EditorViewState,
-    recent_projects: &[PathBuf],
-    recent_open: &mut bool,
-    config: &Config,
-    sidebar_state: &mut sidebar_state::SidebarUiState,
-    commands: &mut Vec<AppCommand>,
-) -> (f32, bool, Option<PathBuf>) {
+    explorer: &'a mut ExplorerState,
+    editor_view: &'a mut explorer_view::EditorViewState,
+    recent_projects: &'a [PathBuf],
+    recent_open: &'a mut bool,
+    config: &'a Config,
+    sidebar_state: &'a mut sidebar_state::SidebarUiState,
+    commands: &'a mut Vec<AppCommand>,
+}
+
+fn render_file_tree(input: FileTreeRenderInput<'_>) -> (f32, bool, Option<PathBuf>) {
+    let FileTreeRenderInput {
+        ctx,
+        chrome_bg,
+        text_color,
+        explorer,
+        editor_view,
+        recent_projects,
+        recent_open,
+        config,
+        sidebar_state,
+        commands,
+    } = input;
     let default_width = SIDEBAR_WIDTH - BUMPER_WIDTH;
     let min_width = 140.0;
     let max_width = 400.0;

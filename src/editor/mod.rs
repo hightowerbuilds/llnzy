@@ -174,7 +174,7 @@ fn plan_syntax_reparse(line_count: usize, view: &BufferView) -> SyntaxReparsePla
         return SyntaxReparsePlan::Skip;
     };
 
-    match (&view.tree, view.pending_tree_edit.clone()) {
+    match (&view.tree, view.pending_tree_edit) {
         (Some(tree), Some(edit)) => SyntaxReparsePlan::Incremental {
             lang_id,
             old_tree: tree.clone(),

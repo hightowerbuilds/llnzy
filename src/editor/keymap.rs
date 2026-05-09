@@ -1,4 +1,4 @@
-use crate::editor::buffer::Position;
+use crate::editor::buffer::{Buffer, Position};
 use crate::editor::{BufferView, EditorKeyChord};
 use crate::keybindings::KeybindingPreset;
 
@@ -14,17 +14,30 @@ pub use pairs::PAIRS;
 pub use types::KeyAction;
 
 /// Handle keyboard input for the editor. Returns actions for the host.
-pub fn handle_editor_keys(
-    ctx: &egui::Context,
-    buf: &mut crate::editor::buffer::Buffer,
-    view: &mut BufferView,
-    status_msg: &mut Option<String>,
-    clipboard_out: &mut Option<String>,
-    clipboard_in: &mut Option<String>,
-    line_height: f32,
-    completion_active: bool,
-    keybinding_preset: KeybindingPreset,
-) -> KeyAction {
+pub struct EditorKeymapContext<'a> {
+    pub ctx: &'a egui::Context,
+    pub buf: &'a mut Buffer,
+    pub view: &'a mut BufferView,
+    pub status_msg: &'a mut Option<String>,
+    pub clipboard_out: &'a mut Option<String>,
+    pub clipboard_in: &'a mut Option<String>,
+    pub line_height: f32,
+    pub completion_active: bool,
+    pub keybinding_preset: KeybindingPreset,
+}
+
+pub fn handle_editor_keys(env: EditorKeymapContext<'_>) -> KeyAction {
+    let EditorKeymapContext {
+        ctx,
+        buf,
+        view,
+        status_msg,
+        clipboard_out,
+        clipboard_in,
+        line_height,
+        completion_active,
+        keybinding_preset,
+    } = env;
     let mut action = KeyAction::default();
     ctx.input(|input| {
         // `input.modifiers.command` is cross-platform in egui: it maps to
@@ -100,8 +113,8 @@ pub fn handle_editor_keys(
 
         // ── Emacs keybinding overrides ──
         // When Emacs preset is active, Ctrl+key combos map to movement/editing.
-        if keybinding_preset == KeybindingPreset::Emacs {
-            if handle_emacs_keys(
+        if keybinding_preset == KeybindingPreset::Emacs
+            && handle_emacs_keys(
                 input,
                 buf,
                 view,
@@ -109,9 +122,9 @@ pub fn handle_editor_keys(
                 clipboard_out,
                 clipboard_in,
                 &mut action,
-            ) {
-                return;
-            }
+            )
+        {
+            return;
         }
 
         // ── LSP shortcuts ──

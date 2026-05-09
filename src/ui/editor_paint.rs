@@ -114,18 +114,32 @@ pub(super) fn indentation_columns(line: &str, style: IndentStyle) -> usize {
     columns
 }
 
-pub(super) fn render_highlighted_line(
-    painter: &egui::Painter,
-    clip: egui::Rect,
-    spans: &[crate::editor::syntax::HighlightSpan],
-    syntax_colors: &HashMap<HighlightGroup, [u8; 3]>,
-    line_text: &str,
-    text_x_base: f32,
-    y: f32,
-    char_width: f32,
-    font: &egui::FontId,
-    default_color: egui::Color32,
-) {
+pub(super) struct HighlightedLineRenderInput<'a> {
+    pub painter: &'a egui::Painter,
+    pub clip: egui::Rect,
+    pub spans: &'a [crate::editor::syntax::HighlightSpan],
+    pub syntax_colors: &'a HashMap<HighlightGroup, [u8; 3]>,
+    pub line_text: &'a str,
+    pub text_x_base: f32,
+    pub y: f32,
+    pub char_width: f32,
+    pub font: &'a egui::FontId,
+    pub default_color: egui::Color32,
+}
+
+pub(super) fn render_highlighted_line(input: HighlightedLineRenderInput<'_>) {
+    let HighlightedLineRenderInput {
+        painter,
+        clip,
+        spans,
+        syntax_colors,
+        line_text,
+        text_x_base,
+        y,
+        char_width,
+        font,
+        default_color,
+    } = input;
     let chars: Vec<char> = line_text.chars().collect();
     let mut col = 0;
     while col < chars.len() {

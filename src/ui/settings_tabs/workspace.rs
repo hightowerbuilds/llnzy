@@ -245,41 +245,40 @@ pub(crate) fn render_workspace_tab(ui: &mut egui::Ui) -> Option<WorkspaceAction>
             .fill(egui::Color32::from_rgb(40, 100, 200)),
         )
         .clicked()
+        && !ws_name.trim().is_empty()
     {
-        if !ws_name.trim().is_empty() {
-            let tabs: Vec<TabEntry> = ws_tabs
-                .iter()
-                .map(|t| match t.as_str() {
-                    "Stacker" => TabEntry::Stacker,
-                    "Sketch" => TabEntry::Sketch,
-                    "Git" => TabEntry::Git,
-                    _ => TabEntry::Terminal,
-                })
-                .collect();
+        let tabs: Vec<TabEntry> = ws_tabs
+            .iter()
+            .map(|t| match t.as_str() {
+                "Stacker" => TabEntry::Stacker,
+                "Sketch" => TabEntry::Sketch,
+                "Git" => TabEntry::Git,
+                _ => TabEntry::Terminal,
+            })
+            .collect();
 
-            let ws = SavedWorkspace {
-                name: ws_name.trim().to_string(),
-                theme: if ws_theme.is_empty() {
-                    None
-                } else {
-                    Some(ws_theme.clone())
-                },
-                project_path: if ws_project.trim().is_empty() {
-                    None
-                } else {
-                    Some(std::path::PathBuf::from(ws_project.trim()))
-                },
-                tabs,
-            };
-            match workspace_store::save_workspace(&ws) {
-                Ok(_) => {
-                    ws_name.clear();
-                    ws_theme.clear();
-                    ws_project.clear();
-                    ws_tabs = vec!["Terminal".to_string()];
-                }
-                Err(e) => log::warn!("Failed to save workspace: {e}"),
+        let ws = SavedWorkspace {
+            name: ws_name.trim().to_string(),
+            theme: if ws_theme.is_empty() {
+                None
+            } else {
+                Some(ws_theme.clone())
+            },
+            project_path: if ws_project.trim().is_empty() {
+                None
+            } else {
+                Some(std::path::PathBuf::from(ws_project.trim()))
+            },
+            tabs,
+        };
+        match workspace_store::save_workspace(&ws) {
+            Ok(_) => {
+                ws_name.clear();
+                ws_theme.clear();
+                ws_project.clear();
+                ws_tabs = vec!["Terminal".to_string()];
             }
+            Err(e) => log::warn!("Failed to save workspace: {e}"),
         }
     }
 

@@ -1076,10 +1076,8 @@ fn handle_sketch_pointer(
                 sketch.finish_resize_selected();
                 sketch.finish_move_selected();
             }
-            if response.clicked() {
-                if sketch.selected_resize_handle_at(point).is_none() {
-                    sketch.select_at(point);
-                }
+            if response.clicked() && sketch.selected_resize_handle_at(point).is_none() {
+                sketch.select_at(point);
             }
         }
     }

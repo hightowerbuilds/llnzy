@@ -2,7 +2,6 @@ use std::collections::VecDeque;
 use std::time::Instant;
 
 /// Performance thresholds for the editor.
-
 /// Files above this line count disable syntax highlighting.
 pub const SYNTAX_LINE_LIMIT: usize = 100_000;
 

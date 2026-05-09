@@ -70,10 +70,7 @@ impl IndentStyle {
 }
 
 pub(super) fn leading_whitespace_len(line: &str) -> usize {
-    line.len()
-        - line
-            .trim_start_matches(|c: char| c == ' ' || c == '\t')
-            .len()
+    line.len() - line.trim_start_matches([' ', '\t']).len()
 }
 
 impl Buffer {
@@ -111,7 +108,7 @@ impl Buffer {
     /// Get the indentation string of a line.
     pub fn line_indent(&self, line_idx: usize) -> &str {
         let line = self.line(line_idx);
-        let trimmed = line.trim_start_matches(|c: char| c == ' ' || c == '\t');
+        let trimmed = line.trim_start_matches([' ', '\t']);
         &line[..line.len() - trimmed.len()]
     }
 }

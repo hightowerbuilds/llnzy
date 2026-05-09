@@ -33,3 +33,9 @@ impl ClickState {
         self.count
     }
 }
+
+impl Default for ClickState {
+    fn default() -> Self {
+        Self::new()
+    }
+}

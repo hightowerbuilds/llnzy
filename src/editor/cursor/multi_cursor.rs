@@ -52,7 +52,7 @@ impl EditorCursor {
     }
 
     /// Get the selected text for the primary cursor, or the word under the cursor.
-    pub fn word_or_selection_text<'a>(&self, buf: &'a Buffer) -> Option<String> {
+    pub fn word_or_selection_text(&self, buf: &Buffer) -> Option<String> {
         if let Some((start, end)) = self.selection() {
             let text = buf.text_range(start, end);
             if !text.is_empty() {

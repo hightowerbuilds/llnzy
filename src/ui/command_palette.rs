@@ -372,7 +372,7 @@ impl PaletteState {
         } else {
             self.filtered = all_commands_for_context(self.context)
                 .into_iter()
-                .filter(|c| fuzzy_match(&q, &c.name.to_lowercase()))
+                .filter(|c| fuzzy_match_case_insensitive_ascii(&q, c.name))
                 .collect();
         }
         self.selected = 0;
@@ -384,37 +384,18 @@ impl PaletteState {
     }
 }
 
-fn fuzzy_match(query: &str, target: &str) -> bool {
+fn fuzzy_match_case_insensitive_ascii(query: &str, target: &str) -> bool {
     let mut target_chars = target.chars();
     for qc in query.chars() {
         loop {
             match target_chars.next() {
-                Some(tc) if tc == qc => break,
+                Some(tc) if tc.to_ascii_lowercase() == qc => break,
                 Some(_) => continue,
                 None => return false,
             }
         }
     }
     true
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn default_context_excludes_stacker_commands() {
-        assert!(!all_commands_for_context(CommandPaletteContext::Default)
-            .iter()
-            .any(|command| matches!(command.id, CommandId::Stacker(_))));
-    }
-
-    #[test]
-    fn stacker_context_includes_stacker_commands() {
-        assert!(all_commands_for_context(CommandPaletteContext::Stacker)
-            .iter()
-            .any(|command| matches!(command.id, CommandId::Stacker(StackerCommandId::Bold))));
-    }
 }
 
 /// Render the command palette overlay. Returns the selected CommandId if the user confirms.
@@ -520,4 +501,23 @@ pub fn render_palette(ui: &mut egui::Ui, state: &mut PaletteState) -> Option<Com
     });
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_context_excludes_stacker_commands() {
+        assert!(!all_commands_for_context(CommandPaletteContext::Default)
+            .iter()
+            .any(|command| matches!(command.id, CommandId::Stacker(_))));
+    }
+
+    #[test]
+    fn stacker_context_includes_stacker_commands() {
+        assert!(all_commands_for_context(CommandPaletteContext::Stacker)
+            .iter()
+            .any(|command| matches!(command.id, CommandId::Stacker(StackerCommandId::Bold))));
+    }
 }

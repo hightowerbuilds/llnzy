@@ -4,7 +4,6 @@ use crate::editor::{keymap::KeyAction, BufferView};
 /// Handle Emacs-style keybindings. Returns true if the key was consumed.
 /// Emacs bindings use Ctrl+key for movement and editing, distinct from
 /// the Cmd-based shortcuts which still work.
-#[expect(clippy::too_many_arguments, reason = "matching main handler signature")]
 pub(super) fn handle_emacs_keys(
     input: &egui::InputState,
     buf: &mut crate::editor::buffer::Buffer,

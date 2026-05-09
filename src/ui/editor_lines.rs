@@ -11,7 +11,7 @@ use super::editor_line_decorations::{
 };
 use super::editor_paint::{
     indent_level, render_highlighted_line, render_indentation_guides,
-    render_visible_whitespace_line,
+    render_visible_whitespace_line, HighlightedLineRenderInput,
 };
 use super::editor_wrap::WrapRow;
 
@@ -393,9 +393,9 @@ fn render_unwrapped_lines(
                 text_color,
             );
         } else {
-            render_highlighted_line(
+            render_highlighted_line(HighlightedLineRenderInput {
                 painter,
-                text_clip,
+                clip: text_clip,
                 spans,
                 syntax_colors,
                 line_text,
@@ -403,8 +403,8 @@ fn render_unwrapped_lines(
                 y,
                 char_width,
                 font,
-                text_color,
-            );
+                default_color: text_color,
+            });
         }
 
         render_fold_placeholder(

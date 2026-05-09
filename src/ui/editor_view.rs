@@ -2,13 +2,13 @@ use std::collections::HashMap;
 
 use crate::config::EffectiveEditorConfig;
 use crate::editor::buffer::{BufferEdit, IndentStyle};
-use crate::editor::keymap::{handle_editor_keys, KeyAction};
+use crate::editor::keymap::{handle_editor_keys, EditorKeymapContext, KeyAction};
 use crate::editor::perf;
 use crate::editor::search::EditorSearch;
 use crate::editor::syntax::{HighlightGroup, SyntaxEngine};
 use crate::editor::BufferView;
 use crate::keybindings::KeybindingPreset;
-use crate::lsp::{CodeLensInfo, FileDiagnostic, InlayHintInfo};
+use crate::lsp::{CodeLensInfo, CompletionItem, FileDiagnostic, InlayHintInfo, SignatureInfo};
 
 use super::editor_cursor::render_primary_cursor;
 use super::editor_folding::{
@@ -34,27 +34,56 @@ pub(crate) struct EditorFrameResult {
     pub buffer_edit: Option<BufferEdit>,
 }
 
+pub(crate) struct TextEditorState<'a> {
+    pub buf: &'a mut crate::editor::buffer::Buffer,
+    pub view: &'a mut BufferView,
+    pub status_msg: &'a mut Option<String>,
+    pub clipboard_out: &'a mut Option<String>,
+    pub clipboard_in: &'a mut Option<String>,
+    pub editor_search: &'a mut EditorSearch,
+}
+
+pub(crate) struct TextEditorInput<'a> {
+    pub syntax: &'a SyntaxEngine,
+    pub editor_config: &'a EffectiveEditorConfig,
+    pub syntax_colors: &'a HashMap<HighlightGroup, [u8; 3]>,
+    pub diagnostics: Option<&'a [FileDiagnostic]>,
+    pub hover_text: Option<&'a str>,
+    pub completions: Option<(&'a [&'a CompletionItem], usize)>,
+    pub signature_help: Option<&'a SignatureInfo>,
+    pub inlay_hints: &'a [InlayHintInfo],
+    pub code_lenses: &'a [CodeLensInfo],
+    pub lsp_status: &'a str,
+    pub keybinding_preset: KeybindingPreset,
+}
+
 /// Render the code editor for a text buffer.
 pub(crate) fn render_text_editor(
     ui: &mut egui::Ui,
-    buf: &mut crate::editor::buffer::Buffer,
-    view: &mut BufferView,
-    syntax: &SyntaxEngine,
-    editor_config: &EffectiveEditorConfig,
-    syntax_colors: &HashMap<HighlightGroup, [u8; 3]>,
-    diagnostics: Option<&[FileDiagnostic]>,
-    hover_text: Option<&str>,
-    completions: Option<(&[&crate::lsp::CompletionItem], usize)>,
-    signature_help: Option<&crate::lsp::SignatureInfo>,
-    inlay_hints: &[InlayHintInfo],
-    code_lenses: &[CodeLensInfo],
-    status_msg: &mut Option<String>,
-    clipboard_out: &mut Option<String>,
-    clipboard_in: &mut Option<String>,
-    editor_search: &mut EditorSearch,
-    lsp_status: &str,
-    keybinding_preset: KeybindingPreset,
+    state: TextEditorState<'_>,
+    input: TextEditorInput<'_>,
 ) -> EditorFrameResult {
+    let TextEditorState {
+        buf,
+        view,
+        status_msg,
+        clipboard_out,
+        clipboard_in,
+        editor_search,
+    } = state;
+    let TextEditorInput {
+        syntax,
+        editor_config,
+        syntax_colors,
+        diagnostics,
+        hover_text,
+        completions,
+        signature_help,
+        inlay_hints,
+        code_lenses,
+        lsp_status,
+        keybinding_preset,
+    } = input;
     let mut result = EditorFrameResult::default();
 
     let line_count = buf.line_count();
@@ -83,8 +112,8 @@ pub(crate) fn render_text_editor(
     let cursor_before = view.cursor.pos;
     let ctx = ui.ctx().clone();
     let completion_active = completions.is_some();
-    result.key_action = handle_editor_keys(
-        &ctx,
+    result.key_action = handle_editor_keys(EditorKeymapContext {
+        ctx: &ctx,
         buf,
         view,
         status_msg,
@@ -93,7 +122,7 @@ pub(crate) fn render_text_editor(
         line_height,
         completion_active,
         keybinding_preset,
-    );
+    });
     result.buffer_edit = buf.take_last_edit();
     if result.buffer_edit.is_some() {
         view.tree_dirty = true;

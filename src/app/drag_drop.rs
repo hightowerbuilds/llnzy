@@ -144,7 +144,7 @@ impl DragDropState {
                 .find(|path| path.is_dir())
                 .cloned()
                 .map(DragDropCommand::OpenProject)
-                .or_else(|| Some(DragDropCommand::OpenFiles { paths })),
+                .or(Some(DragDropCommand::OpenFiles { paths })),
             DropTarget::Editor { .. } => Some(DragDropCommand::OpenFiles { paths }),
             DropTarget::TabBar { index, zone } => Some(DragDropCommand::OpenFilesNearTab {
                 paths,
@@ -189,7 +189,7 @@ pub fn tab_index_at_x(
     if rel_x >= tab_bar_width {
         return None;
     }
-    let tab_width = (tab_bar_width / tab_count as f32).min(200.0).max(1.0);
+    let tab_width = (tab_bar_width / tab_count as f32).clamp(1.0, 200.0);
     Some((rel_x / tab_width).floor().min((tab_count - 1) as f32) as usize)
 }
 
@@ -200,7 +200,7 @@ pub fn tab_drop_zone_at_x(
     tab_count: usize,
 ) -> Option<TabDropZone> {
     let idx = tab_index_at_x(pointer_x, tab_bar_left, tab_bar_width, tab_count)?;
-    let tab_width = (tab_bar_width / tab_count as f32).min(200.0).max(1.0);
+    let tab_width = (tab_bar_width / tab_count as f32).clamp(1.0, 200.0);
     let tab_left = tab_bar_left + idx as f32 * tab_width;
     let rel = ((pointer_x - tab_left) / tab_width).clamp(0.0, 1.0);
     if rel < 0.33 {

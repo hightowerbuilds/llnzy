@@ -98,16 +98,11 @@ impl fmt::Display for LayerId {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum BlendMode {
+    #[default]
     Normal,
     Additive,
-}
-
-impl Default for BlendMode {
-    fn default() -> Self {
-        Self::Normal
-    }
 }
 
 #[derive(Clone, Debug, PartialEq)]

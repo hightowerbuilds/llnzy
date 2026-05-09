@@ -158,7 +158,7 @@ fn toggle_line_comments_as_command(
 }
 
 fn line_indent(line: &str) -> &str {
-    let trimmed = line.trim_start_matches(|c: char| c == ' ' || c == '\t');
+    let trimmed = line.trim_start_matches([' ', '\t']);
     &line[..line.len() - trimmed.len()]
 }
 
@@ -167,7 +167,7 @@ fn comment_style(lang_id: Option<&'static str>, path: Option<&Path>) -> CommentS
         .and_then(|p| p.extension())
         .and_then(|e| e.to_str())
         .map(str::to_ascii_lowercase);
-    let lang = lang_id.or_else(|| match ext.as_deref() {
+    let lang = lang_id.or(match ext.as_deref() {
         Some("rs") => Some("rust"),
         Some("js" | "mjs" | "cjs" | "jsx") => Some("javascript"),
         Some("ts" | "mts" | "cts") => Some("typescript"),

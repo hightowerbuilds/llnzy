@@ -217,10 +217,6 @@ impl TextSystem {
         self.render_cached_grid(&pane, gpu, view, encoder);
     }
 
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "glyphon render calls need GPU, target, cache, and terminal context together"
-    )]
     pub fn render_grids_at(
         &mut self,
         panes: &[GridTextPane<'_>],
@@ -438,10 +434,6 @@ impl TextSystem {
     }
 
     /// Render engine text runs at absolute pixel positions.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "engine text bridge keeps GPU target state explicit at call sites"
-    )]
     pub fn render_text_runs(
         &mut self,
         runs: &[TextRun],

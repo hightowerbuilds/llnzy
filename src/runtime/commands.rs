@@ -304,7 +304,7 @@ impl App {
             AppCommand::KillTerminalTab(idx) => self.kill_terminal_tab(idx),
             AppCommand::RestartTerminalTab(idx) => self.restart_terminal_tab(idx),
             AppCommand::ApplyConfig(new_config) => {
-                self.config = new_config;
+                self.config = *new_config;
                 if let Some(ui) = &mut self.ui {
                     ui.apply_config(&self.config);
                 }

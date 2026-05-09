@@ -55,6 +55,19 @@ pub struct OpenFile {
     pub content: FileContent,
 }
 
+#[derive(Clone, Debug)]
+struct IndexedFile {
+    path: PathBuf,
+    search_text: String,
+}
+
+impl IndexedFile {
+    fn new(path: PathBuf) -> Self {
+        let search_text = path.to_string_lossy().to_lowercase();
+        Self { path, search_text }
+    }
+}
+
 /// A node in the file tree.
 pub struct TreeNode {
     pub name: String,
@@ -142,8 +155,8 @@ fn read_dir_sorted(path: &Path) -> Vec<TreeNode> {
         }
     }
 
-    dirs.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-    files.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    dirs.sort_by_cached_key(|node| node.name.to_lowercase());
+    files.sort_by_cached_key(|node| node.name.to_lowercase());
 
     let mut result = Vec::with_capacity(dirs.len() + files.len());
     result.append(&mut dirs);
@@ -192,8 +205,8 @@ pub struct ExplorerState {
     pub finder_results: Vec<PathBuf>,
     pub finder_selected: usize,
     /// Cached project file index for fuzzy finding.
-    file_index: Option<Vec<PathBuf>>,
-    file_index_rx: Option<Receiver<(PathBuf, Vec<PathBuf>)>>,
+    file_index: Option<Vec<IndexedFile>>,
+    file_index_rx: Option<Receiver<(PathBuf, Vec<IndexedFile>)>>,
     indexing_root: Option<PathBuf>,
     project_watcher: Option<ProjectWatcher>,
     project_watcher_enabled: bool,
@@ -425,17 +438,17 @@ impl ExplorerState {
         let query = self.finder_query.to_lowercase();
 
         if query.is_empty() {
-            self.finder_results = index.iter().take(50).cloned().collect();
+            self.finder_results = index
+                .iter()
+                .take(50)
+                .map(|entry| entry.path.clone())
+                .collect();
         } else {
             self.finder_results = index
                 .iter()
-                .filter(|p| {
-                    let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                    let path_str = p.to_string_lossy().to_lowercase();
-                    fuzzy_match(&query, &path_str) || fuzzy_match(&query, &name.to_lowercase())
-                })
+                .filter(|entry| fuzzy_match(&query, &entry.search_text))
                 .take(30)
-                .cloned()
+                .map(|entry| entry.path.clone())
                 .collect();
         }
         self.finder_selected = 0;
@@ -555,7 +568,7 @@ fn project_event_affects_tree(event: &Event) -> bool {
 
 /// Walk a directory tree iteratively, collecting file paths up to a cap.
 /// Skips ignored directories and hidden files. Uses a stack (no recursion).
-fn walk_files_capped(root: &Path, max_files: usize) -> Vec<PathBuf> {
+fn walk_files_capped(root: &Path, max_files: usize) -> Vec<IndexedFile> {
     let mut files = Vec::new();
     let mut dirs_to_visit = vec![root.to_path_buf()];
 
@@ -587,15 +600,18 @@ fn walk_files_capped(root: &Path, max_files: usize) -> Vec<PathBuf> {
                     dirs_to_visit.push(path);
                 }
             } else {
-                files.push(path);
+                files.push(IndexedFile::new(path));
             }
         }
     }
 
-    files.sort_by(|a, b| {
-        let a_name = a.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        let b_name = b.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        a_name.to_lowercase().cmp(&b_name.to_lowercase())
+    files.sort_by_cached_key(|entry| {
+        entry
+            .path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("")
+            .to_lowercase()
     });
     files
 }
@@ -616,15 +632,12 @@ fn fuzzy_match(query: &str, target: &str) -> bool {
 }
 
 pub fn is_image_path(path: &Path) -> bool {
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_lowercase();
-    matches!(
-        ext.as_str(),
-        "png" | "jpg" | "jpeg" | "gif" | "bmp" | "webp" | "tiff" | "tif" | "ico"
-    )
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    [
+        "png", "jpg", "jpeg", "gif", "bmp", "webp", "tiff", "tif", "ico",
+    ]
+    .iter()
+    .any(|candidate| ext.eq_ignore_ascii_case(candidate))
 }
 
 pub fn format_size(bytes: u64) -> String {
@@ -638,6 +651,62 @@ pub fn format_size(bytes: u64) -> String {
 }
 
 // ── Recent projects persistence ──
+
+const MAX_RECENT: usize = 5;
+
+fn recent_projects_path() -> Option<PathBuf> {
+    crate::platform::paths::current_paths().map(|paths| paths.recent_projects_file())
+}
+
+/// Load recent project paths from disk.
+pub fn load_recent_projects() -> Vec<PathBuf> {
+    let Some(path) = recent_projects_path() else {
+        return Vec::new();
+    };
+    let Ok(data) = fs::read_to_string(&path) else {
+        return Vec::new();
+    };
+    let Ok(paths) = serde_json::from_str::<Vec<String>>(&data) else {
+        return Vec::new();
+    };
+    paths
+        .into_iter()
+        .map(PathBuf::from)
+        .filter(|p| p.exists())
+        .collect()
+}
+
+/// Save recent project paths to disk.
+pub fn save_recent_projects(projects: &[PathBuf]) {
+    let Some(path) = recent_projects_path() else {
+        return;
+    };
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let strings: Vec<String> = projects
+        .iter()
+        .map(|p| p.to_string_lossy().to_string())
+        .collect();
+    if let Ok(json) = serde_json::to_string_pretty(&strings) {
+        let _ = fs::write(path, json);
+    }
+}
+
+/// Add a project to the recent list (moves to front, caps at MAX_RECENT).
+pub fn add_recent_project(projects: &mut Vec<PathBuf>, path: PathBuf) {
+    projects.retain(|p| p != &path);
+    projects.insert(0, path);
+    projects.truncate(MAX_RECENT);
+    save_recent_projects(projects);
+}
+
+/// Get the display name for a project path (last directory component).
+pub fn project_name(path: &Path) -> &str {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown")
+}
 
 #[cfg(test)]
 mod tests {
@@ -786,60 +855,4 @@ mod tests {
                 .any(|child| !child.is_dir && child.name == name)
         })
     }
-}
-
-const MAX_RECENT: usize = 5;
-
-fn recent_projects_path() -> Option<PathBuf> {
-    crate::platform::paths::current_paths().map(|paths| paths.recent_projects_file())
-}
-
-/// Load recent project paths from disk.
-pub fn load_recent_projects() -> Vec<PathBuf> {
-    let Some(path) = recent_projects_path() else {
-        return Vec::new();
-    };
-    let Ok(data) = fs::read_to_string(&path) else {
-        return Vec::new();
-    };
-    let Ok(paths) = serde_json::from_str::<Vec<String>>(&data) else {
-        return Vec::new();
-    };
-    paths
-        .into_iter()
-        .map(PathBuf::from)
-        .filter(|p| p.exists())
-        .collect()
-}
-
-/// Save recent project paths to disk.
-pub fn save_recent_projects(projects: &[PathBuf]) {
-    let Some(path) = recent_projects_path() else {
-        return;
-    };
-    if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    let strings: Vec<String> = projects
-        .iter()
-        .map(|p| p.to_string_lossy().to_string())
-        .collect();
-    if let Ok(json) = serde_json::to_string_pretty(&strings) {
-        let _ = fs::write(path, json);
-    }
-}
-
-/// Add a project to the recent list (moves to front, caps at MAX_RECENT).
-pub fn add_recent_project(projects: &mut Vec<PathBuf>, path: PathBuf) {
-    projects.retain(|p| p != &path);
-    projects.insert(0, path);
-    projects.truncate(MAX_RECENT);
-    save_recent_projects(projects);
-}
-
-/// Get the display name for a project path (last directory component).
-pub fn project_name(path: &Path) -> &str {
-    path.file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("unknown")
 }

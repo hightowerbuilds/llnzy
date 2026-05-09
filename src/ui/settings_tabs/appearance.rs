@@ -271,21 +271,20 @@ pub(crate) fn render_themes_tab(ui: &mut egui::Ui, config: &mut Config) {
             .fill(egui::Color32::from_rgb(40, 100, 200)),
         )
         .clicked()
+        && !theme_name.trim().is_empty()
     {
-        if !theme_name.trim().is_empty() {
-            let flags = theme_store::ThemeViewFlags {
-                terminal: true,
-                editor: false,
-                sketch: false,
-                stacker: false,
-            };
-            match theme_store::save_theme(theme_name.trim(), theme_desc.trim(), config, &flags) {
-                Ok(_) => {
-                    theme_name.clear();
-                    theme_desc.clear();
-                }
-                Err(e) => log::warn!("Failed to save theme: {e}"),
+        let flags = theme_store::ThemeViewFlags {
+            terminal: true,
+            editor: false,
+            sketch: false,
+            stacker: false,
+        };
+        match theme_store::save_theme(theme_name.trim(), theme_desc.trim(), config, &flags) {
+            Ok(_) => {
+                theme_name.clear();
+                theme_desc.clear();
             }
+            Err(e) => log::warn!("Failed to save theme: {e}"),
         }
     }
 

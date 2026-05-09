@@ -654,7 +654,7 @@ mod tests {
             id: 99,
         };
 
-        let target = pending_close_file(&tab, buffer_id, &buf);
+        let target = pending_close_file(&tab, buffer_id, buf);
 
         assert_eq!(target.tab_id, 99);
         assert_eq!(target.buffer_id, buffer_id);

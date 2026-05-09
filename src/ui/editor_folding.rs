@@ -142,7 +142,7 @@ fn add_fold_range(folded_ranges: &mut Vec<FoldRange>, range: FoldRange) {
     if range.start_line >= range.end_line {
         return;
     }
-    if !folded_ranges.iter().any(|existing| *existing == range) {
+    if !folded_ranges.contains(&range) {
         folded_ranges.push(range);
     }
 }

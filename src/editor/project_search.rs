@@ -21,6 +21,7 @@ pub struct ProjectSearchResult {
 }
 
 /// State for the multi-file search feature.
+#[derive(Default)]
 pub struct ProjectSearch {
     pub query: String,
     pub regex_mode: bool,
@@ -28,19 +29,6 @@ pub struct ProjectSearch {
     pub result: Option<ProjectSearchResult>,
     pub selected: usize,
     pending: Option<mpsc::Receiver<ProjectSearchResult>>,
-}
-
-impl Default for ProjectSearch {
-    fn default() -> Self {
-        Self {
-            query: String::new(),
-            regex_mode: false,
-            active: false,
-            result: None,
-            selected: 0,
-            pending: None,
-        }
-    }
 }
 
 /// Directories to skip during project search.
@@ -123,34 +111,61 @@ impl ProjectSearch {
     }
 }
 
+enum SearchMatcher {
+    Regex(Regex),
+    Literal {
+        query_lower: String,
+        query_byte_len: usize,
+    },
+}
+
+impl SearchMatcher {
+    fn new(query: &str, regex_mode: bool) -> Result<Self, regex::Error> {
+        if regex_mode {
+            Regex::new(query).map(Self::Regex)
+        } else {
+            let query_lower = query.to_lowercase();
+            Ok(Self::Literal {
+                query_byte_len: query_lower.len(),
+                query_lower,
+            })
+        }
+    }
+
+    fn for_each_match(&self, line: &str, mut on_match: impl FnMut(usize) -> bool) {
+        match self {
+            Self::Regex(re) => {
+                for match_ in re.find_iter(line) {
+                    if !on_match(line[..match_.start()].chars().count()) {
+                        break;
+                    }
+                }
+            }
+            Self::Literal {
+                query_lower,
+                query_byte_len,
+            } => {
+                let line_lower = line.to_lowercase();
+                let mut start = 0;
+                while let Some(pos) = line_lower[start..].find(query_lower) {
+                    if !on_match(line[..start + pos].chars().count()) {
+                        break;
+                    }
+                    start += pos + query_byte_len;
+                }
+            }
+        }
+    }
+}
+
 /// Walk the project tree and search each text file for the query.
 fn search_files(root: &Path, query: &str, regex_mode: bool) -> Vec<ProjectMatch> {
     let mut matches = Vec::new();
-    let matcher: Box<dyn Fn(&str) -> Vec<(usize, usize)> + Send> = if regex_mode {
-        match Regex::new(query) {
-            Ok(re) => Box::new(move |line: &str| {
-                re.find_iter(line)
-                    .map(|m| {
-                        let col = line[..m.start()].chars().count();
-                        (col, col + m.as_str().chars().count())
-                    })
-                    .collect()
-            }),
-            Err(_) => return matches, // invalid regex
-        }
-    } else {
-        let query_lower = query.to_lowercase();
-        Box::new(move |line: &str| {
-            let line_lower = line.to_lowercase();
-            let mut results = Vec::new();
-            let mut start = 0;
-            while let Some(pos) = line_lower[start..].find(&query_lower) {
-                let col = line[..start + pos].chars().count();
-                results.push((col, col + query_lower.chars().count()));
-                start += pos + query_lower.len();
-            }
-            results
-        })
+    if query.is_empty() {
+        return matches;
+    }
+    let Ok(matcher) = SearchMatcher::new(query, regex_mode) else {
+        return matches;
     };
 
     let mut stack = vec![root.to_path_buf()];
@@ -195,17 +210,18 @@ fn search_files(root: &Path, query: &str, regex_mode: bool) -> Vec<ProjectMatch>
             };
 
             for (line_idx, line) in text.lines().enumerate() {
-                let hits = matcher(line);
-                for (col, _) in hits {
+                let line_text = line.trim();
+                matcher.for_each_match(line, |col| {
                     matches.push(ProjectMatch {
                         path: path.clone(),
                         line: line_idx,
                         col,
-                        line_text: line.trim().to_string(),
+                        line_text: line_text.to_string(),
                     });
-                    if matches.len() >= MAX_MATCHES {
-                        return matches;
-                    }
+                    matches.len() < MAX_MATCHES
+                });
+                if matches.len() >= MAX_MATCHES {
+                    return matches;
                 }
             }
         }
@@ -365,7 +381,6 @@ mod tests {
     #[test]
     fn empty_query_returns_empty() {
         let mut search = ProjectSearch::default();
-        search.query = String::new();
         search.search(Path::new("/tmp"));
         assert_eq!(search.match_count(), 0);
     }

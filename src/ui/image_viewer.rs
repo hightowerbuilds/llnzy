@@ -8,8 +8,8 @@ pub(super) fn render_image_viewer(
     let file_name = explorer.open_file.as_ref().unwrap().name.clone();
     let mut close = false;
     ui.horizontal(|ui| {
-        if show_back_button {
-            if ui
+        if show_back_button
+            && ui
                 .add(
                     egui::Button::new(
                         egui::RichText::new("< Back")
@@ -19,9 +19,8 @@ pub(super) fn render_image_viewer(
                     .fill(egui::Color32::TRANSPARENT),
                 )
                 .clicked()
-            {
-                close = true;
-            }
+        {
+            close = true;
         }
         ui.label(
             egui::RichText::new(&file_name)

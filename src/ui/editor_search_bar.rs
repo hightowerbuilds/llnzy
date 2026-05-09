@@ -43,7 +43,6 @@ pub(super) fn render_search_bar(
                     search.focus_nearest(view.cursor.pos);
                 }
 
-                let case_label = if search.case_sensitive { "Aa" } else { "Aa" };
                 let case_bg = if search.case_sensitive {
                     toggle_on
                 } else {
@@ -52,7 +51,7 @@ pub(super) fn render_search_bar(
                 if ui
                     .add(
                         egui::Button::new(
-                            egui::RichText::new(case_label)
+                            egui::RichText::new("Aa")
                                 .size(11.0)
                                 .color(egui::Color32::WHITE),
                         )
@@ -126,7 +125,7 @@ pub(super) fn render_search_bar(
                     .on_hover_text("Previous (Shift+Enter)")
                     .clicked()
                 {
-                    if let Some(pos) = search.prev() {
+                    if let Some(pos) = search.previous_match() {
                         view.cursor.pos = pos;
                         view.cursor.clear_selection();
                         view.cursor.desired_col = None;
@@ -141,7 +140,7 @@ pub(super) fn render_search_bar(
                     .on_hover_text("Next (Enter)")
                     .clicked()
                 {
-                    if let Some(pos) = search.next() {
+                    if let Some(pos) = search.next_match() {
                         view.cursor.pos = pos;
                         view.cursor.clear_selection();
                         view.cursor.desired_col = None;
@@ -236,13 +235,13 @@ pub(super) fn render_search_bar(
         if input.key_pressed(egui::Key::Escape) {
             search.close();
         } else if input.key_pressed(egui::Key::Enter) && !input.modifiers.shift {
-            if let Some(pos) = search.next() {
+            if let Some(pos) = search.next_match() {
                 view.cursor.pos = pos;
                 view.cursor.clear_selection();
                 view.cursor.desired_col = None;
             }
         } else if input.key_pressed(egui::Key::Enter) && input.modifiers.shift {
-            if let Some(pos) = search.prev() {
+            if let Some(pos) = search.previous_match() {
                 view.cursor.pos = pos;
                 view.cursor.clear_selection();
                 view.cursor.desired_col = None;
