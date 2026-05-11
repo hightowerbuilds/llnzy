@@ -7,6 +7,7 @@ use crate::editor::history::UndoHistory;
 use crate::text_utils::normalize_crlf_to_lf;
 
 use super::indent::IndentStyle;
+use super::kind::BufferKind;
 use super::model::content_hash;
 use super::Buffer;
 
@@ -58,6 +59,7 @@ impl Buffer {
             history: UndoHistory::new(),
             last_edit: None,
             indent_style,
+            kind: BufferKind::Code,
         })
     }
 

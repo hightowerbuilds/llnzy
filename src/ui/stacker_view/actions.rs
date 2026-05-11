@@ -1,4 +1,4 @@
-use crate::stacker::{document::StackerDocumentEditor, draft::StackerDraft, StackerPrompt};
+use crate::stacker::{draft::StackerDraft, session::StackerSession, StackerPrompt};
 
 use super::{PendingStackerDraftSwitch, STACKER_PROMPT_EDITOR_ID};
 use crate::ui::stacker_cursor;
@@ -6,7 +6,7 @@ use crate::ui::stacker_cursor;
 pub(super) fn request_load_saved_prompt(
     ctx: &egui::Context,
     prompts: &[StackerPrompt],
-    editor: &mut StackerDocumentEditor,
+    editor: &mut StackerSession,
     draft: &mut StackerDraft,
     pending_switch: &mut Option<PendingStackerDraftSwitch>,
     editing: &mut Option<usize>,
@@ -29,7 +29,7 @@ pub(super) fn request_load_saved_prompt(
 pub(super) fn request_load_inbox_prompt(
     ctx: &egui::Context,
     inbox_prompts: &[StackerPrompt],
-    editor: &mut StackerDocumentEditor,
+    editor: &mut StackerSession,
     draft: &mut StackerDraft,
     pending_switch: &mut Option<PendingStackerDraftSwitch>,
     editing: &mut Option<usize>,
@@ -58,7 +58,7 @@ pub(super) fn request_load_inbox_prompt(
 pub(super) fn load_saved_prompt_into_editor(
     ctx: &egui::Context,
     prompts: &[StackerPrompt],
-    editor: &mut StackerDocumentEditor,
+    editor: &mut StackerSession,
     draft: &mut StackerDraft,
     editing: &mut Option<usize>,
     index: usize,
@@ -81,7 +81,7 @@ pub(super) fn load_saved_prompt_into_editor(
 pub(super) fn load_inbox_prompt_into_editor(
     ctx: &egui::Context,
     inbox_prompts: &[StackerPrompt],
-    editor: &mut StackerDocumentEditor,
+    editor: &mut StackerSession,
     draft: &mut StackerDraft,
     editing: &mut Option<usize>,
     index: usize,
@@ -106,7 +106,7 @@ pub(super) fn load_inbox_prompt_into_editor(
 
 pub(super) fn start_scratch_prompt(
     ctx: &egui::Context,
-    editor: &mut StackerDocumentEditor,
+    editor: &mut StackerSession,
     draft: &mut StackerDraft,
     editing: &mut Option<usize>,
 ) {

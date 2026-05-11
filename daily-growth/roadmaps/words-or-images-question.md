@@ -1,3 +1,85 @@
+# Words or Images: The Question of Intent Compression
+
+**Date:** 2026-05-09
+**Author:** Gemini CLI (Technical Review)
+
+## The Fundamental Tension
+
+In the development of LLNZY, we find ourselves at a crossroad of human expression. On one side stands the **Word**: precise, sequential, logical, and the foundation of all programming. On the other side stands the **Image**: spatial, simultaneous, hierarchical, and the foundation of all design.
+
+The metaphor "An image is worth a thousand tokens" is not a claim about API pricing. It is a claim about **bandwidth**. It asks a fundamental question about the future of software engineering: Is the current text-heavy paradigm of prompting a local maximum, or can we achieve a higher-order state of communication by re-introducing spatial reasoning into the developer's workbench?
+
+## I. The Tyranny of the Sequence
+
+Text is inherently linear. To describe a user interface in Markdown, a developer must translate a three-dimensional mental model (layers, depth, and layout) into a one-dimensional stream of characters.
+
+Consider the task of describing a "Search-First Dashboard":
+> "The app should have a central search bar that is 40% of the screen width, positioned at the top. Below it, two columns: a left column for results and a right column for details. The results column should be scrollable, while the details column stays fixed."
+
+This prose is clear to a human, but it forces the LLM to perform a "reconstruction" task. The model must parse the sequence, build an internal spatial map, and then generate code based on that map. Every step in this translation—from the user's brain to text, and from text to the model's spatial map—is a point of potential failure. These are "lossy" transitions.
+
+In this context, **Tokens are a tax on translation.** The more words we use to describe a shape, the more we pay for the model's attempt to understand that shape.
+
+## II. The Spatial Advantage: Sketch as a Grounding Layer
+
+The Sketch feature in LLNZY is not a "drawing toy." It is a **Spatial Grounding Layer**. When a user draws a rectangle and labels it "Results," they are bypassing the sequence. They are providing the model with a direct representation of their mental model.
+
+### 1. Simultaneous Information Density
+In a single visual field, an image conveys:
+- **Proximity:** Which elements belong together?
+- **Hierarchy:** Which element is "on top" or "larger"?
+- **Flow:** Where does the eye (or the data) go next?
+- **Containment:** What is a child of what?
+
+A text document requires thousands of tokens to establish these relationships with the same degree of certainty that a single 500-token SVG can provide. This is where the "Thousand Tokens" metaphor finds its technical teeth. By using `src/sketch/model.rs` primitives—`RectElement`, `SymbolElement`, and `TextElement`—LLNZY allows the user to communicate structure with **zero translation loss**.
+
+### 2. The Semantic Bridge
+The inclusion of `SketchSymbolKind` (Database, API, Cloud) is the most potent part of this architecture. These are not just icons; they are **Semantic Macros**. A "Database" icon is a 1-token visual signal that carries the weight of a 500-token architectural description. It tells the model: "Expect persistence logic, connection strings, and schema definitions here."
+
+## III. The Hard Limits of the Visual
+
+However, my review of the "An Image for a Thousand Tokens" roadmap confirms a critical warning: **Images are terrible at logic.**
+
+You cannot draw an "if-then-else" statement that is as clear as a line of Rust. You cannot draw a "retry policy with exponential backoff" in a way that is more efficient than a bulleted list. 
+
+The danger of the "Image as Prompt" movement is the **Ambiguity Trap**. A user might draw an arrow between two boxes and assume the model understands that this arrow represents an "asynchronous gRPC call with a 5-second timeout." The model, seeing only an arrow, might assume it's a simple function call. 
+
+At this point, the image is no longer "worth a thousand tokens." It is a **liability**. It has introduced a "precision gap" that must be filled by even more text later to correct the model's hallucinations.
+
+## IV. The Hybrid Future: The "Annotated Artifact"
+
+The resolution to the "Words or Images" question is not a choice between them, but a **Synthesis**. 
+
+The future of LLNZY’s Sketch feature lies in the **Annotated Artifact**. This is a document where the image provides the *Spatial Skeleton* and the text provides the *Behavioral Nervous System*.
+
+### The Ideal Prompt Structure:
+1. **The Visual Anchor (The Sketch):** A structured layout of the system, defining boundaries, grouping, and hierarchy.
+2. **The Behavioral Constraints (The Bullets):** A concise list of non-negotiable logic (e.g., "Must use OAuth2," "Cache expires in 60s").
+3. **The Intent Layer (The Goal):** A single sentence describing *why* this exists.
+
+This hybrid format is the true "Token Compressor." It uses each medium for what it is best at. The image handles the thousand words of spatial description; the text handles the hundred words of logical precision.
+
+## V. Technical Evolution: From Drawing to Engineering
+
+To move from a "roadmap" to a "power tool," LLNZY's Sketch implementation must lean harder into its identity as an engineering surface. 
+
+**Proposals for the Evolution of `src/sketch`:**
+- **Typed Connections:** Replacing free-form strokes with "Smart Connectors" that carry metadata (e.g., a "Data Flow" connector vs. an "Ownership" connector).
+- **Z-Axis Awareness:** Explicitly supporting "Layers" so the model understands which components are "behind" or "inside" others in a 3D sense.
+- **Bi-directional Sync:** What if a change in the code (e.g., adding a new field to a struct) automatically updated a "Table" symbol in the Sketch? This would turn the image into a **Live View** of the intent, rather than a static snapshot.
+
+## VI. Conclusion: The Bandwidth of Intent
+
+The question of "Words or Images" is ultimately a question of **Human Throughput**. 
+
+If we can communicate a complex architectural change in 2 minutes of sketching and 30 seconds of typing, rather than 15 minutes of drafting a Markdown specification, we have increased the developer's "Intent Bandwidth" by 5x. 
+
+The tokens saved are a nice side effect, but the real victory is the **reduction in cognitive friction**. LLNZY’s Sketch feature, if treated as a serious semantic compressor, has the potential to move us past the era of "Chatting with an AI" and into the era of "Modeling with an AI."
+
+In this new era, we don't just tell the model what to do. We show it what we see. And in that showing, we find that a picture is not just worth a thousand words—it is worth a thousand *correct* implementation steps.
+
+---
+
 # An Image For A Thousand Tokens
 
 Date: 2026-05-09
@@ -369,4 +451,3 @@ medium for structured intent rather than as a casual drawing toy.
 
 That distinction is the difference between a novelty feature and a strategically
 defensible one.
-

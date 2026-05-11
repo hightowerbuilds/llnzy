@@ -4,7 +4,7 @@ use ropey::Rope;
 
 use crate::editor::history::UndoHistory;
 
-use super::{IndentStyle, LineEnding};
+use super::{BufferKind, IndentStyle, LineEnding};
 
 /// A position in a text document.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -39,6 +39,9 @@ pub struct Buffer {
     pub(super) last_edit: Option<BufferEdit>,
     /// Indent style detected or configured for this buffer.
     pub indent_style: IndentStyle,
+    /// What kind of content this buffer holds. Drives tree-sitter, LSP,
+    /// rendering, and font decisions outside the buffer itself.
+    pub(super) kind: BufferKind,
 }
 
 pub(super) fn content_hash(rope: &Rope) -> u64 {
@@ -54,6 +57,17 @@ pub(super) fn content_hash(rope: &Rope) -> u64 {
 impl Buffer {
     /// Create an empty buffer with no associated file.
     pub fn empty() -> Self {
+        Self::empty_with_kind(BufferKind::Code)
+    }
+
+    /// Create an empty prose buffer with no associated file. Prose buffers
+    /// turn off code-oriented behaviors (tree-sitter, LSP, gutter/minimap)
+    /// at downstream consumers and default to a prose font and word wrap.
+    pub fn empty_prose() -> Self {
+        Self::empty_with_kind(BufferKind::Prose)
+    }
+
+    fn empty_with_kind(kind: BufferKind) -> Self {
         let rope = Rope::new();
         let hash = content_hash(&rope);
         Self {
@@ -65,7 +79,12 @@ impl Buffer {
             history: UndoHistory::new(),
             last_edit: None,
             indent_style: IndentStyle::default(),
+            kind,
         }
+    }
+
+    pub fn kind(&self) -> BufferKind {
+        self.kind
     }
 
     pub fn path(&self) -> Option<&Path> {

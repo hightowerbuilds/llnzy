@@ -210,7 +210,7 @@ impl App {
         if changed {
             ui.stacker
                 .draft
-                .record_current_text(ui.stacker.editor.text().to_string());
+                .record_current_text(ui.stacker.editor.text());
             self.request_redraw();
         }
         if matches!(
@@ -219,7 +219,7 @@ impl App {
         ) {
             #[cfg(target_os = "macos")]
             {
-                self.stacker_native_view_pending_focus = true;
+                self.stacker_pending_focus = true;
             }
             self.request_redraw();
         }

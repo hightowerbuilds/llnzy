@@ -27,7 +27,7 @@ pub mod sidebar_move;
 pub mod sketch;
 pub mod stacker;
 #[cfg(target_os = "macos")]
-pub mod stacker_native_view;
+pub mod stacker_input_client;
 pub mod tab_groups;
 pub mod tasks;
 pub mod terminal;
@@ -44,12 +44,32 @@ pub enum UserEvent {
     PtyOutput,
     LspMessage,
     FileChanged(std::path::PathBuf),
+    /// `NSTextInputClient::insertText:replacementRange:` — final committed
+    /// text, replacing the marked range / replacement_range / current
+    /// selection in that order of preference.
     #[cfg(target_os = "macos")]
-    StackerNativeTextChanged {
-        kind: &'static str,
+    StackerInputClientInsertText {
         text: String,
-        utf16_start: usize,
-        utf16_end: usize,
+        replacement_utf16: Option<(usize, usize)>,
+    },
+    /// `NSTextInputClient::setMarkedText:selectedRange:replacementRange:` —
+    /// IME / dictation composition update.
+    #[cfg(target_os = "macos")]
+    StackerInputClientSetMarkedText {
+        text: String,
+        marked_internal_utf16: (usize, usize),
+        replacement_utf16: Option<(usize, usize)>,
+    },
+    /// `NSTextInputClient::unmarkText` — commit the current marked range
+    /// in place.
+    #[cfg(target_os = "macos")]
+    StackerInputClientUnmarkText,
+    /// `NSTextInputClient::doCommandBySelector:` — keyboard action
+    /// delivered by the AppKit input manager (move/delete/insert-newline,
+    /// etc.). The selector name is the canonical AppKit identifier.
+    #[cfg(target_os = "macos")]
+    StackerInputClientDoCommand {
+        selector_name: String,
     },
     #[cfg(target_os = "macos")]
     MenuCommand(String),

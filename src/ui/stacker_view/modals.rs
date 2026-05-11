@@ -1,6 +1,6 @@
 use crate::stacker::{
-    archive_inbox_prompt, archive_saved_prompt, document::StackerDocumentEditor,
-    draft::StackerDraft, StackerPrompt,
+    archive_inbox_prompt, archive_saved_prompt, draft::StackerDraft, session::StackerSession,
+    StackerPrompt,
 };
 
 use super::{
@@ -14,7 +14,7 @@ pub(super) fn render_delete_prompt_modal(
     ctx: &egui::Context,
     prompts: &mut Vec<StackerPrompt>,
     inbox_prompts: &mut Vec<StackerPrompt>,
-    editor: &mut StackerDocumentEditor,
+    editor: &mut StackerSession,
     draft: &mut StackerDraft,
     editing: &mut Option<usize>,
     dirty: &mut bool,
@@ -125,7 +125,7 @@ fn delete_target_prompt<'a>(
 fn delete_saved_prompt(
     ctx: &egui::Context,
     prompts: &mut Vec<StackerPrompt>,
-    editor: &mut StackerDocumentEditor,
+    editor: &mut StackerSession,
     draft: &mut StackerDraft,
     editing: &mut Option<usize>,
     dirty: &mut bool,
@@ -161,7 +161,7 @@ fn delete_saved_prompt(
 fn delete_inbox_prompt(
     ctx: &egui::Context,
     inbox_prompts: &mut Vec<StackerPrompt>,
-    editor: &mut StackerDocumentEditor,
+    editor: &mut StackerSession,
     draft: &mut StackerDraft,
     editing: &mut Option<usize>,
     id: &str,
@@ -187,7 +187,7 @@ pub(super) fn render_discard_draft_modal(
     ctx: &egui::Context,
     prompts: &[StackerPrompt],
     inbox_prompts: &[StackerPrompt],
-    editor: &mut StackerDocumentEditor,
+    editor: &mut StackerSession,
     draft: &mut StackerDraft,
     pending_switch: &mut Option<PendingStackerDraftSwitch>,
     editing: &mut Option<usize>,

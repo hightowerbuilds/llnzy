@@ -8,25 +8,42 @@ preserve.
 
 ## Text Mutation Owner
 
-`StackerDocumentEditor` is the durable owner of the active Stacker draft text,
-selection, undo history, and redo history.
+> **Updated 2026-05-10 (Stacker Final Stretch).** The text mutation owner
+> renamed from `StackerDocumentEditor` to `StackerSession`, and the
+> visual layer moved from a bespoke paint into the editor view's
+> `prose_mode = true` render path.
 
-- Toolbar formatting reads the live editor selection, calls
-  `execute_stacker_command_at`, then stores the resulting selection back into
-  both the document editor and egui TextEdit state.
-- Command palette Stacker actions come from `stacker_command_registry()` and
-  dispatch as `ExternalAction::ApplyFormatting`.
-- App-level Stacker insert, paste, copy, select all, undo, redo, and formatting
-  route through the internal external-command dispatcher.
-- The native text path (a visible `NSTextView` overlay on macOS, see
-  `src/stacker_native_view.rs`) is an input bridge. It must sync changes back
-  into `StackerDocumentEditor` instead of becoming separate durable state.
-  The earlier WKWebView-backed editor and the hidden AppKit text bridge it
-  replaced have been removed.
+`StackerSession` (`src/stacker/session.rs`) is the durable owner of the
+active Stacker draft text, selection, undo history, redo history, and
+the IME marked range. It owns a rope-backed `Buffer { kind: Prose }`.
 
-The remaining controlled escape hatch is egui's direct `TextEdit` string
-access. That path must continue to reconcile changes through the document
-editor's widget-change handling.
+- Toolbar formatting reads the live session selection, calls
+  `execute_stacker_command_at`, then stores the resulting selection back
+  into both the session and egui's TextEdit memory cache (the latter
+  via `stacker_cursor::mirror_selection_to_text_edit_cache` per frame).
+- Command palette Stacker actions come from `stacker_command_registry()`
+  and dispatch as `ExternalAction::ApplyFormatting`.
+- App-level Stacker insert, paste, copy, select all, undo, redo, and
+  formatting route through the internal external-command dispatcher.
+- The native text path on macOS is `LlnzyStackerInputClient`
+  (`src/stacker_input_client.rs`), an `NSTextInputClient`-conforming
+  sibling NSView. It is an **input bridge only**. Mutations come back
+  via `UserEvent`s and apply to the session through `StackerInputEngine`.
+  Visual rendering happens in the editor view, not in the input client.
+- The visible prompt is rendered by
+  `editor_host::render_prose_editor(... prose_mode: true)`. The bespoke
+  `editor_paint`, the `NSTextView` overlay, and the WKWebView are all
+  removed.
+- The editor view exports a per-frame `input_anchor` (a single galley +
+  screen origin) that the input client uses for
+  `firstRectForCharacterRange:` and `characterIndexForPoint:`. The same
+  anchor drives the IME marked-text underline overlay, so dictation
+  refinement and the visible underline track each other exactly.
+
+The remaining controlled escape hatch is egui's TextEdit memory cache
+(used by toolbar formatting commands as a selection scratchpad). The
+prompt panel mirrors the session's selection into that cache every
+frame; mutations flow only through the session.
 
 ## Command Registry
 
@@ -53,7 +70,9 @@ input or UI changes:
 - Saved prompt edit, save, delete, delete cancel, and Escape cancel.
 - Prompt queue add behavior.
 - Dictation or external text delivery latency and focused-surface routing
-  through the native `NSTextView` overlay.
+  through the native `LlnzyStackerInputClient` subview.
+- IME composition (Japanese / Chinese / Korean) — verify the marked-text
+  underline paints and clears on `unmarkText`.
 
 These manual checks are tracked in `daily-growth/roadmaps/manual laundry.md`.
 

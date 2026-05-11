@@ -5,12 +5,14 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 pub mod cli;
 pub mod commands;
-pub mod document;
 pub mod draft;
 pub mod formatting;
 pub mod input;
 pub mod queue;
+pub mod session;
 pub mod storage;
+#[cfg(target_os = "macos")]
+pub mod utf16;
 
 use queue::{sanitize_prompt_queue, QueuedPrompt};
 

@@ -532,3 +532,26 @@ fn matching_bracket_crosses_lines() {
         Some((Position::new(0, 0), Position::new(2, 0)))
     );
 }
+
+#[test]
+fn empty_buffer_defaults_to_code_kind() {
+    let buf = Buffer::empty();
+    assert_eq!(buf.kind(), BufferKind::Code);
+    assert!(!buf.kind().is_prose());
+}
+
+#[test]
+fn empty_prose_buffer_reports_prose_kind() {
+    let buf = Buffer::empty_prose();
+    assert_eq!(buf.kind(), BufferKind::Prose);
+    assert!(buf.kind().is_prose());
+}
+
+#[test]
+fn prose_buffer_supports_normal_edits_without_changing_kind() {
+    let mut buf = Buffer::empty_prose();
+    buf.insert(Position::new(0, 0), "hello world");
+    assert_eq!(buf.line(0), "hello world");
+    assert_eq!(buf.kind(), BufferKind::Prose);
+    assert!(buf.is_modified());
+}

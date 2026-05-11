@@ -2,6 +2,7 @@ mod editing;
 mod history;
 mod indent;
 mod io;
+mod kind;
 mod model;
 mod recovery;
 
@@ -10,4 +11,5 @@ mod tests;
 
 pub use indent::IndentStyle;
 pub use io::LineEnding;
+pub use kind::BufferKind;
 pub use model::{Buffer, BufferEdit, Position};

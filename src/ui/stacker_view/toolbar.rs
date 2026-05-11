@@ -3,9 +3,9 @@ use crate::stacker::{
         execute_stacker_command_at, stacker_command_descriptor, stacker_command_registry,
         stacker_editor_command, StackerCommandId, StackerEditorCommand,
     },
-    document::StackerDocumentEditor,
     draft::StackerDraft,
     import_prompts, merge_unique_prompts, new_prompt, promote_inbox_prompt, prompt_label,
+    session::StackerSession,
     stacker_path, StackerPrompt,
 };
 
@@ -22,7 +22,7 @@ pub(super) fn render_editor_toolbar(
     editor_id: egui::Id,
     prompts: &mut Vec<StackerPrompt>,
     inbox_prompts: &mut Vec<StackerPrompt>,
-    editor: &mut StackerDocumentEditor,
+    editor: &mut StackerSession,
     draft: &mut StackerDraft,
     pending_switch: &mut Option<PendingStackerDraftSwitch>,
     editing: &mut Option<usize>,
@@ -214,7 +214,7 @@ fn import_prompt_file(prompts: &mut Vec<StackerPrompt>, dirty: &mut bool) {
 fn apply_editor_command(
     ctx: &egui::Context,
     editor_id: egui::Id,
-    editor: &mut StackerDocumentEditor,
+    editor: &mut StackerSession,
     draft: &mut StackerDraft,
     command: StackerEditorCommand,
 ) -> bool {
@@ -223,7 +223,7 @@ fn apply_editor_command(
     let outcome = execute_stacker_command_at(editor, selection, command);
     stacker_cursor::store_document_selection(ctx, editor_id, editor, outcome.selection);
     if outcome.changed {
-        draft.record_current_text(editor.text().to_string());
+        draft.record_current_text(editor.text());
     }
     outcome.changed
 }

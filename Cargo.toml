@@ -50,5 +50,16 @@ sha2 = "0.10"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSColor", "NSFont", "NSMenu", "NSMenuItem", "NSResponder", "NSScrollView", "NSText", "NSTextView", "NSView", "NSWindow"] }
+objc2-app-kit = { version = "0.3", features = ["NSAccessibility", "NSAccessibilityConstants", "NSApplication", "NSColor", "NSFont", "NSMenu", "NSMenuItem", "NSResponder", "NSScrollView", "NSText", "NSTextInputClient", "NSTextView", "NSView", "NSWindow"] }
 objc2-foundation = { version = "0.3", features = ["NSGeometry", "NSString"] }
+# Compile dependencies with full optimizations even in dev builds.
+# wgpu/glyphon/egui/ropey are unusable at opt-level=0.
+[profile.dev.package."*"]
+opt-level = 3
+
+# Light optimization for our own crate so per-keystroke O(n) walks
+# (rope→String materialisation, word/line counters, UTF-16 index
+# conversion) don't dominate typing latency on long prompts. Debug info
+# and incremental compile speed are preserved at opt-level=1.
+[profile.dev]
+opt-level = 1

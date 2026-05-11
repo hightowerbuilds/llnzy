@@ -130,7 +130,7 @@ impl App {
                     effects_mask,
                 });
                 self.handle_ui_frame_output(ui_frame_output, event_loop);
-                self.sync_stacker_native_view();
+                self.sync_stacker_input_client();
             }
         }
         if project_tree_changed {

@@ -30,7 +30,7 @@ use llnzy::stacker::commands::{stacker_command_registry, StackerCommandId};
 #[cfg(target_os = "macos")]
 use llnzy::stacker::input::StackerSelection;
 #[cfg(target_os = "macos")]
-use llnzy::stacker_native_view::StackerNativeView;
+use llnzy::stacker_input_client::StackerInputClient;
 use llnzy::ui::command_palette::CommandId;
 #[cfg(target_os = "macos")]
 use llnzy::ui::{stacker_cursor, STACKER_PROMPT_EDITOR_ID};
@@ -88,9 +88,9 @@ struct App {
     selection_rect_cache: Option<SelectionRectCache>,
     click_state: ClickState,
     #[cfg(target_os = "macos")]
-    stacker_native_view: Option<StackerNativeView>,
+    stacker_input_client: Option<StackerInputClient>,
     #[cfg(target_os = "macos")]
-    stacker_native_view_pending_focus: bool,
+    stacker_pending_focus: bool,
     ui: Option<UiState>,
     screen_layout: Option<ScreenLayout>,
     visual_bell_until: Option<Instant>,
@@ -126,9 +126,9 @@ impl App {
             selection_rect_cache: None,
             click_state: ClickState::new(),
             #[cfg(target_os = "macos")]
-            stacker_native_view: None,
+            stacker_input_client: None,
             #[cfg(target_os = "macos")]
-            stacker_native_view_pending_focus: false,
+            stacker_pending_focus: false,
             ui: None,
             screen_layout: None,
             visual_bell_until: None,
@@ -185,132 +185,243 @@ impl App {
     }
 
     #[cfg(target_os = "macos")]
-    fn create_stacker_native_view(&mut self) {
-        if self.stacker_native_view.is_some() {
+    fn create_stacker_input_client(&mut self) {
+        let Some(window) = &self.window else { return };
+        if self.stacker_input_client.is_some() {
             return;
         }
-        let Some(window) = &self.window else { return };
-        match StackerNativeView::new(window.as_ref(), self.proxy.clone()) {
-            Ok(view) => {
-                self.stacker_native_view = Some(view);
-                self.error_log
-                    .info("Stacker native NSTextView initialized for system text input");
+        match StackerInputClient::new(window.as_ref(), self.proxy.clone()) {
+            Ok(client) => {
+                self.stacker_input_client = Some(client);
             }
-            Err(err) => {
-                self.error_log.error(err);
-            }
+            Err(err) => self.error_log.error(err),
         }
     }
 
     #[cfg(not(target_os = "macos"))]
-    fn create_stacker_native_view(&mut self) {}
+    fn create_stacker_input_client(&mut self) {}
 
     #[cfg(target_os = "macos")]
-    fn sync_stacker_native_view(&mut self) {
+    fn sync_stacker_input_client(&mut self) {
         let active = self.stacker_visible_in_active_context();
         let focus_when_shown = self.active_stacker_tab();
-        let Some(view) = &mut self.stacker_native_view else {
+        let Some(client) = &mut self.stacker_input_client else {
             return;
         };
         if !active {
-            view.set_visible(false);
-            self.stacker_native_view_pending_focus = false;
+            client.set_visible(false);
+            self.stacker_pending_focus = false;
             return;
         }
 
         let Some(ui) = &self.ui else {
-            view.set_visible(false);
+            client.set_visible(false);
             return;
         };
         let modal_open = ui.stacker.pending_draft_switch.is_some()
             || ui.stacker.pending_prompt_delete.is_some()
             || ui.pending_close.is_some();
-        let Some(rect) = ui.stacker.web_editor_rect else {
-            view.set_visible(false);
+        let Some(rect) = ui.stacker.prompt_editor_rect else {
+            client.set_visible(false);
             return;
         };
         if modal_open {
-            view.set_visible(false);
+            client.set_visible(false);
             return;
         }
 
-        view.set_bounds(rect);
-        view.set_font_size(ui.stacker.editor_font_size);
-        view.set_document(ui.stacker.editor.text(), ui.stacker.editor.selection());
-        let became_visible = view.set_visible(true);
+        client.set_bounds(rect);
+        client.set_state(
+            ui.stacker.editor.text(),
+            ui.stacker.editor.char_count(),
+            ui.stacker.editor.selection(),
+            ui.stacker.editor.marked_range(),
+        );
+        client.set_galley(ui.stacker.prompt_editor_anchor.clone());
+        let became_visible = client.set_visible(true);
         let should_focus =
-            focus_when_shown && (self.stacker_native_view_pending_focus || became_visible);
+            focus_when_shown && (self.stacker_pending_focus || became_visible);
         if should_focus {
-            view.focus();
-            self.stacker_native_view_pending_focus = false;
+            client.focus();
+            self.stacker_pending_focus = false;
+        } else if focus_when_shown {
+            client.ensure_focused();
         }
     }
 
     #[cfg(not(target_os = "macos"))]
-    fn sync_stacker_native_view(&mut self) {}
+    fn sync_stacker_input_client(&mut self) {}
 
     #[cfg(target_os = "macos")]
-    fn apply_stacker_native_text_changed(
+    fn apply_stacker_input_client_insert_text(
         &mut self,
-        kind: &'static str,
         text: String,
-        utf16_start: usize,
-        utf16_end: usize,
-    ) -> bool {
-        let Some(stacker_tab_idx) = self.stacker_tab_in_active_context() else {
-            return false;
-        };
-        if matches!(
-            kind,
-            "pointerDown" | "focus" | "textChanged" | "selectionChanged"
-        ) && stacker_tab_idx != self.active_tab
-        {
-            self.switch_tab(stacker_tab_idx);
-            self.stacker_native_view_pending_focus = true;
+        replacement_utf16: Option<(usize, usize)>,
+    ) {
+        llnzy::external_input_trace::trace("stacker.insert_text_entry", || {
+            format!("text={:?}, replacement={:?}", text, replacement_utf16)
+        });
+        if !text.is_empty() && text.chars().all(|c| c.is_control() && c != '\n' && c != '\t') {
+            llnzy::external_input_trace::trace("stacker.insert_text_dropped_control", || {
+                format!("text={text:?}")
+            });
+            return;
         }
+        if self.stacker_tab_in_active_context().is_none() {
+            return;
+        }
+        let Some(ui) = &mut self.ui else { return };
 
-        let Some(ui) = &mut self.ui else {
-            return false;
+        // Resolution order matches AppKit: existing marked range → explicit
+        // replacement_range → current selection.
+        let target = if let Some(marked) = ui.stacker.editor.marked_range() {
+            marked
+        } else if let Some(pair) = replacement_utf16 {
+            // Only materialise the pre-edit text when we actually need it for
+            // the UTF-16 → char conversion. For plain typing this branch is
+            // never taken, saving an O(n) heap allocation per keystroke.
+            let session_text = ui.stacker.editor.text();
+            llnzy::stacker_input_client::utf16_pair_to_selection(session_text, pair)
+        } else {
+            ui.stacker.editor.selection()
         };
-        let selection = StackerSelection {
-            start: llnzy::stacker_native_view::utf16_index_to_char_index(&text, utf16_start),
-            end: llnzy::stacker_native_view::utf16_index_to_char_index(&text, utf16_end),
-        };
+        ui.stacker.editor.unmark_text();
+        let cursor_after = target.sorted().start + text.chars().count();
+        ui.stacker
+            .editor
+            .replace_range(target, &text, StackerSelection::collapsed(cursor_after));
+        store_stacker_selection(ui, ui.stacker.editor.selection());
+        ui.stacker
+            .draft
+            .record_current_text(ui.stacker.editor.text());
+        llnzy::external_input_trace::trace("stacker.input_client_insert", || {
+            format!(
+                "chars={}, cursor={cursor_after}",
+                ui.stacker.editor.text().chars().count()
+            )
+        });
+        self.request_redraw();
+    }
 
-        match kind {
-            "textChanged" => {
-                let changed = ui
-                    .stacker
-                    .editor
-                    .replace_all_with_history(text.clone(), selection);
-                store_stacker_native_selection(ui, selection);
+    #[cfg(target_os = "macos")]
+    fn apply_stacker_input_client_set_marked_text(
+        &mut self,
+        text: String,
+        marked_internal_utf16: (usize, usize),
+        replacement_utf16: Option<(usize, usize)>,
+    ) {
+        llnzy::external_input_trace::trace("stacker.set_marked_text_entry", || {
+            format!(
+                "text={:?}, internal={:?}, replacement={:?}",
+                text, marked_internal_utf16, replacement_utf16
+            )
+        });
+        if self.stacker_tab_in_active_context().is_none() {
+            return;
+        }
+        let Some(ui) = &mut self.ui else { return };
+
+        let replacement = replacement_utf16.map(|pair| {
+            // Borrow only when needed; avoids an O(n) alloc on the common path.
+            llnzy::stacker_input_client::utf16_pair_to_selection(
+                ui.stacker.editor.text(),
+                pair,
+            )
+        });
+
+        // The internal selection's UTF-16 indices are relative to the new
+        // marked text, so resolve against `text` itself.
+        let internal =
+            llnzy::stacker_input_client::utf16_pair_to_selection(&text, marked_internal_utf16);
+
+        ui.stacker
+            .editor
+            .set_marked_text(&text, internal, replacement);
+        store_stacker_selection(ui, ui.stacker.editor.selection());
+        ui.stacker
+            .draft
+            .record_current_text(ui.stacker.editor.text());
+        llnzy::external_input_trace::trace("stacker.input_client_set_marked", || {
+            format!(
+                "marked_chars={}, internal={}..{}",
+                text.chars().count(),
+                internal.start,
+                internal.end
+            )
+        });
+        self.request_redraw();
+    }
+
+    #[cfg(target_os = "macos")]
+    fn apply_stacker_input_client_unmark_text(&mut self) {
+        let Some(ui) = &mut self.ui else { return };
+        ui.stacker.editor.unmark_text();
+        self.request_redraw();
+    }
+
+    #[cfg(target_os = "macos")]
+    fn apply_stacker_input_client_do_command(&mut self, selector_name: &str) {
+        llnzy::external_input_trace::trace("stacker.do_command_entry", || {
+            selector_name.to_string()
+        });
+        if self.stacker_tab_in_active_context().is_none() {
+            return;
+        }
+        let Some(ui) = &mut self.ui else { return };
+        let selection = ui.stacker.editor.selection();
+
+        let handled = match selector_name {
+            "insertNewline:" | "insertLineBreak:" | "insertParagraphSeparator:" => {
                 ui.stacker
-                    .draft
-                    .record_current_text(ui.stacker.editor.text().to_string());
-                if let Some(view) = &mut self.stacker_native_view {
-                    view.note_view_document(ui.stacker.editor.text(), selection);
-                }
-                if changed {
-                    llnzy::external_input_trace::trace("stacker.native_text_changed", || {
-                        format!("chars={}", ui.stacker.editor.text().chars().count())
-                    });
-                }
-                self.request_redraw();
+                    .editor
+                    .replace_range(selection, "\n", StackerSelection::collapsed(0));
                 true
             }
-            "selectionChanged" | "focus" => {
-                store_stacker_native_selection(ui, selection);
-                if let Some(view) = &mut self.stacker_native_view {
-                    view.note_view_document(ui.stacker.editor.text(), selection);
-                }
+            "deleteBackward:" => {
+                ui.stacker.editor.delete_backward(selection);
                 true
             }
-            "pointerDown" => {
-                self.stacker_native_view_pending_focus = true;
-                self.request_redraw();
+            "deleteForward:" => {
+                ui.stacker.editor.delete_forward(selection);
                 true
             }
-            _ => false,
+            "selectAll:" => {
+                ui.stacker.editor.select_all();
+                true
+            }
+            "moveLeft:" => {
+                let next = selection.sorted().start.saturating_sub(1);
+                ui.stacker
+                    .editor
+                    .set_selection(StackerSelection::collapsed(next));
+                true
+            }
+            "moveRight:" => {
+                let next = selection
+                    .sorted()
+                    .end
+                    .saturating_add(1)
+                    .min(ui.stacker.editor.char_count());
+                ui.stacker
+                    .editor
+                    .set_selection(StackerSelection::collapsed(next));
+                true
+            }
+            other => {
+                llnzy::external_input_trace::trace(
+                    "stacker.input_client_unhandled_selector",
+                    || other.to_string(),
+                );
+                false
+            }
+        };
+
+        if handled {
+            store_stacker_selection(ui, ui.stacker.editor.selection());
+            ui.stacker
+                .draft
+                .record_current_text(ui.stacker.editor.text());
+            self.request_redraw();
         }
     }
 
@@ -639,7 +750,7 @@ fn rect_contains(rect: llnzy::session::Rect, x: f32, y: f32) -> bool {
 }
 
 #[cfg(target_os = "macos")]
-fn store_stacker_native_selection(ui: &mut UiState, selection: StackerSelection) {
+fn store_stacker_selection(ui: &mut UiState, selection: StackerSelection) {
     let editor_id = egui::Id::new(STACKER_PROMPT_EDITOR_ID);
     let ctx = ui.ctx.clone();
     stacker_cursor::store_document_selection(&ctx, editor_id, &mut ui.stacker.editor, selection);

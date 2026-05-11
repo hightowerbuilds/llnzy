@@ -252,6 +252,14 @@ impl ApplicationHandler<UserEvent> for App {
                             window.set_ime_allowed(true);
                         }
                     }
+                    // If the window just regained focus while a Stacker pane
+                    // is the active text-input target, the macOS first
+                    // responder may have drifted back to the winit content
+                    // view. Schedule a re-claim on the next frame's sync.
+                    #[cfg(target_os = "macos")]
+                    if self.stacker_visible_in_active_context() {
+                        self.stacker_pending_focus = true;
+                    }
                     self.request_redraw();
                 }
             }
@@ -498,10 +506,22 @@ impl ApplicationHandler<UserEvent> for App {
                 {
                     match key_event.logical_key {
                         Key::Named(NamedKey::Backspace) => {
-                            self.delete_stacker_editor_backward();
+                            llnzy::external_input_trace::trace(
+                                "stacker.winit_backspace",
+                                || "winit Backspace path fired".to_string(),
+                            );
+                            let handled = self.delete_stacker_editor_backward();
+                            llnzy::external_input_trace::trace(
+                                "stacker.winit_backspace",
+                                || format!("handled={handled}"),
+                            );
                             return;
                         }
                         Key::Named(NamedKey::Delete) => {
+                            llnzy::external_input_trace::trace(
+                                "stacker.winit_delete",
+                                || "winit Delete path fired".to_string(),
+                            );
                             self.delete_stacker_editor_forward();
                             return;
                         }
@@ -509,6 +529,13 @@ impl ApplicationHandler<UserEvent> for App {
                     }
                 }
 
+                // On macOS the NSTextInputClient subview owns text input for
+                // Stacker (insertText: / setMarkedText: drive the session).
+                // Routing key_event.text into the editor here would double
+                // every keystroke, because AppKit's interpretKeyEvents:
+                // dispatches insertText: on the subview in parallel with
+                // winit's keyboard event.
+                #[cfg(not(target_os = "macos"))]
                 if let Some(ref text) = key_event.text {
                     let s = text.as_str();
                     if !s.is_empty()
@@ -558,6 +585,11 @@ impl ApplicationHandler<UserEvent> for App {
             // IME (input method) events — handles composed text from
             // non-US keyboards, dead keys, and CJK input methods.
             WindowEvent::Ime(ime) => {
+                // On macOS the NSTextInputClient subview owns IME composition
+                // (setMarkedText: / unmarkText). Writing winit's Ime::Commit
+                // text here would land a second copy after AppKit already
+                // committed the marked range into the session.
+                #[cfg(not(target_os = "macos"))]
                 if let Ime::Commit(text) = &ime {
                     if self.append_text_to_stacker_editor(text) {
                         llnzy::external_input_trace::trace("stacker.ime_commit", || {

@@ -1,7 +1,6 @@
 pub(super) const S: f32 = 14.0;
 pub(super) const MIN_EDITOR_FONT_SIZE: f32 = 12.0;
 pub(super) const MAX_EDITOR_FONT_SIZE: f32 = 24.0;
-pub(super) const ATKINSON: &str = "Atkinson Hyperlegible";
 pub(super) const MUTED: egui::Color32 = egui::Color32::from_rgb(130, 130, 145);
 pub(super) const HEADING_COLOR: egui::Color32 = egui::Color32::from_rgb(200, 200, 210);
 pub(super) const DIM: egui::Color32 = egui::Color32::from_rgb(90, 92, 105);
@@ -16,10 +15,6 @@ pub(super) const EDITOR_BOTTOM_GAP: f32 = 20.0;
 
 pub(super) fn small(text: &str) -> egui::RichText {
     egui::RichText::new(text).size(S)
-}
-
-pub(super) fn stacker_editor_font(font_size: f32) -> egui::FontId {
-    egui::FontId::new(font_size, egui::FontFamily::Name(ATKINSON.into()))
 }
 
 pub(super) fn header_label(text: &str) -> egui::Label {

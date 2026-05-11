@@ -1,4 +1,4 @@
-use crate::stacker::{document::StackerDocumentEditor, input::StackerSelection};
+use crate::stacker::{input::StackerSelection, session::StackerSession};
 
 /// Clamp a Stacker character cursor to the current document length.
 pub fn clamp_cursor(cursor: usize, char_count: usize) -> usize {
@@ -112,7 +112,7 @@ pub fn store_text_edit_cursor(
 pub fn store_document_selection(
     ctx: &egui::Context,
     editor_id: egui::Id,
-    editor: &mut StackerDocumentEditor,
+    editor: &mut StackerSession,
     selection: StackerSelection,
 ) -> StackerSelection {
     let selection = clamp_selection(selection, editor.char_count());
@@ -124,12 +124,32 @@ pub fn store_document_selection(
 pub fn store_document_cursor(
     ctx: &egui::Context,
     editor_id: egui::Id,
-    editor: &mut StackerDocumentEditor,
+    editor: &mut StackerSession,
     cursor: usize,
 ) -> usize {
     let cursor = clamp_cursor(cursor, editor.char_count());
     editor.set_selection(StackerSelection::collapsed(cursor));
     store_text_edit_cursor(ctx, editor_id, cursor, editor.char_count())
+}
+
+/// Mirror a selection into egui's TextEdit memory cache without grabbing
+/// focus or requesting a repaint. Used after the editor view's prose
+/// render path moves the cursor (mouse drag), so toolbar formatting
+/// commands that read selection via `current_selection` see the latest
+/// position. Unlike `store_text_edit_selection`, this is safe to call
+/// every frame because it does not request focus.
+pub fn mirror_selection_to_text_edit_cache(
+    ctx: &egui::Context,
+    editor_id: egui::Id,
+    selection: StackerSelection,
+    char_count: usize,
+) {
+    let selection = clamp_selection(selection, char_count);
+    let mut state = egui::text_edit::TextEditState::load(ctx, editor_id).unwrap_or_default();
+    state
+        .cursor
+        .set_char_range(Some(cursor_range_from_selection(selection)));
+    state.store(ctx, editor_id);
 }
 
 /// Reset egui's cached TextEdit cursor state and focus the editor.

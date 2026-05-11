@@ -1,5 +1,13 @@
 # Stacker Native Input Roadmap
 
+> **Superseded 2026-05-10** by
+> `daily-growth/roadmaps/stacker-final-stretch.md`. Phases 1, 2, and 4
+> of this plan shipped (commits through `517b37b`); Phase 3 was largely
+> skipped — Phase 4's `NSTextInputClient` shipped on top of the bespoke
+> `editor_paint` instead of the editor renderer. The Final Stretch
+> roadmap captures the actual remaining work and was completed
+> 2026-05-10. Kept here for historical context only.
+
 Date: 2026-05-09
 
 This document plans the path from the current WebView-backed Stacker editor to

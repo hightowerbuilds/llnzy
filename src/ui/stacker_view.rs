@@ -1,5 +1,8 @@
+use crate::config::Config;
+use crate::editor::syntax::SyntaxEngine;
+use crate::editor::BufferView;
 use crate::stacker::{
-    document::StackerDocumentEditor, draft::StackerDraft, queue::QueuedPrompt, StackerPrompt,
+    draft::StackerDraft, queue::QueuedPrompt, session::StackerSession, StackerPrompt,
 };
 
 use super::{
@@ -25,7 +28,7 @@ pub(crate) fn render_stacker_view(
     ui: &mut egui::Ui,
     prompts: &mut Vec<StackerPrompt>,
     inbox_prompts: &mut Vec<StackerPrompt>,
-    editor: &mut StackerDocumentEditor,
+    editor: &mut StackerSession,
     draft: &mut StackerDraft,
     pending_switch: &mut Option<PendingStackerDraftSwitch>,
     pending_delete: &mut Option<PendingStackerPromptDelete>,
@@ -34,11 +37,16 @@ pub(crate) fn render_stacker_view(
     dirty: &mut bool,
     _saved_edit_idx: &mut Option<usize>,
     editor_font_size: &mut f32,
-    web_editor_rect: &mut Option<egui::Rect>,
+    prompt_editor_rect: &mut Option<egui::Rect>,
+    prompt_editor_anchor: &mut Option<(std::sync::Arc<egui::Galley>, egui::Pos2)>,
     queued_prompts: &mut Vec<QueuedPrompt>,
     prompt_view_mode: &mut StackerPromptViewMode,
+    config: &Config,
+    prose_view: &mut BufferView,
+    prose_syntax: &SyntaxEngine,
 ) {
-    *web_editor_rect = None;
+    *prompt_editor_rect = None;
+    *prompt_editor_anchor = None;
 
     if let Some(idx) = *editing {
         if idx >= prompts.len() {
@@ -130,7 +138,11 @@ pub(crate) fn render_stacker_view(
         editing,
         dirty,
         editor_font_size,
-        web_editor_rect,
+        prompt_editor_rect,
+        prompt_editor_anchor,
+        config,
+        prose_view,
+        prose_syntax,
     );
 
     modals::render_discard_draft_modal(

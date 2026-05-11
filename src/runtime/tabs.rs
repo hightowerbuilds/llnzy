@@ -408,7 +408,7 @@ impl App {
             if matches!(self.tabs[idx].content, TabContent::Stacker) {
                 #[cfg(target_os = "macos")]
                 {
-                    self.stacker_native_view_pending_focus = true;
+                    self.stacker_pending_focus = true;
                 }
             }
             self.sync_active_tab_content();

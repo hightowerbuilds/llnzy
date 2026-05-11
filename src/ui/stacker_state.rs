@@ -1,11 +1,13 @@
 use super::stacker_view;
 use super::types::CopyGhost;
+use crate::editor::{syntax::SyntaxEngine, BufferView};
 use crate::stacker::{
-    document::StackerDocumentEditor,
     draft::StackerDraft,
     load_inbox_prompts, load_saved_prompts, load_stacker_queue, persist_prompt_library,
     queue::{self, QueuedPrompt},
-    save_stacker_queue, StackerPrompt,
+    save_stacker_queue,
+    session::StackerSession,
+    StackerPrompt,
 };
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::path::PathBuf;
@@ -50,7 +52,7 @@ impl StackerPromptViewMode {
 pub struct StackerUiState {
     pub prompts: Vec<StackerPrompt>,
     pub inbox_prompts: Vec<StackerPrompt>,
-    pub editor: StackerDocumentEditor,
+    pub editor: StackerSession,
     pub draft: StackerDraft,
     pub pending_draft_switch: Option<PendingStackerDraftSwitch>,
     pub pending_prompt_delete: Option<PendingStackerPromptDelete>,
@@ -59,9 +61,15 @@ pub struct StackerUiState {
     pub dirty: bool,
     pub copy_ghosts: Vec<CopyGhost>,
     pub editor_font_size: f32,
-    pub web_editor_rect: Option<egui::Rect>,
+    pub prompt_editor_rect: Option<egui::Rect>,
+    pub prompt_editor_anchor: Option<(std::sync::Arc<egui::Galley>, egui::Pos2)>,
     pub queued_prompts: Vec<QueuedPrompt>,
     pub prompt_view_mode: StackerPromptViewMode,
+    /// Cursor / scroll / folding state for the prose editor view.
+    /// `git_gutter` stays `None` so no git markers ever render.
+    pub prose_view: BufferView,
+    /// Empty syntax engine — prose mode never loads grammars.
+    pub prose_syntax: SyntaxEngine,
     last_persisted_prompts: Vec<StackerPrompt>,
     last_persisted_queue: Vec<QueuedPrompt>,
     inbox_watcher: Option<StackerInboxWatcher>,
@@ -73,7 +81,7 @@ impl Default for StackerUiState {
         Self {
             prompts: Vec::new(),
             inbox_prompts: Vec::new(),
-            editor: StackerDocumentEditor::new(),
+            editor: StackerSession::new(),
             draft: StackerDraft::new(),
             pending_draft_switch: None,
             pending_prompt_delete: None,
@@ -82,9 +90,12 @@ impl Default for StackerUiState {
             dirty: false,
             copy_ghosts: Vec::new(),
             editor_font_size: stacker_view::DEFAULT_EDITOR_FONT_SIZE,
-            web_editor_rect: None,
+            prompt_editor_rect: None,
+            prompt_editor_anchor: None,
             queued_prompts: Vec::new(),
             prompt_view_mode: StackerPromptViewMode::List,
+            prose_view: BufferView::default(),
+            prose_syntax: SyntaxEngine::new(),
             last_persisted_prompts: Vec::new(),
             last_persisted_queue: Vec::new(),
             inbox_watcher: None,

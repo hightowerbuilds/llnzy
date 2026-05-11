@@ -41,11 +41,13 @@ impl StackerDraft {
         self.current_text = text;
     }
 
-    pub fn record_current_text(&mut self, text: impl Into<String>) -> bool {
-        let text = text.into();
-        let changed = self.current_text != text;
-        self.current_text = text;
-        changed
+    pub fn record_current_text(&mut self, text: &str) -> bool {
+        if self.current_text == text {
+            return false;
+        }
+        self.current_text.clear();
+        self.current_text.push_str(text);
+        true
     }
 
     pub fn is_dirty(&self) -> bool {

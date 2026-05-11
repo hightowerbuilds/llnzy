@@ -1,7 +1,7 @@
 use super::{
-    document::StackerDocumentEditor,
     formatting::{apply_list_prefix, char_to_byte_idx, ListButtonKind},
     input::StackerSelection,
+    session::StackerSession,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -158,14 +158,14 @@ pub struct StackerCommandOutcome {
 }
 
 pub fn execute_stacker_command(
-    editor: &mut StackerDocumentEditor,
+    editor: &mut StackerSession,
     command: StackerEditorCommand,
 ) -> StackerCommandOutcome {
     execute_stacker_command_at(editor, editor.selection(), command)
 }
 
 pub fn execute_stacker_command_at(
-    editor: &mut StackerDocumentEditor,
+    editor: &mut StackerSession,
     selection: StackerSelection,
     command: StackerEditorCommand,
 ) -> StackerCommandOutcome {
@@ -217,7 +217,7 @@ pub fn execute_stacker_command_at(
 }
 
 fn wrap_selection(
-    editor: &mut StackerDocumentEditor,
+    editor: &mut StackerSession,
     selection: StackerSelection,
     prefix: &str,
     suffix: &str,
@@ -249,7 +249,7 @@ fn wrap_selection(
 }
 
 fn apply_list(
-    editor: &mut StackerDocumentEditor,
+    editor: &mut StackerSession,
     selection: StackerSelection,
     kind: ListButtonKind,
 ) -> StackerCommandOutcome {
@@ -265,7 +265,7 @@ fn apply_list(
 }
 
 fn apply_line_prefix(
-    editor: &mut StackerDocumentEditor,
+    editor: &mut StackerSession,
     selection: StackerSelection,
     prefix: &str,
 ) -> StackerCommandOutcome {
@@ -376,8 +376,8 @@ fn char_at(text: &str, char_idx: usize) -> Option<char> {
 mod tests {
     use super::*;
 
-    fn editor_with(text: &str, selection: StackerSelection) -> StackerDocumentEditor {
-        let mut editor = StackerDocumentEditor::new();
+    fn editor_with(text: &str, selection: StackerSelection) -> StackerSession {
+        let mut editor = StackerSession::new();
         editor.set_text(text);
         editor.set_selection(selection);
         editor

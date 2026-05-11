@@ -63,7 +63,7 @@ impl App {
         self.window = Some(window);
         self.renderer = Some(renderer);
         self.ui = Some(ui_state);
-        self.create_stacker_native_view();
+        self.create_stacker_input_client();
         self.restore_last_session();
         if self.tabs.is_empty() {
             self.open_singleton_tab(llnzy::workspace::TabKind::Home);

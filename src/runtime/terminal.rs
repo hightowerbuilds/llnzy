@@ -155,7 +155,7 @@ impl App {
         store_stacker_cursor(ui, outcome.cursor);
         ui.stacker
             .draft
-            .record_current_text(ui.stacker.editor.text().to_string());
+            .record_current_text(ui.stacker.editor.text());
         self.request_redraw();
         true
     }

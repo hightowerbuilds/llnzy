@@ -66,7 +66,7 @@ pub(super) fn render_tab_content(input: TabContentRenderInput<'_>) {
 
     match active_tab_kind {
         Some(TabKind::Home) => render_home(ctx, state),
-        Some(TabKind::Stacker) => render_stacker(ctx, state),
+        Some(TabKind::Stacker) => render_stacker(ctx, config, state),
         Some(TabKind::CodeFile) => {
             if let Some(buffer_id) = tab_panes
                 .get(active_tab_index)
@@ -280,9 +280,13 @@ fn render_joined_pane(
                     &mut state.stacker.dirty,
                     state.saved_edit_idx,
                     &mut state.stacker.editor_font_size,
-                    &mut state.stacker.web_editor_rect,
+                    &mut state.stacker.prompt_editor_rect,
+                    &mut state.stacker.prompt_editor_anchor,
                     &mut state.stacker.queued_prompts,
                     &mut state.stacker.prompt_view_mode,
+                    config,
+                    &mut state.stacker.prose_view,
+                    &state.stacker.prose_syntax,
                 );
             });
         }
@@ -388,7 +392,7 @@ fn render_home(ctx: &egui::Context, state: TabContentState<'_>) {
     }
 }
 
-fn render_stacker(ctx: &egui::Context, state: TabContentState<'_>) {
+fn render_stacker(ctx: &egui::Context, config: &Config, state: TabContentState<'_>) {
     egui::CentralPanel::default()
         .frame(content_frame(egui::Color32::from_rgb(36, 36, 36), 0.0))
         .show(ctx, |ui| {
@@ -405,9 +409,13 @@ fn render_stacker(ctx: &egui::Context, state: TabContentState<'_>) {
                 &mut state.stacker.dirty,
                 state.saved_edit_idx,
                 &mut state.stacker.editor_font_size,
-                &mut state.stacker.web_editor_rect,
+                &mut state.stacker.prompt_editor_rect,
+                &mut state.stacker.prompt_editor_anchor,
                 &mut state.stacker.queued_prompts,
                 &mut state.stacker.prompt_view_mode,
+                config,
+                &mut state.stacker.prose_view,
+                &state.stacker.prose_syntax,
             );
         });
 }
