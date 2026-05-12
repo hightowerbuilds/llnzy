@@ -35,7 +35,14 @@ cargo check --manifest-path spikes/gpui_foundation/Cargo.toml
 - `cargo check --manifest-path spikes/gpui_foundation/Cargo.toml`
 - `cargo run --manifest-path spikes/gpui_foundation/Cargo.toml`
 
-The current spike includes a basic app shell, Explorer-like list, custom-painted panel, and focused text input field.
+The current spike includes a basic app shell, Explorer-like list, custom-painted panel, focused text input field, and simple click feedback for tabs/sidebar rows.
+
+Initial manual finding:
+
+- Typing works well.
+- Wispr Flow input works well.
+- Mouse click/focus works in the text input.
+- Tab/sidebar click feedback is not yet reliable; this is shell-chrome behavior and does not block the Stacker text-input proof.
 
 ## Still Open
 
@@ -61,6 +68,8 @@ Checklist:
 - [ ] Copy, cut, and paste with Cmd+C/Cmd+X/Cmd+V.
 - [ ] Click to move the cursor.
 - [ ] Drag to select text.
+- [ ] Click tabs and confirm the active tab label/background changes. Not blocking for Stacker text-input proof.
+- [ ] Click sidebar rows and confirm the selected file label/background changes. Not blocking for Stacker text-input proof.
 - [ ] Use macOS dictation or Wispr-style input.
 - [ ] Use an IME/composition input method and confirm marked text appears correctly.
 - [ ] Resize the window and confirm the input field remains usable.

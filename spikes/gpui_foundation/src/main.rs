@@ -34,6 +34,10 @@ struct FoundationSpike {
     prompt_input: Entity<TextInput>,
     tabs: Vec<&'static str>,
     files: Vec<String>,
+    active_tab: usize,
+    selected_file: usize,
+    click_count: usize,
+    last_click: SharedString,
 }
 
 impl FoundationSpike {
@@ -58,12 +62,16 @@ impl FoundationSpike {
             prompt_input,
             tabs,
             files,
+            active_tab: 1,
+            selected_file: 0,
+            click_count: 0,
+            last_click: "No mouse click recorded".into(),
         }
     }
 }
 
 impl Render for FoundationSpike {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .size_full()
             .bg(rgb(0x101014))
@@ -74,21 +82,31 @@ impl Render for FoundationSpike {
                     .size_full()
                     .flex()
                     .flex_col()
-                    .child(top_bar(&self.tabs))
+                    .child(top_bar(&self.tabs, self.active_tab, cx))
                     .child(
                         div()
                             .flex()
                             .flex_1()
-                            .child(sidebar(&self.files))
-                            .child(main_pane(self.prompt_input.clone())),
+                            .child(sidebar(&self.files, self.selected_file, cx))
+                            .child(main_pane(
+                                self.prompt_input.clone(),
+                                self.tabs[self.active_tab],
+                                self.files[self.selected_file].clone(),
+                                self.click_count,
+                                self.last_click.clone(),
+                            )),
                     )
-                    .child(footer()),
+                    .child(footer(self.click_count, self.last_click.clone())),
             )
     }
 }
 
-fn top_bar(tabs: &[&'static str]) -> impl IntoElement {
-    tabs.iter().fold(
+fn top_bar(
+    tabs: &[&'static str],
+    active_tab: usize,
+    cx: &mut Context<FoundationSpike>,
+) -> impl IntoElement {
+    tabs.iter().enumerate().fold(
         div()
             .h(px(42.0))
             .w_full()
@@ -106,7 +124,12 @@ fn top_bar(tabs: &[&'static str]) -> impl IntoElement {
                     .mr_2()
                     .child("LLNZY GPUI Spike"),
             ),
-        |bar, tab| {
+        |bar, (ix, tab)| {
+            let bg = if ix == active_tab {
+                rgb(0x365177)
+            } else {
+                rgb(0x232331)
+            };
             bar.child(
                 div()
                     .h(px(28.0))
@@ -114,30 +137,64 @@ fn top_bar(tabs: &[&'static str]) -> impl IntoElement {
                     .flex()
                     .items_center()
                     .rounded_md()
-                    .bg(rgb(0x232331))
+                    .bg(bg)
                     .text_size(px(13.0))
+                    .cursor_pointer()
+                    .on_mouse_up(
+                        MouseButton::Left,
+                        cx.listener(move |this, _: &MouseUpEvent, _, cx| {
+                            this.active_tab = ix;
+                            this.click_count += 1;
+                            this.last_click = format!("Clicked tab: {}", this.tabs[ix]).into();
+                            cx.notify();
+                        }),
+                    )
                     .child(*tab),
             )
         },
     )
 }
 
-fn sidebar(files: &[String]) -> impl IntoElement {
-    let list = files
-        .iter()
-        .fold(div().flex().flex_col().gap_1().p_2(), |list, file| {
-            list.child(
-                div()
-                    .h(px(24.0))
-                    .flex()
-                    .items_center()
-                    .px_2()
-                    .rounded_sm()
-                    .text_size(px(12.0))
-                    .text_color(rgb(0xbfc1cc))
-                    .child(file.clone()),
-            )
-        });
+fn sidebar(
+    files: &[String],
+    selected_file: usize,
+    cx: &mut Context<FoundationSpike>,
+) -> impl IntoElement {
+    let list =
+        files
+            .iter()
+            .enumerate()
+            .fold(div().flex().flex_col().gap_1().p_2(), |list, file| {
+                let (ix, file) = file;
+                let bg = if ix == selected_file {
+                    rgb(0x26384f)
+                } else {
+                    rgb(0x15151c)
+                };
+                list.child(
+                    div()
+                        .h(px(24.0))
+                        .flex()
+                        .items_center()
+                        .px_2()
+                        .rounded_sm()
+                        .text_size(px(12.0))
+                        .text_color(rgb(0xbfc1cc))
+                        .bg(bg)
+                        .cursor_pointer()
+                        .on_mouse_up(
+                            MouseButton::Left,
+                            cx.listener(move |this, _: &MouseUpEvent, _, cx| {
+                                this.selected_file = ix;
+                                this.click_count += 1;
+                                this.last_click =
+                                    format!("Clicked file: {}", this.files[ix]).into();
+                                cx.notify();
+                            }),
+                        )
+                        .child(file.clone()),
+                )
+            });
 
     div()
         .w(px(240.0))
@@ -160,7 +217,13 @@ fn sidebar(files: &[String]) -> impl IntoElement {
         .child(div().flex_1().overflow_hidden().child(list))
 }
 
-fn main_pane(prompt_input: Entity<TextInput>) -> impl IntoElement {
+fn main_pane(
+    prompt_input: Entity<TextInput>,
+    active_tab: &'static str,
+    selected_file: String,
+    click_count: usize,
+    last_click: SharedString,
+) -> impl IntoElement {
     div()
         .flex_1()
         .h_full()
@@ -175,7 +238,9 @@ fn main_pane(prompt_input: Entity<TextInput>) -> impl IntoElement {
                 .px_4()
                 .text_size(px(12.0))
                 .text_color(rgb(0x8f94a3))
-                .child("Custom render host placeholder"),
+                .child(format!(
+                    "Active tab: {active_tab} | Selected file: {selected_file} | Clicks: {click_count}"
+                )),
         )
         .child(
             div().px_4().pt_4().child(
@@ -192,6 +257,13 @@ fn main_pane(prompt_input: Entity<TextInput>) -> impl IntoElement {
                             .text_size(px(12.0))
                             .text_color(rgb(0x8f94a3))
                             .child("Stacker text input proof"),
+                    )
+                    .child(
+                        div()
+                            .mb_2()
+                            .text_size(px(12.0))
+                            .text_color(rgb(0xbfc1cc))
+                            .child(last_click.clone()),
                     )
                     .child(prompt_input),
             ),
@@ -232,7 +304,7 @@ fn main_pane(prompt_input: Entity<TextInput>) -> impl IntoElement {
         )
 }
 
-fn footer() -> impl IntoElement {
+fn footer(click_count: usize, last_click: SharedString) -> impl IntoElement {
     div()
         .h(px(34.0))
         .w_full()
@@ -245,8 +317,9 @@ fn footer() -> impl IntoElement {
         .bg(rgb(0x181820))
         .text_size(px(12.0))
         .text_color(rgb(0x9ea3b3))
-        .child("Phase 0")
+        .child(format!("Phase 0 | Mouse clicks: {click_count}"))
         .child("Pinned gpui = 0.2.2 + macos-blade")
+        .child(last_click)
 }
 
 fn main() {
@@ -377,9 +450,10 @@ impl TextInput {
     fn on_mouse_down(
         &mut self,
         event: &MouseDownEvent,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        window.focus(&self.focus_handle);
         self.is_selecting = true;
         if event.modifiers.shift {
             self.select_to(self.index_for_mouse_position(event.position), cx);
