@@ -9,6 +9,8 @@ pub mod explorer;
 pub mod external_command;
 pub mod external_input_trace;
 pub mod git;
+#[cfg(feature = "gpui-stacker")]
+pub mod gpui_stacker;
 pub mod input;
 pub mod keybindings;
 pub mod layout;

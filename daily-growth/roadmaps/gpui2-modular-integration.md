@@ -72,6 +72,7 @@ git push -u origin spike/gpui-foundation
 - [ ] Extract or adapt Stacker state so it can be used by both the current app and the GPUI prototype.
 - [ ] Build a GPUI Stacker window/surface with prompt editing, saved prompts, queue controls, search, and copy behavior.
 - [ ] Replace custom text-input handling in the prototype with GPUI-native text components where possible.
+- [ ] Implement multiline prompt layout; the first GPUI prototype renders newlines as spaces because `shape_line` is single-line only.
 - [ ] Validate dictation, IME, multiline editing, selection, undo/redo, and clipboard workflows.
 - [ ] Compare typing latency and interaction behavior against the current egui/AppKit bridge implementation.
 

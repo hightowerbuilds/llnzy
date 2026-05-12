@@ -3,6 +3,10 @@ name = "llnzy"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = []
+gpui-stacker = ["dep:gpui"]
+
 [dependencies]
 winit = "0.30"
 wgpu = "22"
@@ -47,6 +51,12 @@ notify = "7"
 rustc-hash = "2"
 ulid = "1"
 sha2 = "0.10"
+gpui = { version = "=0.2.2", optional = true, features = ["macos-blade"] }
+
+[[bin]]
+name = "gpui-stacker"
+path = "src/bin/gpui_stacker.rs"
+required-features = ["gpui-stacker"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
