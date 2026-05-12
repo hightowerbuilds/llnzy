@@ -1,0 +1,8 @@
+[package]
+name = "gpui_foundation_spike"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+gpui = "=0.2.2"
