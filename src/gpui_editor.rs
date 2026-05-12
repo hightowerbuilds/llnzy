@@ -19,6 +19,9 @@ actions!(
     [
         Backspace,
         Delete,
+        Enter,
+        Tab,
+        ShiftTab,
         Left,
         Right,
         Up,
@@ -37,6 +40,7 @@ actions!(
         Paste,
         Cut,
         Copy,
+        Save,
         Undo,
         Redo,
         Quit
@@ -49,6 +53,9 @@ pub fn run_editor_prototype() {
         cx.bind_keys([
             KeyBinding::new("backspace", Backspace, None),
             KeyBinding::new("delete", Delete, None),
+            KeyBinding::new("enter", Enter, None),
+            KeyBinding::new("tab", Tab, None),
+            KeyBinding::new("shift-tab", ShiftTab, None),
             KeyBinding::new("left", Left, None),
             KeyBinding::new("right", Right, None),
             KeyBinding::new("up", Up, None),
@@ -67,6 +74,7 @@ pub fn run_editor_prototype() {
             KeyBinding::new("cmd-v", Paste, None),
             KeyBinding::new("cmd-c", Copy, None),
             KeyBinding::new("cmd-x", Cut, None),
+            KeyBinding::new("cmd-s", Save, None),
             KeyBinding::new("cmd-z", Undo, None),
             KeyBinding::new("cmd-shift-z", Redo, None),
         ]);
@@ -97,6 +105,7 @@ struct EditorPrototype {
     load_error: Option<String>,
     sample_text: String,
     sample_scroll_line: usize,
+    status_message: Option<String>,
     last_text_bounds: Option<Bounds<gpui::Pixels>>,
     is_selecting: bool,
 }
@@ -122,6 +131,7 @@ impl EditorPrototype {
             load_error,
             sample_text: sample_text(),
             sample_scroll_line: 0,
+            status_message: None,
             last_text_bounds: None,
             is_selecting: false,
         }
@@ -158,6 +168,7 @@ impl EditorPrototype {
                 selection: view.cursor.selection(),
                 total_lines: line_count,
                 load_error: self.load_error.clone(),
+                status_message: self.status_message.clone(),
                 sample: false,
             };
         }
@@ -181,6 +192,7 @@ impl EditorPrototype {
             selection: None,
             total_lines: self.sample_text.lines().count().max(1),
             load_error: self.load_error.clone(),
+            status_message: self.status_message.clone(),
             sample: true,
         }
     }
@@ -444,6 +456,54 @@ impl EditorPrototype {
         });
     }
 
+    fn enter(&mut self, _: &Enter, _: &mut Window, cx: &mut Context<Self>) {
+        self.edit_active(cx, |buffer, view| {
+            if let Some((start, end)) = view.cursor.selection() {
+                buffer.delete(start, end);
+                view.cursor.pos = start;
+                view.cursor.clear_selection();
+            }
+
+            let indent = buffer.line_indent(view.cursor.pos.line).to_string();
+            let text = format!("\n{indent}");
+            let new_pos = buffer.compute_end_pos_pub(view.cursor.pos, &text);
+            buffer.insert(view.cursor.pos, &text);
+            view.cursor.pos = new_pos;
+            view.cursor.desired_col = None;
+        });
+    }
+
+    fn tab(&mut self, _: &Tab, _: &mut Window, cx: &mut Context<Self>) {
+        self.edit_active(cx, |buffer, view| {
+            if let Some((start, end)) = view.cursor.selection() {
+                buffer.indent_lines(start.line, end.line);
+                view.cursor.anchor = Some(Position::new(start.line, 0));
+                view.cursor.pos = Position::new(end.line, buffer.line_len(end.line));
+            } else {
+                let indent = buffer.indent_style.as_str().to_string();
+                let new_pos = buffer.compute_end_pos_pub(view.cursor.pos, &indent);
+                buffer.insert(view.cursor.pos, &indent);
+                view.cursor.pos = new_pos;
+            }
+            view.cursor.desired_col = None;
+        });
+    }
+
+    fn shift_tab(&mut self, _: &ShiftTab, _: &mut Window, cx: &mut Context<Self>) {
+        self.edit_active(cx, |buffer, view| {
+            if let Some((start, end)) = view.cursor.selection() {
+                buffer.dedent_lines(start.line, end.line);
+                view.cursor.anchor = Some(Position::new(start.line, 0));
+                view.cursor.pos = Position::new(end.line, buffer.line_len(end.line));
+            } else {
+                let line = view.cursor.pos.line;
+                buffer.dedent_lines(line, line);
+                view.cursor.pos.col = view.cursor.pos.col.min(buffer.line_len(line));
+            }
+            view.cursor.desired_col = None;
+        });
+    }
+
     fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
         if let Some((buffer, view)) = self.active_buffer_and_view() {
             view.cursor.select_all(buffer);
@@ -472,6 +532,30 @@ impl EditorPrototype {
         if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
             self.replace_selection_or_range(cx, None, &text);
         }
+    }
+
+    fn save(&mut self, _: &Save, _: &mut Window, cx: &mut Context<Self>) {
+        let active = self.editor.active;
+        let Some(buffer) = self.editor.buffers.get_mut(active) else {
+            self.status_message = Some("No active buffer to save".to_string());
+            cx.notify();
+            return;
+        };
+
+        match buffer.save() {
+            Ok(()) => {
+                let label = buffer
+                    .path()
+                    .and_then(|path| path.file_name())
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| buffer.file_name().to_string());
+                self.status_message = Some(format!("Saved {label}"));
+            }
+            Err(err) => {
+                self.status_message = Some(format!("Save failed: {err}"));
+            }
+        }
+        cx.notify();
     }
 
     fn undo(&mut self, _: &Undo, _: &mut Window, cx: &mut Context<Self>) {
@@ -599,10 +683,14 @@ impl Render for EditorPrototype {
             .on_action(cx.listener(Self::select_end))
             .on_action(cx.listener(Self::backspace))
             .on_action(cx.listener(Self::delete))
+            .on_action(cx.listener(Self::enter))
+            .on_action(cx.listener(Self::tab))
+            .on_action(cx.listener(Self::shift_tab))
             .on_action(cx.listener(Self::select_all))
             .on_action(cx.listener(Self::paste))
             .on_action(cx.listener(Self::cut))
             .on_action(cx.listener(Self::copy))
+            .on_action(cx.listener(Self::save))
             .on_action(cx.listener(Self::undo))
             .on_action(cx.listener(Self::redo))
             .child(header())
@@ -988,8 +1076,9 @@ fn status_bar(snapshot: &EditorSnapshot) -> impl IntoElement {
         "EditorState active buffer".to_string()
     };
     let right = snapshot
-        .load_error
+        .status_message
         .clone()
+        .or_else(|| snapshot.load_error.clone())
         .unwrap_or_else(|| "terminal and app event loop untouched".to_string());
 
     div()
@@ -1055,6 +1144,7 @@ struct EditorSnapshot {
     selection: Option<(Position, Position)>,
     total_lines: usize,
     load_error: Option<String>,
+    status_message: Option<String>,
     sample: bool,
 }
 
