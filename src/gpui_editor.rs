@@ -50,35 +50,8 @@ actions!(
 
 pub fn run_editor_prototype() {
     Application::new().run(|cx: &mut App| {
+        bind_editor_keys(cx);
         cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
-        cx.bind_keys([
-            KeyBinding::new("backspace", Backspace, None),
-            KeyBinding::new("delete", Delete, None),
-            KeyBinding::new("enter", Enter, None),
-            KeyBinding::new("tab", Tab, None),
-            KeyBinding::new("shift-tab", ShiftTab, None),
-            KeyBinding::new("left", Left, None),
-            KeyBinding::new("right", Right, None),
-            KeyBinding::new("up", Up, None),
-            KeyBinding::new("down", Down, None),
-            KeyBinding::new("shift-left", SelectLeft, None),
-            KeyBinding::new("shift-right", SelectRight, None),
-            KeyBinding::new("shift-up", SelectUp, None),
-            KeyBinding::new("shift-down", SelectDown, None),
-            KeyBinding::new("home", Home, None),
-            KeyBinding::new("end", End, None),
-            KeyBinding::new("shift-home", SelectHome, None),
-            KeyBinding::new("shift-end", SelectEnd, None),
-            KeyBinding::new("pageup", PageUp, None),
-            KeyBinding::new("pagedown", PageDown, None),
-            KeyBinding::new("cmd-a", SelectAll, None),
-            KeyBinding::new("cmd-v", Paste, None),
-            KeyBinding::new("cmd-c", Copy, None),
-            KeyBinding::new("cmd-x", Cut, None),
-            KeyBinding::new("cmd-s", Save, None),
-            KeyBinding::new("cmd-z", Undo, None),
-            KeyBinding::new("cmd-shift-z", Redo, None),
-        ]);
 
         let bounds = Bounds::centered(None, size(px(1120.0), px(760.0)), cx);
         let window = cx
@@ -100,7 +73,38 @@ pub fn run_editor_prototype() {
     });
 }
 
-struct EditorPrototype {
+pub(crate) fn bind_editor_keys(cx: &mut App) {
+    cx.bind_keys([
+        KeyBinding::new("backspace", Backspace, None),
+        KeyBinding::new("delete", Delete, None),
+        KeyBinding::new("enter", Enter, None),
+        KeyBinding::new("tab", Tab, None),
+        KeyBinding::new("shift-tab", ShiftTab, None),
+        KeyBinding::new("left", Left, None),
+        KeyBinding::new("right", Right, None),
+        KeyBinding::new("up", Up, None),
+        KeyBinding::new("down", Down, None),
+        KeyBinding::new("shift-left", SelectLeft, None),
+        KeyBinding::new("shift-right", SelectRight, None),
+        KeyBinding::new("shift-up", SelectUp, None),
+        KeyBinding::new("shift-down", SelectDown, None),
+        KeyBinding::new("home", Home, None),
+        KeyBinding::new("end", End, None),
+        KeyBinding::new("shift-home", SelectHome, None),
+        KeyBinding::new("shift-end", SelectEnd, None),
+        KeyBinding::new("pageup", PageUp, None),
+        KeyBinding::new("pagedown", PageDown, None),
+        KeyBinding::new("cmd-a", SelectAll, None),
+        KeyBinding::new("cmd-v", Paste, None),
+        KeyBinding::new("cmd-c", Copy, None),
+        KeyBinding::new("cmd-x", Cut, None),
+        KeyBinding::new("cmd-s", Save, None),
+        KeyBinding::new("cmd-z", Undo, None),
+        KeyBinding::new("cmd-shift-z", Redo, None),
+    ]);
+}
+
+pub(crate) struct EditorPrototype {
     focus_handle: FocusHandle,
     editor: EditorState,
     load_error: Option<String>,
@@ -112,7 +116,7 @@ struct EditorPrototype {
 }
 
 impl EditorPrototype {
-    fn new(cx: &mut Context<Self>) -> Self {
+    pub(crate) fn new(cx: &mut Context<Self>) -> Self {
         let mut editor = EditorState::new();
         let mut load_error = None;
 

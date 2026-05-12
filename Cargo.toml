@@ -7,6 +7,7 @@ edition = "2021"
 default = []
 gpui-editor = ["dep:gpui"]
 gpui-stacker = ["dep:gpui"]
+gpui-workspace = ["gpui-editor", "gpui-stacker"]
 
 [dependencies]
 winit = "0.30"
@@ -63,6 +64,11 @@ required-features = ["gpui-stacker"]
 name = "gpui-editor"
 path = "src/bin/gpui_editor.rs"
 required-features = ["gpui-editor"]
+
+[[bin]]
+name = "gpui-workspace"
+path = "src/bin/gpui_workspace.rs"
+required-features = ["gpui-workspace"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

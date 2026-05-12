@@ -41,23 +41,8 @@ actions!(
 
 pub fn run_stacker_prototype() {
     Application::new().run(|cx: &mut App| {
-        cx.bind_keys([
-            KeyBinding::new("backspace", Backspace, None),
-            KeyBinding::new("delete", Delete, None),
-            KeyBinding::new("left", Left, None),
-            KeyBinding::new("right", Right, None),
-            KeyBinding::new("shift-left", SelectLeft, None),
-            KeyBinding::new("shift-right", SelectRight, None),
-            KeyBinding::new("cmd-a", SelectAll, None),
-            KeyBinding::new("cmd-v", Paste, None),
-            KeyBinding::new("cmd-c", Copy, None),
-            KeyBinding::new("cmd-x", Cut, None),
-            KeyBinding::new("cmd-z", Undo, None),
-            KeyBinding::new("cmd-shift-z", Redo, None),
-            KeyBinding::new("home", Home, None),
-            KeyBinding::new("end", End, None),
-            KeyBinding::new("cmd-q", Quit, None),
-        ]);
+        bind_stacker_keys(cx);
+        cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
 
         let bounds = Bounds::centered(None, size(px(1040.0), px(720.0)), cx);
         let window = cx
@@ -79,14 +64,33 @@ pub fn run_stacker_prototype() {
     });
 }
 
-struct StackerPrototype {
+pub(crate) fn bind_stacker_keys(cx: &mut App) {
+    cx.bind_keys([
+        KeyBinding::new("backspace", Backspace, None),
+        KeyBinding::new("delete", Delete, None),
+        KeyBinding::new("left", Left, None),
+        KeyBinding::new("right", Right, None),
+        KeyBinding::new("shift-left", SelectLeft, None),
+        KeyBinding::new("shift-right", SelectRight, None),
+        KeyBinding::new("cmd-a", SelectAll, None),
+        KeyBinding::new("cmd-v", Paste, None),
+        KeyBinding::new("cmd-c", Copy, None),
+        KeyBinding::new("cmd-x", Cut, None),
+        KeyBinding::new("cmd-z", Undo, None),
+        KeyBinding::new("cmd-shift-z", Redo, None),
+        KeyBinding::new("home", Home, None),
+        KeyBinding::new("end", End, None),
+    ]);
+}
+
+pub(crate) struct StackerPrototype {
     editor: Entity<StackerTextInput>,
     prompts: Vec<StackerPrompt>,
     active_prompt: Option<usize>,
 }
 
 impl StackerPrototype {
-    fn new(cx: &mut Context<Self>) -> Self {
+    pub(crate) fn new(cx: &mut Context<Self>) -> Self {
         let prompts = load_saved_prompts();
         let initial_text = prompts
             .first()
@@ -112,6 +116,12 @@ impl StackerPrototype {
             cx.notify();
         });
         cx.notify();
+    }
+}
+
+impl Focusable for StackerPrototype {
+    fn focus_handle(&self, cx: &App) -> FocusHandle {
+        self.editor.focus_handle(cx)
     }
 }
 

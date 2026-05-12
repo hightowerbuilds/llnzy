@@ -1,173 +1,250 @@
-# Roadmap: GPUI Integration Spike and Incremental Migration
+# Roadmap: GPUI Modular Integration
 
-## Purpose
+## Current Read
 
-Evaluate GPUI as a replacement for LLNZY's productivity UI layer without risking the current app. The near-term migration scope is intentionally limited:
+We have moved beyond the original GPUI feasibility spike. GPUI is now proven enough to keep investing in it for Stacker and the code editor, but the work is still prototype-stage rather than production-integrated.
 
-- **In scope first:** Stacker and the code editor.
-- **In scope later:** Explorer/sidebar and related file-navigation chrome.
-- **Out of scope for this migration wave:** terminal rendering, PTY/session ownership, and custom `wgpu` terminal effects.
+Approximate status:
 
-The first goal is not migration. The first goal is proof.
+- Prototype/proof work: 65-75% complete.
+- Production migration: 10-20% complete.
+- Current app shell replacement: not started.
 
-## Guiding Principles
+The practical next milestone is not more abstract feasibility. It is turning the Stacker and editor prototypes into reusable GPUI surfaces that can be mounted by a future app shell without dragging in terminal migration.
 
-- Do not replace the `winit` event loop until GPUI proves it can host LLNZY's hardest requirements.
-- Keep the current app runnable throughout the migration.
-- Move one surface at a time, starting with the smallest surface that benefits most from native text behavior.
-- Leave the terminal on the existing `winit`/`wgpu` path for now.
-- Treat GPUI as an unstable dependency until pinned, tested, and isolated behind local boundaries.
+## Migration Scope
+
+In scope for this wave:
+
+- Stacker
+- Code editor
+- Explorer/sidebar after Stacker and editor are credible
+- Minimal shared GPUI workspace shell needed to host those surfaces
+
+Out of scope for this wave:
+
+- Terminal rendering
+- PTY/session ownership
+- Custom terminal `wgpu` effects
+- Full event-loop replacement
+- Removing the current app before GPUI surfaces are verified
 
 ## Branch and Commit Discipline
 
-**Objective:** Keep the spike isolated, understandable, and easy to roll back.
+We already completed the initial branch/spike discipline and merged the useful work back to `main`. From here:
 
-- Create a dedicated branch before starting the spike, for example `spike/gpui-foundation`.
-- Keep production app changes separate from throwaway spike code.
-- Prefer small commits that each prove one thing:
-  1. Add roadmap and spike notes.
-  2. Add isolated GPUI spike crate or example.
-  3. Prove basic window/layout.
-  4. Prove text input and native macOS behavior.
-  5. Prove custom drawing or dynamic surface behavior.
-  6. Record findings and next decision.
-- Push the branch early, then push after each meaningful milestone.
-- Use commit messages that state the proof or decision, not just the files changed.
-- Do not merge the spike branch into the main development branch until Phase 0 exit criteria are met.
-- If the spike fails, keep the branch as research history and write down why it failed.
+- Keep `main` green after each meaningful migration step.
+- Use short-lived topic branches only when a slice is risky or likely to need parallel work.
+- Commit each completed capability with a message that names the behavior proven or integrated.
+- Push after each coherent milestone.
+- Keep prototype binaries available until production mounting makes them redundant.
+- Do not delete old UI paths until the GPUI replacement is mounted, verified, and easy to disable.
 
-Suggested commands:
+For parallel work, use separate branches or clearly disjoint file ownership. Good branch names:
 
 ```sh
-git switch -c spike/gpui-foundation
-git add daily-growth/roadmaps/gpui2-modular-integration.md
-git commit -m "Document GPUI spike-first migration plan"
-git push -u origin spike/gpui-foundation
+git switch -c gpui/editor-shell-surface
+git switch -c gpui/stacker-surface-boundary
+git switch -c gpui/explorer-survey
 ```
 
 ## Phase 0: Standalone GPUI Spike
 
-**Objective:** Prove GPUI can support the core interaction and rendering requirements outside the app.
+**Status: effectively complete.**
 
-- [x] Confirm macOS build prerequisites. Prefer GPUI's `macos-blade` feature for the spike so Command Line Tools can build it without full Xcode's `metal` compiler.
-- [x] Create a separate spike crate or isolated example directory outside the production runtime.
-- [x] Pin GPUI to a specific known-good commit.
-- [x] Open a basic GPUI window with app-like layout regions: sidebar, tab bar, main pane, footer/status area.
-- [ ] Prove keyboard input, text input, focus movement, clipboard, mouse selection, scrolling, resize, and redraw behavior.
-- [ ] Test macOS-native text features: IME composition, dictation/Wispr-style input, selection gestures, and command-key editing behavior.
-- [x] Create a custom drawing area that updates at interactive frame rates.
-- [ ] Document whether terminal texture/surface bridging should remain deferred.
-- [ ] Document concrete API constraints, unstable areas, and missing primitives.
+Completed:
 
-**Exit Criteria**
+- [x] Confirmed GPUI can build on this machine with Command Line Tools using `macos-blade`.
+- [x] Added isolated feature-gated GPUI binaries.
+- [x] Pinned GPUI through Cargo dependency configuration.
+- [x] Opened standalone GPUI windows.
+- [x] Proved basic layout, redraw, resize, scrolling, focus, keyboard input, clipboard, mouse text selection, and native text entry.
+- [x] Manually confirmed Wispr Flow/dictation-style input works well enough to continue.
+- [x] Deferred terminal texture/surface bridging.
 
-- We know whether native text input is materially better than the current Stacker path.
-- We have a small reproducible example, not just notes.
-- We can name the exact GPUI commit and dependency setup to use.
+Remaining notes:
 
-## Phase 1: Stacker Prototype
+- [ ] Record exact API constraints discovered during prototype work.
+- [ ] Decide later whether deeper IME marked-text behavior needs a focused test.
 
-**Objective:** Build the first real LLNZY surface in GPUI using actual Stacker data and behavior.
+Decision:
 
-- [ ] Extract or adapt Stacker state so it can be used by both the current app and the GPUI prototype.
-- [ ] Build a GPUI Stacker window/surface with prompt editing, saved prompts, queue controls, search, and copy behavior.
-- [ ] Replace custom text-input handling in the prototype with GPUI-native text components where possible.
-- [ ] Implement multiline prompt layout; the first GPUI prototype renders newlines as spaces because `shape_line` is single-line only.
-- [ ] Validate dictation, IME, multiline editing, selection, undo/redo, and clipboard workflows.
-- [ ] Compare typing latency and interaction behavior against the current egui/AppKit bridge implementation.
+GPUI is viable enough for Stacker and editor prototypes. Terminal migration remains deferred.
 
-**Exit Criteria**
+## Phase 1: GPUI Stacker Prototype
 
-- GPUI Stacker is clearly better for text input and does not regress core Stacker workflows.
-- The shared Stacker model boundary is clean enough to keep.
-- We can decide whether Stacker should be the first production migration target.
+**Status: substantially prototyped, not production-integrated.**
 
-## Phase 2: Code Editor Prototype
+Completed:
 
-**Objective:** Prove the editor can use GPUI for text layout/input while preserving LLNZY's editor model and language features.
+- [x] Built a standalone GPUI Stacker prototype.
+- [x] Loaded real saved prompts.
+- [x] Implemented prompt selection/loading.
+- [x] Implemented GPUI-native text input behavior.
+- [x] Implemented selection, clipboard, undo/redo, mouse selection, scrolling, and keyboard movement.
+- [x] Implemented multiline prompt rendering/wrapping behavior in the prototype.
 
-- [ ] Map the current editor modules and rendering path before implementation.
-- [ ] Keep LLNZY's buffer model, history, cursor logic, tree-sitter parsing, project search, recovery, git gutter, and LSP manager unless there is a specific reason to replace them.
-- [ ] Prototype GPUI-backed text layout and editing with real `ropey` buffers.
-- [ ] Validate typing, selection, scrolling, find-in-file, save, dirty tracking, and file watching.
-- [ ] Prototype diagnostics, completions, hover, rename, code actions, inlay hints, and symbols as GPUI overlays/popovers.
-- [ ] Validate large-file behavior, many diagnostics, multi-cursor editing, Vim/Emacs/VS Code key presets, and file watching.
+Still needed:
 
-**Exit Criteria**
+- [ ] Extract a production-ready Stacker surface boundary.
+- [ ] Decide what state is owned by shared Stacker model code vs GPUI view code.
+- [ ] Add queue controls, search, copy affordances, and production Stacker workflow parity.
+- [ ] Validate against current Stacker behavior with real workflows.
+- [ ] Mount the GPUI Stacker surface in a shared GPUI workspace shell.
 
-- Editor typing and scrolling are faster or more correct than the current implementation.
-- LSP behavior remains intact.
-- No major editor workflow is lost.
-- The terminal remains unaffected.
+Exit criteria:
 
-## Phase 3: Explorer/Sidebar Prototype
+- Stacker can run as a reusable GPUI surface, not just a standalone prototype.
+- Core workflows match or beat the current app.
+- Old Stacker UI can remain available behind a clear fallback path.
 
-**Objective:** Move file navigation to GPUI after Stacker and editor are credible.
+## Phase 2: GPUI Code Editor Prototype
 
-- [ ] Rebuild Explorer with GPUI list/tree primitives and test large projects.
-- [ ] Preserve existing file operations, modals, rename flows, drag/drop behavior, and context menus.
+**Status: active and promising, still prototype-stage.**
+
+Completed:
+
+- [x] Mapped enough of the editor model to reuse `EditorState`, `BufferView`, buffers, cursor state, history, save behavior, and syntax parsing.
+- [x] Built a standalone GPUI editor prototype.
+- [x] Opened real project files.
+- [x] Implemented typing, deletion, enter, tab, shift-tab, arrow movement, home/end, page up/down, selection, mouse placement, drag selection, clipboard, undo/redo, and save.
+- [x] Rendered line numbers, caret, selection, dirty status, scroll position, and syntax highlighting.
+- [x] Kept the terminal untouched.
+
+Still needed:
+
+- [ ] Convert the prototype into a reusable GPUI editor surface.
+- [ ] Replace approximate fixed-width hit testing with measured text layout where GPUI APIs allow it.
+- [ ] Add find-in-file UI and commands.
+- [ ] Validate file watching and external file changes.
+- [ ] Add diagnostics and LSP overlays: diagnostics, completions, hover, rename, code actions, inlay hints, and symbols.
+- [ ] Add large-file guardrails around synchronous syntax refresh.
+- [ ] Decide how tabs/open buffers are represented in the GPUI shell.
+- [ ] Mount the editor beside Stacker in a shared GPUI workspace shell.
+
+Exit criteria:
+
+- Editor can run as a reusable GPUI surface against real buffers.
+- Typing, scrolling, selection, save, and syntax rendering are reliable.
+- LSP behavior has a clear migration path.
+- Existing editor remains available until feature parity is verified.
+
+## Phase 3: Shared GPUI Workspace Shell
+
+**Status: first slice implemented.**
+
+Objective:
+
+Create a minimal GPUI workspace shell that hosts the migrated surfaces without touching terminal ownership.
+
+Target behavior:
+
+- [x] One GPUI window with workspace chrome.
+- [x] Stacker and editor regions mounted as separate surfaces.
+- [x] No terminal region.
+- [x] Simple split layout.
+- [x] Shared title/status area.
+- [x] Clear feature flag and binary entrypoint: `gpui-workspace`.
+- [x] Reuse existing prototype code rather than duplicating logic.
+
+Still needed:
+
+- [ ] Rename prototype types into production-facing surface names.
+- [ ] Split editor construction so embedded use does not depend on `env::args()`.
+- [ ] Decide focus policy between Stacker and editor.
+- [ ] Decide whether Stacker/editor prototype headers should remain inside child surfaces or move into shared workspace chrome.
+- [ ] Add a richer workspace switching model if split layout is not enough.
+
+Why this is next:
+
+The prototypes have already proved enough in isolation. A shared shell will reveal the real integration problems: focus routing, shared app state, layout ownership, buffer selection, and how much refactoring is needed before production mounting.
+
+## Phase 4: Explorer/Sidebar Prototype
+
+**Status: planned after Stacker/editor shell integration.**
+
+Objectives:
+
+- [ ] Rebuild Explorer with GPUI list/tree primitives.
+- [ ] Preserve file operations, rename flows, modals, drag/drop, context menus, and watcher updates.
 - [ ] Validate large repositories, keyboard navigation, selection, sidebar resizing, and file watcher updates.
-- [ ] Decide whether tab bar/footer chrome should also move to GPUI or remain in the existing app shell during this wave.
+- [ ] Decide whether file tabs and footer chrome belong to the GPUI shell in this migration wave.
 
-**Exit Criteria**
+Exit criteria:
 
-- Explorer performance is measurably better or simpler to maintain.
+- Explorer performs well on large project trees.
 - Existing file operations remain intact.
 - Sidebar migration does not force terminal migration.
 
-## Phase 4: Production Migration, Surface by Surface
+## Phase 5: Production Mounting
 
-**Objective:** Start replacing egui surfaces only after the spike work proves the foundation.
+**Status: not started.**
+
+For each migrated surface:
+
+- [ ] Define the model/view boundary.
+- [ ] Mount the GPUI surface behind a feature flag or alternate entrypoint.
+- [ ] Preserve the old surface until the new one is verified.
+- [ ] Add focused tests when model behavior changes.
+- [ ] Manually verify keyboard, mouse, focus, resize, persistence, and fallback behavior.
 
 Recommended order:
 
-1. Stacker
-2. Code editor
-3. Explorer/sidebar
-4. Settings/Appearances, only if needed
-5. Git dashboard, only if needed
+1. Shared GPUI workspace shell
+2. Stacker surface boundary
+3. Editor surface boundary
+4. Editor search/status additions
+5. Explorer/sidebar
+6. Production app mounting
 
-Explicitly excluded from this wave:
+## Phase 6: Event Loop and Terminal Reassessment
 
-- Terminal host
-- PTY/session ownership
-- Terminal `wgpu` effects bridge
-- Final event-loop ownership
+**Status: intentionally deferred.**
 
-For each surface:
-
-- [ ] Define the state boundary between core model and GPUI view.
-- [ ] Port the view with feature parity for the most-used workflows.
-- [ ] Keep the old surface available until the new one is verified.
-- [ ] Add focused tests where model behavior changes.
-- [ ] Manually verify keyboard, mouse, focus, resize, and persistence behavior.
-
-## Phase 5: Event Loop and Terminal Reassessment
-
-**Objective:** Revisit full shell ownership only after Stacker, editor, and Explorer prove GPUI is worth expanding.
+Only revisit this after Stacker, editor, and Explorer prove GPUI is worth expanding.
 
 - [ ] Decide whether GPUI should ever own the main event loop.
-- [ ] Decide whether terminal bridging is worth a separate spike.
+- [ ] Decide whether terminal bridging deserves a separate spike.
 - [ ] Keep existing terminal visuals and behavior unless there is a clear win.
-- [ ] Remove obsolete egui paths only for surfaces that have verified GPUI replacements.
-- [ ] Audit binary size and dependency overlap after the production surfaces land.
+- [ ] Remove obsolete egui paths only for surfaces with verified GPUI replacements.
+- [ ] Audit binary size and dependency overlap after production surfaces land.
+
+## Completed One-Hour Slice
+
+Built a minimal shared GPUI workspace shell.
+
+Done:
+
+- [x] New feature-gated binary and entrypoint: `gpui-workspace`.
+- [x] Window opens with LLNZY-like chrome.
+- [x] Stacker and editor are represented in the same GPUI process.
+- [x] Terminal is explicitly absent.
+- [x] Existing `gpui-stacker` and `gpui-editor` checks still pass.
+- [x] `cargo check` still passes.
+
+Recommended next one-hour slice:
+
+- Rename/refine the Stacker and editor prototype roots into reusable surface APIs.
+- Add embedded editor constructors that do not read `env::args()`.
+- Move prototype-specific labels toward workspace-owned chrome.
+- Keep standalone prototype binaries working.
 
 ## Risks
 
 | Risk | Why It Matters | Mitigation |
 | :--- | :--- | :--- |
-| GPUI API instability | The dependency may change under us. | Pin a commit and isolate GPUI behind local modules. |
-| Terminal migration creep | The terminal/effects pipeline is core to LLNZY's identity. | Keep terminal out of scope for this wave. |
-| Input latency | Bridged input can feel worse than native paths. | Measure early with terminal and Stacker prototypes. |
-| Graphics ownership conflicts | GPUI may not coexist cleanly with the existing `wgpu` pipeline. | Avoid terminal bridging until Stacker/editor/Explorer justify more work. |
-| Scope creep | A full shell rewrite can stall the app. | Migrate one surface at a time with exit criteria. |
-| Editor complexity | The editor has many hidden behaviors and integrations. | Leave editor migration until after smaller GPUI wins. |
+| GPUI API instability | The dependency may change under us. | Keep GPUI isolated behind local modules and feature flags. |
+| Prototype code hardens accidentally | Early shortcuts may leak into production. | Promote prototypes into reusable surfaces intentionally, with clear boundaries. |
+| Terminal migration creep | Terminal rendering is core and risky. | Keep terminal out of this wave. |
+| Input regressions | Text quality is the reason to migrate. | Verify typing, dictation, clipboard, selection, and focus after each step. |
+| Editor complexity | LSP, diagnostics, search, and large files hide edge cases. | Move editor in layers and keep current editor available. |
+| Scope creep | Full shell rewrites can stall the app. | Keep the next milestone to a minimal GPUI workspace shell. |
 
 ## Success Criteria
 
-- Stacker gains reliable native-feeling text input, including dictation and IME behavior.
-- Code editor gains GPUI-backed text interaction without losing LLNZY's existing editor/LSP behavior.
-- Explorer handles large trees smoothly with simpler UI code.
+- Stacker gains reliable native-feeling text input without losing core workflows.
+- Code editor gains GPUI-backed text interaction while preserving LLNZY's editor model.
+- Explorer/sidebar can move later without forcing terminal migration.
 - Terminal remains on its existing path with no regressions.
 - The app remains usable throughout the migration.
 - GPUI only expands beyond Stacker/editor/Explorer after those surfaces prove it should.
