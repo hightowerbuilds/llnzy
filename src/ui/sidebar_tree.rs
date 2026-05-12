@@ -604,10 +604,9 @@ pub(crate) fn render_sidebar_tree(
             editor_state.sidebar_new_entry = Some((parent_dir, String::new(), true));
         }
         Some(TreeAction::Move(path)) => {
-            editor_state.sidebar_move_picker =
-                Some(super::explorer_view::SidebarMovePickerState::new(vec![
-                    path,
-                ]));
+            editor_state.sidebar_move_picker = Some(
+                super::explorer_view::SidebarMovePickerState::new(vec![path], &explorer.root),
+            );
         }
         Some(TreeAction::MoveFilesToFolder { files, folder }) => {
             commands.push(AppCommand::DragDrop(DragDropCommand::MoveFilesToFolder {

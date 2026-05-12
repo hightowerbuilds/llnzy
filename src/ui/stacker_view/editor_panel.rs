@@ -148,6 +148,7 @@ pub(super) fn render_prompt_editor_panel(
     );
 }
 
+
 /// Paint a thin underline beneath the marked (IME-composing) range.
 /// Coordinates come from the same galley the input client uses, so the
 /// underline tracks dictation refinement positions exactly.
@@ -368,4 +369,3 @@ mod tests {
         assert!(b.x > a.x);
     }
 }
-

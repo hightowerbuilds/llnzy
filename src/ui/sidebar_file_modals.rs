@@ -3,10 +3,88 @@ use crate::app::commands::AppCommand;
 use crate::app::drag_drop::DragDropCommand;
 use crate::explorer::ExplorerState;
 use crate::path_utils::{contains_path_case_insensitive, path_contains, same_path};
-use crate::sidebar_move::collect_sidebar_move_destinations;
 use crate::text_utils::contains_case_insensitive;
 use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
+
+const MODAL_CANCEL_FILL: egui::Color32 = egui::Color32::from_rgb(50, 52, 62);
+const MODAL_PRIMARY_FILL_BLUE: egui::Color32 = egui::Color32::from_rgb(40, 100, 200);
+const MODAL_PRIMARY_FILL_RED: egui::Color32 = egui::Color32::from_rgb(180, 50, 50);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ModalButton {
+    None,
+    Primary,
+    Cancel,
+}
+
+struct ModalPrimaryButton {
+    label: &'static str,
+    fill: egui::Color32,
+    enabled: bool,
+}
+
+struct ModalButtonRow {
+    primary: Option<ModalPrimaryButton>,
+    cancel_label: &'static str,
+}
+
+impl ModalButtonRow {
+    fn show(self, ui: &mut egui::Ui) -> ModalButton {
+        let mut result = ModalButton::None;
+        ui.horizontal(|ui| {
+            if let Some(primary) = self.primary {
+                let clicked = ui
+                    .add(
+                        egui::Button::new(
+                            egui::RichText::new(primary.label)
+                                .size(12.0)
+                                .color(egui::Color32::WHITE),
+                        )
+                        .fill(primary.fill),
+                    )
+                    .clicked();
+                if clicked && primary.enabled {
+                    result = ModalButton::Primary;
+                }
+            }
+            let cancel_clicked = ui
+                .add(
+                    egui::Button::new(
+                        egui::RichText::new(self.cancel_label)
+                            .size(12.0)
+                            .color(egui::Color32::WHITE),
+                    )
+                    .fill(MODAL_CANCEL_FILL),
+                )
+                .clicked();
+            if cancel_clicked {
+                result = ModalButton::Cancel;
+            }
+        });
+        result
+    }
+}
+
+fn modal_window(
+    ui: &egui::Ui,
+    id: &'static str,
+    title: impl Into<egui::WidgetText>,
+    offset: egui::Vec2,
+    fixed_size: Option<egui::Vec2>,
+    body: impl FnOnce(&mut egui::Ui),
+) {
+    let ctx = ui.ctx();
+    let center = ctx.screen_rect().center();
+    let mut window = egui::Window::new(title)
+        .id(egui::Id::new(id))
+        .fixed_pos(egui::pos2(center.x + offset.x, center.y + offset.y))
+        .resizable(false);
+    if let Some(size) = fixed_size {
+        window = window.fixed_size(size);
+    }
+    window.show(ctx, body);
+}
 
 pub(super) fn render_sidebar_file_modals(
     ui: &mut egui::Ui,
@@ -25,26 +103,25 @@ fn render_rename_modal(
     explorer: &mut ExplorerState,
     editor_state: &mut EditorViewState,
 ) {
-    if editor_state.sidebar_rename.is_none() {
+    let Some((rename_path, mut rename_text)) = editor_state.sidebar_rename.take() else {
         return;
-    }
-
-    let (rename_path, mut rename_text) = editor_state.sidebar_rename.take().unwrap();
+    };
     let file_name = rename_path
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("file")
         .to_string();
-    let mut done = false;
-    let mut cancel = false;
-    egui::Window::new("Rename")
-        .id(egui::Id::new("sidebar_rename_modal"))
-        .fixed_pos(egui::pos2(
-            ui.ctx().screen_rect().center().x - 140.0,
-            ui.ctx().screen_rect().center().y - 40.0,
-        ))
-        .resizable(false)
-        .show(ui.ctx(), |ui| {
+    let mut button_result = ModalButton::None;
+    let mut esc_pressed = false;
+    let mut enter_pressed = false;
+
+    modal_window(
+        ui,
+        "sidebar_rename_modal",
+        "Rename",
+        egui::vec2(-140.0, -40.0),
+        None,
+        |ui| {
             ui.label(
                 egui::RichText::new(format!("Rename: {file_name}"))
                     .size(13.0)
@@ -58,43 +135,24 @@ fn render_rename_modal(
                     .font(egui::TextStyle::Monospace),
             );
             resp.request_focus();
-            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                cancel = true;
-            }
-            if ui.input(|i| i.key_pressed(egui::Key::Enter)) && !rename_text.trim().is_empty() {
-                done = true;
-            }
+            esc_pressed = ui.input(|i| i.key_pressed(egui::Key::Escape));
+            enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter));
             ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                if ui
-                    .add(
-                        egui::Button::new(
-                            egui::RichText::new("Rename")
-                                .size(12.0)
-                                .color(egui::Color32::WHITE),
-                        )
-                        .fill(egui::Color32::from_rgb(40, 100, 200)),
-                    )
-                    .clicked()
-                    && !rename_text.trim().is_empty()
-                {
-                    done = true;
-                }
-                if ui
-                    .add(
-                        egui::Button::new(
-                            egui::RichText::new("Cancel")
-                                .size(12.0)
-                                .color(egui::Color32::WHITE),
-                        )
-                        .fill(egui::Color32::from_rgb(50, 52, 62)),
-                    )
-                    .clicked()
-                {
-                    cancel = true;
-                }
-            });
-        });
+            button_result = ModalButtonRow {
+                primary: Some(ModalPrimaryButton {
+                    label: "Rename",
+                    fill: MODAL_PRIMARY_FILL_BLUE,
+                    enabled: !rename_text.trim().is_empty(),
+                }),
+                cancel_label: "Cancel",
+            }
+            .show(ui);
+        },
+    );
+
+    let trimmed_non_empty = !rename_text.trim().is_empty();
+    let done = button_result == ModalButton::Primary || (enter_pressed && trimmed_non_empty);
+    let cancel = button_result == ModalButton::Cancel || esc_pressed;
 
     if done {
         match rename_sidebar_entry(&rename_path, &rename_text, editor_state) {
@@ -134,55 +192,37 @@ fn render_delete_modal(
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("item");
-    let is_dir = delete_path.is_dir();
-    let mut confirm = false;
-    let mut cancel = false;
-    egui::Window::new("Delete")
-        .id(egui::Id::new("sidebar_delete_modal"))
-        .fixed_pos(egui::pos2(
-            ui.ctx().screen_rect().center().x - 160.0,
-            ui.ctx().screen_rect().center().y - 40.0,
-        ))
-        .resizable(false)
-        .show(ui.ctx(), |ui| {
+    let mut button_result = ModalButton::None;
+    let mut esc_pressed = false;
+
+    modal_window(
+        ui,
+        "sidebar_delete_modal",
+        "Delete",
+        egui::vec2(-160.0, -40.0),
+        None,
+        |ui| {
             ui.label(
                 egui::RichText::new(format!("Delete \"{display_name}\"? This cannot be undone."))
                     .size(13.0)
                     .color(egui::Color32::from_rgb(210, 215, 225)),
             );
             ui.add_space(12.0);
-            ui.horizontal(|ui| {
-                if ui
-                    .add(
-                        egui::Button::new(
-                            egui::RichText::new("Delete")
-                                .size(12.0)
-                                .color(egui::Color32::WHITE),
-                        )
-                        .fill(egui::Color32::from_rgb(180, 50, 50)),
-                    )
-                    .clicked()
-                {
-                    confirm = true;
-                }
-                if ui
-                    .add(
-                        egui::Button::new(
-                            egui::RichText::new("Cancel")
-                                .size(12.0)
-                                .color(egui::Color32::WHITE),
-                        )
-                        .fill(egui::Color32::from_rgb(50, 52, 62)),
-                    )
-                    .clicked()
-                {
-                    cancel = true;
-                }
-            });
-            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                cancel = true;
+            button_result = ModalButtonRow {
+                primary: Some(ModalPrimaryButton {
+                    label: "Delete",
+                    fill: MODAL_PRIMARY_FILL_RED,
+                    enabled: true,
+                }),
+                cancel_label: "Cancel",
             }
-        });
+            .show(ui);
+            esc_pressed = ui.input(|i| i.key_pressed(egui::Key::Escape));
+        },
+    );
+
+    let confirm = button_result == ModalButton::Primary;
+    let cancel = button_result == ModalButton::Cancel || esc_pressed;
 
     if confirm {
         if let Some(message) =
@@ -190,7 +230,7 @@ fn render_delete_modal(
         {
             editor_state.status_msg = Some(message);
         } else {
-            let result = if is_dir {
+            let result = if delete_path.is_dir() {
                 std::fs::remove_dir_all(&delete_path)
             } else {
                 std::fs::remove_file(&delete_path)
@@ -264,22 +304,22 @@ fn render_new_entry_modal(
     explorer: &mut ExplorerState,
     editor_state: &mut EditorViewState,
 ) {
-    if editor_state.sidebar_new_entry.is_none() {
+    let Some((parent_dir, mut input_text, is_folder)) = editor_state.sidebar_new_entry.take()
+    else {
         return;
-    }
-
-    let (parent_dir, mut input_text, is_folder) = editor_state.sidebar_new_entry.take().unwrap();
+    };
     let kind = if is_folder { "Folder" } else { "File" };
-    let mut done = false;
-    let mut cancel = false;
-    egui::Window::new(format!("New {kind}"))
-        .id(egui::Id::new("sidebar_new_entry_modal"))
-        .fixed_pos(egui::pos2(
-            ui.ctx().screen_rect().center().x - 140.0,
-            ui.ctx().screen_rect().center().y - 40.0,
-        ))
-        .resizable(false)
-        .show(ui.ctx(), |ui| {
+    let mut button_result = ModalButton::None;
+    let mut esc_pressed = false;
+    let mut enter_pressed = false;
+
+    modal_window(
+        ui,
+        "sidebar_new_entry_modal",
+        format!("New {kind}"),
+        egui::vec2(-140.0, -40.0),
+        None,
+        |ui| {
             ui.label(
                 egui::RichText::new(format!("New {kind} name:"))
                     .size(13.0)
@@ -293,43 +333,24 @@ fn render_new_entry_modal(
                     .font(egui::TextStyle::Monospace),
             );
             resp.request_focus();
-            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                cancel = true;
-            }
-            if ui.input(|i| i.key_pressed(egui::Key::Enter)) && !input_text.trim().is_empty() {
-                done = true;
-            }
+            esc_pressed = ui.input(|i| i.key_pressed(egui::Key::Escape));
+            enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter));
             ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                if ui
-                    .add(
-                        egui::Button::new(
-                            egui::RichText::new("Create")
-                                .size(12.0)
-                                .color(egui::Color32::WHITE),
-                        )
-                        .fill(egui::Color32::from_rgb(40, 100, 200)),
-                    )
-                    .clicked()
-                    && !input_text.trim().is_empty()
-                {
-                    done = true;
-                }
-                if ui
-                    .add(
-                        egui::Button::new(
-                            egui::RichText::new("Cancel")
-                                .size(12.0)
-                                .color(egui::Color32::WHITE),
-                        )
-                        .fill(egui::Color32::from_rgb(50, 52, 62)),
-                    )
-                    .clicked()
-                {
-                    cancel = true;
-                }
-            });
-        });
+            button_result = ModalButtonRow {
+                primary: Some(ModalPrimaryButton {
+                    label: "Create",
+                    fill: MODAL_PRIMARY_FILL_BLUE,
+                    enabled: !input_text.trim().is_empty(),
+                }),
+                cancel_label: "Cancel",
+            }
+            .show(ui);
+        },
+    );
+
+    let trimmed_non_empty = !input_text.trim().is_empty();
+    let done = button_result == ModalButton::Primary || (enter_pressed && trimmed_non_empty);
+    let cancel = button_result == ModalButton::Cancel || esc_pressed;
 
     if done {
         match create_sidebar_entry(&parent_dir, &input_text, is_folder) {
@@ -369,7 +390,7 @@ fn open_created_sidebar_file(
 
 fn render_move_picker(
     ui: &mut egui::Ui,
-    explorer: &ExplorerState,
+    _explorer: &ExplorerState,
     editor_state: &mut EditorViewState,
     commands: &mut Vec<AppCommand>,
 ) {
@@ -378,11 +399,12 @@ fn render_move_picker(
     };
 
     let moving_label = move_sources_label(&picker.sources);
-    let mut close = false;
+    let mut button_result = ModalButton::None;
+    let mut esc_pressed = false;
     let mut selected_destination = None;
-    let destinations = collect_sidebar_move_destinations(&explorer.root, &picker.sources);
     let filter = picker.filter.trim();
-    let visible = destinations
+    let visible = picker
+        .destinations
         .iter()
         .filter(|destination| {
             filter.is_empty()
@@ -394,15 +416,13 @@ fn render_move_picker(
         picker.selected = visible.len().saturating_sub(1);
     }
 
-    egui::Window::new("Move")
-        .id(egui::Id::new("sidebar_move_picker_modal"))
-        .fixed_pos(egui::pos2(
-            ui.ctx().screen_rect().center().x - 210.0,
-            ui.ctx().screen_rect().center().y - 210.0,
-        ))
-        .fixed_size(egui::vec2(420.0, 420.0))
-        .resizable(false)
-        .show(ui.ctx(), |ui| {
+    modal_window(
+        ui,
+        "sidebar_move_picker_modal",
+        "Move",
+        egui::vec2(-210.0, -210.0),
+        Some(egui::vec2(420.0, 420.0)),
+        |ui| {
             ui.label(
                 egui::RichText::new(format!("Move {moving_label} to:"))
                     .size(13.0)
@@ -418,9 +438,7 @@ fn render_move_picker(
             );
             filter_resp.request_focus();
 
-            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                close = true;
-            }
+            esc_pressed = ui.input(|i| i.key_pressed(egui::Key::Escape));
             if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) && !visible.is_empty() {
                 picker.selected = (picker.selected + 1).min(visible.len() - 1);
             }
@@ -506,22 +524,15 @@ fn render_move_picker(
                 });
 
             ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                if ui
-                    .add(
-                        egui::Button::new(
-                            egui::RichText::new("Cancel")
-                                .size(12.0)
-                                .color(egui::Color32::WHITE),
-                        )
-                        .fill(egui::Color32::from_rgb(50, 52, 62)),
-                    )
-                    .clicked()
-                {
-                    close = true;
-                }
-            });
-        });
+            button_result = ModalButtonRow {
+                primary: None,
+                cancel_label: "Cancel",
+            }
+            .show(ui);
+        },
+    );
+
+    let close = button_result == ModalButton::Cancel || esc_pressed;
 
     if let Some(folder) = selected_destination {
         commands.push(AppCommand::DragDrop(DragDropCommand::MoveFilesToFolder {

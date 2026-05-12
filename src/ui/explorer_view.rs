@@ -136,14 +136,21 @@ pub struct SidebarMovePickerState {
     pub sources: Vec<std::path::PathBuf>,
     pub filter: String,
     pub selected: usize,
+    /// Pre-computed at modal open so the directory walk and per-destination
+    /// validation don't fire every frame the picker is visible. Staleness
+    /// window: if the on-disk tree changes while the picker is open, those
+    /// changes won't appear here until the picker is reopened.
+    pub destinations: Vec<crate::sidebar_move::SidebarMoveDestination>,
 }
 
 impl SidebarMovePickerState {
-    pub fn new(sources: Vec<std::path::PathBuf>) -> Self {
+    pub fn new(sources: Vec<std::path::PathBuf>, root: &std::path::Path) -> Self {
+        let destinations = crate::sidebar_move::collect_sidebar_move_destinations(root, &sources);
         Self {
             sources,
             filter: String::new(),
             selected: 0,
+            destinations,
         }
     }
 }
