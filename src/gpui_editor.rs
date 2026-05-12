@@ -126,6 +126,21 @@ impl EditorPrototype {
         Self::with_chrome(cx, true)
     }
 
+    pub(crate) fn open_path(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        match self.editor.open(path.clone()) {
+            Ok(_) => {
+                refresh_active_syntax(&mut self.editor);
+                self.load_error = None;
+                self.status_message = Some(format!("Opened {}", path.display()));
+            }
+            Err(err) => {
+                self.load_error = Some(format!("{}: {err}", path.display()));
+                self.status_message = Some("Open failed".to_string());
+            }
+        }
+        cx.notify();
+    }
+
     fn with_chrome(cx: &mut Context<Self>, show_chrome: bool) -> Self {
         let mut editor = EditorState::new();
         let mut load_error = None;

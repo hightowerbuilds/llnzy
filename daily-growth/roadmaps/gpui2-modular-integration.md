@@ -21,7 +21,8 @@ Approximate status:
   places.
 - Terminal in GPUI workspace: live Alacritty-backed surface, with mouse
   reporting and polish still pending.
-- Explorer/sidebar in GPUI workspace: visual/static only.
+- Explorer/sidebar in GPUI workspace: first real project-tree slice is live;
+  file operations, watcher updates, and keyboard navigation still pending.
 - Appearances in GPUI workspace: first GPUI tab entry point exists for terminal,
   editor, and sketch appearance controls.
 - Release readiness: optimized binaries build, but the migrated workspace is
@@ -196,16 +197,18 @@ Goal: replace the static sidebar with the actual project tree workflow.
 
 Tasks:
 
-- [ ] Reuse the existing project/workspace path model where practical.
-- [ ] Load the real current project tree.
-- [ ] Render folders and files with expandable state.
-- [ ] Open files into the GPUI editor surface.
-- [ ] Preserve selected file and expanded folders across refreshes.
+- [x] Reuse the current workspace root as the first project boundary.
+- [x] Load the real current project tree.
+- [x] Render folders and files with expandable state.
+- [x] Open files into the GPUI editor surface.
+- [x] Preserve selected file and expanded folders during the running session.
 - [ ] Wire file watcher updates into the tree.
 - [ ] Add rename, delete, new file, new folder, and reveal-in-finder actions.
 - [ ] Add keyboard navigation.
-- [ ] Add sidebar resize and sensible narrow-width behavior.
-- [ ] Keep large repositories responsive.
+- [x] Add sidebar collapse/open via the bumper.
+- [x] Add sidebar drag resize and sensible width bounds.
+- [x] Keep large repositories responsive with skipped heavy directories and an
+  entry cap.
 
 Exit criteria:
 
@@ -363,15 +366,16 @@ pressure to the workbench surfaces around the shell.
 
 Next objective:
 
-- Turn the sidebar into a real project explorer.
+- Finish explorer production actions: create, rename, delete, reveal, watcher
+  updates, and keyboard navigation.
 - Wire editor appearance settings into the GPUI editor renderer instead of only
   storing the config.
-- Preserve terminal mouse reporting as a focused terminal follow-up.
 - Move into editor workspace tabs and dirty-file safety.
+- Preserve terminal mouse reporting as a focused terminal follow-up.
 
 Order:
 
-1. Real explorer/sidebar.
+1. Explorer production actions and watcher updates.
 2. Editor workspace tabs and dirty-file safety.
 3. Wire editor appearance controls into the GPUI editor renderer.
 4. Terminal mouse reporting for full-screen terminal apps.

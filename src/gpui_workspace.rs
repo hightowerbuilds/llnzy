@@ -1,7 +1,14 @@
+use std::{
+    collections::BTreeSet,
+    fs,
+    path::{Path, PathBuf},
+};
+
 use gpui::prelude::*;
 use gpui::{
-    actions, div, px, rgb, size, App, Application, Bounds, Context, Entity, Focusable, KeyBinding,
-    MouseButton, MouseDownEvent, Render, Window, WindowBounds, WindowOptions,
+    actions, div, px, rgb, size, App, Application, Bounds, Context, DragMoveEvent, Entity,
+    Focusable, KeyBinding, MouseButton, MouseDownEvent, Pixels, Render, Window, WindowBounds,
+    WindowOptions,
 };
 
 use crate::gpui_editor::{bind_editor_keys, EditorPrototype};
@@ -30,8 +37,11 @@ const QUEUE_GREEN: u32 = 0x6aff90;
 
 const TAB_BAR_HEIGHT: f32 = 44.0;
 const FOOTER_HEIGHT: f32 = 48.0;
-const SIDEBAR_WIDTH: f32 = 180.0;
+const SIDEBAR_DEFAULT_WIDTH: f32 = 220.0;
+const SIDEBAR_MIN_WIDTH: f32 = 160.0;
+const SIDEBAR_MAX_WIDTH: f32 = 380.0;
 const BUMPER_WIDTH: f32 = 20.0;
+const EXPLORER_ENTRY_LIMIT: usize = 260;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum WorkspaceSurface {
@@ -39,7 +49,6 @@ enum WorkspaceSurface {
     Stacker,
     Editor,
     Terminal,
-    Explorer,
     Appearances,
     Settings,
 }
@@ -51,7 +60,6 @@ impl WorkspaceSurface {
             WorkspaceSurface::Stacker => "Stacker",
             WorkspaceSurface::Editor => "Code Workbench",
             WorkspaceSurface::Terminal => "Terminal",
-            WorkspaceSurface::Explorer => "Explorer",
             WorkspaceSurface::Appearances => "Appearances",
             WorkspaceSurface::Settings => "Settings",
         }
@@ -90,6 +98,28 @@ impl WorkspaceTab {
     }
 }
 
+#[derive(Clone, Debug)]
+struct ExplorerEntry {
+    path: PathBuf,
+    name: String,
+    is_dir: bool,
+    depth: usize,
+    expanded: bool,
+}
+
+#[derive(Clone, Copy)]
+struct SidebarResizeDrag;
+
+impl Render for SidebarResizeDrag {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .w(px(2.0))
+            .h(px(28.0))
+            .rounded_sm()
+            .bg(rgb(QUEUE_GREEN))
+    }
+}
+
 pub fn run_workspace_prototype() {
     Application::new().run(|cx: &mut App| {
         bind_stacker_keys(cx);
@@ -124,25 +154,38 @@ struct WorkspacePrototype {
     tabs: Vec<WorkspaceTab>,
     active_tab_id: WorkspaceTabId,
     next_tab_id: u64,
+    workspace_root: PathBuf,
+    expanded_dirs: BTreeSet<PathBuf>,
+    selected_path: Option<PathBuf>,
+    sidebar_visible: bool,
+    sidebar_width: f32,
+    last_sidebar_width: f32,
     appearance_config: Config,
     appearance_page: AppearancePage,
 }
 
 impl WorkspacePrototype {
     fn new(cx: &mut Context<Self>) -> Self {
+        let workspace_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let tabs = vec![
             WorkspaceTab::new(WorkspaceTabId(1), WorkspaceSurface::Stacker),
             WorkspaceTab::new(WorkspaceTabId(2), WorkspaceSurface::Editor),
             WorkspaceTab::new(WorkspaceTabId(3), WorkspaceSurface::Terminal),
-            WorkspaceTab::new(WorkspaceTabId(4), WorkspaceSurface::Explorer),
         ];
+        let expanded_dirs = initial_expanded_dirs(&workspace_root);
         Self {
             stacker: cx.new(StackerPrototype::embedded),
             editor: cx.new(EditorPrototype::new),
             terminal: cx.new(TerminalSurface::new),
             tabs,
             active_tab_id: WorkspaceTabId(2),
-            next_tab_id: 5,
+            next_tab_id: 4,
+            workspace_root,
+            expanded_dirs,
+            selected_path: None,
+            sidebar_visible: true,
+            sidebar_width: SIDEBAR_DEFAULT_WIDTH,
+            last_sidebar_width: SIDEBAR_DEFAULT_WIDTH,
             appearance_config: Config::default(),
             appearance_page: AppearancePage::Terminal,
         }
@@ -166,7 +209,6 @@ impl WorkspacePrototype {
         match surface {
             WorkspaceSurface::Stacker => window.focus(&self.stacker.focus_handle(cx)),
             WorkspaceSurface::Editor
-            | WorkspaceSurface::Explorer
             | WorkspaceSurface::Home
             | WorkspaceSurface::Appearances
             | WorkspaceSurface::Settings => {
@@ -232,6 +274,43 @@ impl WorkspacePrototype {
             self.focus_surface(surface, window, cx);
         }
         cx.notify();
+    }
+
+    fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
+        if self.sidebar_visible {
+            self.last_sidebar_width = self.sidebar_width;
+            self.sidebar_visible = false;
+        } else {
+            self.sidebar_visible = true;
+            self.sidebar_width = self
+                .last_sidebar_width
+                .clamp(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH);
+        }
+        cx.notify();
+    }
+
+    fn resize_sidebar_from_x(&mut self, x: Pixels, cx: &mut Context<Self>) {
+        let width = (x / px(1.0) - BUMPER_WIDTH / 2.0).clamp(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH);
+        self.sidebar_visible = true;
+        self.sidebar_width = width;
+        self.last_sidebar_width = width;
+        cx.notify();
+    }
+
+    fn toggle_explorer_dir(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        if !self.expanded_dirs.remove(&path) {
+            self.expanded_dirs.insert(path);
+        }
+        cx.notify();
+    }
+
+    fn open_sidebar_file(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        self.selected_path = Some(path.clone());
+        let editor_path = path.clone();
+        self.editor.update(cx, |editor, cx| {
+            editor.open_path(editor_path, cx);
+        });
+        self.open_or_activate_surface(WorkspaceSurface::Editor, window, cx);
     }
 
     fn apply_appearance_config(&mut self, cx: &mut Context<Self>) {
@@ -313,6 +392,34 @@ impl Render for WorkspacePrototype {
         let tabs = self.tabs.clone();
         let appearance_config = self.appearance_config.clone();
         let appearance_page = self.appearance_page;
+        let explorer_entries = collect_explorer_entries(&self.workspace_root, &self.expanded_dirs);
+        let selected_path = self.selected_path.clone();
+        let workspace_root = self.workspace_root.clone();
+        let sidebar_width = self.sidebar_width;
+        let sidebar_visible = self.sidebar_visible;
+
+        let mut main = div().flex_1().flex().overflow_hidden();
+        if sidebar_visible {
+            main = main.child(workspace_sidebar(
+                workspace_root,
+                explorer_entries,
+                selected_path,
+                sidebar_width,
+                cx,
+            ));
+        }
+        main = main
+            .child(sidebar_bumper(sidebar_visible, cx))
+            .child(workspace_content(
+                self.stacker.clone(),
+                self.editor.clone(),
+                self.terminal.clone(),
+                active_surface,
+                appearance_config,
+                appearance_page,
+                cx,
+            ));
+
         div()
             .size_full()
             .flex()
@@ -321,23 +428,7 @@ impl Render for WorkspacePrototype {
             .text_color(rgb(SIDEBAR_TEXT))
             .font_family("Atkinson Hyperlegible")
             .child(workspace_tab_bar(tabs, active_tab_id, cx))
-            .child(
-                div()
-                    .flex_1()
-                    .flex()
-                    .overflow_hidden()
-                    .child(workspace_sidebar(active_surface, cx))
-                    .child(sidebar_bumper())
-                    .child(workspace_content(
-                        self.stacker.clone(),
-                        self.editor.clone(),
-                        self.terminal.clone(),
-                        active_surface,
-                        appearance_config,
-                        appearance_page,
-                        cx,
-                    )),
-            )
+            .child(main)
             .child(workspace_footer(active_surface, cx))
     }
 }
@@ -444,166 +535,158 @@ fn workspace_tab_width(surface: WorkspaceSurface, active: bool) -> f32 {
 }
 
 fn workspace_sidebar(
-    active_surface: WorkspaceSurface,
+    workspace_root: PathBuf,
+    entries: Vec<ExplorerEntry>,
+    selected_path: Option<PathBuf>,
+    sidebar_width: f32,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
-    div()
-        .w(px(SIDEBAR_WIDTH))
+    let root_label = workspace_root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("Project")
+        .to_string();
+    let mut sidebar = div()
+        .w(px(sidebar_width))
         .h_full()
         .flex()
         .flex_col()
-        .p_2()
         .border_r_1()
         .border_color(rgb(BORDER))
         .bg(rgb(CHROME_BG))
         .child(
             div()
-                .h(px(28.0))
+                .h(px(36.0))
+                .px_2()
                 .flex()
                 .items_center()
                 .justify_between()
-                .text_size(px(14.0))
+                .border_b_1()
+                .border_color(rgb(0x343743))
+                .text_size(px(13.0))
                 .text_color(rgb(ACTIVE_TEXT))
-                .child("LLNZY")
+                .child(
+                    div().flex().items_center().gap_2().child("FILES").child(
+                        div()
+                            .rounded_sm()
+                            .bg(rgb(0x303440))
+                            .px_1()
+                            .text_size(px(10.0))
+                            .text_color(rgb(MUTED_TEXT))
+                            .child(root_label),
+                    ),
+                )
                 .child(
                     div()
+                        .w(px(22.0))
+                        .h(px(22.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded_sm()
                         .text_size(px(12.0))
                         .text_color(rgb(MUTED_TEXT))
+                        .cursor_pointer()
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _: &MouseDownEvent, _window, cx| {
+                                cx.stop_propagation();
+                                this.toggle_sidebar(cx);
+                            }),
+                        )
                         .child("x"),
                 ),
-        )
-        .child(sidebar_button(
-            "Open Project",
-            true,
-            WorkspaceSurface::Explorer,
-            cx,
-        ))
-        .child(sidebar_button(
-            "Open Recent",
-            false,
-            WorkspaceSurface::Explorer,
-            cx,
-        ))
-        .child(sidebar_section_label("PROJECT"))
-        .child(sidebar_tree_row(
-            "src",
-            true,
-            0,
-            WorkspaceSurface::Explorer,
-            active_surface,
-            cx,
-        ))
-        .child(sidebar_tree_row(
-            "gpui_workspace.rs",
-            false,
-            1,
-            WorkspaceSurface::Editor,
-            active_surface,
-            cx,
-        ))
-        .child(sidebar_tree_row(
-            "gpui_editor.rs",
-            false,
-            1,
-            WorkspaceSurface::Editor,
-            active_surface,
-            cx,
-        ))
-        .child(sidebar_tree_row(
-            "gpui_stacker.rs",
-            false,
-            1,
-            WorkspaceSurface::Stacker,
-            active_surface,
-            cx,
-        ))
-        .child(sidebar_tree_row(
-            "daily-growth",
-            true,
-            0,
-            WorkspaceSurface::Explorer,
-            active_surface,
-            cx,
-        ))
-        .child(sidebar_tree_row(
-            "gpui2-modular-integration.md",
-            false,
-            1,
-            WorkspaceSurface::Editor,
-            active_surface,
-            cx,
-        ))
-}
+        );
 
-fn sidebar_button(
-    label: &'static str,
-    primary: bool,
-    surface: WorkspaceSurface,
-    cx: &mut Context<WorkspacePrototype>,
-) -> impl IntoElement {
-    div()
-        .w_full()
-        .h(px(28.0))
-        .mt_1()
-        .flex()
-        .items_center()
-        .px_2()
-        .rounded_sm()
-        .bg(rgb(if primary { ACCENT } else { 0x303440 }))
-        .text_color(rgb(0xe1e6ee))
-        .text_size(px(14.0))
-        .cursor_pointer()
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |this, _: &MouseDownEvent, window, cx| {
-                this.open_or_activate_surface(surface, window, cx);
-            }),
-        )
-        .child(label)
-}
+    let mut tree = div().flex_1().flex().flex_col().overflow_hidden().py_1();
+    if entries.is_empty() {
+        tree = tree.child(
+            div()
+                .p_3()
+                .text_size(px(12.0))
+                .text_color(rgb(MUTED_TEXT))
+                .child("No readable project files."),
+        );
+    } else {
+        for entry in entries {
+            let selected = selected_path.as_ref() == Some(&entry.path);
+            tree = tree.child(sidebar_tree_row(entry, selected, cx));
+        }
+    }
 
-fn sidebar_section_label(label: &'static str) -> impl IntoElement {
-    div()
-        .mt_3()
-        .mb_1()
-        .text_size(px(11.0))
-        .text_color(rgb(0x787d8c))
-        .child(label)
+    sidebar = sidebar.child(tree).child(
+        div()
+            .h(px(28.0))
+            .px_2()
+            .flex()
+            .items_center()
+            .border_t_1()
+            .border_color(rgb(0x343743))
+            .text_size(px(11.0))
+            .text_color(rgb(MUTED_TEXT))
+            .child(format!("{}px", sidebar_width.round())),
+    );
+    sidebar
 }
 
 fn sidebar_tree_row(
-    label: &'static str,
-    folder: bool,
-    depth: usize,
-    surface: WorkspaceSurface,
-    active_surface: WorkspaceSurface,
+    entry: ExplorerEntry,
+    selected: bool,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
-    let selected = surface == active_surface && !folder;
+    let depth = entry.depth;
+    let name = entry.name.clone();
+    let path = entry.path.clone();
+    let is_dir = entry.is_dir;
+    let icon = if is_dir && entry.expanded {
+        "v"
+    } else if is_dir {
+        ">"
+    } else {
+        " "
+    };
+
     div()
         .w_full()
-        .h(px(24.0))
+        .h(px(26.0))
         .flex()
         .items_center()
-        .pl(px(10.0 + depth as f32 * 16.0))
+        .pl(px(8.0 + depth as f32 * 14.0))
         .pr_2()
         .rounded_sm()
         .bg(rgb(if selected { 0x303440 } else { CHROME_BG }))
-        .text_size(px(14.0))
-        .text_color(rgb(if folder { FOLDER_BLUE } else { SIDEBAR_TEXT }))
+        .text_size(px(13.0))
+        .text_color(rgb(if is_dir { FOLDER_BLUE } else { SIDEBAR_TEXT }))
         .cursor_pointer()
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |this, _: &MouseDownEvent, window, cx| {
-                this.open_or_activate_surface(surface, window, cx);
+                if is_dir {
+                    this.toggle_explorer_dir(path.clone(), cx);
+                } else {
+                    this.open_sidebar_file(path.clone(), window, cx);
+                }
             }),
         )
-        .child(if folder { "v " } else { "  " })
-        .child(label)
+        .child(
+            div()
+                .w(px(16.0))
+                .text_size(px(11.0))
+                .text_color(rgb(if is_dir { FOLDER_BLUE } else { 0x646973 }))
+                .child(icon),
+        )
+        .child(
+            div()
+                .flex_1()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .child(name),
+        )
 }
 
-fn sidebar_bumper() -> impl IntoElement {
+fn sidebar_bumper(sidebar_visible: bool, cx: &mut Context<WorkspacePrototype>) -> impl IntoElement {
     div()
+        .id("workspace-sidebar-bumper")
         .w(px(BUMPER_WIDTH))
         .h_full()
         .flex()
@@ -612,9 +695,122 @@ fn sidebar_bumper() -> impl IntoElement {
         .bg(rgb(BUMPER_BG))
         .border_r_1()
         .border_color(rgb(BORDER))
-        .text_color(rgb(0x787d8c))
+        .text_color(rgb(if sidebar_visible {
+            0x787d8c
+        } else {
+            QUEUE_GREEN
+        }))
         .text_size(px(14.0))
-        .child("<")
+        .cursor_col_resize()
+        .on_drag(
+            SidebarResizeDrag,
+            |_drag, _offset, _window, cx: &mut App| cx.new(|_| SidebarResizeDrag),
+        )
+        .on_drag_move::<SidebarResizeDrag>(cx.listener(
+            |this, event: &DragMoveEvent<SidebarResizeDrag>, _window, cx| {
+                this.resize_sidebar_from_x(event.event.position.x, cx);
+            },
+        ))
+        .child(
+            div()
+                .w(px(16.0))
+                .h(px(32.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded_sm()
+                .cursor_pointer()
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _: &MouseDownEvent, _window, cx| {
+                        cx.stop_propagation();
+                        this.toggle_sidebar(cx);
+                    }),
+                )
+                .child(if sidebar_visible { "<" } else { ">" }),
+        )
+}
+
+fn initial_expanded_dirs(root: &Path) -> BTreeSet<PathBuf> {
+    let mut expanded = BTreeSet::new();
+    expanded.insert(root.to_path_buf());
+    for child in ["src", "daily-growth", "docs"] {
+        let path = root.join(child);
+        if path.is_dir() {
+            expanded.insert(path);
+        }
+    }
+    expanded
+}
+
+fn collect_explorer_entries(root: &Path, expanded_dirs: &BTreeSet<PathBuf>) -> Vec<ExplorerEntry> {
+    let mut entries = Vec::new();
+    let mut remaining = EXPLORER_ENTRY_LIMIT;
+    collect_explorer_children(root, 0, expanded_dirs, &mut entries, &mut remaining);
+    entries
+}
+
+fn collect_explorer_children(
+    dir: &Path,
+    depth: usize,
+    expanded_dirs: &BTreeSet<PathBuf>,
+    entries: &mut Vec<ExplorerEntry>,
+    remaining: &mut usize,
+) {
+    if *remaining == 0 {
+        return;
+    }
+
+    let Ok(read_dir) = fs::read_dir(dir) else {
+        return;
+    };
+
+    let mut children = read_dir
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().to_string();
+            if should_skip_explorer_entry(&name) {
+                return None;
+            }
+            let is_dir = entry.file_type().map(|file_type| file_type.is_dir()).ok()?;
+            Some((name, path, is_dir))
+        })
+        .collect::<Vec<_>>();
+
+    children.sort_by(
+        |(left_name, _, left_is_dir), (right_name, _, right_is_dir)| {
+            right_is_dir
+                .cmp(left_is_dir)
+                .then_with(|| left_name.to_lowercase().cmp(&right_name.to_lowercase()))
+        },
+    );
+
+    for (name, path, is_dir) in children {
+        if *remaining == 0 {
+            break;
+        }
+        let expanded = is_dir && expanded_dirs.contains(&path);
+        entries.push(ExplorerEntry {
+            path: path.clone(),
+            name,
+            is_dir,
+            depth,
+            expanded,
+        });
+        *remaining -= 1;
+
+        if expanded {
+            collect_explorer_children(&path, depth + 1, expanded_dirs, entries, remaining);
+        }
+    }
+}
+
+fn should_skip_explorer_entry(name: &str) -> bool {
+    matches!(
+        name,
+        ".git" | ".DS_Store" | "target" | "node_modules" | ".next" | "dist" | "build"
+    )
 }
 
 fn workspace_content(
@@ -684,37 +880,12 @@ fn workspace_content(
                     ),
             ),
         WorkspaceSurface::Terminal => content.child(terminal),
-        WorkspaceSurface::Explorer => content.child(explorer_placeholder()),
         WorkspaceSurface::Appearances => {
             content.child(appearances_surface(appearance_config, appearance_page, cx))
         }
         WorkspaceSurface::Home => content.child(home_placeholder()),
         WorkspaceSurface::Settings => content.child(settings_placeholder()),
     }
-}
-
-fn explorer_placeholder() -> impl IntoElement {
-    div()
-        .flex_1()
-        .h_full()
-        .flex()
-        .flex_col()
-        .items_center()
-        .justify_center()
-        .bg(rgb(EDITOR_BG))
-        .child(
-            div()
-                .text_size(px(15.0))
-                .text_color(rgb(ACTIVE_TEXT))
-                .child("Explorer/sidebar GPUI port is next"),
-        )
-        .child(
-            div()
-                .mt_2()
-                .text_size(px(12.0))
-                .text_color(rgb(MUTED_TEXT))
-                .child("The static sidebar is clickable now; the real file tree comes after editor/Stacker polish."),
-        )
 }
 
 fn appearances_surface(
@@ -1216,12 +1387,6 @@ fn workspace_footer(
         .child(footer_button(
             "Editor",
             WorkspaceSurface::Editor,
-            active_surface,
-            cx,
-        ))
-        .child(footer_button(
-            "Explorer",
-            WorkspaceSurface::Explorer,
             active_surface,
             cx,
         ))
