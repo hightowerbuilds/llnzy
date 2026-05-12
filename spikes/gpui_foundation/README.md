@@ -42,3 +42,27 @@ The current spike includes a basic app shell, Explorer-like list, custom-painted
 - Manual verification of text selection, paste/cut/copy, IME composition, dictation/Wispr-style input, and command-key editing behavior.
 - Terminal texture/surface bridging.
 - Resize, scrolling, and high-frequency redraw measurements.
+
+## Manual Text Input Test Pass
+
+Run the spike, then use the focused prompt field:
+
+```sh
+cargo run --manifest-path spikes/gpui_foundation/Cargo.toml
+```
+
+Checklist:
+
+- [ ] Type normal ASCII text.
+- [ ] Type emoji and accented characters.
+- [ ] Move by character with Left/Right.
+- [ ] Select text with Shift+Left/Shift+Right.
+- [ ] Select all with Cmd+A.
+- [ ] Copy, cut, and paste with Cmd+C/Cmd+X/Cmd+V.
+- [ ] Click to move the cursor.
+- [ ] Drag to select text.
+- [ ] Use macOS dictation or Wispr-style input.
+- [ ] Use an IME/composition input method and confirm marked text appears correctly.
+- [ ] Resize the window and confirm the input field remains usable.
+
+Record failures as concrete observations: what action was taken, expected result, actual result, and whether the app froze, dropped input, or rendered incorrectly.
