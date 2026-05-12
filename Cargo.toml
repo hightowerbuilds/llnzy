@@ -5,6 +5,7 @@ edition = "2021"
 
 [features]
 default = []
+gpui-editor = ["dep:gpui"]
 gpui-stacker = ["dep:gpui"]
 
 [dependencies]
@@ -57,6 +58,11 @@ gpui = { version = "=0.2.2", optional = true, features = ["macos-blade"] }
 name = "gpui-stacker"
 path = "src/bin/gpui_stacker.rs"
 required-features = ["gpui-stacker"]
+
+[[bin]]
+name = "gpui-editor"
+path = "src/bin/gpui_editor.rs"
+required-features = ["gpui-editor"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

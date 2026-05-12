@@ -294,7 +294,7 @@ fn prompt_title(prompt: &StackerPrompt) -> String {
 struct StackerTextInput {
     focus_handle: FocusHandle,
     session: StackerSession,
-    last_layout: Option<ShapedLine>,
+    last_layout: Option<MultilineLayout>,
     last_bounds: Option<Bounds<Pixels>>,
     is_selecting: bool,
 }
@@ -438,7 +438,7 @@ impl StackerTextInput {
     }
 
     fn index_for_mouse_position(&self, position: Point<Pixels>) -> usize {
-        let (Some(bounds), Some(line)) = (self.last_bounds.as_ref(), self.last_layout.as_ref())
+        let (Some(bounds), Some(layout)) = (self.last_bounds.as_ref(), self.last_layout.as_ref())
         else {
             return 0;
         };
@@ -448,8 +448,7 @@ impl StackerTextInput {
         if position.y > bounds.bottom() {
             return self.session.char_count();
         }
-        let byte = line.closest_index_for_x(position.x - bounds.left());
-        byte_to_char_index(self.session.text(), byte)
+        layout.char_index_for_point(position, *bounds)
     }
 
     fn range_from_utf16(&self, range: &Range<usize>) -> StackerSelection {
@@ -553,20 +552,9 @@ impl EntityInputHandler for StackerTextInput {
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
-        let line = self.last_layout.as_ref()?;
+        let layout = self.last_layout.as_ref()?;
         let selection = self.range_from_utf16(&range_utf16).sorted();
-        Some(Bounds::from_corners(
-            point(
-                bounds.left()
-                    + line.x_for_index(byte_index_for_char(self.session.text(), selection.start)),
-                bounds.top(),
-            ),
-            point(
-                bounds.left()
-                    + line.x_for_index(byte_index_for_char(self.session.text(), selection.end)),
-                bounds.bottom(),
-            ),
-        ))
+        Some(layout.bounds_for_range(selection, bounds))
     }
 
     fn character_index_for_point(
@@ -575,13 +563,13 @@ impl EntityInputHandler for StackerTextInput {
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<usize> {
-        let line_point = self.last_bounds?.localize(&point)?;
-        let line = self.last_layout.as_ref()?;
-        let byte = line.index_for_x(point.x - line_point.x)?;
-        Some(char_index_to_utf16_index(
-            self.session.text(),
-            byte_to_char_index(self.session.text(), byte),
-        ))
+        let bounds = self.last_bounds?;
+        if point.y < bounds.top() || point.y > bounds.bottom() {
+            return None;
+        }
+        let layout = self.last_layout.as_ref()?;
+        let char_index = layout.char_index_for_point(point, bounds);
+        Some(char_index_to_utf16_index(self.session.text(), char_index))
     }
 }
 
@@ -635,10 +623,22 @@ struct StackerTextElement {
     input: Entity<StackerTextInput>,
 }
 
+struct MultilineLayout {
+    lines: Vec<LayoutLine>,
+    line_height: Pixels,
+}
+
+struct LayoutLine {
+    line: ShapedLine,
+    text: String,
+    char_start: usize,
+    char_end: usize,
+}
+
 struct TextPrepaintState {
-    line: Option<ShapedLine>,
+    layout: Option<MultilineLayout>,
     cursor: Option<PaintQuad>,
-    selection: Option<PaintQuad>,
+    selection: Vec<PaintQuad>,
 }
 
 impl IntoElement for StackerTextElement {
@@ -687,73 +687,67 @@ impl Element for StackerTextElement {
         let text = input.session.text();
         let selection = input.session.selection();
         let style = window.text_style();
-
-        let display_text: SharedString = if text.is_empty() {
-            "Type a prompt here...".into()
-        } else {
-            // GPUI's low-level `shape_line` rejects embedded newlines.
-            // This prototype keeps char offsets stable by rendering each
-            // newline as one visible space until the multiline text layout
-            // pass lands.
-            text.replace('\n', " ").into()
-        };
         let text_color = if text.is_empty() {
             hsla(0.0, 0.0, 1.0, 0.35)
         } else {
             style.color
         };
-        let run = TextRun {
-            len: display_text.len(),
-            font: style.font(),
-            color: text_color,
-            background_color: None,
-            underline: None,
-            strikethrough: None,
-        };
-        let runs = marked_runs(&input.session, &display_text, run);
         let font_size = style.font_size.to_pixels(window.rem_size());
-        let line = window
-            .text_system()
-            .shape_line(display_text, font_size, &runs, None);
+        let line_height = window.line_height();
+        let layout_lines = layout_text_lines(text)
+            .into_iter()
+            .map(|text_line| {
+                let display_text: SharedString = text_line.text.clone().into();
+                let run = TextRun {
+                    len: display_text.len(),
+                    font: style.font(),
+                    color: text_color,
+                    background_color: None,
+                    underline: None,
+                    strikethrough: None,
+                };
+                let runs = marked_runs_for_line(
+                    &input.session,
+                    text_line.char_start,
+                    text_line.char_end,
+                    &display_text,
+                    run,
+                );
+                let line = window
+                    .text_system()
+                    .shape_line(display_text, font_size, &runs, None);
+                LayoutLine {
+                    line,
+                    text: text_line.text,
+                    char_start: text_line.char_start,
+                    char_end: text_line.char_end,
+                }
+            })
+            .collect();
+        let layout = MultilineLayout {
+            lines: layout_lines,
+            line_height,
+        };
 
-        let cursor_byte = byte_index_for_char(text, selection.end);
-        let cursor_pos = line.x_for_index(cursor_byte);
         let sorted = selection.sorted();
-        let (selection_quad, cursor_quad) = if sorted.is_collapsed() {
-            (
-                None,
-                Some(fill(
-                    Bounds::new(
-                        point(bounds.left() + cursor_pos, bounds.top()),
-                        size(px(2.0), bounds.bottom() - bounds.top()),
-                    ),
-                    rgb(0x7dd3fc),
-                )),
-            )
+        let (selection_quads, cursor_quad) = if sorted.is_collapsed() {
+            let cursor_bounds = layout.caret_bounds(selection.end, bounds);
+            (Vec::new(), Some(fill(cursor_bounds, rgb(0x7dd3fc))))
         } else {
             (
-                Some(fill(
-                    Bounds::from_corners(
-                        point(
-                            bounds.left()
-                                + line.x_for_index(byte_index_for_char(text, sorted.start)),
-                            bounds.top(),
-                        ),
-                        point(
-                            bounds.left() + line.x_for_index(byte_index_for_char(text, sorted.end)),
-                            bounds.bottom(),
-                        ),
-                    ),
-                    rgba(0x38bdf860),
-                )),
+                layout
+                    .selection_bounds(sorted, bounds)
+                    .into_iter()
+                    .map(|bounds| fill(bounds, rgba(0x38bdf860)))
+                    .collect(),
                 None,
             )
         };
 
         TextPrepaintState {
-            line: Some(line),
+            layout: Some(layout),
             cursor: cursor_quad,
-            selection: selection_quad,
+            selection: selection_quads,
         }
     }
 
@@ -773,34 +767,196 @@ impl Element for StackerTextElement {
             ElementInputHandler::new(bounds, self.input.clone()),
             cx,
         );
-        if let Some(selection) = prepaint.selection.take() {
+        for selection in prepaint.selection.drain(..) {
             window.paint_quad(selection);
         }
-        let line = prepaint.line.take().unwrap();
-        line.paint(bounds.origin, window.line_height(), window, cx)
-            .unwrap();
+        let layout = prepaint.layout.take().unwrap();
+        for (line_ix, line) in layout.lines.iter().enumerate() {
+            line.line
+                .paint(
+                    layout.line_origin(bounds, line_ix),
+                    layout.line_height,
+                    window,
+                    cx,
+                )
+                .unwrap();
+        }
         if focus_handle.is_focused(window) {
             if let Some(cursor) = prepaint.cursor.take() {
                 window.paint_quad(cursor);
             }
         }
         self.input.update(cx, |input, _cx| {
-            input.last_layout = Some(line);
+            input.last_layout = Some(layout);
             input.last_bounds = Some(bounds);
         });
     }
 }
 
-fn marked_runs(
+struct LayoutTextLine {
+    text: String,
+    char_start: usize,
+    char_end: usize,
+}
+
+impl MultilineLayout {
+    fn line_origin(&self, bounds: Bounds<Pixels>, line_ix: usize) -> Point<Pixels> {
+        point(
+            bounds.left(),
+            bounds.top() + self.line_height * line_ix as f32,
+        )
+    }
+
+    fn line_for_char(&self, char_index: usize) -> Option<(usize, &LayoutLine)> {
+        self.lines
+            .iter()
+            .enumerate()
+            .find(|(_, line)| char_index >= line.char_start && char_index <= line.char_end)
+            .or_else(|| self.lines.iter().enumerate().last())
+    }
+
+    fn x_for_char(line: &LayoutLine, char_index: usize) -> Pixels {
+        let line_char = char_index
+            .saturating_sub(line.char_start)
+            .min(line.char_end.saturating_sub(line.char_start));
+        line.line
+            .x_for_index(byte_index_for_char(&line.text, line_char))
+    }
+
+    fn caret_bounds(&self, char_index: usize, bounds: Bounds<Pixels>) -> Bounds<Pixels> {
+        let Some((line_ix, line)) = self.line_for_char(char_index) else {
+            return Bounds::new(bounds.origin, size(px(2.0), self.line_height));
+        };
+        Bounds::new(
+            point(
+                bounds.left() + Self::x_for_char(line, char_index),
+                bounds.top() + self.line_height * line_ix as f32,
+            ),
+            size(px(2.0), self.line_height),
+        )
+    }
+
+    fn bounds_for_range(
+        &self,
+        selection: StackerSelection,
+        bounds: Bounds<Pixels>,
+    ) -> Bounds<Pixels> {
+        let range_bounds = self.selection_bounds(selection, bounds);
+        range_bounds
+            .into_iter()
+            .reduce(|acc, bounds| {
+                Bounds::from_corners(
+                    acc.origin.min(&bounds.origin),
+                    acc.bottom_right().max(&bounds.bottom_right()),
+                )
+            })
+            .unwrap_or_else(|| self.caret_bounds(selection.end, bounds))
+    }
+
+    fn selection_bounds(
+        &self,
+        selection: StackerSelection,
+        bounds: Bounds<Pixels>,
+    ) -> Vec<Bounds<Pixels>> {
+        let mut quads = Vec::new();
+        for (line_ix, line) in self.lines.iter().enumerate() {
+            let start = selection.start.max(line.char_start);
+            let end = selection.end.min(line.char_end);
+            let includes_line_break =
+                selection.end > line.char_end && selection.start <= line.char_end;
+            if start >= end && !includes_line_break {
+                continue;
+            }
+
+            let start_x = Self::x_for_char(line, start);
+            let mut end_x = Self::x_for_char(line, end);
+            if includes_line_break && end_x <= start_x {
+                end_x = start_x + px(8.0);
+            }
+            quads.push(Bounds::from_corners(
+                point(
+                    bounds.left() + start_x,
+                    bounds.top() + self.line_height * line_ix as f32,
+                ),
+                point(
+                    bounds.left() + end_x,
+                    bounds.top() + self.line_height * (line_ix + 1) as f32,
+                ),
+            ));
+        }
+        quads
+    }
+
+    fn char_index_for_point(&self, position: Point<Pixels>, bounds: Bounds<Pixels>) -> usize {
+        let line_ix = ((position.y - bounds.top()) / self.line_height)
+            .floor()
+            .max(0.0) as usize;
+        let Some(line) = self.lines.get(line_ix).or_else(|| self.lines.last()) else {
+            return 0;
+        };
+        let local_x = position.x - bounds.left();
+        let byte = line.line.closest_index_for_x(local_x);
+        line.char_start + byte_to_char_index(&line.text, byte)
+    }
+}
+
+fn layout_text_lines(text: &str) -> Vec<LayoutTextLine> {
+    if text.is_empty() {
+        return vec![LayoutTextLine {
+            text: "Type a prompt here...".to_string(),
+            char_start: 0,
+            char_end: 0,
+        }];
+    }
+
+    let mut lines = Vec::new();
+    let mut line = String::new();
+    let mut line_start = 0;
+    let mut char_index = 0;
+
+    for ch in text.chars() {
+        if ch == '\n' {
+            lines.push(LayoutTextLine {
+                text: std::mem::take(&mut line),
+                char_start: line_start,
+                char_end: char_index,
+            });
+            char_index += 1;
+            line_start = char_index;
+        } else {
+            line.push(ch);
+            char_index += 1;
+        }
+    }
+
+    lines.push(LayoutTextLine {
+        text: line,
+        char_start: line_start,
+        char_end: char_index,
+    });
+    lines
+}
+
+fn marked_runs_for_line(
     session: &StackerSession,
+    line_char_start: usize,
+    line_char_end: usize,
     display_text: &SharedString,
     run: TextRun,
 ) -> Vec<TextRun> {
     let Some(marked) = session.marked_range().map(StackerSelection::sorted) else {
         return vec![run];
     };
-    let start = byte_index_for_char(session.text(), marked.start);
-    let end = byte_index_for_char(session.text(), marked.end);
+    let marked_start = marked.start.max(line_char_start);
+    let marked_end = marked.end.min(line_char_end);
+    if marked_start >= marked_end {
+        return vec![run];
+    }
+
+    let line_text = &session.text()[byte_index_for_char(session.text(), line_char_start)
+        ..byte_index_for_char(session.text(), line_char_end)];
+    let start = byte_index_for_char(line_text, marked_start - line_char_start);
+    let end = byte_index_for_char(line_text, marked_end - line_char_start);
     vec![
         TextRun {
             len: start,
