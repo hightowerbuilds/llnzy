@@ -18,6 +18,14 @@ use crate::stacker::{
     StackerPrompt,
 };
 
+const CHROME_BG: u32 = 0x242424;
+const CONTENT_BG: u32 = 0x191920;
+const CONTENT_PANEL_BG: u32 = 0x1f1f28;
+const BORDER: u32 = 0x33333a;
+const TEXT: u32 = 0xe8e8ee;
+const MUTED_TEXT: u32 = 0xa8a8b4;
+const SELECTED_BG: u32 = 0x313846;
+
 actions!(
     stacker_gpui,
     [
@@ -87,10 +95,20 @@ pub(crate) struct StackerPrototype {
     editor: Entity<StackerTextInput>,
     prompts: Vec<StackerPrompt>,
     active_prompt: Option<usize>,
+    show_chrome: bool,
 }
 
 impl StackerPrototype {
     pub(crate) fn new(cx: &mut Context<Self>) -> Self {
+        Self::with_chrome(cx, true)
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn embedded(cx: &mut Context<Self>) -> Self {
+        Self::with_chrome(cx, false)
+    }
+
+    pub(crate) fn with_chrome(cx: &mut Context<Self>, show_chrome: bool) -> Self {
         let prompts = load_saved_prompts();
         let initial_text = prompts
             .first()
@@ -102,6 +120,7 @@ impl StackerPrototype {
             editor,
             prompts,
             active_prompt,
+            show_chrome,
         }
     }
 
@@ -127,50 +146,55 @@ impl Focusable for StackerPrototype {
 
 impl Render for StackerPrototype {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let content = div()
+            .flex()
+            .flex_1()
+            .child(prompt_list(
+                &self.prompts,
+                self.active_prompt,
+                self.show_chrome,
+                cx,
+            ))
+            .child(editor_panel(self.editor.clone(), self.show_chrome));
+        let mut frame = div().size_full().flex().flex_col();
+        if self.show_chrome {
+            frame = frame.child(header());
+        }
+        frame = frame.child(content);
+        if self.show_chrome {
+            frame = frame.child(status_bar(self.editor.read(cx)));
+        }
+
         div()
             .size_full()
-            .bg(rgb(0x101014))
-            .text_color(rgb(0xe7e7ee))
+            .bg(rgb(CONTENT_BG))
+            .text_color(rgb(TEXT))
             .font_family("Inter")
-            .child(
-                div()
-                    .size_full()
-                    .flex()
-                    .flex_col()
-                    .child(header())
-                    .child(
-                        div()
-                            .flex()
-                            .flex_1()
-                            .child(prompt_list(&self.prompts, self.active_prompt, cx))
-                            .child(editor_panel(self.editor.clone())),
-                    )
-                    .child(status_bar(self.editor.read(cx))),
-            )
+            .child(frame)
     }
 }
 
 fn header() -> impl IntoElement {
     div()
-        .h(px(44.0))
+        .h(px(36.0))
         .w_full()
         .flex()
         .items_center()
         .justify_between()
-        .px_4()
+        .px_3()
         .border_b_1()
-        .border_color(rgb(0x272732))
-        .bg(rgb(0x181820))
+        .border_color(rgb(BORDER))
+        .bg(rgb(CHROME_BG))
         .child(
             div()
                 .font_weight(gpui::FontWeight::BOLD)
-                .text_size(px(15.0))
+                .text_size(px(13.0))
                 .child("LLNZY GPUI Stacker Prototype"),
         )
         .child(
             div()
-                .text_size(px(12.0))
-                .text_color(rgb(0x9ea3b3))
+                .text_size(px(11.0))
+                .text_color(rgb(MUTED_TEXT))
                 .child("Feature-gated prototype: existing app untouched"),
         )
 }
@@ -178,10 +202,11 @@ fn header() -> impl IntoElement {
 fn prompt_list(
     prompts: &[StackerPrompt],
     active_prompt: Option<usize>,
+    show_chrome: bool,
     cx: &mut Context<StackerPrototype>,
 ) -> impl IntoElement {
     let list = prompts.iter().enumerate().take(80).fold(
-        div().flex().flex_col().gap_1().p_2(),
+        div().flex().flex_col().gap_1().p_1(),
         |list, (ix, prompt)| {
             let selected = active_prompt == Some(ix);
             let title = prompt_title(prompt);
@@ -189,12 +214,13 @@ fn prompt_list(
             list.child(
                 div()
                     .w_full()
-                    .p_2()
+                    .px_2()
+                    .py_1()
                     .rounded_sm()
                     .bg(if selected {
-                        rgb(0x26384f)
+                        rgb(SELECTED_BG)
                     } else {
-                        rgb(0x15151c)
+                        rgb(CONTENT_PANEL_BG)
                     })
                     .cursor_pointer()
                     .on_mouse_up(
@@ -203,17 +229,11 @@ fn prompt_list(
                             this.load_prompt(ix, cx);
                         }),
                     )
+                    .child(div().text_size(px(12.0)).text_color(rgb(TEXT)).child(title))
                     .child(
                         div()
-                            .text_size(px(13.0))
-                            .text_color(rgb(0xe7e7ee))
-                            .child(title),
-                    )
-                    .child(
-                        div()
-                            .mt_1()
                             .text_size(px(11.0))
-                            .text_color(rgb(0x8f94a3))
+                            .text_color(rgb(MUTED_TEXT))
                             .child(category),
                     ),
             )
@@ -221,65 +241,80 @@ fn prompt_list(
     );
 
     div()
-        .w(px(300.0))
+        .w(if show_chrome { px(292.0) } else { px(260.0) })
         .h_full()
         .flex()
         .flex_col()
         .border_r_1()
-        .border_color(rgb(0x272732))
-        .bg(rgb(0x15151c))
+        .border_color(rgb(BORDER))
+        .bg(rgb(CHROME_BG))
         .child(
             div()
-                .h(px(38.0))
+                .h(px(30.0))
                 .flex()
                 .items_center()
-                .px_3()
+                .px_2()
                 .text_size(px(12.0))
-                .text_color(rgb(0x8f94a3))
+                .text_color(rgb(MUTED_TEXT))
                 .child(format!("Saved prompts ({})", prompts.len())),
         )
         .child(div().flex_1().overflow_hidden().child(list))
 }
 
-fn editor_panel(editor: Entity<StackerTextInput>) -> impl IntoElement {
-    div().flex_1().h_full().p_4().bg(rgb(0x0f0f13)).child(
-        div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .rounded_md()
-            .border_1()
-            .border_color(rgb(0x2f3340))
-            .bg(rgb(0x151821))
-            .child(
-                div()
-                    .h(px(38.0))
-                    .flex()
-                    .items_center()
-                    .px_3()
-                    .border_b_1()
-                    .border_color(rgb(0x2f3340))
-                    .text_size(px(12.0))
-                    .text_color(rgb(0x8f94a3))
-                    .child("Prompt editor"),
-            )
-            .child(div().flex_1().p_3().child(editor)),
-    )
+fn editor_panel(editor: Entity<StackerTextInput>, show_chrome: bool) -> impl IntoElement {
+    let mut body = div()
+        .size_full()
+        .flex()
+        .flex_col()
+        .border_1()
+        .border_color(rgb(BORDER))
+        .bg(rgb(CONTENT_BG));
+    if show_chrome {
+        body = body.child(
+            div()
+                .h(px(30.0))
+                .flex()
+                .items_center()
+                .px_2()
+                .border_b_1()
+                .border_color(rgb(BORDER))
+                .text_size(px(12.0))
+                .text_color(rgb(MUTED_TEXT))
+                .child("Prompt editor"),
+        );
+    }
+
+    let editor = if show_chrome {
+        div().flex_1().p_2().child(editor)
+    } else {
+        div().flex_1().child(editor)
+    };
+    let panel = div()
+        .flex_1()
+        .h_full()
+        .bg(rgb(CONTENT_BG))
+        .child(body.child(editor));
+
+    if show_chrome {
+        panel.p_3()
+    } else {
+        panel
+    }
 }
 
 fn status_bar(editor: &StackerTextInput) -> impl IntoElement {
     div()
-        .h(px(34.0))
+        .h(px(28.0))
         .w_full()
         .flex()
         .items_center()
         .justify_between()
         .px_3()
         .border_t_1()
-        .border_color(rgb(0x272732))
-        .bg(rgb(0x181820))
-        .text_size(px(12.0))
-        .text_color(rgb(0x9ea3b3))
+        .border_color(rgb(BORDER))
+        .bg(rgb(CHROME_BG))
+        .text_size(px(11.0))
+        .text_color(rgb(MUTED_TEXT))
         .child(format!(
             "{} chars | {} words | {} lines",
             editor.session.char_count(),
@@ -638,8 +673,8 @@ impl Render for StackerTextInput {
                     .p(px(8.0))
                     .rounded_sm()
                     .border_1()
-                    .border_color(rgb(0x3a4050))
-                    .bg(rgb(0x0e1118))
+                    .border_color(rgb(BORDER))
+                    .bg(rgb(CONTENT_BG))
                     .child(StackerTextElement { input: cx.entity() }),
             )
     }

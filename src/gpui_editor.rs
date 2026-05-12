@@ -60,7 +60,7 @@ pub fn run_editor_prototype() {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
                     ..Default::default()
                 },
-                |_, cx| cx.new(EditorPrototype::new),
+                |_, cx| cx.new(EditorPrototype::standalone),
             )
             .unwrap();
         window
@@ -113,10 +113,20 @@ pub(crate) struct EditorPrototype {
     status_message: Option<String>,
     last_text_bounds: Option<Bounds<gpui::Pixels>>,
     is_selecting: bool,
+    show_chrome: bool,
 }
 
 impl EditorPrototype {
+    #[cfg_attr(not(feature = "gpui-workspace"), allow(dead_code))]
     pub(crate) fn new(cx: &mut Context<Self>) -> Self {
+        Self::with_chrome(cx, false)
+    }
+
+    pub(crate) fn standalone(cx: &mut Context<Self>) -> Self {
+        Self::with_chrome(cx, true)
+    }
+
+    fn with_chrome(cx: &mut Context<Self>, show_chrome: bool) -> Self {
         let mut editor = EditorState::new();
         let mut load_error = None;
 
@@ -139,6 +149,7 @@ impl EditorPrototype {
             status_message: None,
             last_text_bounds: None,
             is_selecting: false,
+            show_chrome,
         }
     }
 
@@ -684,13 +695,29 @@ impl EditorPrototype {
 impl Render for EditorPrototype {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let snapshot = self.snapshot();
+        let content = div().flex_1().flex().flex_col();
+        let content = if self.show_chrome {
+            content.child(editor_header(&snapshot))
+        } else {
+            content
+        }
+        .child(editor_body(
+            &snapshot,
+            cx.entity(),
+            cx.listener(Self::on_editor_scroll),
+            cx.listener(Self::on_editor_mouse_down),
+            cx.listener(Self::on_editor_mouse_move),
+            cx.listener(Self::on_editor_mouse_up),
+            cx.listener(Self::on_editor_mouse_up),
+        ))
+        .child(status_bar(&snapshot));
 
-        div()
+        let root = div()
             .size_full()
             .flex()
             .flex_col()
-            .bg(rgb(0x0e1116))
-            .text_color(rgb(0xe6edf3))
+            .bg(rgb(EDITOR_SURFACE_BG))
+            .text_color(rgb(EDITOR_TEXT_FG))
             .font_family("Inter")
             .key_context("EditorPrototype")
             .track_focus(&cx.focus_handle())
@@ -719,25 +746,13 @@ impl Render for EditorPrototype {
             .on_action(cx.listener(Self::copy))
             .on_action(cx.listener(Self::save))
             .on_action(cx.listener(Self::undo))
-            .on_action(cx.listener(Self::redo))
-            .child(header())
-            .child(
-                div()
-                    .flex_1()
-                    .flex()
-                    .flex_col()
-                    .child(editor_header(&snapshot))
-                    .child(editor_body(
-                        &snapshot,
-                        cx.entity(),
-                        cx.listener(Self::on_editor_scroll),
-                        cx.listener(Self::on_editor_mouse_down),
-                        cx.listener(Self::on_editor_mouse_move),
-                        cx.listener(Self::on_editor_mouse_up),
-                        cx.listener(Self::on_editor_mouse_up),
-                    ))
-                    .child(status_bar(&snapshot)),
-            )
+            .on_action(cx.listener(Self::redo));
+
+        if self.show_chrome {
+            root.child(header()).child(content)
+        } else {
+            root.child(content)
+        }
     }
 }
 
@@ -932,8 +947,8 @@ fn header() -> impl IntoElement {
         .justify_between()
         .px_4()
         .border_b_1()
-        .border_color(rgb(0x30363d))
-        .bg(rgb(0x161b22))
+        .border_color(rgb(EDITOR_BORDER))
+        .bg(rgb(EDITOR_CHROME_BG))
         .child(
             div()
                 .font_weight(gpui::FontWeight::BOLD)
@@ -943,7 +958,7 @@ fn header() -> impl IntoElement {
         .child(
             div()
                 .text_size(px(12.0))
-                .text_color(rgb(0x8b949e))
+                .text_color(rgb(EDITOR_MUTED_FG))
                 .child("EditorState-backed text input prototype"),
         )
 }
@@ -957,8 +972,8 @@ fn editor_header(snapshot: &EditorSnapshot) -> impl IntoElement {
         .justify_between()
         .px_4()
         .border_b_1()
-        .border_color(rgb(0x30363d))
-        .bg(rgb(0x0d1117))
+        .border_color(rgb(EDITOR_BORDER))
+        .bg(rgb(EDITOR_CHROME_BG))
         .child(
             div()
                 .flex()
@@ -968,7 +983,7 @@ fn editor_header(snapshot: &EditorSnapshot) -> impl IntoElement {
                 .child(
                     div()
                         .text_size(px(11.0))
-                        .text_color(rgb(0x8b949e))
+                        .text_color(rgb(EDITOR_MUTED_FG))
                         .child(snapshot.subtitle.clone()),
                 ),
         )
@@ -976,11 +991,11 @@ fn editor_header(snapshot: &EditorSnapshot) -> impl IntoElement {
             div()
                 .rounded_sm()
                 .border_1()
-                .border_color(rgb(0x30363d))
+                .border_color(rgb(EDITOR_BORDER))
                 .px_2()
                 .py_1()
                 .text_size(px(11.0))
-                .text_color(rgb(0xc9d1d9))
+                .text_color(rgb(EDITOR_TEXT_FG))
                 .child(snapshot.language.clone()),
         )
 }
@@ -1014,7 +1029,7 @@ fn editor_body(
         .flex_1()
         .w_full()
         .overflow_hidden()
-        .bg(rgb(0x0d1117))
+        .bg(rgb(EDITOR_SURFACE_BG))
         .on_scroll_wheel(on_scroll)
         .on_mouse_down(MouseButton::Left, on_mouse_down)
         .on_mouse_move(on_mouse_move)
@@ -1048,7 +1063,7 @@ fn editor_line(
             .flex()
             .items_center()
             .child(styled_text_segments(&before, highlights, selection_cols, 0))
-            .child(div().w(px(2.0)).h(px(17.0)).bg(rgb(0x58a6ff)))
+            .child(div().w(px(2.0)).h(px(17.0)).bg(rgb(EDITOR_CURSOR_BLUE)))
             .child(styled_text_segments(
                 &after,
                 highlights,
@@ -1072,19 +1087,28 @@ fn editor_line(
         .font_family("Berkeley Mono")
         .text_size(px(13.0))
         .bg(if selected {
-            rgb(0x161f2e)
+            rgb(EDITOR_SELECTED_LINE_BG)
         } else {
-            rgb(0x0d1117)
+            rgb(EDITOR_SURFACE_BG)
         })
         .child(
             div()
                 .w(px(72.0))
+                .h_full()
+                .flex()
+                .items_center()
+                .justify_end()
                 .pr_3()
+                .bg(if selected {
+                    rgb(EDITOR_SELECTED_GUTTER_BG)
+                } else {
+                    rgb(EDITOR_GUTTER_BG)
+                })
                 .text_align(gpui::TextAlign::Right)
                 .text_color(if selected {
-                    rgb(0x9ecbff)
+                    rgb(EDITOR_TEXT_FG)
                 } else {
-                    rgb(0x6e7681)
+                    rgb(EDITOR_DIM_FG)
                 })
                 .child(number.to_string()),
         )
@@ -1103,22 +1127,22 @@ fn status_bar(snapshot: &EditorSnapshot) -> impl IntoElement {
         .status_message
         .clone()
         .or_else(|| snapshot.load_error.clone())
-        .unwrap_or_else(|| "terminal and app event loop untouched".to_string());
+        .unwrap_or_else(|| "Ready".to_string());
 
     div()
-        .h(px(36.0))
+        .h(px(24.0))
         .w_full()
         .flex()
         .items_center()
         .justify_between()
-        .px_4()
+        .px_3()
         .border_t_1()
-        .border_color(rgb(0x30363d))
-        .bg(rgb(0x161b22))
-        .text_size(px(12.0))
-        .text_color(rgb(0x8b949e))
+        .border_color(rgb(EDITOR_BORDER))
+        .bg(rgb(EDITOR_CHROME_BG))
+        .text_size(px(11.0))
+        .text_color(rgb(EDITOR_MUTED_FG))
         .child(format!(
-            "{left} | showing {}-{} of {}",
+            "{left} | {}-{} / {}",
             snapshot.first_line_number,
             snapshot
                 .first_line_number
@@ -1196,6 +1220,16 @@ struct EditorLineSnapshot {
     highlights: Vec<HighlightSpan>,
 }
 
+const EDITOR_SURFACE_BG: u32 = 0x191920;
+const EDITOR_GUTTER_BG: u32 = 0x1e1e26;
+const EDITOR_CHROME_BG: u32 = 0x242424;
+const EDITOR_BORDER: u32 = 0x34343c;
+const EDITOR_SELECTED_LINE_BG: u32 = 0x22222d;
+const EDITOR_SELECTED_GUTTER_BG: u32 = 0x2a2a34;
+const EDITOR_TEXT_FG: u32 = 0xe8e8ee;
+const EDITOR_MUTED_FG: u32 = 0x9a9aa7;
+const EDITOR_DIM_FG: u32 = 0x70707d;
+const EDITOR_CURSOR_BLUE: u32 = 0x73b6ff;
 const VISIBLE_LINE_LIMIT: usize = 32;
 const LINE_HEIGHT: gpui::Pixels = px(22.0);
 const LINE_NUMBER_WIDTH: gpui::Pixels = px(72.0);
