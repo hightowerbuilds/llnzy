@@ -14,6 +14,8 @@ pub mod gpui_editor;
 #[cfg(feature = "gpui-stacker")]
 pub mod gpui_stacker;
 #[cfg(feature = "gpui-workspace")]
+pub mod gpui_terminal;
+#[cfg(feature = "gpui-workspace")]
 pub mod gpui_workspace;
 pub mod input;
 pub mod keybindings;

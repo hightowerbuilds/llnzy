@@ -1,11 +1,12 @@
 use gpui::prelude::*;
 use gpui::{
     actions, div, px, rgb, size, App, Application, Bounds, Context, Entity, Focusable, KeyBinding,
-    MouseButton, MouseUpEvent, Render, Window, WindowBounds, WindowOptions,
+    MouseButton, MouseDownEvent, Render, Window, WindowBounds, WindowOptions,
 };
 
 use crate::gpui_editor::{bind_editor_keys, EditorPrototype};
 use crate::gpui_stacker::{bind_stacker_keys, StackerPrototype};
+use crate::gpui_terminal::{bind_terminal_keys, TerminalSurface};
 
 actions!(workspace_gpui, [Quit]);
 
@@ -40,6 +41,7 @@ pub fn run_workspace_prototype() {
     Application::new().run(|cx: &mut App| {
         bind_stacker_keys(cx);
         bind_editor_keys(cx);
+        bind_terminal_keys(cx);
         cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
 
         let bounds = Bounds::centered(None, size(px(1320.0), px(820.0)), cx);
@@ -65,6 +67,7 @@ pub fn run_workspace_prototype() {
 struct WorkspacePrototype {
     stacker: Entity<StackerPrototype>,
     editor: Entity<EditorPrototype>,
+    terminal: Entity<TerminalSurface>,
     active_surface: WorkspaceSurface,
 }
 
@@ -73,6 +76,7 @@ impl WorkspacePrototype {
         Self {
             stacker: cx.new(StackerPrototype::embedded),
             editor: cx.new(EditorPrototype::new),
+            terminal: cx.new(TerminalSurface::new),
             active_surface: WorkspaceSurface::Editor,
         }
     }
@@ -89,7 +93,7 @@ impl WorkspacePrototype {
             WorkspaceSurface::Editor | WorkspaceSurface::Explorer => {
                 window.focus(&self.editor.focus_handle(cx));
             }
-            WorkspaceSurface::Terminal => {}
+            WorkspaceSurface::Terminal => window.focus(&self.terminal.focus_handle(cx)),
         }
         cx.notify();
     }
@@ -115,6 +119,7 @@ impl Render for WorkspacePrototype {
                     .child(workspace_content(
                         self.stacker.clone(),
                         self.editor.clone(),
+                        self.terminal.clone(),
                         self.active_surface,
                         cx,
                     )),
@@ -200,9 +205,9 @@ fn workspace_tab(
         .text_color(rgb(if active { ACTIVE_TEXT } else { MUTED_TEXT }))
         .text_size(px(14.0))
         .cursor_pointer()
-        .on_mouse_up(
+        .on_mouse_down(
             MouseButton::Left,
-            cx.listener(move |this, _: &MouseUpEvent, window, cx| {
+            cx.listener(move |this, _: &MouseDownEvent, window, cx| {
                 this.activate_surface(surface, window, cx);
             }),
         )
@@ -331,9 +336,9 @@ fn sidebar_button(
         .text_color(rgb(0xe1e6ee))
         .text_size(px(14.0))
         .cursor_pointer()
-        .on_mouse_up(
+        .on_mouse_down(
             MouseButton::Left,
-            cx.listener(move |this, _: &MouseUpEvent, window, cx| {
+            cx.listener(move |this, _: &MouseDownEvent, window, cx| {
                 this.activate_surface(surface, window, cx);
             }),
         )
@@ -370,9 +375,9 @@ fn sidebar_tree_row(
         .text_size(px(14.0))
         .text_color(rgb(if folder { FOLDER_BLUE } else { SIDEBAR_TEXT }))
         .cursor_pointer()
-        .on_mouse_up(
+        .on_mouse_down(
             MouseButton::Left,
-            cx.listener(move |this, _: &MouseUpEvent, window, cx| {
+            cx.listener(move |this, _: &MouseDownEvent, window, cx| {
                 this.activate_surface(surface, window, cx);
             }),
         )
@@ -398,6 +403,7 @@ fn sidebar_bumper() -> impl IntoElement {
 fn workspace_content(
     stacker: Entity<StackerPrototype>,
     editor: Entity<EditorPrototype>,
+    terminal: Entity<TerminalSurface>,
     active_surface: WorkspaceSurface,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
@@ -427,9 +433,9 @@ fn workspace_content(
                     .bg(rgb(PANEL_BG))
                     .overflow_hidden()
                     .cursor_pointer()
-                    .on_mouse_up(
+                    .on_mouse_down(
                         MouseButton::Left,
-                        cx.listener(|this, _: &MouseUpEvent, window, cx| {
+                        cx.listener(|this, _: &MouseDownEvent, window, cx| {
                             this.activate_surface(WorkspaceSurface::Stacker, window, cx);
                         }),
                     )
@@ -442,9 +448,9 @@ fn workspace_content(
                     .p_4()
                     .bg(rgb(EDITOR_BG))
                     .cursor_pointer()
-                    .on_mouse_up(
+                    .on_mouse_down(
                         MouseButton::Left,
-                        cx.listener(|this, _: &MouseUpEvent, window, cx| {
+                        cx.listener(|this, _: &MouseDownEvent, window, cx| {
                             this.activate_surface(WorkspaceSurface::Editor, window, cx);
                         }),
                     )
@@ -458,36 +464,9 @@ fn workspace_content(
                             .child(editor),
                     ),
             ),
-        WorkspaceSurface::Terminal => content.child(terminal_placeholder()),
+        WorkspaceSurface::Terminal => content.child(terminal),
         WorkspaceSurface::Explorer => content.child(explorer_placeholder()),
     }
-}
-
-fn terminal_placeholder() -> impl IntoElement {
-    div()
-        .flex_1()
-        .h_full()
-        .flex()
-        .flex_col()
-        .items_center()
-        .justify_center()
-        .bg(rgb(0x080808))
-        .text_color(rgb(0xd6dde8))
-        .child(
-            div()
-                .text_size(px(15.0))
-                .text_color(rgb(ACTIVE_TEXT))
-                .child("Terminal remains on the existing winit/wgpu path"),
-        )
-        .child(
-            div()
-                .mt_2()
-                .text_size(px(12.0))
-                .text_color(rgb(MUTED_TEXT))
-                .child(
-                    "This GPUI shell is validating workspace chrome, Stacker, and editor first.",
-                ),
-        )
 }
 
 fn explorer_placeholder() -> impl IntoElement {
@@ -591,9 +570,9 @@ fn footer_button(
         .text_color(rgb(if active { ACTIVE_TEXT } else { SIDEBAR_TEXT }))
         .text_size(px(14.0))
         .cursor_pointer()
-        .on_mouse_up(
+        .on_mouse_down(
             MouseButton::Left,
-            cx.listener(move |this, _: &MouseUpEvent, window, cx| {
+            cx.listener(move |this, _: &MouseDownEvent, window, cx| {
                 this.activate_surface(surface, window, cx);
             }),
         )

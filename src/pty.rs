@@ -52,6 +52,10 @@ impl Pty {
         Self::spawn_with_proxy(spec, Some(proxy))
     }
 
+    pub fn spawn_with_spec_without_proxy(spec: TerminalLaunchSpec) -> io::Result<Self> {
+        Self::spawn_with_proxy(spec, None)
+    }
+
     #[cfg(test)]
     fn spawn_in_without_proxy(
         shell: &str,
