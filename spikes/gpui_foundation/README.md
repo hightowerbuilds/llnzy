@@ -7,6 +7,7 @@ This is an isolated GPUI spike for LLNZY. It is intentionally outside the produc
 - Prove a pinned GPUI dependency builds locally.
 - Open a GPUI window with LLNZY-like layout regions.
 - Exercise basic declarative layout, scrolling/list content, and custom canvas painting.
+- Exercise GPUI's native text input path with a Stacker-like prompt field.
 - Capture follow-up findings before any production migration begins.
 
 ## Run
@@ -29,6 +30,15 @@ This avoids GPUI's default macOS build path that invokes Apple's `metal` shader 
 cargo check --manifest-path spikes/gpui_foundation/Cargo.toml
 ```
 
-## Current Scope
+## Verified
 
-The first build proves a basic GPUI shell and custom-painted panel. It does not yet prove native text input, IME/dictation behavior, or terminal texture bridging.
+- `cargo check --manifest-path spikes/gpui_foundation/Cargo.toml`
+- `cargo run --manifest-path spikes/gpui_foundation/Cargo.toml`
+
+The current spike includes a basic app shell, Explorer-like list, custom-painted panel, and focused text input field.
+
+## Still Open
+
+- Manual verification of text selection, paste/cut/copy, IME composition, dictation/Wispr-style input, and command-key editing behavior.
+- Terminal texture/surface bridging.
+- Resize, scrolling, and high-frequency redraw measurements.

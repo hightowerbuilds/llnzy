@@ -6,3 +6,4 @@ publish = false
 
 [dependencies]
 gpui = { version = "=0.2.2", features = ["macos-blade"] }
+unicode-segmentation = "1"

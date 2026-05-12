@@ -2131,6 +2131,7 @@ name = "gpui_foundation_spike"
 version = "0.1.0"
 dependencies = [
  "gpui",
+ "unicode-segmentation",
 ]
 
 [[package]]

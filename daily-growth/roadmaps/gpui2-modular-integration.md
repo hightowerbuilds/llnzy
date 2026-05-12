@@ -48,13 +48,13 @@ git push -u origin spike/gpui-foundation
 
 **Objective:** Prove GPUI can support the core interaction and rendering requirements outside the app.
 
-- [ ] Confirm macOS build prerequisites. Prefer GPUI's `macos-blade` feature for the spike so Command Line Tools can build it without full Xcode's `metal` compiler.
-- [ ] Create a separate spike crate or isolated example directory outside the production runtime.
-- [ ] Pin GPUI to a specific known-good commit.
-- [ ] Open a basic GPUI window with app-like layout regions: sidebar, tab bar, main pane, footer/status area.
+- [x] Confirm macOS build prerequisites. Prefer GPUI's `macos-blade` feature for the spike so Command Line Tools can build it without full Xcode's `metal` compiler.
+- [x] Create a separate spike crate or isolated example directory outside the production runtime.
+- [x] Pin GPUI to a specific known-good commit.
+- [x] Open a basic GPUI window with app-like layout regions: sidebar, tab bar, main pane, footer/status area.
 - [ ] Prove keyboard input, text input, focus movement, clipboard, mouse selection, scrolling, resize, and redraw behavior.
 - [ ] Test macOS-native text features: IME composition, dictation/Wispr-style input, selection gestures, and command-key editing behavior.
-- [ ] Create a custom drawing area that updates at interactive frame rates.
+- [x] Create a custom drawing area that updates at interactive frame rates.
 - [ ] Investigate whether GPUI can display a dynamic texture or host a custom-rendered surface suitable for the terminal.
 - [ ] Document concrete API constraints, unstable areas, and missing primitives.
 
