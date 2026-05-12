@@ -17,25 +17,15 @@ cargo run --manifest-path spikes/gpui_foundation/Cargo.toml
 
 ## Build Status
 
-Current blocker on this machine:
+The spike uses GPUI's `macos-blade` feature:
 
-```text
-gpui@0.2.2: metal shader compilation failed
-xcrun: error: unable to find utility "metal", not a developer tool or in PATH
+```toml
+gpui = { version = "=0.2.2", features = ["macos-blade"] }
 ```
 
-The active developer directory is currently:
+This avoids GPUI's default macOS build path that invokes Apple's `metal` shader compiler. With the current Command Line Tools setup, the default path fails because `xcrun -find metal` does not resolve, but the Blade-backed path compiles:
 
 ```sh
-xcode-select -p
-# /Library/Developer/CommandLineTools
-```
-
-GPUI's macOS renderer needs the full Xcode toolchain, not only Command Line Tools, because its build script invokes Apple's `metal` shader compiler. After installing Xcode, point `xcode-select` at it and re-run:
-
-```sh
-sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
-xcrun -find metal
 cargo check --manifest-path spikes/gpui_foundation/Cargo.toml
 ```
 

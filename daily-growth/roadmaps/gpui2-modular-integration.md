@@ -48,7 +48,7 @@ git push -u origin spike/gpui-foundation
 
 **Objective:** Prove GPUI can support the core interaction and rendering requirements outside the app.
 
-- [ ] Confirm macOS build prerequisites: full Xcode must be installed and `xcrun -find metal` must resolve.
+- [ ] Confirm macOS build prerequisites. Prefer GPUI's `macos-blade` feature for the spike so Command Line Tools can build it without full Xcode's `metal` compiler.
 - [ ] Create a separate spike crate or isolated example directory outside the production runtime.
 - [ ] Pin GPUI to a specific known-good commit.
 - [ ] Open a basic GPUI window with app-like layout regions: sidebar, tab bar, main pane, footer/status area.
