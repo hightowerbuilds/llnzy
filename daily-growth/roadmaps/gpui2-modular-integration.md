@@ -139,8 +139,9 @@ Exit criteria:
 
 ## Phase 2: Bring Up A Real GPUI Terminal Surface
 
-Status: first live slice implemented on `final-stretch/gpui-terminal-surface`;
-manual verification and parity work still pending.
+Status: live terminal surface implemented on
+`final-stretch/gpui-terminal-surface`; visual parity pass started, with
+manual verification and terminal mouse reporting still pending.
 
 Goal: replace the terminal placeholder with a minimal real terminal.
 
@@ -165,7 +166,7 @@ Tasks:
   behavior has been manually verified.
 - [ ] Manually verify the first GPUI terminal slice in the running release
   workspace.
-- [ ] Add color/style spans, cell backgrounds, and cursor styling parity.
+- [x] Add color/style spans, cell backgrounds, and cursor styling parity.
 - [ ] Add terminal mouse reporting for full-screen terminal apps.
 - [ ] Add URL/file opening and copy-on-select parity.
 
@@ -345,32 +346,24 @@ migration path.
 
 ## Recommended Next Slice
 
-Start with the terminal. It is the most visible missing piece, and the desktop
-test made that clear.
+The terminal is now alive and rendering with Alacritty-backed styling. Keep the
+old terminal path preserved until the GPUI surface has been manually verified,
+but move the main migration pressure to the workbench surfaces around it.
 
-Next branch:
+Next objective:
 
-```sh
-git switch -c final-stretch/gpui-terminal-surface
-```
+- Turn the sidebar into a real project explorer.
+- Preserve terminal mouse reporting as a focused terminal follow-up.
+- Then move into editor workspace tabs and dirty-file safety.
 
-First objective:
-
-- Create a minimal `TerminalSurface` in GPUI.
-- Reuse the existing PTY/session/grid code as much as possible.
-- Render plain terminal text.
-- Route basic keyboard input.
-- Prove one real shell prompt inside `gpui-workspace`.
-
-This does not need to look beautiful yet. It needs to be alive.
-
-Once terminal has a real first slice, the order should be:
+Order:
 
 1. Real explorer/sidebar.
-2. Editor workspace tabs and dirty-file safety.
-3. Stacker production workflow parity.
-4. Styling restoration pass.
-5. Release packaging and smoke automation.
+2. Terminal mouse reporting for full-screen terminal apps.
+3. Editor workspace tabs and dirty-file safety.
+4. Stacker production workflow parity.
+5. Styling restoration pass.
+6. Release packaging and smoke automation.
 
 ## Guiding Rule
 

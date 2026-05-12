@@ -1,16 +1,18 @@
 use std::ops::Range;
 use std::time::Duration;
 
+use alacritty_terminal::term::cell::Flags;
 use gpui::prelude::*;
 use gpui::{
     actions, div, fill, point, px, relative, rgb, rgba, size, App, Bounds, ClipboardItem,
     ContentMask, Context, DispatchPhase, Element, ElementId, ElementInputHandler, Entity,
-    EntityInputHandler, FocusHandle, Focusable, GlobalElementId, KeyBinding, LayoutId, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point, Render,
-    ScrollWheelEvent, SharedString, Style, TextAlign, TextRun, UTF16Selection, Window, WrappedLine,
+    EntityInputHandler, FocusHandle, Focusable, Font, FontStyle, FontWeight, GlobalElementId,
+    KeyBinding, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad,
+    Pixels, Point, Render, ScrollWheelEvent, SharedString, Style, TextAlign, TextRun,
+    UTF16Selection, Window, WrappedLine,
 };
 
-use crate::config::Config;
+use crate::config::{Config, CursorStyle};
 use crate::session::Session;
 
 const TERMINAL_BG: u32 = 0x080808;
@@ -21,7 +23,6 @@ const TERMINAL_MUTED: u32 = 0x8d94a3;
 const TERMINAL_ACCENT: u32 = 0x6aff90;
 const TERMINAL_ERROR: u32 = 0xff7a7a;
 const TERMINAL_SELECTION: u32 = 0x38bdf860;
-const TERMINAL_CURSOR: u32 = 0xd6dde8aa;
 
 const DEFAULT_COLS: u16 = 100;
 const DEFAULT_ROWS: u16 = 30;
@@ -617,6 +618,8 @@ struct TerminalElement {
 }
 
 struct TerminalPrepaintState {
+    backgrounds: Vec<PaintQuad>,
+    decorations: Vec<PaintQuad>,
     lines: Vec<TerminalPaintLine>,
     selection: Vec<PaintQuad>,
     cursor: Option<PaintQuad>,
@@ -625,6 +628,13 @@ struct TerminalPrepaintState {
 struct TerminalPaintLine {
     line: WrappedLine,
     row: usize,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct TerminalTextStyle {
+    fg: [u8; 3],
+    bold: bool,
+    italic: bool,
 }
 
 impl IntoElement for TerminalElement {
@@ -670,33 +680,39 @@ impl Element for TerminalElement {
         cx: &mut App,
     ) -> Self::PrepaintState {
         let surface = self.surface.read(cx);
+        let terminal_config = terminal_render_config(&surface.config);
         let style = window.text_style();
-        let font_size = px(14.0);
-        let run = TextRun {
-            len: 0,
-            font: style.font(),
-            color: rgb(TERMINAL_TEXT).into(),
-            background_color: None,
-            underline: None,
-            strikethrough: None,
-        };
+        let font_size = px(terminal_config.font_size);
+        let base_font = terminal_font(&terminal_config, style.font());
+        let mut backgrounds = Vec::new();
+        let mut decorations = Vec::new();
         let mut lines = Vec::new();
         let mut selection = Vec::new();
         let mut cursor = None;
 
         if let Some(session) = &surface.session {
             let (cols, rows) = session.terminal.size();
+            let is_focused = surface.focus_handle.is_focused(window);
+            let block_cursor = if is_focused && terminal_config.cursor_style == CursorStyle::Block {
+                session.terminal.cursor_point()
+            } else {
+                None
+            };
+
             for row in 0..rows {
-                let text = terminal_row_text(session, row, cols);
+                let (text, runs) = terminal_row_runs(
+                    session,
+                    &terminal_config,
+                    row,
+                    cols,
+                    block_cursor,
+                    &base_font,
+                );
                 let display_text: SharedString = text.into();
-                let row_run = TextRun {
-                    len: display_text.len(),
-                    ..run.clone()
-                };
                 if let Ok(mut shaped) =
                     window
                         .text_system()
-                        .shape_text(display_text, font_size, &[row_run], None, None)
+                        .shape_text(display_text, font_size, &runs, None, None)
                 {
                     if let Some(line) = shaped.pop() {
                         lines.push(TerminalPaintLine { line, row });
@@ -723,20 +739,34 @@ impl Element for TerminalElement {
                 .collect();
 
             if let Some((row, col)) = session.terminal.cursor_point() {
-                cursor = Some(fill(
-                    Bounds::new(
-                        point(
-                            bounds.left() + px(TERMINAL_PADDING + col as f32 * CELL_WIDTH),
-                            bounds.top() + px(TERMINAL_PADDING + row as f32 * LINE_HEIGHT),
-                        ),
-                        size(px(CELL_WIDTH), px(LINE_HEIGHT)),
-                    ),
-                    rgba(TERMINAL_CURSOR),
-                ));
+                if is_focused {
+                    cursor = Some(cursor_quad(bounds, row, col, &terminal_config));
+                }
             }
+
+            backgrounds = session
+                .terminal
+                .background_rects(&terminal_config, CELL_WIDTH, LINE_HEIGHT)
+                .into_iter()
+                .map(|rect| terminal_rect_quad(bounds, rect))
+                .collect();
+
+            decorations = session
+                .terminal
+                .decoration_rects(&terminal_config, CELL_WIDTH, LINE_HEIGHT)
+                .into_iter()
+                .chain(
+                    session
+                        .terminal
+                        .url_decoration_rects(CELL_WIDTH, LINE_HEIGHT),
+                )
+                .map(|rect| terminal_rect_quad(bounds, rect))
+                .collect();
         }
 
         TerminalPrepaintState {
+            backgrounds,
+            decorations,
             lines,
             selection,
             cursor,
@@ -765,14 +795,16 @@ impl Element for TerminalElement {
         });
 
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
+            for background in prepaint.backgrounds.drain(..) {
+                window.paint_quad(background);
+            }
+
             for selection in prepaint.selection.drain(..) {
                 window.paint_quad(selection);
             }
 
-            if focus_handle.is_focused(window) {
-                if let Some(cursor) = prepaint.cursor.take() {
-                    window.paint_quad(cursor);
-                }
+            if let Some(cursor) = prepaint.cursor.take() {
+                window.paint_quad(cursor);
             }
 
             for paint_line in prepaint.lines.drain(..) {
@@ -791,6 +823,10 @@ impl Element for TerminalElement {
                         cx,
                     )
                     .ok();
+            }
+
+            for decoration in prepaint.decorations.drain(..) {
+                window.paint_quad(decoration);
             }
         });
 
@@ -888,17 +924,176 @@ fn terminal_grid_size(bounds: Bounds<Pixels>) -> (u16, u16) {
     (cols, rows)
 }
 
-fn terminal_row_text(session: &Session, row: usize, cols: usize) -> String {
-    (0..cols)
-        .map(|col| {
-            let c = session.terminal.cell_char(row, col);
-            if c == '\0' {
-                ' '
-            } else {
-                c
-            }
-        })
-        .collect()
+fn terminal_render_config(config: &Config) -> Config {
+    let mut terminal_config = config.clone();
+    terminal_config.colors.background = [8, 8, 8];
+    terminal_config.colors.ansi[0] = [8, 8, 8];
+    terminal_config
+}
+
+fn terminal_font(config: &Config, mut base_font: Font) -> Font {
+    if let Some(font_family) = &config.font_family {
+        base_font.family = font_family.clone().into();
+    }
+    base_font
+}
+
+fn terminal_row_runs(
+    session: &Session,
+    config: &Config,
+    row: usize,
+    cols: usize,
+    block_cursor: Option<(usize, usize)>,
+    base_font: &Font,
+) -> (String, Vec<TextRun>) {
+    let mut text = String::new();
+    let mut runs = Vec::new();
+    let mut current_style: Option<TerminalTextStyle> = None;
+    let mut current_len = 0;
+
+    for col in 0..cols {
+        let style = terminal_cell_text_style(session, config, row, col, block_cursor);
+        let c = display_cell_char(session.terminal.cell_char(row, col));
+        let byte_len = c.len_utf8();
+
+        if current_style == Some(style) || current_style.is_none() {
+            current_style = Some(style);
+            current_len += byte_len;
+        } else if let Some(previous_style) = current_style.replace(style) {
+            runs.push(text_run(previous_style, current_len, base_font));
+            current_len = byte_len;
+        }
+
+        text.push(c);
+    }
+
+    if let Some(style) = current_style {
+        runs.push(text_run(style, current_len, base_font));
+    }
+
+    (text, runs)
+}
+
+fn terminal_cell_text_style(
+    session: &Session,
+    config: &Config,
+    row: usize,
+    col: usize,
+    block_cursor: Option<(usize, usize)>,
+) -> TerminalTextStyle {
+    let flags = session.terminal.cell_flags(row, col);
+    let is_block_cursor = block_cursor == Some((row, col));
+    let mut fg = if is_block_cursor {
+        config.colors.background
+    } else {
+        session.terminal.resolve_fg_with_attrs(row, col, config)
+    };
+
+    if flags.contains(Flags::DIM) && !is_block_cursor {
+        fg = [
+            (fg[0] as u16 * 2 / 3) as u8,
+            (fg[1] as u16 * 2 / 3) as u8,
+            (fg[2] as u16 * 2 / 3) as u8,
+        ];
+    }
+    if flags.contains(Flags::HIDDEN) && !is_block_cursor {
+        fg = session.terminal.resolve_bg_with_attrs(row, col, config);
+    }
+
+    TerminalTextStyle {
+        fg,
+        bold: flags.contains(Flags::BOLD),
+        italic: flags.contains(Flags::ITALIC),
+    }
+}
+
+fn text_run(style: TerminalTextStyle, len: usize, base_font: &Font) -> TextRun {
+    let mut font = base_font.clone();
+    if style.bold {
+        font.weight = FontWeight::BOLD;
+    }
+    if style.italic {
+        font.style = FontStyle::Italic;
+    }
+
+    TextRun {
+        len,
+        font,
+        color: rgb(rgb_u32(style.fg)).into(),
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    }
+}
+
+fn display_cell_char(c: char) -> char {
+    if c == '\0' {
+        ' '
+    } else {
+        c
+    }
+}
+
+fn cursor_quad(
+    terminal_bounds: Bounds<Pixels>,
+    row: usize,
+    col: usize,
+    config: &Config,
+) -> PaintQuad {
+    let x = TERMINAL_PADDING + col as f32 * CELL_WIDTH;
+    let y = TERMINAL_PADDING + row as f32 * LINE_HEIGHT;
+    let (cursor_x, cursor_y, cursor_w, cursor_h) = match config.cursor_style {
+        CursorStyle::Block => (x, y, CELL_WIDTH, LINE_HEIGHT),
+        CursorStyle::Beam => (x, y, 2.0, LINE_HEIGHT),
+        CursorStyle::Underline => (x, y + LINE_HEIGHT - 2.0, CELL_WIDTH, 2.0),
+    };
+
+    fill(
+        Bounds::new(
+            point(
+                terminal_bounds.left() + px(cursor_x),
+                terminal_bounds.top() + px(cursor_y),
+            ),
+            size(px(cursor_w), px(cursor_h)),
+        ),
+        rgba(rgba_u32(config.cursor_color(), 1.0)),
+    )
+}
+
+fn terminal_rect_quad(
+    terminal_bounds: Bounds<Pixels>,
+    (x, y, width, height, color): (f32, f32, f32, f32, [f32; 4]),
+) -> PaintQuad {
+    fill(
+        Bounds::new(
+            point(
+                terminal_bounds.left() + px(TERMINAL_PADDING + x),
+                terminal_bounds.top() + px(TERMINAL_PADDING + y),
+            ),
+            size(px(width), px(height)),
+        ),
+        rgba(rgba_f32_u32(color)),
+    )
+}
+
+fn rgb_u32(color: [u8; 3]) -> u32 {
+    ((color[0] as u32) << 16) | ((color[1] as u32) << 8) | color[2] as u32
+}
+
+fn rgba_u32(color: [u8; 3], alpha: f32) -> u32 {
+    (rgb_u32(color) << 8) | color_channel(alpha) as u32
+}
+
+fn rgba_f32_u32(color: [f32; 4]) -> u32 {
+    let red = color_channel(color[0]);
+    let green = color_channel(color[1]);
+    let blue = color_channel(color[2]);
+    let alpha = color_channel(color[3]);
+    ((red as u32) << 24) | ((green as u32) << 16) | ((blue as u32) << 8) | alpha as u32
+}
+
+fn color_channel(value: f32) -> u8 {
+    (value.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
 fn terminal_paste_payload(text: &str, bracketed: bool) -> Vec<u8> {
