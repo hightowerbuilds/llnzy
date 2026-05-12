@@ -11,6 +11,7 @@ use gpui::{
 };
 
 use crate::editor::buffer::Position;
+use crate::editor::syntax::{group_color, HighlightGroup, HighlightSpan};
 use crate::editor::{BufferView, EditorState};
 use crate::stacker::utf16::{char_index_to_utf16_index, utf16_index_to_char_index};
 
@@ -119,7 +120,7 @@ impl EditorPrototype {
             if let Err(err) = editor.open(path.clone()) {
                 load_error = Some(format!("{}: {err}", path.display()));
             } else {
-                editor.reparse_active();
+                refresh_active_syntax(&mut editor);
             }
         } else {
             load_error = Some("No readable file found for GPUI editor prototype".to_string());
@@ -137,12 +138,29 @@ impl EditorPrototype {
         }
     }
 
-    fn snapshot(&self) -> EditorSnapshot {
+    fn snapshot(&mut self) -> EditorSnapshot {
+        refresh_active_syntax(&mut self.editor);
         if let Some((buffer_id, buffer, view)) = self.editor.active_buffer_view() {
             let line_count = buffer.line_count();
             let visible_start = view.scroll_line.min(line_count.saturating_sub(1));
-            let lines = (visible_start..line_count.min(visible_start + VISIBLE_LINE_LIMIT))
-                .map(|line| buffer.line(line).to_string())
+            let visible_end = line_count.min(visible_start + VISIBLE_LINE_LIMIT);
+            let highlight_spans = match (view.lang_id, view.tree.as_ref()) {
+                (Some(lang_id), Some(tree)) => self.editor.syntax.highlights_for_range(
+                    lang_id,
+                    tree,
+                    buffer.text().as_bytes(),
+                    visible_start,
+                    visible_end,
+                ),
+                _ => vec![Vec::new(); visible_end.saturating_sub(visible_start)],
+            };
+            let lines = (visible_start..visible_end)
+                .enumerate()
+                .map(|(idx, line)| EditorLineSnapshot {
+                    number: line + 1,
+                    text: buffer.line(line).to_string(),
+                    highlights: highlight_spans.get(idx).cloned().unwrap_or_default(),
+                })
                 .collect();
 
             return EditorSnapshot {
@@ -185,7 +203,12 @@ impl EditorPrototype {
                 .lines()
                 .skip(self.sample_scroll_line)
                 .take(VISIBLE_LINE_LIMIT)
-                .map(str::to_string)
+                .enumerate()
+                .map(|(idx, line)| EditorLineSnapshot {
+                    number: self.sample_scroll_line + idx + 1,
+                    text: line.to_string(),
+                    highlights: Vec::new(),
+                })
                 .collect(),
             first_line_number: self.sample_scroll_line + 1,
             cursor: None,
@@ -247,7 +270,7 @@ impl EditorPrototype {
                 &buffer_edit.new_text,
             );
         }
-        self.editor.reparse_active();
+        refresh_active_syntax(&mut self.editor);
         cx.notify();
     }
 
@@ -967,20 +990,20 @@ fn editor_body(
     on_mouse_up: impl Fn(&MouseUpEvent, &mut Window, &mut App) + 'static,
     on_mouse_up_out: impl Fn(&MouseUpEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
-    let lines = snapshot.lines.iter().enumerate().fold(
-        div().flex().flex_col().py_3(),
-        |column, (idx, line)| {
-            let line_number = snapshot.first_line_number + idx;
+    let lines = snapshot
+        .lines
+        .iter()
+        .fold(div().flex().flex_col().py_3(), |column, line| {
             column.child(editor_line(
-                line_number,
-                line,
+                line.number,
+                &line.text,
+                &line.highlights,
                 snapshot
                     .cursor
-                    .filter(|cursor| cursor.line + 1 == line_number),
+                    .filter(|cursor| cursor.line + 1 == line.number),
                 snapshot.selection,
             ))
-        },
-    );
+        });
 
     div()
         .relative()
@@ -1005,14 +1028,14 @@ fn editor_body(
 fn editor_line(
     number: usize,
     text: &str,
+    highlights: &[HighlightSpan],
     cursor: Option<Position>,
     selection: Option<(Position, Position)>,
 ) -> impl IntoElement {
-    let selection_active = selection.is_some_and(|(start, end)| {
-        let line = number.saturating_sub(1);
-        line >= start.line && line <= end.line
-    });
-    let selected = cursor.is_some() || selection_active;
+    let line = number.saturating_sub(1);
+    let selection_cols =
+        selection.and_then(|(start, end)| selection_columns_for_line(start, end, line, text));
+    let selected = cursor.is_some() || selection_cols.is_some();
     let text_cell = if let Some(cursor) = cursor {
         let (before, after) = split_chars(text, cursor.col);
         div()
@@ -1020,24 +1043,21 @@ fn editor_line(
             .overflow_hidden()
             .flex()
             .items_center()
-            .text_color(rgb(0xf0f6fc))
-            .child(before)
+            .child(styled_text_segments(&before, highlights, selection_cols, 0))
             .child(div().w(px(2.0)).h(px(17.0)).bg(rgb(0x58a6ff)))
-            .child(if after.is_empty() {
-                " ".to_string()
-            } else {
-                after
-            })
+            .child(styled_text_segments(
+                &after,
+                highlights,
+                selection_cols,
+                cursor.col,
+            ))
     } else {
         div()
             .flex_1()
             .overflow_hidden()
-            .text_color(rgb(0xd0d7de))
-            .child(if text.is_empty() {
-                " ".to_string()
-            } else {
-                text.to_string()
-            })
+            .flex()
+            .items_center()
+            .child(styled_text_segments(text, highlights, selection_cols, 0))
     };
 
     div()
@@ -1122,6 +1142,24 @@ fn language_label(view: &BufferView) -> String {
     view.lang_id.unwrap_or("plain text").to_string()
 }
 
+fn refresh_active_syntax(editor: &mut EditorState) {
+    let active = editor.active;
+    if active >= editor.buffers.len() || active >= editor.views.len() {
+        return;
+    }
+
+    let Some(lang_id) = editor.views[active].lang_id else {
+        return;
+    };
+    if !editor.views[active].tree_dirty && editor.views[active].tree.is_some() {
+        return;
+    }
+    let source = editor.buffers[active].text();
+    editor.views[active].tree = editor.syntax.parse(lang_id, &source);
+    editor.views[active].tree_dirty = false;
+    editor.views[active].folded_ranges.clear();
+}
+
 fn sample_text() -> String {
     [
         "LLNZY GPUI editor prototype",
@@ -1138,7 +1176,7 @@ struct EditorSnapshot {
     title: String,
     subtitle: String,
     language: String,
-    lines: Vec<String>,
+    lines: Vec<EditorLineSnapshot>,
     first_line_number: usize,
     cursor: Option<Position>,
     selection: Option<(Position, Position)>,
@@ -1146,6 +1184,12 @@ struct EditorSnapshot {
     load_error: Option<String>,
     status_message: Option<String>,
     sample: bool,
+}
+
+struct EditorLineSnapshot {
+    number: usize,
+    text: String,
+    highlights: Vec<HighlightSpan>,
 }
 
 const VISIBLE_LINE_LIMIT: usize = 32;
@@ -1183,6 +1227,89 @@ fn split_chars(text: &str, char_index: usize) -> (String, String) {
         .nth(char_index)
         .unwrap_or(text.len());
     (text[..byte].to_string(), text[byte..].to_string())
+}
+
+fn styled_text_segments(
+    text: &str,
+    highlights: &[HighlightSpan],
+    selection: Option<(usize, usize)>,
+    col_offset: usize,
+) -> impl IntoElement {
+    let mut row = div().flex().items_center().text_color(rgb(0xd0d7de));
+    if text.is_empty() {
+        return row.child(" ".to_string());
+    }
+
+    let mut segment_start = 0;
+    let mut current_col = col_offset;
+    let mut current_style = text_style_for_col(current_col, highlights, selection);
+
+    for (byte, _) in text.char_indices().skip(1) {
+        let next_col = current_col + 1;
+        let next_style = text_style_for_col(next_col, highlights, selection);
+        if next_style != current_style {
+            row = row.child(styled_text_chunk(&text[segment_start..byte], current_style));
+            segment_start = byte;
+            current_style = next_style;
+        }
+        current_col = next_col;
+    }
+
+    row.child(styled_text_chunk(&text[segment_start..], current_style))
+}
+
+fn styled_text_chunk(text: &str, style: TextChunkStyle) -> impl IntoElement {
+    let mut chunk = div()
+        .h(LINE_HEIGHT)
+        .flex()
+        .items_center()
+        .text_color(style.color);
+    if style.selected {
+        chunk = chunk.bg(rgb(0x264f78));
+    }
+    chunk.child(text.to_string())
+}
+
+fn text_style_for_col(
+    col: usize,
+    highlights: &[HighlightSpan],
+    selection: Option<(usize, usize)>,
+) -> TextChunkStyle {
+    let group = highlights
+        .iter()
+        .find(|span| col >= span.col_start && col < span.col_end)
+        .map(|span| span.group);
+    TextChunkStyle {
+        color: highlight_color(group),
+        selected: selection.is_some_and(|(start, end)| col >= start && col < end),
+    }
+}
+
+fn highlight_color(group: Option<HighlightGroup>) -> gpui::Rgba {
+    let [red, green, blue] = group.map(group_color).unwrap_or([208, 215, 222]);
+    rgb(((red as u32) << 16) | ((green as u32) << 8) | blue as u32)
+}
+
+#[derive(Clone, Copy, PartialEq)]
+struct TextChunkStyle {
+    color: gpui::Rgba,
+    selected: bool,
+}
+
+fn selection_columns_for_line(
+    start: Position,
+    end: Position,
+    line: usize,
+    text: &str,
+) -> Option<(usize, usize)> {
+    if line < start.line || line > end.line {
+        return None;
+    }
+
+    let line_len = text.chars().count();
+    let start_col = if line == start.line { start.col } else { 0 };
+    let end_col = if line == end.line { end.col } else { line_len };
+    (start_col < end_col).then_some((start_col.min(line_len), end_col.min(line_len)))
 }
 
 fn bounds_for_position(
