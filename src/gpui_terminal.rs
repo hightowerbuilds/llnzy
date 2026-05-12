@@ -125,6 +125,11 @@ impl TerminalSurface {
         surface
     }
 
+    pub(crate) fn set_config(&mut self, config: Config, cx: &mut Context<Self>) {
+        self.config = config;
+        cx.notify();
+    }
+
     fn process_output(&mut self) -> bool {
         let Some(session) = &mut self.session else {
             return false;

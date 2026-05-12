@@ -17,9 +17,13 @@ Approximate status:
 - GPUI feasibility: complete.
 - GPUI Stacker prototype: strong but not production parity.
 - GPUI editor prototype: promising but not production parity.
-- GPUI workspace shell: first working slice, still static in several places.
-- Terminal in GPUI workspace: not implemented yet.
+- GPUI workspace shell: real first-pass tab model, still static in several
+  places.
+- Terminal in GPUI workspace: live Alacritty-backed surface, with mouse
+  reporting and polish still pending.
 - Explorer/sidebar in GPUI workspace: visual/static only.
+- Appearances in GPUI workspace: first GPUI tab entry point exists for terminal,
+  editor, and sketch appearance controls.
 - Release readiness: optimized binaries build, but the migrated workspace is
   not yet a replacement for the current app.
 
@@ -54,11 +58,13 @@ The live inspection clarified the gap:
 
 - The visual shell is roughly shaped like the LLNZY workbench again.
 - Some chrome interactions work now, but the shell still feels partial.
-- The terminal tab is visible but only a placeholder.
+- The terminal tab is now a real shell surface.
 - The sidebar looks like a file explorer but is not yet backed by the real
   project tree, file operations, or watcher updates.
-- The workspace has tabs, but they are surface switches, not the real app tab
-  model yet.
+- The workspace now has real first-pass tab identity, open/activate semantics,
+  close buttons, and footer navigation.
+- The footer has an Appearances entry point, but the editor and sketch
+  appearance controls still need deeper surface integration.
 - Stacker and editor are embedded, but still carry prototype assumptions.
 - We need to restore production-grade styling and interaction polish, not just
   compile a new framework.
@@ -278,12 +284,16 @@ Goal: stop treating the GPUI workspace as four disconnected demos.
 
 Tasks:
 
-- [ ] Define real workspace tabs: Terminal, CodeFile, Stacker, Explorer/Home,
-  Settings, and any other retained product surfaces.
-- [ ] Decide what opens as a singleton tab versus a multi-instance tab.
-- [ ] Rebuild the top tab bar around real tab identity.
-- [ ] Keep the footer as command/navigation chrome, not fake state.
+- [x] Define first-pass singleton workspace tabs: Terminal, Editor, Stacker,
+  Explorer, Home, Settings, and Appearances.
+- [x] Decide what opens as a singleton tab versus a multi-instance tab for the
+  first GPUI shell pass.
+- [x] Rebuild the top tab bar around real tab identity.
+- [x] Keep the footer as command/navigation chrome, not fake state.
+- [x] Add an Appearances footer command that opens/focuses an Appearances tab.
 - [ ] Restore session save/restore for open tabs and selected project.
+- [ ] Upgrade editor file tabs from singleton surface tabs to real open-buffer
+  tabs.
 - [ ] Define split/join behavior after single-surface tabs are stable.
 - [ ] Route app commands through a shared command dispatcher instead of
   per-surface ad hoc handlers.
@@ -346,24 +356,28 @@ migration path.
 
 ## Recommended Next Slice
 
-The terminal is now alive and rendering with Alacritty-backed styling. Keep the
-old terminal path preserved until the GPUI surface has been manually verified,
-but move the main migration pressure to the workbench surfaces around it.
+The terminal is alive, the first real workspace tab shell is in place, and the
+footer now has an Appearances tab entry point. Keep the old app path preserved
+until GPUI surfaces have been manually verified, but move the main migration
+pressure to the workbench surfaces around the shell.
 
 Next objective:
 
 - Turn the sidebar into a real project explorer.
+- Wire editor appearance settings into the GPUI editor renderer instead of only
+  storing the config.
 - Preserve terminal mouse reporting as a focused terminal follow-up.
-- Then move into editor workspace tabs and dirty-file safety.
+- Move into editor workspace tabs and dirty-file safety.
 
 Order:
 
 1. Real explorer/sidebar.
-2. Terminal mouse reporting for full-screen terminal apps.
-3. Editor workspace tabs and dirty-file safety.
-4. Stacker production workflow parity.
-5. Styling restoration pass.
-6. Release packaging and smoke automation.
+2. Editor workspace tabs and dirty-file safety.
+3. Wire editor appearance controls into the GPUI editor renderer.
+4. Terminal mouse reporting for full-screen terminal apps.
+5. Stacker production workflow parity.
+6. Styling restoration pass.
+7. Release packaging and smoke automation.
 
 ## Guiding Rule
 
