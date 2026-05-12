@@ -1,18 +1,17 @@
-use std::ops::Range;
-use std::time::Duration;
+use std::{ops::Range, path::PathBuf, time::Duration};
 
 use alacritty_terminal::term::cell::Flags;
 use gpui::prelude::*;
 use gpui::{
-    actions, div, fill, point, px, relative, rgb, rgba, size, App, Bounds, ClipboardItem,
+    actions, div, fill, img, point, px, relative, rgb, rgba, size, App, Bounds, ClipboardItem,
     ContentMask, Context, DispatchPhase, Element, ElementId, ElementInputHandler, Entity,
     EntityInputHandler, FocusHandle, Focusable, Font, FontStyle, FontWeight, GlobalElementId,
-    KeyBinding, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad,
-    Pixels, Point, Render, ScrollWheelEvent, SharedString, Style, TextAlign, TextRun,
-    UTF16Selection, Window, WrappedLine,
+    KeyBinding, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit,
+    PaintQuad, Pixels, Point, Render, ScrollWheelEvent, SharedString, Style, StyledImage,
+    TextAlign, TextRun, UTF16Selection, Window, WrappedLine,
 };
 
-use crate::config::{Config, CursorStyle};
+use crate::config::{BackgroundImageFit, Config, CursorStyle};
 use crate::session::Session;
 
 const TERMINAL_BG: u32 = 0x080808;
@@ -539,7 +538,7 @@ impl EntityInputHandler for TerminalSurface {
 impl Render for TerminalSurface {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let body = if self.session.is_some() {
-            div()
+            let mut terminal_body = div()
                 .relative()
                 .flex_1()
                 .w_full()
@@ -548,10 +547,15 @@ impl Render for TerminalSurface {
                 .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
                 .on_mouse_move(cx.listener(Self::on_mouse_move))
                 .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
-                .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
-                .child(TerminalElement {
-                    surface: cx.entity(),
-                })
+                .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up));
+
+            if let Some(path) = terminal_background_image_path(&self.config) {
+                terminal_body = terminal_body.child(terminal_background_image(path, &self.config));
+            }
+
+            terminal_body.child(TerminalElement {
+                surface: cx.entity(),
+            })
         } else {
             div()
                 .flex_1()
@@ -958,6 +962,49 @@ fn terminal_render_config(config: &Config) -> Config {
     terminal_config
 }
 
+fn terminal_background_image_path(config: &Config) -> Option<PathBuf> {
+    if !config.effects.enabled || config.effects.background != "image" {
+        return None;
+    }
+
+    let reference = config.effects.background_image.as_deref()?;
+    crate::theme_store::resolve_background_path(reference).or_else(|| {
+        let path = PathBuf::from(reference);
+        path.is_file().then_some(path)
+    })
+}
+
+fn terminal_background_image(path: PathBuf, config: &Config) -> impl IntoElement {
+    let dim_alpha =
+        ((1.0 - config.effects.background_intensity.clamp(0.05, 1.0)) * 0.72).clamp(0.0, 0.72);
+    div()
+        .absolute()
+        .size_full()
+        .overflow_hidden()
+        .child(
+            img(path)
+                .size_full()
+                .object_fit(terminal_background_object_fit(
+                    config.effects.background_image_fit,
+                )),
+        )
+        .child(
+            div()
+                .absolute()
+                .size_full()
+                .bg(rgba(rgba_u32([0, 0, 0], dim_alpha))),
+        )
+}
+
+fn terminal_background_object_fit(fit: BackgroundImageFit) -> ObjectFit {
+    match fit {
+        BackgroundImageFit::Fill => ObjectFit::Cover,
+        BackgroundImageFit::Fit => ObjectFit::Contain,
+        BackgroundImageFit::Tile => ObjectFit::Fill,
+        BackgroundImageFit::Center => ObjectFit::ScaleDown,
+    }
+}
+
 fn terminal_font(config: &Config, mut base_font: Font) -> Font {
     if let Some(font_family) = &config.font_family {
         base_font.family = font_family.clone().into();
@@ -1117,7 +1164,7 @@ fn terminal_effect_overlay(terminal_bounds: Bounds<Pixels>, config: &Config) -> 
 
 fn terminal_background_effects(terminal_bounds: Bounds<Pixels>, config: &Config) -> Vec<PaintQuad> {
     let mode = config.effects.background.as_str();
-    if mode == "none" {
+    if mode == "none" || mode == "image" {
         return Vec::new();
     }
 

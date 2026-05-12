@@ -11,8 +11,12 @@ pub mod external_input_trace;
 pub mod git;
 #[cfg(feature = "gpui-editor")]
 pub mod gpui_editor;
+#[cfg(feature = "gpui-workspace")]
+pub mod gpui_sketch;
 #[cfg(feature = "gpui-stacker")]
 pub mod gpui_stacker;
+#[cfg(feature = "gpui-workspace")]
+pub mod gpui_tabs;
 #[cfg(feature = "gpui-workspace")]
 pub mod gpui_terminal;
 #[cfg(feature = "gpui-workspace")]

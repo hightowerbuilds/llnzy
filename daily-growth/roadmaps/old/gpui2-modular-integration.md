@@ -24,6 +24,11 @@ Approximate status:
 - Explorer/sidebar in GPUI workspace: first real project-tree slice is live;
   project close/open/recent handling is live; file operations, watcher updates,
   and keyboard navigation still pending.
+- Sketch Pad in GPUI workspace: first real canvas surface is live; marker,
+  rectangle, selection/move, grid toggles, save, clear, undo/redo, persisted
+  scratch loading, and rendering of existing text/image/symbol records are in
+  place; GPUI text editing, imports, symbols, and full appearance controls are
+  still pending.
 - Appearances in GPUI workspace: first GPUI tab entry point exists for terminal,
   editor, and sketch appearance controls; terminal effects controls now feed the
   GPUI terminal surface.
@@ -50,12 +55,17 @@ Completed and worth preserving:
   GPUI process.
 - The GPUI workspace shell now has clickable top tabs, sidebar rows, footer
   controls, active-surface switching, and release builds.
+- The GPUI workspace now restores a native desktop menu bar with LLNZY, File,
+  Edit, Tab, and View menus.
 - The GPUI workspace can close the active repo from the sidebar, leaving Open
   Project and Open Recent controls visible.
 - Home now shows the active project plus the top five recent projects.
 - The GPUI terminal has first-pass visible effects for smoke/aurora background
   layers, bloom-style cursor glow, cursor trail, particles, CRT overlays, and
   text shimmer.
+- The old Sketch model, persistence, appearance settings, hit testing, and tool
+  state survived the migration and are now mounted through a first-pass GPUI
+  Sketch Pad surface.
 - The main app and GPUI binaries build in optimized release mode:
   `llnzy`, `gpui-workspace`, `gpui-editor`, and `gpui-stacker`.
 
@@ -78,6 +88,9 @@ The live inspection clarified the gap:
   process cwd.
 - Terminal effects can be toggled from Appearances, but these are GPUI paint
   layers, not yet the full old `wgpu` shader pipeline.
+- Sketch was missing from the GPUI shell and has been restored as a real
+  workspace tab/footer surface, but text editing, image import, symbols, and
+  appearance-control parity still need follow-up.
 - Stacker and editor are embedded, but still carry prototype assumptions.
 - We need to restore production-grade styling and interaction polish, not just
   compile a new framework.
@@ -93,6 +106,7 @@ The final migrated workbench should open as a coherent desktop app with:
 - Real code editor tab and buffers.
 - Real Stacker tab.
 - Real file explorer/sidebar.
+- Real Sketch Pad tab.
 - Real workspace/tab model.
 - Restored LLNZY visual quality.
 - Release builds and repeatable smoke checks.
@@ -138,6 +152,7 @@ Tasks:
 - [x] Keep `gpui-workspace` feature-gated.
 - [x] Keep standalone `gpui-editor` and `gpui-stacker` binaries available.
 - [x] Add clickable surface switching for top tabs, sidebar rows, and footer.
+- [x] Restore native desktop menu bar entries for File, Edit, Tab, and View.
 - [x] Show the terminal as an explicit placeholder instead of pretending it is
   complete.
 - [ ] Rename prototype types into production-facing surface names.
@@ -192,11 +207,15 @@ Tasks:
 - [ ] Add URL/file opening and copy-on-select parity.
 - [ ] Bridge or replace the old `wgpu` shader effects pipeline for true shader
   parity inside the GPUI terminal.
+- [ ] Restore pixel-level shader control for smoke/aurora/background effects by
+  bridging the existing renderer path back under GPUI instead of expanding the
+  current rectangle-based paint approximation.
 
 Deferred until after the terminal is alive:
 
 - Background images.
-- Advanced shader effects beyond the current GPUI paint-layer approximation.
+- Advanced shader effects beyond the current GPUI paint-layer approximation,
+  unless they are part of the dedicated shader bridge slice above.
 - Terminal theme import/export polish.
 - Pixel-perfect parity with the current `wgpu` renderer.
 
@@ -239,6 +258,9 @@ Exit criteria:
 
 Goal: make the GPUI editor usable as a real daily coding surface.
 
+Detailed editor roadmap:
+`daily-growth/roadmaps/gpui-editor-professional-grade.md`
+
 Already working in prototype form:
 
 - Real file open.
@@ -252,6 +274,11 @@ Already working in prototype form:
 
 Still needed:
 
+- [x] Add a single GPUI editor command dispatcher.
+- [x] Expand keyboard traversal to command, option, shift-command, and
+  shift-option movement.
+- [x] Keep cursor, selection, scroll reveal, line, and column state exact after
+  every editor command in the current fixed-width renderer.
 - [ ] Connect editor tabs and open-buffer state to workspace state.
 - [ ] Add find-in-file.
 - [ ] Add project search handoff or a clear placeholder.
@@ -270,6 +297,42 @@ Exit criteria:
   back to the old UI.
 - LSP behavior has at least a credible first slice, even if not full parity.
 - Dirty files are protected.
+
+## Phase 4.5: Restore The Sketch Pad
+
+Status: first GPUI Sketch Pad surface is restored.
+
+Goal: keep Sketch as a real workbench surface, not an old-app-only feature.
+
+Already working in first GPUI form:
+
+- Scratch sketch loading from the preserved sketch document path.
+- Marker drawing with GPUI path rendering.
+- Rectangle drawing.
+- Select, move, delete, undo, redo, clear, and save.
+- Grid cycling between hidden, lines, and dots.
+- Rendering of existing strokes, rectangles, text records, imported-image
+  placeholders, symbols, selection outlines, and resize handles.
+- Persisted sketch scratch save behavior.
+- Sketch Pad tab and footer entry in the GPUI workspace.
+
+Still needed:
+
+- [ ] Add GPUI-native text editing for sketch text boxes.
+- [ ] Restore image import and real image rendering.
+- [ ] Restore symbol palette insertion.
+- [ ] Expose full sketch appearance controls in the Appearances tab: canvas
+  color, grid spacing, grid opacity, selection outline, handle size, toolbar
+  position, and canvas border/shadow.
+- [ ] Add named sketch browser/save-as/delete flows.
+- [ ] Add export behavior from the GPUI surface.
+- [ ] Verify mouse hit testing and resize handles across dense sketches.
+
+Exit criteria:
+
+- Sketch is usable for quick diagrams without falling back to the old UI.
+- Existing saved sketches render faithfully enough for daily use.
+- Text, image, symbol, and export workflows are no longer placeholders.
 
 ## Phase 5: Bring Stacker To Workbench Parity
 
@@ -307,7 +370,7 @@ Goal: stop treating the GPUI workspace as four disconnected demos.
 Tasks:
 
 - [x] Define first-pass singleton workspace tabs: Terminal, Editor, Stacker,
-  Explorer, Home, Settings, and Appearances.
+  Sketch, Home, Settings, and Appearances, with Explorer owned by the sidebar.
 - [x] Decide what opens as a singleton tab versus a multi-instance tab for the
   first GPUI shell pass.
 - [x] Rebuild the top tab bar around real tab identity.
@@ -380,29 +443,39 @@ migration path.
 
 ## Recommended Next Slice
 
-The terminal is alive, the first real workspace tab shell is in place, and the
-footer now has an Appearances tab entry point. Keep the old app path preserved
-until GPUI surfaces have been manually verified, but move the main migration
-pressure to the workbench surfaces around the shell.
+The terminal is alive, the first real workspace tab shell is in place, the
+footer has an Appearances tab entry point, and Sketch is back as a real GPUI
+surface. Keep the old app path preserved until GPUI surfaces have been manually
+verified, but move the main migration pressure to the workbench surfaces around
+the shell.
 
 Next objective:
 
+- Restore pixel-level terminal shader control by bridging the existing `wgpu`
+  shader pipeline back under the GPUI terminal, instead of treating paint-layer
+  effects as final.
+- Reorganize Stacker into a production workflow surface instead of a prompt
+  editor prototype.
 - Finish explorer production actions: create, rename, delete, reveal, watcher
   updates, and keyboard navigation.
 - Wire editor appearance settings into the GPUI editor renderer instead of only
   storing the config.
 - Move into editor workspace tabs and dirty-file safety.
 - Preserve terminal mouse reporting as a focused terminal follow-up.
+- Finish Sketch parity work: text editing, image import, symbols, named
+  sketches, export, and full appearance controls.
 
 Order:
 
-1. Explorer production actions and watcher updates.
-2. Editor workspace tabs and dirty-file safety.
-3. Wire editor appearance controls into the GPUI editor renderer.
-4. Terminal mouse reporting for full-screen terminal apps.
-5. Stacker production workflow parity.
-6. Styling restoration pass.
-7. Release packaging and smoke automation.
+1. Terminal shader bridge for real pixel-level smoke/background control.
+2. Stacker production workflow parity.
+3. Explorer production actions and watcher updates.
+4. Editor workspace tabs and dirty-file safety.
+5. Wire editor and sketch appearance controls into their GPUI renderers.
+6. Terminal mouse reporting for full-screen terminal apps.
+7. Sketch text/image/symbol/export parity.
+8. Styling restoration pass.
+9. Release packaging and smoke automation.
 
 ## Guiding Rule
 

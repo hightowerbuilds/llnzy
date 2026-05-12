@@ -12,7 +12,9 @@ use gpui::{
 
 use crate::stacker::{
     input::StackerSelection,
-    load_saved_prompts,
+    load_saved_prompts, load_stacker_queue,
+    queue::{self, QueuedPrompt},
+    save_stacker_queue,
     session::StackerSession,
     utf16::{char_index_to_utf16_index, utf16_index_to_char_index},
     StackerPrompt,
@@ -25,6 +27,7 @@ const BORDER: u32 = 0x33333a;
 const TEXT: u32 = 0xe8e8ee;
 const MUTED_TEXT: u32 = 0xa8a8b4;
 const SELECTED_BG: u32 = 0x313846;
+const QUEUE_GREEN: u32 = 0x6aff90;
 
 actions!(
     stacker_gpui,
@@ -94,6 +97,7 @@ pub(crate) fn bind_stacker_keys(cx: &mut App) {
 pub(crate) struct StackerPrototype {
     editor: Entity<StackerTextInput>,
     prompts: Vec<StackerPrompt>,
+    queued_prompts: Vec<QueuedPrompt>,
     active_prompt: Option<usize>,
     show_chrome: bool,
 }
@@ -110,6 +114,8 @@ impl StackerPrototype {
 
     pub(crate) fn with_chrome(cx: &mut Context<Self>, show_chrome: bool) -> Self {
         let prompts = load_saved_prompts();
+        let mut queued_prompts = load_stacker_queue();
+        queue::sanitize_prompt_queue(&mut queued_prompts);
         let initial_text = prompts
             .first()
             .map(|prompt| prompt.text.clone())
@@ -119,6 +125,7 @@ impl StackerPrototype {
         Self {
             editor,
             prompts,
+            queued_prompts,
             active_prompt,
             show_chrome,
         }
@@ -136,6 +143,16 @@ impl StackerPrototype {
         });
         cx.notify();
     }
+
+    fn toggle_prompt_queue(&mut self, index: usize, cx: &mut Context<Self>) {
+        let Some(prompt) = self.prompts.get(index) else {
+            return;
+        };
+        queue::toggle_prompt(&mut self.queued_prompts, prompt);
+        queue::sanitize_prompt_queue(&mut self.queued_prompts);
+        save_stacker_queue(&self.queued_prompts);
+        cx.notify();
+    }
 }
 
 impl Focusable for StackerPrototype {
@@ -146,16 +163,14 @@ impl Focusable for StackerPrototype {
 
 impl Render for StackerPrototype {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let content = div()
-            .flex()
-            .flex_1()
-            .child(prompt_list(
-                &self.prompts,
-                self.active_prompt,
-                self.show_chrome,
-                cx,
-            ))
-            .child(editor_panel(self.editor.clone(), self.show_chrome));
+        let content = stacker_workbench(
+            &self.prompts,
+            &self.queued_prompts,
+            self.active_prompt,
+            self.editor.clone(),
+            self.show_chrome,
+            cx,
+        );
         let mut frame = div().size_full().flex().flex_col();
         if self.show_chrome {
             frame = frame.child(header());
@@ -172,6 +187,31 @@ impl Render for StackerPrototype {
             .font_family("Inter")
             .child(frame)
     }
+}
+
+fn stacker_workbench(
+    prompts: &[StackerPrompt],
+    queued_prompts: &[QueuedPrompt],
+    active_prompt: Option<usize>,
+    editor: Entity<StackerTextInput>,
+    show_chrome: bool,
+    cx: &mut Context<StackerPrototype>,
+) -> impl IntoElement {
+    div()
+        .size_full()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .p(if show_chrome { px(12.0) } else { px(10.0) })
+        .child(
+            div()
+                .h(relative(0.34))
+                .min_h(px(156.0))
+                .flex()
+                .gap_2()
+                .child(prompt_list(prompts, queued_prompts, active_prompt, cx)),
+        )
+        .child(editor_panel(editor, show_chrome))
 }
 
 fn header() -> impl IntoElement {
@@ -201,19 +241,24 @@ fn header() -> impl IntoElement {
 
 fn prompt_list(
     prompts: &[StackerPrompt],
+    queued_prompts: &[QueuedPrompt],
     active_prompt: Option<usize>,
-    show_chrome: bool,
     cx: &mut Context<StackerPrototype>,
 ) -> impl IntoElement {
-    let list = prompts.iter().enumerate().take(80).fold(
-        div().flex().flex_col().gap_1().p_1(),
+    let mut list = prompts.iter().enumerate().take(24).fold(
+        div().flex().flex_col().gap_1().p_1().overflow_hidden(),
         |list, (ix, prompt)| {
             let selected = active_prompt == Some(ix);
+            let queued = queue::contains_prompt(queued_prompts, prompt);
             let title = prompt_title(prompt);
             let category = prompt.category.clone();
             list.child(
                 div()
                     .w_full()
+                    .min_h(px(34.0))
+                    .flex()
+                    .items_center()
+                    .gap_2()
                     .px_2()
                     .py_1()
                     .rounded_sm()
@@ -229,23 +274,60 @@ fn prompt_list(
                             this.load_prompt(ix, cx);
                         }),
                     )
-                    .child(div().text_size(px(12.0)).text_color(rgb(TEXT)).child(title))
                     .child(
                         div()
-                            .text_size(px(11.0))
-                            .text_color(rgb(MUTED_TEXT))
-                            .child(category),
+                            .flex_1()
+                            .overflow_hidden()
+                            .child(div().text_size(px(12.0)).text_color(rgb(TEXT)).child(title))
+                            .child(
+                                div()
+                                    .text_size(px(10.0))
+                                    .text_color(rgb(MUTED_TEXT))
+                                    .child(category),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .h(px(22.0))
+                            .min_w(px(62.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded_sm()
+                            .border_1()
+                            .border_color(rgb(if queued { 0x3fd663 } else { BORDER }))
+                            .bg(rgb(if queued { 0x183a20 } else { 0x242632 }))
+                            .text_size(px(10.0))
+                            .text_color(rgb(if queued { QUEUE_GREEN } else { MUTED_TEXT }))
+                            .cursor_pointer()
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _: &MouseDownEvent, _window, cx| {
+                                    cx.stop_propagation();
+                                    this.toggle_prompt_queue(ix, cx);
+                                }),
+                            )
+                            .child(if queued { "QUEUED" } else { "QUEUE" }),
                     ),
             )
         },
     );
+    if prompts.is_empty() {
+        list = list.child(
+            div()
+                .p_3()
+                .text_size(px(12.0))
+                .text_color(rgb(MUTED_TEXT))
+                .child("No saved prompts yet."),
+        );
+    }
 
     div()
-        .w(if show_chrome { px(292.0) } else { px(260.0) })
+        .flex_1()
         .h_full()
         .flex()
         .flex_col()
-        .border_r_1()
+        .border_1()
         .border_color(rgb(BORDER))
         .bg(rgb(CHROME_BG))
         .child(
@@ -253,10 +335,12 @@ fn prompt_list(
                 .h(px(30.0))
                 .flex()
                 .items_center()
+                .justify_between()
                 .px_2()
                 .text_size(px(12.0))
                 .text_color(rgb(MUTED_TEXT))
-                .child(format!("Saved prompts ({})", prompts.len())),
+                .child("SAVED PROMPTS")
+                .child(format!("{}", prompts.len())),
         )
         .child(div().flex_1().overflow_hidden().child(list))
 }
@@ -291,7 +375,7 @@ fn editor_panel(editor: Entity<StackerTextInput>, show_chrome: bool) -> impl Int
     };
     let panel = div()
         .flex_1()
-        .h_full()
+        .min_h(px(320.0))
         .bg(rgb(CONTENT_BG))
         .child(body.child(editor));
 
@@ -643,6 +727,7 @@ impl Focusable for StackerTextInput {
 impl Render for StackerTextInput {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
+            .size_full()
             .key_context("StackerTextInput")
             .track_focus(&self.focus_handle(cx))
             .cursor(CursorStyle::IBeam)
