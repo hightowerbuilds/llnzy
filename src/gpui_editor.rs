@@ -3,30 +3,72 @@ use std::path::{Path, PathBuf};
 
 use gpui::prelude::*;
 use gpui::{
-    actions, div, px, rgb, size, App, Application, Bounds, Context, KeyBinding, MouseButton,
-    MouseDownEvent, Render, ScrollWheelEvent, Window, WindowBounds, WindowOptions,
+    actions, div, px, relative, rgb, size, App, Application, Bounds, ClipboardItem, Context,
+    Element, ElementId, ElementInputHandler, Entity, EntityInputHandler, FocusHandle, Focusable,
+    GlobalElementId, KeyBinding, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, Render, ScrollWheelEvent, Style, UTF16Selection, Window, WindowBounds,
+    WindowOptions,
 };
 
 use crate::editor::buffer::Position;
 use crate::editor::{BufferView, EditorState};
+use crate::stacker::utf16::{char_index_to_utf16_index, utf16_index_to_char_index};
 
 actions!(
     editor_gpui,
-    [Left, Right, Up, Down, Home, End, PageUp, PageDown, Quit]
+    [
+        Backspace,
+        Delete,
+        Left,
+        Right,
+        Up,
+        Down,
+        SelectLeft,
+        SelectRight,
+        SelectUp,
+        SelectDown,
+        Home,
+        End,
+        SelectHome,
+        SelectEnd,
+        PageUp,
+        PageDown,
+        SelectAll,
+        Paste,
+        Cut,
+        Copy,
+        Undo,
+        Redo,
+        Quit
+    ]
 );
 
 pub fn run_editor_prototype() {
     Application::new().run(|cx: &mut App| {
         cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
         cx.bind_keys([
+            KeyBinding::new("backspace", Backspace, None),
+            KeyBinding::new("delete", Delete, None),
             KeyBinding::new("left", Left, None),
             KeyBinding::new("right", Right, None),
             KeyBinding::new("up", Up, None),
             KeyBinding::new("down", Down, None),
+            KeyBinding::new("shift-left", SelectLeft, None),
+            KeyBinding::new("shift-right", SelectRight, None),
+            KeyBinding::new("shift-up", SelectUp, None),
+            KeyBinding::new("shift-down", SelectDown, None),
             KeyBinding::new("home", Home, None),
             KeyBinding::new("end", End, None),
+            KeyBinding::new("shift-home", SelectHome, None),
+            KeyBinding::new("shift-end", SelectEnd, None),
             KeyBinding::new("pageup", PageUp, None),
             KeyBinding::new("pagedown", PageDown, None),
+            KeyBinding::new("cmd-a", SelectAll, None),
+            KeyBinding::new("cmd-v", Paste, None),
+            KeyBinding::new("cmd-c", Copy, None),
+            KeyBinding::new("cmd-x", Cut, None),
+            KeyBinding::new("cmd-z", Undo, None),
+            KeyBinding::new("cmd-shift-z", Redo, None),
         ]);
 
         let bounds = Bounds::centered(None, size(px(1120.0), px(760.0)), cx);
@@ -39,21 +81,28 @@ pub fn run_editor_prototype() {
                 |_, cx| cx.new(EditorPrototype::new),
             )
             .unwrap();
-        window.update(cx, |_, _, _| {}).unwrap();
+        window
+            .update(cx, |view, window, cx| {
+                window.focus(&view.focus_handle(cx));
+            })
+            .unwrap();
         cx.on_action(|_: &Quit, cx| cx.quit());
         cx.activate(true);
     });
 }
 
 struct EditorPrototype {
+    focus_handle: FocusHandle,
     editor: EditorState,
     load_error: Option<String>,
     sample_text: String,
     sample_scroll_line: usize,
+    last_text_bounds: Option<Bounds<gpui::Pixels>>,
+    is_selecting: bool,
 }
 
 impl EditorPrototype {
-    fn new(_: &mut Context<Self>) -> Self {
+    fn new(cx: &mut Context<Self>) -> Self {
         let mut editor = EditorState::new();
         let mut load_error = None;
 
@@ -68,10 +117,13 @@ impl EditorPrototype {
         }
 
         Self {
+            focus_handle: cx.focus_handle(),
             editor,
             load_error,
             sample_text: sample_text(),
             sample_scroll_line: 0,
+            last_text_bounds: None,
+            is_selecting: false,
         }
     }
 
@@ -103,6 +155,7 @@ impl EditorPrototype {
                 lines,
                 first_line_number: visible_start + 1,
                 cursor: Some(view.cursor.pos),
+                selection: view.cursor.selection(),
                 total_lines: line_count,
                 load_error: self.load_error.clone(),
                 sample: false,
@@ -125,6 +178,7 @@ impl EditorPrototype {
                 .collect(),
             first_line_number: self.sample_scroll_line + 1,
             cursor: None,
+            selection: None,
             total_lines: self.sample_text.lines().count().max(1),
             load_error: self.load_error.clone(),
             sample: true,
@@ -141,6 +195,85 @@ impl EditorPrototype {
         Some((&self.editor.buffers[active], &mut self.editor.views[active]))
     }
 
+    fn active_buffer_and_view_mut(
+        &mut self,
+    ) -> Option<(&mut crate::editor::buffer::Buffer, &mut BufferView)> {
+        let active = self.editor.active;
+        if active >= self.editor.buffers.len() || active >= self.editor.views.len() {
+            return None;
+        }
+        Some((
+            &mut self.editor.buffers[active],
+            &mut self.editor.views[active],
+        ))
+    }
+
+    fn edit_active(
+        &mut self,
+        cx: &mut Context<Self>,
+        edit: impl FnOnce(&mut crate::editor::buffer::Buffer, &mut BufferView),
+    ) {
+        let active = self.editor.active;
+        if active >= self.editor.buffers.len() || active >= self.editor.views.len() {
+            return;
+        }
+
+        let old_source = self.editor.buffers[active].text();
+        {
+            let buffer = &mut self.editor.buffers[active];
+            let view = &mut self.editor.views[active];
+            edit(buffer, view);
+            view.cursor.clamp(buffer);
+            reveal_cursor(view, buffer.line_count());
+        }
+
+        if let Some(buffer_edit) = self.editor.buffers[active].take_last_edit() {
+            self.editor.record_active_incremental_edit(
+                &old_source,
+                buffer_edit.start,
+                buffer_edit.old_end,
+                &buffer_edit.new_text,
+            );
+        }
+        self.editor.reparse_active();
+        cx.notify();
+    }
+
+    fn replace_selection_or_range(
+        &mut self,
+        cx: &mut Context<Self>,
+        range: Option<(Position, Position)>,
+        text: &str,
+    ) {
+        if range.is_none() && text.is_empty() {
+            return;
+        }
+        self.edit_active(cx, |buffer, view| {
+            let (start, end) = range
+                .or_else(|| view.cursor.selection())
+                .unwrap_or((view.cursor.pos, view.cursor.pos));
+            let new_pos = buffer.compute_end_pos_pub(start, text);
+            buffer.replace(start, end, text);
+            view.cursor.pos = new_pos;
+            view.cursor.clear_selection();
+            view.cursor.desired_col = None;
+        });
+    }
+
+    fn position_for_utf16(&self, utf16: usize) -> Option<Position> {
+        let (.., buffer, _) = self.editor.active_buffer_view()?;
+        let char_index = utf16_index_to_char_index(&buffer.text(), utf16);
+        Some(buffer.char_to_pos(char_index))
+    }
+
+    fn utf16_for_position(&self, position: Position) -> Option<usize> {
+        let (.., buffer, _) = self.editor.active_buffer_view()?;
+        Some(char_index_to_utf16_index(
+            &buffer.text(),
+            buffer.pos_to_char(position),
+        ))
+    }
+
     fn scroll_by_lines(&mut self, delta: isize, cx: &mut Context<Self>) {
         if let Some((buffer, view)) = self.active_buffer_and_view() {
             scroll_view_by_lines(view, buffer.line_count(), delta);
@@ -155,48 +288,96 @@ impl EditorPrototype {
     }
 
     fn move_left(&mut self, _: &Left, _: &mut Window, cx: &mut Context<Self>) {
+        self.move_left_impl(false, cx);
+    }
+
+    fn select_left(&mut self, _: &SelectLeft, _: &mut Window, cx: &mut Context<Self>) {
+        self.move_left_impl(true, cx);
+    }
+
+    fn move_left_impl(&mut self, extend: bool, cx: &mut Context<Self>) {
         if let Some((buffer, view)) = self.active_buffer_and_view() {
-            view.cursor.move_left(buffer, false);
+            view.cursor.move_left(buffer, extend);
             reveal_cursor(view, buffer.line_count());
             cx.notify();
         }
     }
 
     fn move_right(&mut self, _: &Right, _: &mut Window, cx: &mut Context<Self>) {
+        self.move_right_impl(false, cx);
+    }
+
+    fn select_right(&mut self, _: &SelectRight, _: &mut Window, cx: &mut Context<Self>) {
+        self.move_right_impl(true, cx);
+    }
+
+    fn move_right_impl(&mut self, extend: bool, cx: &mut Context<Self>) {
         if let Some((buffer, view)) = self.active_buffer_and_view() {
-            view.cursor.move_right(buffer, false);
+            view.cursor.move_right(buffer, extend);
             reveal_cursor(view, buffer.line_count());
             cx.notify();
         }
     }
 
     fn move_up(&mut self, _: &Up, _: &mut Window, cx: &mut Context<Self>) {
+        self.move_up_impl(false, cx);
+    }
+
+    fn select_up(&mut self, _: &SelectUp, _: &mut Window, cx: &mut Context<Self>) {
+        self.move_up_impl(true, cx);
+    }
+
+    fn move_up_impl(&mut self, extend: bool, cx: &mut Context<Self>) {
         if let Some((buffer, view)) = self.active_buffer_and_view() {
-            view.cursor.move_up(buffer, false);
+            view.cursor.move_up(buffer, extend);
             reveal_cursor(view, buffer.line_count());
             cx.notify();
         }
     }
 
     fn move_down(&mut self, _: &Down, _: &mut Window, cx: &mut Context<Self>) {
+        self.move_down_impl(false, cx);
+    }
+
+    fn select_down(&mut self, _: &SelectDown, _: &mut Window, cx: &mut Context<Self>) {
+        self.move_down_impl(true, cx);
+    }
+
+    fn move_down_impl(&mut self, extend: bool, cx: &mut Context<Self>) {
         if let Some((buffer, view)) = self.active_buffer_and_view() {
-            view.cursor.move_down(buffer, false);
+            view.cursor.move_down(buffer, extend);
             reveal_cursor(view, buffer.line_count());
             cx.notify();
         }
     }
 
     fn move_home(&mut self, _: &Home, _: &mut Window, cx: &mut Context<Self>) {
+        self.move_home_impl(false, cx);
+    }
+
+    fn select_home(&mut self, _: &SelectHome, _: &mut Window, cx: &mut Context<Self>) {
+        self.move_home_impl(true, cx);
+    }
+
+    fn move_home_impl(&mut self, extend: bool, cx: &mut Context<Self>) {
         if let Some((buffer, view)) = self.active_buffer_and_view() {
-            view.cursor.move_home(buffer, false);
+            view.cursor.move_home(buffer, extend);
             reveal_cursor(view, buffer.line_count());
             cx.notify();
         }
     }
 
     fn move_end(&mut self, _: &End, _: &mut Window, cx: &mut Context<Self>) {
+        self.move_end_impl(false, cx);
+    }
+
+    fn select_end(&mut self, _: &SelectEnd, _: &mut Window, cx: &mut Context<Self>) {
+        self.move_end_impl(true, cx);
+    }
+
+    fn move_end_impl(&mut self, extend: bool, cx: &mut Context<Self>) {
         if let Some((buffer, view)) = self.active_buffer_and_view() {
-            view.cursor.move_end(buffer, false);
+            view.cursor.move_end(buffer, extend);
             reveal_cursor(view, buffer.line_count());
             cx.notify();
         }
@@ -223,6 +404,96 @@ impl EditorPrototype {
         }
     }
 
+    fn backspace(&mut self, _: &Backspace, _: &mut Window, cx: &mut Context<Self>) {
+        self.edit_active(cx, |buffer, view| {
+            if let Some((start, end)) = view.cursor.selection() {
+                buffer.delete(start, end);
+                view.cursor.pos = start;
+                view.cursor.clear_selection();
+            } else if view.cursor.pos.col > 0 {
+                let start = Position::new(view.cursor.pos.line, view.cursor.pos.col - 1);
+                buffer.delete(start, view.cursor.pos);
+                view.cursor.pos = start;
+            } else if view.cursor.pos.line > 0 {
+                let prev_len = buffer.line_len(view.cursor.pos.line - 1);
+                let start = Position::new(view.cursor.pos.line - 1, prev_len);
+                buffer.delete(start, view.cursor.pos);
+                view.cursor.pos = start;
+            }
+            view.cursor.desired_col = None;
+        });
+    }
+
+    fn delete(&mut self, _: &Delete, _: &mut Window, cx: &mut Context<Self>) {
+        self.edit_active(cx, |buffer, view| {
+            if let Some((start, end)) = view.cursor.selection() {
+                buffer.delete(start, end);
+                view.cursor.pos = start;
+                view.cursor.clear_selection();
+            } else {
+                let line_len = buffer.line_len(view.cursor.pos.line);
+                if view.cursor.pos.col < line_len {
+                    let end = Position::new(view.cursor.pos.line, view.cursor.pos.col + 1);
+                    buffer.delete(view.cursor.pos, end);
+                } else if view.cursor.pos.line + 1 < buffer.line_count() {
+                    let end = Position::new(view.cursor.pos.line + 1, 0);
+                    buffer.delete(view.cursor.pos, end);
+                }
+            }
+            view.cursor.desired_col = None;
+        });
+    }
+
+    fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some((buffer, view)) = self.active_buffer_and_view() {
+            view.cursor.select_all(buffer);
+            reveal_cursor(view, buffer.line_count());
+            cx.notify();
+        }
+    }
+
+    fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some((buffer, view)) = self.editor.active_buffer_view().map(|(_, b, v)| (b, v)) {
+            if let Some((start, end)) = view.cursor.selection() {
+                let text = buffer.text_range(start, end);
+                if !text.is_empty() {
+                    cx.write_to_clipboard(ClipboardItem::new_string(text));
+                }
+            }
+        }
+    }
+
+    fn cut(&mut self, _: &Cut, window: &mut Window, cx: &mut Context<Self>) {
+        self.copy(&Copy, window, cx);
+        self.delete(&Delete, window, cx);
+    }
+
+    fn paste(&mut self, _: &Paste, _: &mut Window, cx: &mut Context<Self>) {
+        if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
+            self.replace_selection_or_range(cx, None, &text);
+        }
+    }
+
+    fn undo(&mut self, _: &Undo, _: &mut Window, cx: &mut Context<Self>) {
+        self.edit_active(cx, |buffer, view| {
+            if let Some(pos) = buffer.undo() {
+                view.cursor.pos = pos;
+                view.cursor.clear_selection();
+                view.cursor.desired_col = None;
+            }
+        });
+    }
+
+    fn redo(&mut self, _: &Redo, _: &mut Window, cx: &mut Context<Self>) {
+        self.edit_active(cx, |buffer, view| {
+            if let Some(pos) = buffer.redo() {
+                view.cursor.pos = pos;
+                view.cursor.clear_selection();
+                view.cursor.desired_col = None;
+            }
+        });
+    }
+
     fn on_editor_scroll(
         &mut self,
         event: &ScrollWheelEvent,
@@ -244,7 +515,58 @@ impl EditorPrototype {
         if event.button != MouseButton::Left {
             return;
         }
-        window.focus(&cx.focus_handle());
+        window.focus(&self.focus_handle);
+        self.is_selecting = true;
+        if let Some(position) = self.position_for_point(event.position) {
+            if event.modifiers.shift {
+                if let Some((_, view)) = self.active_buffer_and_view_mut() {
+                    view.cursor.start_selection();
+                    view.cursor.pos = position;
+                    view.cursor.desired_col = None;
+                }
+            } else if let Some((_, view)) = self.active_buffer_and_view_mut() {
+                view.cursor.pos = position;
+                view.cursor.clear_selection();
+                view.cursor.desired_col = None;
+            }
+            cx.notify();
+        }
+    }
+
+    fn on_editor_mouse_move(
+        &mut self,
+        event: &MouseMoveEvent,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.is_selecting {
+            return;
+        }
+        if let Some(position) = self.position_for_point(event.position) {
+            if let Some((_, view)) = self.active_buffer_and_view_mut() {
+                view.cursor.start_selection();
+                view.cursor.pos = position;
+                view.cursor.desired_col = None;
+                cx.notify();
+            }
+        }
+    }
+
+    fn on_editor_mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, _: &mut Context<Self>) {
+        self.is_selecting = false;
+    }
+
+    fn position_for_point(&self, point: gpui::Point<gpui::Pixels>) -> Option<Position> {
+        let bounds = self.last_text_bounds?;
+        let (_, buffer, view) = self.editor.active_buffer_view()?;
+        let row = ((point.y - bounds.top() - EDITOR_VERTICAL_PADDING) / LINE_HEIGHT)
+            .floor()
+            .max(0.0) as usize;
+        let line = (view.scroll_line + row).min(buffer.line_count().saturating_sub(1));
+        let col = ((point.x - bounds.left() - LINE_NUMBER_WIDTH) / CHAR_WIDTH)
+            .round()
+            .max(0.0) as usize;
+        Some(Position::new(line, col.min(buffer.line_len(line))))
     }
 }
 
@@ -269,6 +591,20 @@ impl Render for EditorPrototype {
             .on_action(cx.listener(Self::move_end))
             .on_action(cx.listener(Self::page_up))
             .on_action(cx.listener(Self::page_down))
+            .on_action(cx.listener(Self::select_left))
+            .on_action(cx.listener(Self::select_right))
+            .on_action(cx.listener(Self::select_up))
+            .on_action(cx.listener(Self::select_down))
+            .on_action(cx.listener(Self::select_home))
+            .on_action(cx.listener(Self::select_end))
+            .on_action(cx.listener(Self::backspace))
+            .on_action(cx.listener(Self::delete))
+            .on_action(cx.listener(Self::select_all))
+            .on_action(cx.listener(Self::paste))
+            .on_action(cx.listener(Self::cut))
+            .on_action(cx.listener(Self::copy))
+            .on_action(cx.listener(Self::undo))
+            .on_action(cx.listener(Self::redo))
             .child(header())
             .child(
                 div()
@@ -278,11 +614,197 @@ impl Render for EditorPrototype {
                     .child(editor_header(&snapshot))
                     .child(editor_body(
                         &snapshot,
+                        cx.entity(),
                         cx.listener(Self::on_editor_scroll),
                         cx.listener(Self::on_editor_mouse_down),
+                        cx.listener(Self::on_editor_mouse_move),
+                        cx.listener(Self::on_editor_mouse_up),
+                        cx.listener(Self::on_editor_mouse_up),
                     ))
                     .child(status_bar(&snapshot)),
             )
+    }
+}
+
+impl Focusable for EditorPrototype {
+    fn focus_handle(&self, _: &App) -> FocusHandle {
+        self.focus_handle.clone()
+    }
+}
+
+impl EntityInputHandler for EditorPrototype {
+    fn text_for_range(
+        &mut self,
+        range_utf16: std::ops::Range<usize>,
+        actual_range: &mut Option<std::ops::Range<usize>>,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> Option<String> {
+        let start = self.position_for_utf16(range_utf16.start)?;
+        let end = self.position_for_utf16(range_utf16.end)?;
+        let (.., buffer, _) = self.editor.active_buffer_view()?;
+        actual_range.replace(
+            self.utf16_for_position(start).unwrap_or(range_utf16.start)
+                ..self.utf16_for_position(end).unwrap_or(range_utf16.end),
+        );
+        Some(buffer.text_range(start, end))
+    }
+
+    fn selected_text_range(
+        &mut self,
+        _ignore_disabled_input: bool,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> Option<UTF16Selection> {
+        let (_, buffer, view) = self.editor.active_buffer_view()?;
+        let (start, end, reversed) = if let Some((start, end)) = view.cursor.selection() {
+            (
+                start,
+                end,
+                view.cursor
+                    .anchor
+                    .is_some_and(|anchor| anchor > view.cursor.pos),
+            )
+        } else {
+            (view.cursor.pos, view.cursor.pos, false)
+        };
+        Some(UTF16Selection {
+            range: char_index_to_utf16_index(&buffer.text(), buffer.pos_to_char(start))
+                ..char_index_to_utf16_index(&buffer.text(), buffer.pos_to_char(end)),
+            reversed,
+        })
+    }
+
+    fn marked_text_range(
+        &self,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> Option<std::ops::Range<usize>> {
+        None
+    }
+
+    fn unmark_text(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {}
+
+    fn replace_text_in_range(
+        &mut self,
+        range_utf16: Option<std::ops::Range<usize>>,
+        new_text: &str,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let range = range_utf16.and_then(|range| {
+            Some((
+                self.position_for_utf16(range.start)?,
+                self.position_for_utf16(range.end)?,
+            ))
+        });
+        self.replace_selection_or_range(cx, range, new_text);
+    }
+
+    fn replace_and_mark_text_in_range(
+        &mut self,
+        range_utf16: Option<std::ops::Range<usize>>,
+        new_text: &str,
+        _new_selected_range_utf16: Option<std::ops::Range<usize>>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.replace_text_in_range(range_utf16, new_text, window, cx);
+    }
+
+    fn bounds_for_range(
+        &mut self,
+        range_utf16: std::ops::Range<usize>,
+        bounds: Bounds<gpui::Pixels>,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> Option<Bounds<gpui::Pixels>> {
+        let start = self.position_for_utf16(range_utf16.start)?;
+        Some(bounds_for_position(
+            self.editor.active_buffer_view()?.2,
+            start,
+            bounds,
+        ))
+    }
+
+    fn character_index_for_point(
+        &mut self,
+        point: gpui::Point<gpui::Pixels>,
+        _window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> Option<usize> {
+        let position = self.position_for_point(point)?;
+        self.utf16_for_position(position)
+    }
+}
+
+struct EditorInputElement {
+    input: Entity<EditorPrototype>,
+}
+
+impl IntoElement for EditorInputElement {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
+    }
+}
+
+impl Element for EditorInputElement {
+    type RequestLayoutState = ();
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&gpui::InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, Self::RequestLayoutState) {
+        let mut style = Style::default();
+        style.size.width = relative(1.0).into();
+        style.size.height = relative(1.0).into();
+        (window.request_layout(style, [], cx), ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&gpui::InspectorElementId>,
+        _bounds: Bounds<gpui::Pixels>,
+        _request_layout: &mut Self::RequestLayoutState,
+        _window: &mut Window,
+        _cx: &mut App,
+    ) -> Self::PrepaintState {
+    }
+
+    fn paint(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&gpui::InspectorElementId>,
+        bounds: Bounds<gpui::Pixels>,
+        _request_layout: &mut Self::RequestLayoutState,
+        _prepaint: &mut Self::PrepaintState,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let focus_handle = self.input.read(cx).focus_handle.clone();
+        window.handle_input(
+            &focus_handle,
+            ElementInputHandler::new(bounds, self.input.clone()),
+            cx,
+        );
+        self.input.update(cx, |input, _cx| {
+            input.last_text_bounds = Some(bounds);
+        });
     }
 }
 
@@ -307,7 +829,7 @@ fn header() -> impl IntoElement {
             div()
                 .text_size(px(12.0))
                 .text_color(rgb(0x8b949e))
-                .child("EditorState-backed cursor and scrolling prototype"),
+                .child("EditorState-backed text input prototype"),
         )
 }
 
@@ -350,8 +872,12 @@ fn editor_header(snapshot: &EditorSnapshot) -> impl IntoElement {
 
 fn editor_body(
     snapshot: &EditorSnapshot,
+    input: Entity<EditorPrototype>,
     on_scroll: impl Fn(&ScrollWheelEvent, &mut Window, &mut App) + 'static,
     on_mouse_down: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+    on_mouse_move: impl Fn(&MouseMoveEvent, &mut Window, &mut App) + 'static,
+    on_mouse_up: impl Fn(&MouseUpEvent, &mut Window, &mut App) + 'static,
+    on_mouse_up_out: impl Fn(&MouseUpEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
     let lines = snapshot.lines.iter().enumerate().fold(
         div().flex().flex_col().py_3(),
@@ -363,22 +889,42 @@ fn editor_body(
                 snapshot
                     .cursor
                     .filter(|cursor| cursor.line + 1 == line_number),
+                snapshot.selection,
             ))
         },
     );
 
     div()
+        .relative()
         .flex_1()
         .w_full()
         .overflow_hidden()
         .bg(rgb(0x0d1117))
         .on_scroll_wheel(on_scroll)
         .on_mouse_down(MouseButton::Left, on_mouse_down)
+        .on_mouse_move(on_mouse_move)
+        .on_mouse_up(MouseButton::Left, on_mouse_up)
+        .on_mouse_up_out(MouseButton::Left, on_mouse_up_out)
         .child(lines)
+        .child(
+            div()
+                .absolute()
+                .size_full()
+                .child(EditorInputElement { input }),
+        )
 }
 
-fn editor_line(number: usize, text: &str, cursor: Option<Position>) -> impl IntoElement {
-    let selected = cursor.is_some();
+fn editor_line(
+    number: usize,
+    text: &str,
+    cursor: Option<Position>,
+    selection: Option<(Position, Position)>,
+) -> impl IntoElement {
+    let selection_active = selection.is_some_and(|(start, end)| {
+        let line = number.saturating_sub(1);
+        line >= start.line && line <= end.line
+    });
+    let selected = cursor.is_some() || selection_active;
     let text_cell = if let Some(cursor) = cursor {
         let (before, after) = split_chars(text, cursor.col);
         div()
@@ -491,10 +1037,10 @@ fn sample_text() -> String {
     [
         "LLNZY GPUI editor prototype",
         "",
-        "This surface is intentionally read-only for the first pass.",
+        "This surface now accepts GPUI text input for opened files.",
         "The production editor model is present, but no file could be opened.",
         "",
-        "Next step: wire GPUI input, cursor motion, and BufferView scrolling.",
+        "Next step: move syntax highlighting and richer selection painting over.",
     ]
     .join("\n")
 }
@@ -506,6 +1052,7 @@ struct EditorSnapshot {
     lines: Vec<String>,
     first_line_number: usize,
     cursor: Option<Position>,
+    selection: Option<(Position, Position)>,
     total_lines: usize,
     load_error: Option<String>,
     sample: bool,
@@ -513,6 +1060,9 @@ struct EditorSnapshot {
 
 const VISIBLE_LINE_LIMIT: usize = 32;
 const LINE_HEIGHT: gpui::Pixels = px(22.0);
+const LINE_NUMBER_WIDTH: gpui::Pixels = px(72.0);
+const CHAR_WIDTH: gpui::Pixels = px(7.8);
+const EDITOR_VERTICAL_PADDING: gpui::Pixels = px(12.0);
 
 fn reveal_cursor(view: &mut BufferView, line_count: usize) {
     let cursor_line = view.cursor.pos.line.min(line_count.saturating_sub(1));
@@ -543,4 +1093,20 @@ fn split_chars(text: &str, char_index: usize) -> (String, String) {
         .nth(char_index)
         .unwrap_or(text.len());
     (text[..byte].to_string(), text[byte..].to_string())
+}
+
+fn bounds_for_position(
+    view: &BufferView,
+    position: Position,
+    bounds: Bounds<gpui::Pixels>,
+) -> Bounds<gpui::Pixels> {
+    Bounds::new(
+        gpui::point(
+            bounds.left() + LINE_NUMBER_WIDTH + CHAR_WIDTH * position.col as f32,
+            bounds.top()
+                + EDITOR_VERTICAL_PADDING
+                + LINE_HEIGHT * position.line.saturating_sub(view.scroll_line) as f32,
+        ),
+        size(px(2.0), LINE_HEIGHT),
+    )
 }
