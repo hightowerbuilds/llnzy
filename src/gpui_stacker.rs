@@ -3,11 +3,11 @@ use std::ops::Range;
 use gpui::prelude::*;
 use gpui::{
     actions, div, fill, hsla, point, px, relative, rgb, rgba, size, App, Application, Bounds,
-    ClipboardItem, Context, CursorStyle, Element, ElementId, ElementInputHandler, Entity,
-    EntityInputHandler, FocusHandle, Focusable, GlobalElementId, KeyBinding, LayoutId, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point, Render, ShapedLine,
-    SharedString, Style, TextRun, UTF16Selection, UnderlineStyle, Window, WindowBounds,
-    WindowOptions,
+    ClipboardItem, ContentMask, Context, CursorStyle, DispatchPhase, Element, ElementId,
+    ElementInputHandler, Entity, EntityInputHandler, FocusHandle, Focusable, GlobalElementId,
+    KeyBinding, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad,
+    Pixels, Point, Render, ScrollWheelEvent, SharedString, Style, TextAlign, TextRun,
+    UTF16Selection, UnderlineStyle, Window, WindowBounds, WindowOptions, WrappedLine,
 };
 
 use crate::stacker::{
@@ -296,6 +296,8 @@ struct StackerTextInput {
     session: StackerSession,
     last_layout: Option<MultilineLayout>,
     last_bounds: Option<Bounds<Pixels>>,
+    scroll_y: Pixels,
+    content_height: Pixels,
     is_selecting: bool,
 }
 
@@ -308,6 +310,8 @@ impl StackerTextInput {
             session,
             last_layout: None,
             last_bounds: None,
+            scroll_y: px(0.0),
+            content_height: px(0.0),
             is_selecting: false,
         }
     }
@@ -435,6 +439,18 @@ impl StackerTextInput {
             end: offset,
         });
         cx.notify();
+    }
+
+    fn scroll_by(&mut self, delta: Pixels, cx: &mut Context<Self>) {
+        let Some(bounds) = self.last_bounds else {
+            return;
+        };
+        let max_scroll = (self.content_height - bounds.size.height).max(px(0.0));
+        let next = (self.scroll_y + delta).clamp(px(0.0), max_scroll);
+        if next != self.scroll_y {
+            self.scroll_y = next;
+            cx.notify();
+        }
     }
 
     fn index_for_mouse_position(&self, position: Point<Pixels>) -> usize {
@@ -626,13 +642,16 @@ struct StackerTextElement {
 struct MultilineLayout {
     lines: Vec<LayoutLine>,
     line_height: Pixels,
+    scroll_y: Pixels,
+    content_height: Pixels,
 }
 
 struct LayoutLine {
-    line: ShapedLine,
+    line: WrappedLine,
     text: String,
     char_start: usize,
     char_end: usize,
+    visual_start: usize,
 }
 
 struct TextPrepaintState {
@@ -694,9 +713,11 @@ impl Element for StackerTextElement {
         };
         let font_size = style.font_size.to_pixels(window.rem_size());
         let line_height = window.line_height();
+        let wrap_width = Some(bounds.size.width.max(px(24.0)));
+        let mut visual_start = 0;
         let layout_lines = layout_text_lines(text)
             .into_iter()
-            .map(|text_line| {
+            .filter_map(|text_line| {
                 let display_text: SharedString = text_line.text.clone().into();
                 let run = TextRun {
                     len: display_text.len(),
@@ -713,23 +734,37 @@ impl Element for StackerTextElement {
                     &display_text,
                     run,
                 );
-                let line = window
+                let mut wrapped = window
                     .text_system()
-                    .shape_line(display_text, font_size, &runs, None);
-                LayoutLine {
+                    .shape_text(display_text, font_size, &runs, wrap_width, None)
+                    .ok()?;
+                let line = wrapped.pop()?;
+                let line_visual_start = visual_start;
+                visual_start += line.wrap_boundaries().len() + 1;
+                Some(LayoutLine {
                     line,
                     text: text_line.text,
                     char_start: text_line.char_start,
                     char_end: text_line.char_end,
-                }
+                    visual_start: line_visual_start,
+                })
             })
             .collect();
+        let content_height = line_height * visual_start.max(1) as f32;
+        let max_scroll = (content_height - bounds.size.height).max(px(0.0));
+        let mut scroll_y = input.scroll_y.clamp(px(0.0), max_scroll);
         let layout = MultilineLayout {
             lines: layout_lines,
             line_height,
+            scroll_y,
+            content_height,
         };
 
         let sorted = selection.sorted();
+        if sorted.is_collapsed() {
+            scroll_y = layout.scroll_y_for_caret(selection.end, bounds, scroll_y);
+        }
+        let layout = MultilineLayout { scroll_y, ..layout };
         let (selection_quads, cursor_quad) = if sorted.is_collapsed() {
             let cursor_bounds = layout.caret_bounds(selection.end, bounds);
             (Vec::new(), Some(fill(cursor_bounds, rgb(0x7dd3fc))))
@@ -767,26 +802,40 @@ impl Element for StackerTextElement {
             ElementInputHandler::new(bounds, self.input.clone()),
             cx,
         );
-        for selection in prepaint.selection.drain(..) {
-            window.paint_quad(selection);
-        }
         let layout = prepaint.layout.take().unwrap();
-        for (line_ix, line) in layout.lines.iter().enumerate() {
-            line.line
-                .paint(
-                    layout.line_origin(bounds, line_ix),
-                    layout.line_height,
-                    window,
-                    cx,
-                )
-                .unwrap();
-        }
-        if focus_handle.is_focused(window) {
-            if let Some(cursor) = prepaint.cursor.take() {
-                window.paint_quad(cursor);
+        window.with_content_mask(Some(ContentMask { bounds }), |window| {
+            for selection in prepaint.selection.drain(..) {
+                window.paint_quad(selection);
             }
-        }
+            for line in &layout.lines {
+                line.line
+                    .paint(
+                        layout.line_origin(bounds, line),
+                        layout.line_height,
+                        TextAlign::Left,
+                        Some(bounds),
+                        window,
+                        cx,
+                    )
+                    .unwrap();
+            }
+            if focus_handle.is_focused(window) {
+                if let Some(cursor) = prepaint.cursor.take() {
+                    window.paint_quad(cursor);
+                }
+            }
+        });
+        let input = self.input.clone();
+        let line_height = layout.line_height;
+        window.on_mouse_event(move |event: &ScrollWheelEvent, phase, _window, cx| {
+            if phase == DispatchPhase::Bubble && bounds.contains(&event.position) {
+                let delta = event.delta.pixel_delta(line_height);
+                input.update(cx, |input, cx| input.scroll_by(-delta.y, cx));
+            }
+        });
         self.input.update(cx, |input, _cx| {
+            input.scroll_y = layout.scroll_y;
+            input.content_height = layout.content_height;
             input.last_layout = Some(layout);
             input.last_bounds = Some(bounds);
         });
@@ -800,10 +849,10 @@ struct LayoutTextLine {
 }
 
 impl MultilineLayout {
-    fn line_origin(&self, bounds: Bounds<Pixels>, line_ix: usize) -> Point<Pixels> {
+    fn line_origin(&self, bounds: Bounds<Pixels>, line: &LayoutLine) -> Point<Pixels> {
         point(
             bounds.left(),
-            bounds.top() + self.line_height * line_ix as f32,
+            bounds.top() + self.line_height * line.visual_start as f32 - self.scroll_y,
         )
     }
 
@@ -815,22 +864,18 @@ impl MultilineLayout {
             .or_else(|| self.lines.iter().enumerate().last())
     }
 
-    fn x_for_char(line: &LayoutLine, char_index: usize) -> Pixels {
-        let line_char = char_index
-            .saturating_sub(line.char_start)
-            .min(line.char_end.saturating_sub(line.char_start));
-        line.line
-            .x_for_index(byte_index_for_char(&line.text, line_char))
-    }
-
     fn caret_bounds(&self, char_index: usize, bounds: Bounds<Pixels>) -> Bounds<Pixels> {
-        let Some((line_ix, line)) = self.line_for_char(char_index) else {
+        let Some((_, line)) = self.line_for_char(char_index) else {
             return Bounds::new(bounds.origin, size(px(2.0), self.line_height));
         };
+        let position = line
+            .position_for_char(char_index, self.line_height)
+            .unwrap_or(point(px(0.0), px(0.0)));
         Bounds::new(
             point(
-                bounds.left() + Self::x_for_char(line, char_index),
-                bounds.top() + self.line_height * line_ix as f32,
+                bounds.left() + position.x,
+                bounds.top() + self.line_height * line.visual_start as f32 + position.y
+                    - self.scroll_y,
             ),
             size(px(2.0), self.line_height),
         )
@@ -859,44 +904,172 @@ impl MultilineLayout {
         bounds: Bounds<Pixels>,
     ) -> Vec<Bounds<Pixels>> {
         let mut quads = Vec::new();
-        for (line_ix, line) in self.lines.iter().enumerate() {
-            let start = selection.start.max(line.char_start);
-            let end = selection.end.min(line.char_end);
-            let includes_line_break =
-                selection.end > line.char_end && selection.start <= line.char_end;
-            if start >= end && !includes_line_break {
-                continue;
-            }
+        for line in &self.lines {
+            let segments = line.visual_segments();
+            for (segment_ix, segment) in segments.iter().enumerate() {
+                let start = selection.start.max(segment.char_start);
+                let end = selection.end.min(segment.char_end);
+                let last_segment = segment_ix + 1 == segments.len();
+                let includes_line_break = last_segment
+                    && selection.end > line.char_end
+                    && selection.start <= line.char_end;
+                if start >= end && !includes_line_break {
+                    continue;
+                }
 
-            let start_x = Self::x_for_char(line, start);
-            let mut end_x = Self::x_for_char(line, end);
-            if includes_line_break && end_x <= start_x {
-                end_x = start_x + px(8.0);
+                let start_x = line
+                    .x_for_char_in_segment(start, segment)
+                    .unwrap_or(px(0.0));
+                let mut end_x = line.x_for_char_in_segment(end, segment).unwrap_or(px(0.0));
+                if includes_line_break && end_x <= start_x {
+                    end_x = start_x + px(8.0);
+                }
+                let visual_line = line.visual_start + segment_ix;
+                quads.push(Bounds::from_corners(
+                    point(
+                        bounds.left() + start_x,
+                        bounds.top() + self.line_height * visual_line as f32 - self.scroll_y,
+                    ),
+                    point(
+                        bounds.left() + end_x,
+                        bounds.top() + self.line_height * (visual_line + 1) as f32 - self.scroll_y,
+                    ),
+                ));
             }
-            quads.push(Bounds::from_corners(
-                point(
-                    bounds.left() + start_x,
-                    bounds.top() + self.line_height * line_ix as f32,
-                ),
-                point(
-                    bounds.left() + end_x,
-                    bounds.top() + self.line_height * (line_ix + 1) as f32,
-                ),
-            ));
         }
         quads
     }
 
     fn char_index_for_point(&self, position: Point<Pixels>, bounds: Bounds<Pixels>) -> usize {
-        let line_ix = ((position.y - bounds.top()) / self.line_height)
+        let visual_ix = ((position.y - bounds.top() + self.scroll_y) / self.line_height)
             .floor()
             .max(0.0) as usize;
-        let Some(line) = self.lines.get(line_ix).or_else(|| self.lines.last()) else {
+        let Some(line) = self
+            .lines
+            .iter()
+            .find(|line| visual_ix >= line.visual_start && visual_ix < line.visual_end())
+            .or_else(|| self.lines.last())
+        else {
             return 0;
         };
-        let local_x = position.x - bounds.left();
-        let byte = line.line.closest_index_for_x(local_x);
+        let local = point(
+            position.x - bounds.left(),
+            position.y - bounds.top() + self.scroll_y - self.line_height * line.visual_start as f32,
+        );
+        let byte = line
+            .line
+            .closest_index_for_position(local, self.line_height)
+            .unwrap_or_else(|index| index);
         line.char_start + byte_to_char_index(&line.text, byte)
+    }
+
+    fn scroll_y_for_caret(
+        &self,
+        char_index: usize,
+        bounds: Bounds<Pixels>,
+        current_scroll_y: Pixels,
+    ) -> Pixels {
+        let cursor = self.caret_bounds_with_scroll(char_index, bounds, current_scroll_y);
+        let max_scroll = (self.content_height - bounds.size.height).max(px(0.0));
+        if cursor.top() < bounds.top() {
+            (current_scroll_y - (bounds.top() - cursor.top())).clamp(px(0.0), max_scroll)
+        } else if cursor.bottom() > bounds.bottom() {
+            (current_scroll_y + (cursor.bottom() - bounds.bottom())).clamp(px(0.0), max_scroll)
+        } else {
+            current_scroll_y.clamp(px(0.0), max_scroll)
+        }
+    }
+
+    fn caret_bounds_with_scroll(
+        &self,
+        char_index: usize,
+        bounds: Bounds<Pixels>,
+        scroll_y: Pixels,
+    ) -> Bounds<Pixels> {
+        let Some((_, line)) = self.line_for_char(char_index) else {
+            return Bounds::new(bounds.origin, size(px(2.0), self.line_height));
+        };
+        let position = line
+            .position_for_char(char_index, self.line_height)
+            .unwrap_or(point(px(0.0), px(0.0)));
+        Bounds::new(
+            point(
+                bounds.left() + position.x,
+                bounds.top() + self.line_height * line.visual_start as f32 + position.y - scroll_y,
+            ),
+            size(px(2.0), self.line_height),
+        )
+    }
+}
+
+struct VisualSegment {
+    byte_start: usize,
+    byte_end: usize,
+    char_start: usize,
+    char_end: usize,
+    visual_ix: usize,
+}
+
+impl LayoutLine {
+    fn visual_end(&self) -> usize {
+        self.visual_start + self.line.wrap_boundaries().len() + 1
+    }
+
+    fn visual_segments(&self) -> Vec<VisualSegment> {
+        let mut bytes = Vec::with_capacity(self.line.wrap_boundaries().len() + 2);
+        bytes.push(0);
+        for boundary in self.line.wrap_boundaries() {
+            let run = &self.line.runs()[boundary.run_ix];
+            bytes.push(run.glyphs[boundary.glyph_ix].index);
+        }
+        bytes.push(self.text.len());
+        bytes
+            .windows(2)
+            .enumerate()
+            .map(|(ix, window)| VisualSegment {
+                byte_start: window[0],
+                byte_end: window[1],
+                char_start: self.char_start + byte_to_char_index(&self.text, window[0]),
+                char_end: self.char_start + byte_to_char_index(&self.text, window[1]),
+                visual_ix: ix,
+            })
+            .collect()
+    }
+
+    fn position_for_char(&self, char_index: usize, line_height: Pixels) -> Option<Point<Pixels>> {
+        let local_char = char_index
+            .saturating_sub(self.char_start)
+            .min(self.char_end.saturating_sub(self.char_start));
+        let byte = byte_index_for_char(&self.text, local_char);
+        let segments = self.visual_segments();
+        let segment = segments.iter().find(|segment| {
+            byte >= segment.byte_start
+                && (byte < segment.byte_end
+                    || segment.visual_ix + 1 == segments.len() && byte <= segment.byte_end)
+        })?;
+        self.position_for_byte_in_segment(byte, segment, line_height)
+    }
+
+    fn x_for_char_in_segment(&self, char_index: usize, segment: &VisualSegment) -> Option<Pixels> {
+        let local_char = char_index
+            .saturating_sub(self.char_start)
+            .min(self.char_end.saturating_sub(self.char_start));
+        let byte = byte_index_for_char(&self.text, local_char);
+        self.position_for_byte_in_segment(byte, segment, px(0.0))
+            .map(|position| position.x)
+    }
+
+    fn position_for_byte_in_segment(
+        &self,
+        byte: usize,
+        segment: &VisualSegment,
+        line_height: Pixels,
+    ) -> Option<Point<Pixels>> {
+        if byte <= segment.byte_start {
+            return Some(point(px(0.0), line_height * segment.visual_ix as f32));
+        }
+        self.line
+            .position_for_index(byte.min(segment.byte_end), line_height)
     }
 }
 
