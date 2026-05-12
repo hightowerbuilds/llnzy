@@ -1,7 +1,7 @@
 use gpui::prelude::*;
 use gpui::{
     actions, div, px, rgb, size, App, Application, Bounds, Context, Entity, Focusable, KeyBinding,
-    Render, Window, WindowBounds, WindowOptions,
+    MouseButton, MouseUpEvent, Render, Window, WindowBounds, WindowOptions,
 };
 
 use crate::gpui_editor::{bind_editor_keys, EditorPrototype};
@@ -27,6 +27,14 @@ const TAB_BAR_HEIGHT: f32 = 44.0;
 const FOOTER_HEIGHT: f32 = 48.0;
 const SIDEBAR_WIDTH: f32 = 180.0;
 const BUMPER_WIDTH: f32 = 20.0;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WorkspaceSurface {
+    Stacker,
+    Editor,
+    Terminal,
+    Explorer,
+}
 
 pub fn run_workspace_prototype() {
     Application::new().run(|cx: &mut App| {
@@ -57,6 +65,7 @@ pub fn run_workspace_prototype() {
 struct WorkspacePrototype {
     stacker: Entity<StackerPrototype>,
     editor: Entity<EditorPrototype>,
+    active_surface: WorkspaceSurface,
 }
 
 impl WorkspacePrototype {
@@ -64,12 +73,30 @@ impl WorkspacePrototype {
         Self {
             stacker: cx.new(StackerPrototype::embedded),
             editor: cx.new(EditorPrototype::new),
+            active_surface: WorkspaceSurface::Editor,
         }
+    }
+
+    fn activate_surface(
+        &mut self,
+        surface: WorkspaceSurface,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.active_surface = surface;
+        match surface {
+            WorkspaceSurface::Stacker => window.focus(&self.stacker.focus_handle(cx)),
+            WorkspaceSurface::Editor | WorkspaceSurface::Explorer => {
+                window.focus(&self.editor.focus_handle(cx));
+            }
+            WorkspaceSurface::Terminal => {}
+        }
+        cx.notify();
     }
 }
 
 impl Render for WorkspacePrototype {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .size_full()
             .flex()
@@ -77,21 +104,29 @@ impl Render for WorkspacePrototype {
             .bg(rgb(CHROME_BG))
             .text_color(rgb(SIDEBAR_TEXT))
             .font_family("Atkinson Hyperlegible")
-            .child(workspace_tab_bar())
+            .child(workspace_tab_bar(self.active_surface, cx))
             .child(
                 div()
                     .flex_1()
                     .flex()
                     .overflow_hidden()
-                    .child(workspace_sidebar())
+                    .child(workspace_sidebar(self.active_surface, cx))
                     .child(sidebar_bumper())
-                    .child(workspace_content(self.stacker.clone(), self.editor.clone())),
+                    .child(workspace_content(
+                        self.stacker.clone(),
+                        self.editor.clone(),
+                        self.active_surface,
+                        cx,
+                    )),
             )
-            .child(workspace_footer())
+            .child(workspace_footer(self.active_surface, cx))
     }
 }
 
-fn workspace_tab_bar() -> impl IntoElement {
+fn workspace_tab_bar(
+    active_surface: WorkspaceSurface,
+    cx: &mut Context<WorkspacePrototype>,
+) -> impl IntoElement {
     div()
         .h(px(TAB_BAR_HEIGHT))
         .w_full()
@@ -103,9 +138,30 @@ fn workspace_tab_bar() -> impl IntoElement {
         .border_b_1()
         .border_color(rgb(BORDER))
         .bg(rgb(CHROME_BG))
-        .child(workspace_tab("Stacker", false))
-        .child(workspace_tab("Code Workbench", true))
-        .child(workspace_tab("Explorer", false))
+        .child(workspace_tab(
+            "Stacker",
+            WorkspaceSurface::Stacker,
+            active_surface,
+            cx,
+        ))
+        .child(workspace_tab(
+            "Code Workbench",
+            WorkspaceSurface::Editor,
+            active_surface,
+            cx,
+        ))
+        .child(workspace_tab(
+            "Terminal",
+            WorkspaceSurface::Terminal,
+            active_surface,
+            cx,
+        ))
+        .child(workspace_tab(
+            "Explorer",
+            WorkspaceSurface::Explorer,
+            active_surface,
+            cx,
+        ))
         .child(
             div()
                 .ml_2()
@@ -121,7 +177,13 @@ fn workspace_tab_bar() -> impl IntoElement {
         )
 }
 
-fn workspace_tab(title: &'static str, active: bool) -> impl IntoElement {
+fn workspace_tab(
+    title: &'static str,
+    surface: WorkspaceSurface,
+    active_surface: WorkspaceSurface,
+    cx: &mut Context<WorkspacePrototype>,
+) -> impl IntoElement {
+    let active = surface == active_surface;
     div()
         .w(px(if active { 184.0 } else { 120.0 }))
         .h(px(32.0))
@@ -137,6 +199,13 @@ fn workspace_tab(title: &'static str, active: bool) -> impl IntoElement {
         }))
         .text_color(rgb(if active { ACTIVE_TEXT } else { MUTED_TEXT }))
         .text_size(px(14.0))
+        .cursor_pointer()
+        .on_mouse_up(
+            MouseButton::Left,
+            cx.listener(move |this, _: &MouseUpEvent, window, cx| {
+                this.activate_surface(surface, window, cx);
+            }),
+        )
         .child(title)
         .child(
             div()
@@ -152,7 +221,10 @@ fn workspace_tab(title: &'static str, active: bool) -> impl IntoElement {
         )
 }
 
-fn workspace_sidebar() -> impl IntoElement {
+fn workspace_sidebar(
+    active_surface: WorkspaceSurface,
+    cx: &mut Context<WorkspacePrototype>,
+) -> impl IntoElement {
     div()
         .w(px(SIDEBAR_WIDTH))
         .h_full()
@@ -178,18 +250,75 @@ fn workspace_sidebar() -> impl IntoElement {
                         .child("x"),
                 ),
         )
-        .child(sidebar_button("Open Project", true))
-        .child(sidebar_button("Open Recent", false))
+        .child(sidebar_button(
+            "Open Project",
+            true,
+            WorkspaceSurface::Explorer,
+            cx,
+        ))
+        .child(sidebar_button(
+            "Open Recent",
+            false,
+            WorkspaceSurface::Explorer,
+            cx,
+        ))
         .child(sidebar_section_label("PROJECT"))
-        .child(sidebar_tree_row("src", true, 0))
-        .child(sidebar_tree_row("gpui_workspace.rs", false, 1))
-        .child(sidebar_tree_row("gpui_editor.rs", false, 1))
-        .child(sidebar_tree_row("gpui_stacker.rs", false, 1))
-        .child(sidebar_tree_row("daily-growth", true, 0))
-        .child(sidebar_tree_row("gpui2-modular-integration.md", false, 1))
+        .child(sidebar_tree_row(
+            "src",
+            true,
+            0,
+            WorkspaceSurface::Explorer,
+            active_surface,
+            cx,
+        ))
+        .child(sidebar_tree_row(
+            "gpui_workspace.rs",
+            false,
+            1,
+            WorkspaceSurface::Editor,
+            active_surface,
+            cx,
+        ))
+        .child(sidebar_tree_row(
+            "gpui_editor.rs",
+            false,
+            1,
+            WorkspaceSurface::Editor,
+            active_surface,
+            cx,
+        ))
+        .child(sidebar_tree_row(
+            "gpui_stacker.rs",
+            false,
+            1,
+            WorkspaceSurface::Stacker,
+            active_surface,
+            cx,
+        ))
+        .child(sidebar_tree_row(
+            "daily-growth",
+            true,
+            0,
+            WorkspaceSurface::Explorer,
+            active_surface,
+            cx,
+        ))
+        .child(sidebar_tree_row(
+            "gpui2-modular-integration.md",
+            false,
+            1,
+            WorkspaceSurface::Editor,
+            active_surface,
+            cx,
+        ))
 }
 
-fn sidebar_button(label: &'static str, primary: bool) -> impl IntoElement {
+fn sidebar_button(
+    label: &'static str,
+    primary: bool,
+    surface: WorkspaceSurface,
+    cx: &mut Context<WorkspacePrototype>,
+) -> impl IntoElement {
     div()
         .w_full()
         .h(px(28.0))
@@ -201,6 +330,13 @@ fn sidebar_button(label: &'static str, primary: bool) -> impl IntoElement {
         .bg(rgb(if primary { ACCENT } else { 0x303440 }))
         .text_color(rgb(0xe1e6ee))
         .text_size(px(14.0))
+        .cursor_pointer()
+        .on_mouse_up(
+            MouseButton::Left,
+            cx.listener(move |this, _: &MouseUpEvent, window, cx| {
+                this.activate_surface(surface, window, cx);
+            }),
+        )
         .child(label)
 }
 
@@ -213,7 +349,15 @@ fn sidebar_section_label(label: &'static str) -> impl IntoElement {
         .child(label)
 }
 
-fn sidebar_tree_row(label: &'static str, folder: bool, depth: usize) -> impl IntoElement {
+fn sidebar_tree_row(
+    label: &'static str,
+    folder: bool,
+    depth: usize,
+    surface: WorkspaceSurface,
+    active_surface: WorkspaceSurface,
+    cx: &mut Context<WorkspacePrototype>,
+) -> impl IntoElement {
+    let selected = surface == active_surface && !folder;
     div()
         .w_full()
         .h(px(24.0))
@@ -222,8 +366,16 @@ fn sidebar_tree_row(label: &'static str, folder: bool, depth: usize) -> impl Int
         .pl(px(10.0 + depth as f32 * 16.0))
         .pr_2()
         .rounded_sm()
+        .bg(rgb(if selected { 0x303440 } else { CHROME_BG }))
         .text_size(px(14.0))
         .text_color(rgb(if folder { FOLDER_BLUE } else { SIDEBAR_TEXT }))
+        .cursor_pointer()
+        .on_mouse_up(
+            MouseButton::Left,
+            cx.listener(move |this, _: &MouseUpEvent, window, cx| {
+                this.activate_surface(surface, window, cx);
+            }),
+        )
         .child(if folder { "v " } else { "  " })
         .child(label)
 }
@@ -246,37 +398,126 @@ fn sidebar_bumper() -> impl IntoElement {
 fn workspace_content(
     stacker: Entity<StackerPrototype>,
     editor: Entity<EditorPrototype>,
+    active_surface: WorkspaceSurface,
+    cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
-    div()
+    let content = div()
         .flex_1()
         .h_full()
         .flex()
         .overflow_hidden()
-        .bg(rgb(EDITOR_BG))
-        .child(
+        .bg(rgb(EDITOR_BG));
+
+    match active_surface {
+        WorkspaceSurface::Stacker => content.child(
             div()
-                .w(px(320.0))
+                .flex_1()
                 .h_full()
-                .border_r_1()
-                .border_color(rgb(BORDER))
                 .bg(rgb(PANEL_BG))
                 .overflow_hidden()
                 .child(stacker),
+        ),
+        WorkspaceSurface::Editor => content
+            .child(
+                div()
+                    .w(px(320.0))
+                    .h_full()
+                    .border_r_1()
+                    .border_color(rgb(BORDER))
+                    .bg(rgb(PANEL_BG))
+                    .overflow_hidden()
+                    .cursor_pointer()
+                    .on_mouse_up(
+                        MouseButton::Left,
+                        cx.listener(|this, _: &MouseUpEvent, window, cx| {
+                            this.activate_surface(WorkspaceSurface::Stacker, window, cx);
+                        }),
+                    )
+                    .child(stacker),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .h_full()
+                    .p_4()
+                    .bg(rgb(EDITOR_BG))
+                    .cursor_pointer()
+                    .on_mouse_up(
+                        MouseButton::Left,
+                        cx.listener(|this, _: &MouseUpEvent, window, cx| {
+                            this.activate_surface(WorkspaceSurface::Editor, window, cx);
+                        }),
+                    )
+                    .child(
+                        div()
+                            .size_full()
+                            .border_1()
+                            .border_color(rgb(BORDER))
+                            .bg(rgb(EDITOR_BG))
+                            .overflow_hidden()
+                            .child(editor),
+                    ),
+            ),
+        WorkspaceSurface::Terminal => content.child(terminal_placeholder()),
+        WorkspaceSurface::Explorer => content.child(explorer_placeholder()),
+    }
+}
+
+fn terminal_placeholder() -> impl IntoElement {
+    div()
+        .flex_1()
+        .h_full()
+        .flex()
+        .flex_col()
+        .items_center()
+        .justify_center()
+        .bg(rgb(0x080808))
+        .text_color(rgb(0xd6dde8))
+        .child(
+            div()
+                .text_size(px(15.0))
+                .text_color(rgb(ACTIVE_TEXT))
+                .child("Terminal remains on the existing winit/wgpu path"),
         )
         .child(
-            div().flex_1().h_full().p_4().bg(rgb(EDITOR_BG)).child(
-                div()
-                    .size_full()
-                    .border_1()
-                    .border_color(rgb(BORDER))
-                    .bg(rgb(EDITOR_BG))
-                    .overflow_hidden()
-                    .child(editor),
-            ),
+            div()
+                .mt_2()
+                .text_size(px(12.0))
+                .text_color(rgb(MUTED_TEXT))
+                .child(
+                    "This GPUI shell is validating workspace chrome, Stacker, and editor first.",
+                ),
         )
 }
 
-fn workspace_footer() -> impl IntoElement {
+fn explorer_placeholder() -> impl IntoElement {
+    div()
+        .flex_1()
+        .h_full()
+        .flex()
+        .flex_col()
+        .items_center()
+        .justify_center()
+        .bg(rgb(EDITOR_BG))
+        .child(
+            div()
+                .text_size(px(15.0))
+                .text_color(rgb(ACTIVE_TEXT))
+                .child("Explorer/sidebar GPUI port is next"),
+        )
+        .child(
+            div()
+                .mt_2()
+                .text_size(px(12.0))
+                .text_color(rgb(MUTED_TEXT))
+                .child("The static sidebar is clickable now; the real file tree comes after editor/Stacker polish."),
+        )
+}
+
+fn workspace_footer(
+    active_surface: WorkspaceSurface,
+    cx: &mut Context<WorkspacePrototype>,
+) -> impl IntoElement {
     div()
         .h(px(FOOTER_HEIGHT))
         .w_full()
@@ -288,12 +529,42 @@ fn workspace_footer() -> impl IntoElement {
         .border_t_1()
         .border_color(rgb(BORDER))
         .bg(rgb(CHROME_BG))
-        .child(footer_button("Home", false))
-        .child(footer_button("Stacker", true))
-        .child(footer_button("Editor", true))
-        .child(footer_button("Sketch", false))
-        .child(footer_button("Git", false))
-        .child(footer_button("Settings", false))
+        .child(footer_button(
+            "Home",
+            WorkspaceSurface::Explorer,
+            active_surface,
+            cx,
+        ))
+        .child(footer_button(
+            "Terminal",
+            WorkspaceSurface::Terminal,
+            active_surface,
+            cx,
+        ))
+        .child(footer_button(
+            "Stacker",
+            WorkspaceSurface::Stacker,
+            active_surface,
+            cx,
+        ))
+        .child(footer_button(
+            "Editor",
+            WorkspaceSurface::Editor,
+            active_surface,
+            cx,
+        ))
+        .child(footer_button(
+            "Explorer",
+            WorkspaceSurface::Explorer,
+            active_surface,
+            cx,
+        ))
+        .child(footer_button(
+            "Settings",
+            WorkspaceSurface::Explorer,
+            active_surface,
+            cx,
+        ))
         .child(div().flex_1())
         .child(
             div()
@@ -303,7 +574,13 @@ fn workspace_footer() -> impl IntoElement {
         )
 }
 
-fn footer_button(label: &'static str, active: bool) -> impl IntoElement {
+fn footer_button(
+    label: &'static str,
+    surface: WorkspaceSurface,
+    active_surface: WorkspaceSurface,
+    cx: &mut Context<WorkspacePrototype>,
+) -> impl IntoElement {
+    let active = surface == active_surface;
     div()
         .h(px(36.0))
         .flex()
@@ -313,5 +590,12 @@ fn footer_button(label: &'static str, active: bool) -> impl IntoElement {
         .bg(rgb(if active { ACCENT } else { CHROME_BG }))
         .text_color(rgb(if active { ACTIVE_TEXT } else { SIDEBAR_TEXT }))
         .text_size(px(14.0))
+        .cursor_pointer()
+        .on_mouse_up(
+            MouseButton::Left,
+            cx.listener(move |this, _: &MouseUpEvent, window, cx| {
+                this.activate_surface(surface, window, cx);
+            }),
+        )
         .child(label)
 }
