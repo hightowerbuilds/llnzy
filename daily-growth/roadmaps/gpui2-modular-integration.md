@@ -17,14 +17,16 @@ Approximate status:
 - GPUI feasibility: complete.
 - GPUI Stacker prototype: strong but not production parity.
 - GPUI editor prototype: promising but not production parity.
-- GPUI workspace shell: real first-pass tab model, still static in several
-  places.
+- GPUI workspace shell: real first-pass tab model with project open/close and
+  recent-project launcher flow.
 - Terminal in GPUI workspace: live Alacritty-backed surface, with mouse
-  reporting and polish still pending.
+  reporting, true shader parity, and polish still pending.
 - Explorer/sidebar in GPUI workspace: first real project-tree slice is live;
-  file operations, watcher updates, and keyboard navigation still pending.
+  project close/open/recent handling is live; file operations, watcher updates,
+  and keyboard navigation still pending.
 - Appearances in GPUI workspace: first GPUI tab entry point exists for terminal,
-  editor, and sketch appearance controls.
+  editor, and sketch appearance controls; terminal effects controls now feed the
+  GPUI terminal surface.
 - Release readiness: optimized binaries build, but the migrated workspace is
   not yet a replacement for the current app.
 
@@ -48,6 +50,12 @@ Completed and worth preserving:
   GPUI process.
 - The GPUI workspace shell now has clickable top tabs, sidebar rows, footer
   controls, active-surface switching, and release builds.
+- The GPUI workspace can close the active repo from the sidebar, leaving Open
+  Project and Open Recent controls visible.
+- Home now shows the active project plus the top five recent projects.
+- The GPUI terminal has first-pass visible effects for smoke/aurora background
+  layers, bloom-style cursor glow, cursor trail, particles, CRT overlays, and
+  text shimmer.
 - The main app and GPUI binaries build in optimized release mode:
   `llnzy`, `gpui-workspace`, `gpui-editor`, and `gpui-stacker`.
 
@@ -66,6 +74,10 @@ The live inspection clarified the gap:
   close buttons, and footer navigation.
 - The footer has an Appearances entry point, but the editor and sketch
   appearance controls still need deeper surface integration.
+- Project open/close now belongs to the shell instead of being implicit in the
+  process cwd.
+- Terminal effects can be toggled from Appearances, but these are GPUI paint
+  layers, not yet the full old `wgpu` shader pipeline.
 - Stacker and editor are embedded, but still carry prototype assumptions.
 - We need to restore production-grade styling and interaction polish, not just
   compile a new framework.
@@ -146,9 +158,9 @@ Exit criteria:
 
 ## Phase 2: Bring Up A Real GPUI Terminal Surface
 
-Status: live terminal surface implemented on
-`final-stretch/gpui-terminal-surface`; visual parity pass started, with
-manual verification and terminal mouse reporting still pending.
+Status: live terminal surface implemented in the GPUI workspace; visual parity
+pass started, with manual verification, terminal mouse reporting, and full
+shader-pipeline parity still pending.
 
 Goal: replace the terminal placeholder with a minimal real terminal.
 
@@ -169,19 +181,22 @@ Tasks:
 - [x] Add basic scrollback and selection.
 - [x] Add copy/paste behavior.
 - [x] Show process exit and restart controls.
+- [x] Add color/style spans, cell backgrounds, and cursor styling parity.
+- [x] Add first-pass GPUI terminal effects toggles and paint-layer rendering:
+  smoke, aurora, bloom/glow, particles, CRT overlay, cursor trail, and shimmer.
 - [ ] Preserve the existing terminal implementation until GPUI terminal
   behavior has been manually verified.
 - [ ] Manually verify the first GPUI terminal slice in the running release
   workspace.
-- [x] Add color/style spans, cell backgrounds, and cursor styling parity.
 - [ ] Add terminal mouse reporting for full-screen terminal apps.
 - [ ] Add URL/file opening and copy-on-select parity.
+- [ ] Bridge or replace the old `wgpu` shader effects pipeline for true shader
+  parity inside the GPUI terminal.
 
 Deferred until after the terminal is alive:
 
-- CRT effects.
 - Background images.
-- Advanced shader effects.
+- Advanced shader effects beyond the current GPUI paint-layer approximation.
 - Terminal theme import/export polish.
 - Pixel-perfect parity with the current `wgpu` renderer.
 
@@ -202,6 +217,10 @@ Tasks:
 - [x] Render folders and files with expandable state.
 - [x] Open files into the GPUI editor surface.
 - [x] Preserve selected file and expanded folders during the running session.
+- [x] Add an explicit project close button that clears the project without
+  hiding Open Project and Open Recent.
+- [x] Add sidebar Open Project and Open Recent controls.
+- [x] Track recent projects and cap visible recent entries to the top five.
 - [ ] Wire file watcher updates into the tree.
 - [ ] Add rename, delete, new file, new folder, and reveal-in-finder actions.
 - [ ] Add keyboard navigation.
@@ -294,6 +313,8 @@ Tasks:
 - [x] Rebuild the top tab bar around real tab identity.
 - [x] Keep the footer as command/navigation chrome, not fake state.
 - [x] Add an Appearances footer command that opens/focuses an Appearances tab.
+- [x] Add Home project launcher content: active project plus top-five recent
+  projects.
 - [ ] Restore session save/restore for open tabs and selected project.
 - [ ] Upgrade editor file tabs from singleton surface tabs to real open-buffer
   tabs.

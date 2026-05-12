@@ -154,9 +154,11 @@ struct WorkspacePrototype {
     tabs: Vec<WorkspaceTab>,
     active_tab_id: WorkspaceTabId,
     next_tab_id: u64,
-    workspace_root: PathBuf,
+    workspace_root: Option<PathBuf>,
     expanded_dirs: BTreeSet<PathBuf>,
     selected_path: Option<PathBuf>,
+    recent_projects: Vec<PathBuf>,
+    recent_projects_open: bool,
     sidebar_visible: bool,
     sidebar_width: f32,
     last_sidebar_width: f32,
@@ -166,13 +168,16 @@ struct WorkspacePrototype {
 
 impl WorkspacePrototype {
     fn new(cx: &mut Context<Self>) -> Self {
-        let workspace_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let workspace_root = std::env::current_dir().ok();
         let tabs = vec![
             WorkspaceTab::new(WorkspaceTabId(1), WorkspaceSurface::Stacker),
             WorkspaceTab::new(WorkspaceTabId(2), WorkspaceSurface::Editor),
             WorkspaceTab::new(WorkspaceTabId(3), WorkspaceSurface::Terminal),
         ];
-        let expanded_dirs = initial_expanded_dirs(&workspace_root);
+        let expanded_dirs = workspace_root
+            .as_ref()
+            .map(|root| initial_expanded_dirs(root))
+            .unwrap_or_default();
         Self {
             stacker: cx.new(StackerPrototype::embedded),
             editor: cx.new(EditorPrototype::new),
@@ -183,6 +188,8 @@ impl WorkspacePrototype {
             workspace_root,
             expanded_dirs,
             selected_path: None,
+            recent_projects: crate::explorer::load_recent_projects(),
+            recent_projects_open: false,
             sidebar_visible: true,
             sidebar_width: SIDEBAR_DEFAULT_WIDTH,
             last_sidebar_width: SIDEBAR_DEFAULT_WIDTH,
@@ -313,6 +320,42 @@ impl WorkspacePrototype {
         self.open_or_activate_surface(WorkspaceSurface::Editor, window, cx);
     }
 
+    fn pick_open_project(&mut self, cx: &mut Context<Self>) {
+        if let Some(path) = rfd::FileDialog::new()
+            .set_title("Open Project Folder")
+            .pick_folder()
+        {
+            self.open_project(path, cx);
+        }
+    }
+
+    fn open_project(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        if !path.is_dir() {
+            return;
+        }
+        crate::explorer::add_recent_project(&mut self.recent_projects, path.clone());
+        self.workspace_root = Some(path.clone());
+        self.expanded_dirs = initial_expanded_dirs(&path);
+        self.selected_path = None;
+        self.sidebar_visible = true;
+        self.recent_projects_open = false;
+        cx.notify();
+    }
+
+    fn close_project(&mut self, cx: &mut Context<Self>) {
+        self.workspace_root = None;
+        self.expanded_dirs.clear();
+        self.selected_path = None;
+        self.sidebar_visible = true;
+        self.recent_projects_open = false;
+        cx.notify();
+    }
+
+    fn toggle_recent_projects(&mut self, cx: &mut Context<Self>) {
+        self.recent_projects_open = !self.recent_projects_open;
+        cx.notify();
+    }
+
     fn apply_appearance_config(&mut self, cx: &mut Context<Self>) {
         let config = self.appearance_config.clone();
         self.terminal
@@ -357,6 +400,44 @@ impl WorkspacePrototype {
         self.apply_appearance_config(cx);
     }
 
+    fn toggle_bloom(&mut self, cx: &mut Context<Self>) {
+        self.appearance_config.effects.bloom_enabled =
+            !self.appearance_config.effects.bloom_enabled;
+        self.apply_appearance_config(cx);
+    }
+
+    fn toggle_crt(&mut self, cx: &mut Context<Self>) {
+        self.appearance_config.effects.crt_enabled = !self.appearance_config.effects.crt_enabled;
+        self.apply_appearance_config(cx);
+    }
+
+    fn toggle_particles(&mut self, cx: &mut Context<Self>) {
+        self.appearance_config.effects.particles_enabled =
+            !self.appearance_config.effects.particles_enabled;
+        self.apply_appearance_config(cx);
+    }
+
+    fn toggle_cursor_glow(&mut self, cx: &mut Context<Self>) {
+        self.appearance_config.effects.cursor_glow = !self.appearance_config.effects.cursor_glow;
+        self.apply_appearance_config(cx);
+    }
+
+    fn toggle_cursor_trail(&mut self, cx: &mut Context<Self>) {
+        self.appearance_config.effects.cursor_trail = !self.appearance_config.effects.cursor_trail;
+        self.apply_appearance_config(cx);
+    }
+
+    fn toggle_text_animation(&mut self, cx: &mut Context<Self>) {
+        self.appearance_config.effects.text_animation =
+            !self.appearance_config.effects.text_animation;
+        self.apply_appearance_config(cx);
+    }
+
+    fn toggle_effects_enabled(&mut self, cx: &mut Context<Self>) {
+        self.appearance_config.effects.enabled = !self.appearance_config.effects.enabled;
+        self.apply_appearance_config(cx);
+    }
+
     fn adjust_editor_font_size(&mut self, delta: f32, cx: &mut Context<Self>) {
         let current = self
             .appearance_config
@@ -392,18 +473,26 @@ impl Render for WorkspacePrototype {
         let tabs = self.tabs.clone();
         let appearance_config = self.appearance_config.clone();
         let appearance_page = self.appearance_page;
-        let explorer_entries = collect_explorer_entries(&self.workspace_root, &self.expanded_dirs);
+        let explorer_entries = self
+            .workspace_root
+            .as_ref()
+            .map(|root| collect_explorer_entries(root, &self.expanded_dirs))
+            .unwrap_or_default();
         let selected_path = self.selected_path.clone();
         let workspace_root = self.workspace_root.clone();
+        let recent_projects = self.recent_projects.clone();
+        let recent_projects_open = self.recent_projects_open;
         let sidebar_width = self.sidebar_width;
         let sidebar_visible = self.sidebar_visible;
 
         let mut main = div().flex_1().flex().overflow_hidden();
         if sidebar_visible {
             main = main.child(workspace_sidebar(
-                workspace_root,
+                workspace_root.clone(),
                 explorer_entries,
                 selected_path,
+                recent_projects.clone(),
+                recent_projects_open,
                 sidebar_width,
                 cx,
             ));
@@ -415,6 +504,8 @@ impl Render for WorkspacePrototype {
                 self.editor.clone(),
                 self.terminal.clone(),
                 active_surface,
+                workspace_root,
+                recent_projects,
                 appearance_config,
                 appearance_page,
                 cx,
@@ -535,17 +626,22 @@ fn workspace_tab_width(surface: WorkspaceSurface, active: bool) -> f32 {
 }
 
 fn workspace_sidebar(
-    workspace_root: PathBuf,
+    workspace_root: Option<PathBuf>,
     entries: Vec<ExplorerEntry>,
     selected_path: Option<PathBuf>,
+    recent_projects: Vec<PathBuf>,
+    recent_projects_open: bool,
     sidebar_width: f32,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     let root_label = workspace_root
-        .file_name()
+        .as_ref()
+        .and_then(|path| path.file_name())
         .and_then(|name| name.to_str())
-        .unwrap_or("Project")
+        .unwrap_or("No Project")
         .to_string();
+    let has_project = workspace_root.is_some();
+
     let mut sidebar = div()
         .w(px(sidebar_width))
         .h_full()
@@ -576,30 +672,24 @@ fn workspace_sidebar(
                             .child(root_label),
                     ),
                 )
-                .child(
-                    div()
-                        .w(px(22.0))
-                        .h(px(22.0))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .rounded_sm()
-                        .text_size(px(12.0))
-                        .text_color(rgb(MUTED_TEXT))
-                        .cursor_pointer()
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _: &MouseDownEvent, _window, cx| {
-                                cx.stop_propagation();
-                                this.toggle_sidebar(cx);
-                            }),
-                        )
-                        .child("x"),
-                ),
-        );
+                .child(sidebar_close_project_button(has_project, cx)),
+        )
+        .child(sidebar_project_controls(
+            recent_projects,
+            recent_projects_open,
+            cx,
+        ));
 
     let mut tree = div().flex_1().flex().flex_col().overflow_hidden().py_1();
-    if entries.is_empty() {
+    if !has_project {
+        tree = tree.child(
+            div()
+                .p_3()
+                .text_size(px(12.0))
+                .text_color(rgb(MUTED_TEXT))
+                .child("Open a project to show its files."),
+        );
+    } else if entries.is_empty() {
         tree = tree.child(
             div()
                 .p_3()
@@ -627,6 +717,129 @@ fn workspace_sidebar(
             .child(format!("{}px", sidebar_width.round())),
     );
     sidebar
+}
+
+fn sidebar_close_project_button(
+    has_project: bool,
+    cx: &mut Context<WorkspacePrototype>,
+) -> impl IntoElement {
+    let button = div()
+        .w(px(22.0))
+        .h(px(22.0))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded_sm()
+        .text_size(px(12.0))
+        .text_color(rgb(if has_project { MUTED_TEXT } else { 0x545965 }))
+        .child("x");
+
+    if has_project {
+        button.cursor_pointer().on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|this, _: &MouseDownEvent, _window, cx| {
+                cx.stop_propagation();
+                this.close_project(cx);
+            }),
+        )
+    } else {
+        button
+    }
+}
+
+fn sidebar_project_controls(
+    recent_projects: Vec<PathBuf>,
+    recent_projects_open: bool,
+    cx: &mut Context<WorkspacePrototype>,
+) -> impl IntoElement {
+    let mut controls = div()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .p_2()
+        .border_b_1()
+        .border_color(rgb(0x343743))
+        .child(project_button("Open Project", true, cx, |this, cx| {
+            this.pick_open_project(cx);
+        }))
+        .child(project_button("Open Recent", false, cx, |this, cx| {
+            this.toggle_recent_projects(cx);
+        }));
+
+    if recent_projects_open {
+        let recent = recent_projects.into_iter().take(5).collect::<Vec<_>>();
+        if recent.is_empty() {
+            controls = controls.child(
+                div()
+                    .px_2()
+                    .py_1()
+                    .text_size(px(12.0))
+                    .text_color(rgb(MUTED_TEXT))
+                    .child("No recent projects"),
+            );
+        } else {
+            for project in recent {
+                controls = controls.child(recent_project_row(project, cx));
+            }
+        }
+    }
+
+    controls
+}
+
+fn project_button(
+    label: &'static str,
+    primary: bool,
+    cx: &mut Context<WorkspacePrototype>,
+    on_click: impl Fn(&mut WorkspacePrototype, &mut Context<WorkspacePrototype>) + 'static,
+) -> impl IntoElement {
+    div()
+        .w_full()
+        .h(px(30.0))
+        .flex()
+        .items_center()
+        .px_2()
+        .rounded_sm()
+        .bg(rgb(if primary { ACCENT } else { 0x303440 }))
+        .text_color(rgb(0xe1e6ee))
+        .text_size(px(13.0))
+        .cursor_pointer()
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, _: &MouseDownEvent, _window, cx| {
+                on_click(this, cx);
+            }),
+        )
+        .child(label)
+}
+
+fn recent_project_row(project: PathBuf, cx: &mut Context<WorkspacePrototype>) -> impl IntoElement {
+    let label = project_display_name(&project);
+    let path = project;
+    div()
+        .w_full()
+        .h(px(26.0))
+        .flex()
+        .items_center()
+        .px_2()
+        .rounded_sm()
+        .text_size(px(12.0))
+        .text_color(rgb(SIDEBAR_TEXT))
+        .cursor_pointer()
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, _: &MouseDownEvent, _window, cx| {
+                this.open_project(path.clone(), cx);
+            }),
+        )
+        .child(label)
+}
+
+fn project_display_name(path: &Path) -> String {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("Project")
+        .to_string()
 }
 
 fn sidebar_tree_row(
@@ -818,6 +1031,8 @@ fn workspace_content(
     editor: Entity<EditorPrototype>,
     terminal: Entity<TerminalSurface>,
     active_surface: WorkspaceSurface,
+    workspace_root: Option<PathBuf>,
+    recent_projects: Vec<PathBuf>,
     appearance_config: Config,
     appearance_page: AppearancePage,
     cx: &mut Context<WorkspacePrototype>,
@@ -883,7 +1098,7 @@ fn workspace_content(
         WorkspaceSurface::Appearances => {
             content.child(appearances_surface(appearance_config, appearance_page, cx))
         }
-        WorkspaceSurface::Home => content.child(home_placeholder()),
+        WorkspaceSurface::Home => content.child(home_surface(workspace_root, recent_projects, cx)),
         WorkspaceSurface::Settings => content.child(settings_placeholder()),
     }
 }
@@ -1096,6 +1311,19 @@ fn terminal_appearance_controls(
                 .flex()
                 .items_center()
                 .gap_2()
+                .child(control_label("Effects"))
+                .child(effect_toggle_button(
+                    "Terminal",
+                    config.effects.enabled,
+                    cx,
+                    |this, cx| this.toggle_effects_enabled(cx),
+                )),
+        )
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
                 .child(control_label("Cursor Style"))
                 .child(appearance_button(
                     "Block".to_string(),
@@ -1135,10 +1363,60 @@ fn terminal_appearance_controls(
                     |this, cx| this.set_background_mode("smoke", cx),
                 ))
                 .child(appearance_button(
-                    "Matrix".to_string(),
-                    config.effects.background == "matrix",
+                    "Aurora".to_string(),
+                    config.effects.background == "aurora",
                     cx,
-                    |this, cx| this.set_background_mode("matrix", cx),
+                    |this, cx| this.set_background_mode("aurora", cx),
+                )),
+        )
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(control_label("Post Effects"))
+                .child(effect_toggle_button(
+                    "Bloom",
+                    config.effects.bloom_enabled,
+                    cx,
+                    |this, cx| this.toggle_bloom(cx),
+                ))
+                .child(effect_toggle_button(
+                    "CRT",
+                    config.effects.crt_enabled,
+                    cx,
+                    |this, cx| this.toggle_crt(cx),
+                ))
+                .child(effect_toggle_button(
+                    "Particles",
+                    config.effects.particles_enabled,
+                    cx,
+                    |this, cx| this.toggle_particles(cx),
+                )),
+        )
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(control_label("Text Effects"))
+                .child(effect_toggle_button(
+                    "Glow",
+                    config.effects.cursor_glow,
+                    cx,
+                    |this, cx| this.toggle_cursor_glow(cx),
+                ))
+                .child(effect_toggle_button(
+                    "Trail",
+                    config.effects.cursor_trail,
+                    cx,
+                    |this, cx| this.toggle_cursor_trail(cx),
+                ))
+                .child(effect_toggle_button(
+                    "Text Anim",
+                    config.effects.text_animation,
+                    cx,
+                    |this, cx| this.toggle_text_animation(cx),
                 )),
         )
         .child(metric_row(
@@ -1255,6 +1533,24 @@ fn control_label(label: &'static str) -> impl IntoElement {
         .child(label)
 }
 
+fn effect_toggle_button(
+    label: &'static str,
+    active: bool,
+    cx: &mut Context<WorkspacePrototype>,
+    on_click: impl Fn(&mut WorkspacePrototype, &mut Context<WorkspacePrototype>) + 'static,
+) -> impl IntoElement {
+    appearance_button(
+        if active {
+            format!("{label} On")
+        } else {
+            format!("{label} Off")
+        },
+        active,
+        cx,
+        on_click,
+    )
+}
+
 fn appearance_button(
     label: String,
     active: bool,
@@ -1303,27 +1599,150 @@ fn color_u32(color: [u8; 3]) -> u32 {
     ((color[0] as u32) << 16) | ((color[1] as u32) << 8) | color[2] as u32
 }
 
-fn home_placeholder() -> impl IntoElement {
-    div()
+fn home_surface(
+    workspace_root: Option<PathBuf>,
+    recent_projects: Vec<PathBuf>,
+    cx: &mut Context<WorkspacePrototype>,
+) -> impl IntoElement {
+    let mut recent_list = div().flex().flex_col().gap_1().w(px(360.0));
+    let recent = recent_projects.into_iter().take(5).collect::<Vec<_>>();
+    if recent.is_empty() {
+        recent_list = recent_list.child(
+            div()
+                .py_2()
+                .text_size(px(13.0))
+                .text_color(rgb(MUTED_TEXT))
+                .child("No recent projects"),
+        );
+    } else {
+        for project in recent {
+            recent_list = recent_list.child(home_recent_project_row(project, cx));
+        }
+    }
+
+    let mut content = div()
         .flex_1()
         .h_full()
         .flex()
         .flex_col()
         .items_center()
-        .justify_center()
         .bg(rgb(EDITOR_BG))
+        .pt(px(80.0))
         .child(
             div()
-                .text_size(px(15.0))
+                .text_size(px(26.0))
                 .text_color(rgb(ACTIVE_TEXT))
-                .child("Home workspace launcher"),
+                .child("Home"),
         )
         .child(
             div()
                 .mt_2()
+                .mb_5()
+                .text_size(px(13.0))
+                .text_color(rgb(MUTED_TEXT))
+                .child("Open a project or jump back into a recent workspace."),
+        )
+        .child(home_open_project_button(cx));
+
+    if let Some(root) = workspace_root {
+        content = content.child(
+            div()
+                .mt_5()
+                .w(px(360.0))
+                .rounded_sm()
+                .border_1()
+                .border_color(rgb(BORDER))
+                .bg(rgb(PANEL_BG))
+                .p_3()
+                .child(
+                    div()
+                        .text_size(px(12.0))
+                        .text_color(rgb(MUTED_TEXT))
+                        .child("OPEN PROJECT"),
+                )
+                .child(
+                    div()
+                        .mt_1()
+                        .text_size(px(15.0))
+                        .text_color(rgb(ACTIVE_TEXT))
+                        .child(project_display_name(&root)),
+                )
+                .child(
+                    div()
+                        .mt_1()
+                        .text_size(px(11.0))
+                        .text_color(rgb(MUTED_TEXT))
+                        .child(root.display().to_string()),
+                ),
+        );
+    }
+
+    content
+        .child(
+            div()
+                .mt_6()
+                .mb_2()
                 .text_size(px(12.0))
                 .text_color(rgb(MUTED_TEXT))
-                .child("Recent projects and workspace restore move here after the tab shell is stable."),
+                .child("RECENT PROJECTS"),
+        )
+        .child(recent_list)
+}
+
+fn home_open_project_button(cx: &mut Context<WorkspacePrototype>) -> impl IntoElement {
+    div()
+        .w(px(240.0))
+        .h(px(42.0))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded_sm()
+        .bg(rgb(ACCENT))
+        .text_size(px(15.0))
+        .text_color(rgb(ACTIVE_TEXT))
+        .cursor_pointer()
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|this, _: &MouseDownEvent, _window, cx| {
+                this.pick_open_project(cx);
+            }),
+        )
+        .child("Open Project")
+}
+
+fn home_recent_project_row(
+    project: PathBuf,
+    cx: &mut Context<WorkspacePrototype>,
+) -> impl IntoElement {
+    let title = project_display_name(&project);
+    let detail = project.display().to_string();
+    let path = project;
+    div()
+        .w_full()
+        .rounded_sm()
+        .border_1()
+        .border_color(rgb(BORDER))
+        .bg(rgb(PANEL_BG))
+        .p_2()
+        .cursor_pointer()
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, _: &MouseDownEvent, _window, cx| {
+                this.open_project(path.clone(), cx);
+            }),
+        )
+        .child(
+            div()
+                .text_size(px(14.0))
+                .text_color(rgb(SIDEBAR_TEXT))
+                .child(title),
+        )
+        .child(
+            div()
+                .mt_1()
+                .text_size(px(11.0))
+                .text_color(rgb(MUTED_TEXT))
+                .child(detail),
         )
 }
 
