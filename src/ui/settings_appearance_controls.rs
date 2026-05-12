@@ -11,6 +11,7 @@ pub(super) fn render_terminal_controls_column(
     config: &mut Config,
     width: f32,
     height: f32,
+    background_import_error: &mut Option<String>,
 ) {
     let inner_w = (width - 32.0).max(88.0);
     let inner_h = (height - 32.0).max(1.0);
@@ -48,7 +49,7 @@ pub(super) fn render_terminal_controls_column(
                     ui.add_space(16.0);
                     ui.separator();
                     ui.add_space(16.0);
-                    settings_tabs::render_background_tab(ui, config);
+                    settings_tabs::render_background_tab(ui, config, background_import_error);
                 });
         });
 }

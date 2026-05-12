@@ -279,6 +279,7 @@ pub struct BackgroundRenderer {
     image_uniform_buffer: wgpu::Buffer,
     image_bind_group: Option<wgpu::BindGroup>,
     loaded_image_path: Option<String>,
+    rejected_image_path: Option<String>,
     loaded_image_size: [f32; 2],
 }
 
@@ -450,6 +451,7 @@ impl BackgroundRenderer {
             image_uniform_buffer,
             image_bind_group: None,
             loaded_image_path: None,
+            rejected_image_path: None,
             loaded_image_size: [1.0, 1.0],
         }
     }
@@ -600,6 +602,17 @@ impl BackgroundRenderer {
         if self.loaded_image_path.as_deref() == Some(path) {
             return;
         }
+        if self.rejected_image_path.as_deref() == Some(path) {
+            return;
+        }
+
+        if let Err(err) = crate::theme_store::validate_background_image(Path::new(path)) {
+            log::warn!("Skipping background image: {err}");
+            self.image_bind_group = None;
+            self.loaded_image_path = None;
+            self.rejected_image_path = Some(path.to_string());
+            return;
+        }
 
         let img = match image::open(path) {
             Ok(img) => img.to_rgba8(),
@@ -607,6 +620,7 @@ impl BackgroundRenderer {
                 log::warn!("Failed to load background image: {e}");
                 self.image_bind_group = None;
                 self.loaded_image_path = None;
+                self.rejected_image_path = Some(path.to_string());
                 return;
             }
         };
@@ -671,6 +685,7 @@ impl BackgroundRenderer {
         }));
 
         self.loaded_image_path = Some(path.to_string());
+        self.rejected_image_path = None;
         self.loaded_image_size = [width as f32, height as f32];
     }
 

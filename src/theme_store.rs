@@ -8,6 +8,10 @@ use crate::theme::VisualTheme;
 
 // ── Background Image Library ──
 
+pub const MAX_BACKGROUND_IMAGE_BYTES: u64 = 50 * 1024 * 1024;
+pub const MAX_BACKGROUND_IMAGE_DIMENSION: u32 = 8192;
+pub const MAX_BACKGROUND_IMAGE_PIXELS: u64 = 24_000_000;
+
 /// Directory where saved background images live.
 pub fn backgrounds_dir() -> Option<PathBuf> {
     crate::platform::paths::current_paths().map(|paths| paths.backgrounds_dir())
@@ -17,6 +21,51 @@ pub fn backgrounds_dir() -> Option<PathBuf> {
 pub fn import_background(source: &Path) -> Result<PathBuf, String> {
     let dir = backgrounds_dir().ok_or("No config directory")?;
     import_background_into_dir(source, &dir)
+}
+
+pub fn validate_background_image(path: &Path) -> Result<(u32, u32), String> {
+    if !path_extension_matches(path, BACKGROUND_IMAGE_EXTS) {
+        return Err("Background image must be PNG, JPEG, BMP, WEBP, or GIF.".to_string());
+    }
+
+    let metadata = std::fs::metadata(path).map_err(|e| format!("Image is unavailable: {e}"))?;
+    if !metadata.is_file() {
+        return Err("Background image must be a file.".to_string());
+    }
+    if metadata.len() > MAX_BACKGROUND_IMAGE_BYTES {
+        return Err(format!(
+            "Background image is too large on disk: {}. Maximum is {}.",
+            format_bytes(metadata.len()),
+            format_bytes(MAX_BACKGROUND_IMAGE_BYTES)
+        ));
+    }
+
+    let (width, height) =
+        image::image_dimensions(path).map_err(|e| format!("Could not read image size: {e}"))?;
+    let pixels = u64::from(width) * u64::from(height);
+    if width > MAX_BACKGROUND_IMAGE_DIMENSION || height > MAX_BACKGROUND_IMAGE_DIMENSION {
+        return Err(format!(
+            "Background image is too large: {width}x{height}. Maximum edge is {MAX_BACKGROUND_IMAGE_DIMENSION}px."
+        ));
+    }
+    if pixels > MAX_BACKGROUND_IMAGE_PIXELS {
+        return Err(format!(
+            "Background image is too large: {width}x{height} ({:.1} MP). Maximum is {:.1} MP.",
+            pixels as f64 / 1_000_000.0,
+            MAX_BACKGROUND_IMAGE_PIXELS as f64 / 1_000_000.0
+        ));
+    }
+
+    Ok((width, height))
+}
+
+fn format_bytes(bytes: u64) -> String {
+    const MIB: u64 = 1024 * 1024;
+    if bytes >= MIB {
+        format!("{:.1} MiB", bytes as f64 / MIB as f64)
+    } else {
+        format!("{bytes} bytes")
+    }
 }
 
 /// Resolve a stored background image reference to an image in the background library.
@@ -56,6 +105,7 @@ fn resolve_background_path_in_dir(reference: &str, dir: &Path) -> Option<PathBuf
 }
 
 fn import_background_into_dir(source: &Path, dir: &Path) -> Result<PathBuf, String> {
+    validate_background_image(source)?;
     std::fs::create_dir_all(dir).map_err(|e| format!("Failed to create backgrounds dir: {e}"))?;
 
     let file_name = source.file_name().ok_or("No file name")?;
@@ -388,6 +438,7 @@ fn delete_user_theme_from_dir(name: &str, dir: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn test_dir(name: &str) -> PathBuf {
@@ -398,6 +449,11 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("llnzy-theme-store-{name}-{stamp}"));
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    fn write_test_png(path: &Path) {
+        let image = image::RgbaImage::from_pixel(2, 2, image::Rgba([10, 20, 30, 255]));
+        image.save(path).unwrap();
     }
 
     #[test]
@@ -424,7 +480,7 @@ mod tests {
         let source = root.join("source");
         let library = root.join("library");
         std::fs::create_dir_all(&source).unwrap();
-        std::fs::write(source.join("sky.png"), b"first").unwrap();
+        write_test_png(&source.join("sky.png"));
         std::fs::write(source.join("notes.txt"), b"ignore").unwrap();
 
         let first = import_background_into_dir(&source.join("sky.png"), &library).unwrap();
@@ -445,6 +501,33 @@ mod tests {
 
         delete_background(&first).unwrap();
         assert!(!first.exists());
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn background_import_rejects_oversized_files_before_copying() {
+        let root = test_dir("background-too-large");
+        let source = root.join("huge.png");
+        let library = root.join("library");
+        let file = std::fs::File::create(&source).unwrap();
+        file.set_len(MAX_BACKGROUND_IMAGE_BYTES + 1).unwrap();
+
+        let err = import_background_into_dir(&source, &library).unwrap_err();
+
+        assert!(err.contains("too large on disk"));
+        assert!(list_backgrounds_in_dir(&library).is_empty());
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn background_validation_reports_dimensions() {
+        let root = test_dir("background-dimensions");
+        let path = root.join("tiny.png");
+        write_test_png(&path);
+
+        assert_eq!(validate_background_image(&path).unwrap(), (2, 2));
 
         let _ = std::fs::remove_dir_all(root);
     }

@@ -24,6 +24,7 @@ pub struct SettingsUiState {
     active_appearance: AppearancePage,
     pub(super) preview_background_path: Option<String>,
     pub(super) preview_background_texture: Option<egui::TextureHandle>,
+    pub(super) background_import_error: Option<String>,
     show_hotkey_legend: bool,
 }
 
@@ -39,6 +40,7 @@ impl Default for SettingsUiState {
             active_appearance: AppearancePage::Terminal,
             preview_background_path: None,
             preview_background_texture: None,
+            background_import_error: None,
             show_hotkey_legend: false,
         }
     }
@@ -158,7 +160,13 @@ fn render_appearance_panel(
     effects_ui.set_clip_rect(left_rect);
     match state.active_appearance {
         AppearancePage::Terminal => {
-            render_terminal_controls_column(&mut effects_ui, config, column_w, content_size.y);
+            render_terminal_controls_column(
+                &mut effects_ui,
+                config,
+                column_w,
+                content_size.y,
+                &mut state.background_import_error,
+            );
         }
         AppearancePage::CodeEditor => {
             render_code_editor_controls_column(&mut effects_ui, config, column_w, content_size.y);

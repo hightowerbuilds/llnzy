@@ -87,7 +87,11 @@ fn background_reference_matches_path(reference: Option<&str>, path: &std::path::
     std::path::Path::new(reference).file_name() == path.file_name()
 }
 
-pub(crate) fn render_background_tab(ui: &mut egui::Ui, config: &mut Config) {
+pub(crate) fn render_background_tab(
+    ui: &mut egui::Ui,
+    config: &mut Config,
+    import_error: &mut Option<String>,
+) {
     ui.label(
         egui::RichText::new("Background Effects")
             .size(18.0)
@@ -186,11 +190,15 @@ pub(crate) fn render_background_tab(ui: &mut egui::Ui, config: &mut Config) {
                     {
                         match theme_store::import_background(&path) {
                             Ok(saved_path) => {
+                                *import_error = None;
                                 config.effects.background_image =
                                     Some(background_library_reference(&saved_path));
                                 config.effects.background = "image".to_string();
                             }
-                            Err(e) => log::warn!("Failed to import background: {e}"),
+                            Err(e) => {
+                                log::warn!("Failed to import background: {e}");
+                                *import_error = Some(e);
+                            }
                         }
                     }
                 }
@@ -224,6 +232,15 @@ pub(crate) fn render_background_tab(ui: &mut egui::Ui, config: &mut Config) {
                 ui.end_row();
             }
         });
+
+    if let Some(error) = import_error.as_deref() {
+        ui.add_space(8.0);
+        ui.label(
+            egui::RichText::new(error)
+                .size(12.0)
+                .color(egui::Color32::from_rgb(220, 120, 110)),
+        );
+    }
 
     if let Some(path) = config.effects.background_image.as_deref() {
         if theme_store::resolve_background_path(path).is_none() {
