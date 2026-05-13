@@ -7,7 +7,10 @@ use super::{
     sidebar_state,
 };
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "palette dispatch coordinates editor, sidebar, config, and command sinks until a command context is introduced"
+)]
 pub(super) fn apply_palette_command(
     command_id: CommandId,
     editor_view: &mut EditorViewState,

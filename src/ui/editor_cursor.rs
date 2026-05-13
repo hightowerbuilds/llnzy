@@ -1,23 +1,17 @@
 use crate::editor::BufferView;
 
+use super::editor_paint::EditorPaintContext;
 use super::editor_wrap::WrapRow;
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn render_primary_cursor(
     ui: &egui::Ui,
-    painter: &egui::Painter,
-    text_clip: egui::Rect,
+    ctx: EditorPaintContext<'_>,
     view: &mut BufferView,
     visible_window: &[usize],
     visible_wrap_window: &[WrapRow],
-    rect: egui::Rect,
-    gutter_width: f32,
-    text_margin: f32,
-    char_width: f32,
-    line_height: f32,
-    h_offset: f32,
     word_wrap: bool,
 ) {
+    let geometry = ctx.geometry;
     let cursor_vis_info: Option<(f32, f32)> = if word_wrap {
         visible_wrap_window
             .iter()
@@ -48,10 +42,12 @@ pub(super) fn render_primary_cursor(
         return;
     };
 
-    let vis_y = vis_row * line_height;
-    let target_x = rect.left() + gutter_width + text_margin + col_offset * char_width
-        - if word_wrap { 0.0 } else { h_offset };
-    let target_y = rect.top() + vis_y;
+    let target_x = if word_wrap {
+        geometry.wrapped_text_x(col_offset as usize)
+    } else {
+        geometry.text_x(col_offset as usize)
+    };
+    let target_y = geometry.rect.top() + vis_row * geometry.line_height;
 
     view.cursor_display_x = target_x;
     view.cursor_display_y = target_y;
@@ -59,16 +55,16 @@ pub(super) fn render_primary_cursor(
 
     let cursor_x = view.cursor_display_x;
     let cursor_y = view.cursor_display_y;
-    if cursor_x >= text_clip.left() && cursor_x <= text_clip.right() {
+    if cursor_x >= geometry.text_clip.left() && cursor_x <= geometry.text_clip.right() {
         let time = ui.ctx().input(|i| i.time);
         let blink_cycle = (time * 2.0 * std::f64::consts::PI / 1.2) as f32;
         let opacity = (blink_cycle.sin() * 0.5 + 0.5).clamp(0.15, 1.0);
         let alpha = (opacity * 255.0) as u8;
         let cursor_color = egui::Color32::from_rgba_unmultiplied(80, 160, 255, alpha);
-        painter.with_clip_rect(text_clip).line_segment(
+        ctx.painter.with_clip_rect(geometry.text_clip).line_segment(
             [
                 egui::pos2(cursor_x, cursor_y + 1.0),
-                egui::pos2(cursor_x, cursor_y + line_height - 1.0),
+                egui::pos2(cursor_x, cursor_y + geometry.line_height - 1.0),
             ],
             egui::Stroke::new(2.0, cursor_color),
         );

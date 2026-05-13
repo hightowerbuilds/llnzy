@@ -45,6 +45,7 @@ const NS_NOT_FOUND: usize = usize::MAX;
 
 static EVENT_PROXY: OnceLock<EventLoopProxy<UserEvent>> = OnceLock::new();
 
+#[derive(Default)]
 struct ClientSnapshot {
     text: String,
     total_chars: usize,
@@ -61,22 +62,6 @@ struct ClientSnapshot {
     /// screen coordinates. Used by `firstRectForCharacterRange:` to anchor
     /// dictation and IME overlays to the actual caret position.
     galley: Option<(std::sync::Arc<egui::Galley>, egui::Pos2)>,
-}
-
-impl Default for ClientSnapshot {
-    fn default() -> Self {
-        Self {
-            text: String::new(),
-            total_chars: 0,
-            selection_start_char: 0,
-            selection_end_char: 0,
-            selection_start_u16: 0,
-            selection_end_u16: 0,
-            marked_range_chars: None,
-            marked_range_u16: None,
-            galley: None,
-        }
-    }
 }
 
 static CLIENT_STATE: OnceLock<Mutex<ClientSnapshot>> = OnceLock::new();

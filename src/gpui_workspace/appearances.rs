@@ -1,0 +1,681 @@
+use std::path::{Path, PathBuf};
+
+use gpui::prelude::*;
+use gpui::{div, px, rgb, Context, MouseButton, MouseDownEvent};
+
+use crate::{
+    config::{BackgroundImageFit, Config, CursorStyle},
+    theme::builtin_themes,
+};
+
+use super::{
+    AppearancePage, WorkspacePrototype, ACTIVE_TEXT, BORDER, EDITOR_BG,
+    GPUI_TERMINAL_BACKGROUND_MAX_EDGE, MUTED_TEXT, PANEL_BG, QUEUE_GREEN, SIDEBAR_TEXT,
+};
+
+pub(super) fn appearances_surface(
+    config: Config,
+    page: AppearancePage,
+    terminal_background_import_error: Option<String>,
+    cx: &mut Context<WorkspacePrototype>,
+) -> impl IntoElement {
+    div()
+        .flex_1()
+        .h_full()
+        .flex()
+        .flex_col()
+        .bg(rgb(EDITOR_BG))
+        .child(
+            div()
+                .h(px(52.0))
+                .w_full()
+                .flex()
+                .items_center()
+                .justify_between()
+                .px_4()
+                .border_b_1()
+                .border_color(rgb(BORDER))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(
+                            div()
+                                .text_size(px(18.0))
+                                .text_color(rgb(ACTIVE_TEXT))
+                                .child("Appearances"),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(12.0))
+                                .text_color(rgb(MUTED_TEXT))
+                                .child("Theme, terminal, editor, and canvas presentation"),
+                        ),
+                )
+                .child(appearance_page_nav(page, cx)),
+        )
+        .child(
+            div()
+                .flex_1()
+                .flex()
+                .gap_3()
+                .p_4()
+                .overflow_hidden()
+                .child(appearance_theme_column(&config, cx))
+                .child(appearance_controls_column(
+                    config,
+                    page,
+                    terminal_background_import_error,
+                    cx,
+                )),
+        )
+}
+
+fn appearance_page_nav(
+    page: AppearancePage,
+    cx: &mut Context<WorkspacePrototype>,
+) -> impl IntoElement {
+    div()
+        .flex()
+        .items_center()
+        .gap_1()
+        .child(appearance_page_button(AppearancePage::Terminal, page, cx))
+        .child(appearance_page_button(AppearancePage::Editor, page, cx))
+        .child(appearance_page_button(AppearancePage::Sketch, page, cx))
+}
+
+fn appearance_page_button(
+    target: AppearancePage,
+    page: AppearancePage,
+    cx: &mut Context<WorkspacePrototype>,
+) -> impl IntoElement {
+    let active = target == page;
+    appearance_button(target.title().to_string(), active, cx, move |this, cx| {
+        this.set_appearance_page(target, cx);
+    })
+}
+
+fn appearance_theme_column(
+    config: &Config,
+    cx: &mut Context<WorkspacePrototype>,
+) -> impl IntoElement {
+    let mut themes = div()
+        .w(px(320.0))
+        .h_full()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .border_1()
+        .border_color(rgb(BORDER))
+        .bg(rgb(PANEL_BG))
+        .p_3()
+        .overflow_hidden()
+        .child(
+            div()
+                .text_size(px(13.0))
+                .text_color(rgb(MUTED_TEXT))
+                .child("THEMES"),
+        )
+        .child(color_strip([
+            config.colors.background,
+            config.colors.foreground,
+            config.colors.cursor,
+            config.colors.selection,
+            config.colors.ansi[1],
+            config.colors.ansi[2],
+            config.colors.ansi[4],
+            config.colors.ansi[5],
+        ]));
+
+    for theme in builtin_themes().into_iter().take(6) {
+        let theme_name = theme.name.clone();
+        themes = themes.child(
+            div()
+                .w_full()
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap_2()
+                .rounded_sm()
+                .bg(rgb(0x252935))
+                .p_2()
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .child(
+                            div()
+                                .text_size(px(13.0))
+                                .text_color(rgb(ACTIVE_TEXT))
+                                .child(theme.name.clone()),
+                        )
+                        .child(color_strip([
+                            theme.colors.background,
+                            theme.colors.foreground,
+                            theme.colors.cursor,
+                            theme.colors.ansi[1],
+                        ])),
+                )
+                .child(appearance_button(
+                    "Apply".to_string(),
+                    false,
+                    cx,
+                    move |this, cx| {
+                        this.apply_builtin_theme(&theme_name, cx);
+                    },
+                )),
+        );
+    }
+
+    themes
+}
+
+fn appearance_controls_column(
+    config: Config,
+    page: AppearancePage,
+    terminal_background_import_error: Option<String>,
+    cx: &mut Context<WorkspacePrototype>,
+) -> impl IntoElement {
+    let content = div()
+        .flex_1()
+        .h_full()
+        .flex()
+        .flex_col()
+        .gap_3()
+        .border_1()
+        .border_color(rgb(BORDER))
+        .bg(rgb(0x15151c))
+        .p_4()
+        .overflow_hidden()
+        .child(
+            div()
+                .text_size(px(18.0))
+                .text_color(rgb(ACTIVE_TEXT))
+                .child(page.title()),
+        );
+
+    match page {
+        AppearancePage::Terminal => {
+            terminal_appearance_controls(content, config, terminal_background_import_error, cx)
+        }
+        AppearancePage::Editor => editor_appearance_controls(content, config, cx),
+        AppearancePage::Sketch => sketch_appearance_controls(content),
+    }
+}
+
+fn terminal_appearance_controls(
+    content: gpui::Div,
+    config: Config,
+    terminal_background_import_error: Option<String>,
+    cx: &mut Context<WorkspacePrototype>,
+) -> gpui::Div {
+    content
+        .child(metric_row(
+            "App Font Size",
+            format!("{:.0}px", config.font_size),
+            cx,
+            |this, cx| this.adjust_font_size(-1.0, cx),
+            |this, cx| this.adjust_font_size(1.0, cx),
+        ))
+        .child(metric_row(
+            "Terminal Line Height",
+            format!("{:.2}x", config.line_height),
+            cx,
+            |this, cx| this.adjust_line_height(-0.05, cx),
+            |this, cx| this.adjust_line_height(0.05, cx),
+        ))
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(control_label("Effects"))
+                .child(effect_toggle_button(
+                    "Terminal",
+                    config.effects.enabled,
+                    cx,
+                    |this, cx| this.toggle_effects_enabled(cx),
+                )),
+        )
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(control_label("Cursor Style"))
+                .child(appearance_button(
+                    "Block".to_string(),
+                    config.cursor_style == CursorStyle::Block,
+                    cx,
+                    |this, cx| this.set_cursor_style(CursorStyle::Block, cx),
+                ))
+                .child(appearance_button(
+                    "Beam".to_string(),
+                    config.cursor_style == CursorStyle::Beam,
+                    cx,
+                    |this, cx| this.set_cursor_style(CursorStyle::Beam, cx),
+                ))
+                .child(appearance_button(
+                    "Underline".to_string(),
+                    config.cursor_style == CursorStyle::Underline,
+                    cx,
+                    |this, cx| this.set_cursor_style(CursorStyle::Underline, cx),
+                )),
+        )
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(control_label("Background"))
+                .child(appearance_button(
+                    "None".to_string(),
+                    config.effects.background == "none",
+                    cx,
+                    |this, cx| this.set_background_mode("none", cx),
+                ))
+                .child(appearance_button(
+                    "Smoke".to_string(),
+                    config.effects.background == "smoke",
+                    cx,
+                    |this, cx| this.set_background_mode("smoke", cx),
+                ))
+                .child(appearance_button(
+                    "Aurora".to_string(),
+                    config.effects.background == "aurora",
+                    cx,
+                    |this, cx| this.set_background_mode("aurora", cx),
+                ))
+                .child(appearance_button(
+                    "Image".to_string(),
+                    config.effects.background == "image",
+                    cx,
+                    |this, cx| this.import_terminal_background(cx),
+                )),
+        )
+        .child(terminal_background_image_controls(
+            &config,
+            terminal_background_import_error,
+            cx,
+        ))
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(control_label("Post Effects"))
+                .child(effect_toggle_button(
+                    "Bloom",
+                    config.effects.bloom_enabled,
+                    cx,
+                    |this, cx| this.toggle_bloom(cx),
+                ))
+                .child(effect_toggle_button(
+                    "CRT",
+                    config.effects.crt_enabled,
+                    cx,
+                    |this, cx| this.toggle_crt(cx),
+                ))
+                .child(effect_toggle_button(
+                    "Particles",
+                    config.effects.particles_enabled,
+                    cx,
+                    |this, cx| this.toggle_particles(cx),
+                )),
+        )
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(control_label("Text Effects"))
+                .child(effect_toggle_button(
+                    "Glow",
+                    config.effects.cursor_glow,
+                    cx,
+                    |this, cx| this.toggle_cursor_glow(cx),
+                ))
+                .child(effect_toggle_button(
+                    "Trail",
+                    config.effects.cursor_trail,
+                    cx,
+                    |this, cx| this.toggle_cursor_trail(cx),
+                ))
+                .child(effect_toggle_button(
+                    "Text Anim",
+                    config.effects.text_animation,
+                    cx,
+                    |this, cx| this.toggle_text_animation(cx),
+                )),
+        )
+        .child(metric_row(
+            "Selection Alpha",
+            format!("{:.0}%", config.colors.selection_alpha * 100.0),
+            cx,
+            |this, cx| this.adjust_selection_alpha(-0.05, cx),
+            |this, cx| this.adjust_selection_alpha(0.05, cx),
+        ))
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(control_label("Time-of-Day Warmth"))
+                .child(appearance_button(
+                    if config.time_of_day_enabled {
+                        "On".to_string()
+                    } else {
+                        "Off".to_string()
+                    },
+                    config.time_of_day_enabled,
+                    cx,
+                    |this, cx| this.toggle_time_of_day(cx),
+                )),
+        )
+}
+
+fn terminal_background_image_controls(
+    config: &Config,
+    terminal_background_import_error: Option<String>,
+    cx: &mut Context<WorkspacePrototype>,
+) -> gpui::Div {
+    let current_image = config
+        .effects
+        .background_image
+        .as_deref()
+        .map(background_image_display_name)
+        .unwrap_or_else(|| "No image selected".to_string());
+
+    let mut controls = div().flex().flex_col().gap_2().child(
+        div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(control_label("Image Background"))
+            .child(appearance_button(
+                "Import Image".to_string(),
+                config.effects.background == "image" && config.effects.background_image.is_some(),
+                cx,
+                |this, cx| this.import_terminal_background(cx),
+            ))
+            .child(appearance_button(
+                "Clear".to_string(),
+                false,
+                cx,
+                |this, cx| {
+                    this.clear_terminal_background_image(cx);
+                },
+            ))
+            .child(
+                div()
+                    .max_w(px(220.0))
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_size(px(12.0))
+                    .text_color(rgb(MUTED_TEXT))
+                    .child(current_image),
+            ),
+    );
+
+    if config.effects.background_image.is_some() || config.effects.background == "image" {
+        let mut fit_row = div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(control_label("Image Fit"));
+        for fit in BackgroundImageFit::ALL {
+            fit_row = fit_row.child(appearance_button(
+                fit.label().to_string(),
+                config.effects.background_image_fit == fit,
+                cx,
+                move |this, cx| this.set_background_image_fit(fit, cx),
+            ));
+        }
+        controls = controls.child(fit_row);
+    }
+
+    if let Some(error) = terminal_background_import_error {
+        controls = controls.child(
+            div()
+                .pl(px(150.0))
+                .text_size(px(12.0))
+                .text_color(rgb(0xff8a7a))
+                .child(error),
+        );
+    }
+
+    controls
+}
+
+fn editor_appearance_controls(
+    content: gpui::Div,
+    config: Config,
+    cx: &mut Context<WorkspacePrototype>,
+) -> gpui::Div {
+    let editor_font = config
+        .editor
+        .font_size
+        .unwrap_or((config.font_size - 2.0).max(10.0));
+    content
+        .child(metric_row(
+            "Editor Font Size",
+            format!("{editor_font:.0}px"),
+            cx,
+            |this, cx| this.adjust_editor_font_size(-1.0, cx),
+            |this, cx| this.adjust_editor_font_size(1.0, cx),
+        ))
+        .child(metric_row(
+            "Sidebar Font Size",
+            format!("{:.0}px", config.editor.sidebar_font_size),
+            cx,
+            |this, cx| this.adjust_sidebar_font_size(-1.0, cx),
+            |this, cx| this.adjust_sidebar_font_size(1.0, cx),
+        ))
+        .child(
+            div()
+                .mt_2()
+                .text_size(px(12.0))
+                .text_color(rgb(MUTED_TEXT))
+                .child("Syntax color editing and dirty-file editor tabs come with the next editor pass."),
+        )
+}
+
+fn sketch_appearance_controls(content: gpui::Div) -> gpui::Div {
+    content
+        .child(
+            div()
+                .text_size(px(13.0))
+                .text_color(rgb(SIDEBAR_TEXT))
+                .child("Sketch canvas rendering is back on the GPUI path with persisted grid, canvas, and selection settings."),
+        )
+        .child(
+            div()
+                .mt_2()
+                .text_size(px(12.0))
+                .text_color(rgb(MUTED_TEXT))
+                .child("The next pass should expose full canvas color, grid spacing, image, symbol, and text editing controls here."),
+        )
+}
+
+fn metric_row(
+    label: &'static str,
+    value: String,
+    cx: &mut Context<WorkspacePrototype>,
+    decrement: impl Fn(&mut WorkspacePrototype, &mut Context<WorkspacePrototype>) + 'static,
+    increment: impl Fn(&mut WorkspacePrototype, &mut Context<WorkspacePrototype>) + 'static,
+) -> impl IntoElement {
+    div()
+        .w_full()
+        .flex()
+        .items_center()
+        .gap_2()
+        .child(control_label(label))
+        .child(appearance_button("-".to_string(), false, cx, decrement))
+        .child(
+            div()
+                .w(px(72.0))
+                .h(px(30.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded_sm()
+                .bg(rgb(0x242632))
+                .text_size(px(13.0))
+                .text_color(rgb(ACTIVE_TEXT))
+                .child(value),
+        )
+        .child(appearance_button("+".to_string(), false, cx, increment))
+}
+
+fn control_label(label: &'static str) -> impl IntoElement {
+    div()
+        .w(px(150.0))
+        .text_size(px(12.0))
+        .text_color(rgb(MUTED_TEXT))
+        .child(label)
+}
+
+fn effect_toggle_button(
+    label: &'static str,
+    active: bool,
+    cx: &mut Context<WorkspacePrototype>,
+    on_click: impl Fn(&mut WorkspacePrototype, &mut Context<WorkspacePrototype>) + 'static,
+) -> impl IntoElement {
+    appearance_button(
+        if active {
+            format!("{label} On")
+        } else {
+            format!("{label} Off")
+        },
+        active,
+        cx,
+        on_click,
+    )
+}
+
+fn appearance_button(
+    label: String,
+    active: bool,
+    cx: &mut Context<WorkspacePrototype>,
+    on_click: impl Fn(&mut WorkspacePrototype, &mut Context<WorkspacePrototype>) + 'static,
+) -> impl IntoElement {
+    div()
+        .h(px(30.0))
+        .flex()
+        .items_center()
+        .justify_center()
+        .px_2()
+        .rounded_sm()
+        .border_1()
+        .border_color(rgb(if active { 0x47785f } else { BORDER }))
+        .bg(rgb(if active { 0x183725 } else { 0x242632 }))
+        .text_size(px(12.0))
+        .text_color(rgb(if active { QUEUE_GREEN } else { SIDEBAR_TEXT }))
+        .cursor_pointer()
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, _: &MouseDownEvent, _window, cx| {
+                on_click(this, cx);
+            }),
+        )
+        .child(label)
+}
+
+fn color_strip<const N: usize>(colors: [[u8; 3]; N]) -> impl IntoElement {
+    let mut strip = div().flex().items_center().gap_1();
+    for color in colors {
+        strip = strip.child(
+            div()
+                .w(px(16.0))
+                .h(px(16.0))
+                .rounded_sm()
+                .border_1()
+                .border_color(rgb(0x000000))
+                .bg(rgb(color_u32(color))),
+        );
+    }
+    strip
+}
+
+fn color_u32(color: [u8; 3]) -> u32 {
+    ((color[0] as u32) << 16) | ((color[1] as u32) << 8) | color[2] as u32
+}
+
+fn background_library_reference(path: &Path) -> String {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| path.display().to_string())
+}
+
+pub(super) fn gpui_terminal_background_reference(path: &Path) -> Result<String, String> {
+    ensure_gpui_safe_background_image(path).map(|path| background_library_reference(&path))
+}
+
+fn ensure_gpui_safe_background_image(path: &Path) -> Result<PathBuf, String> {
+    let (width, height) = image::image_dimensions(path)
+        .map_err(|error| format!("Could not read image size: {error}"))?;
+    if width.max(height) <= GPUI_TERMINAL_BACKGROUND_MAX_EDGE {
+        return Ok(path.to_path_buf());
+    }
+
+    let parent = path
+        .parent()
+        .ok_or("Background image has no parent directory")?;
+    let stem = path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("background");
+    let target = parent.join(format!(
+        "{stem}-gpui-{}px.png",
+        GPUI_TERMINAL_BACKGROUND_MAX_EDGE
+    ));
+    if target.is_file() && image::image_dimensions(&target).is_ok() {
+        return Ok(target);
+    }
+
+    let image = image::open(path).map_err(|error| format!("Could not load image: {error}"))?;
+    let resized = image.resize(
+        GPUI_TERMINAL_BACKGROUND_MAX_EDGE,
+        GPUI_TERMINAL_BACKGROUND_MAX_EDGE,
+        image::imageops::FilterType::Lanczos3,
+    );
+    resized
+        .save(&target)
+        .map_err(|error| format!("Could not create GPUI-safe image: {error}"))?;
+    Ok(target)
+}
+
+fn background_image_display_name(reference: &str) -> String {
+    Path::new(reference)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| reference.to_string())
+}
+
+pub(super) fn settings_placeholder() -> impl IntoElement {
+    div()
+        .flex_1()
+        .h_full()
+        .flex()
+        .flex_col()
+        .items_center()
+        .justify_center()
+        .bg(rgb(EDITOR_BG))
+        .child(
+            div()
+                .text_size(px(15.0))
+                .text_color(rgb(ACTIVE_TEXT))
+                .child("Settings"),
+        )
+        .child(
+            div()
+                .mt_2()
+                .text_size(px(12.0))
+                .text_color(rgb(MUTED_TEXT))
+                .child("The existing settings surface is still preserved on the current app path."),
+        )
+}

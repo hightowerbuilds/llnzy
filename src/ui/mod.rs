@@ -65,7 +65,6 @@ use crate::app::commands::AppCommand;
 use crate::app::drag_drop::DragDropState;
 use crate::config::Config;
 use crate::explorer::ExplorerState;
-use crate::stacker::apply_prompt_edit;
 use crate::tab_groups::TabGroupState;
 use crate::workspace_layout::tab_bar_entries;
 
@@ -357,7 +356,6 @@ impl UiState {
 
         // Stacker state — extract for closure
         let mut stacker = std::mem::take(&mut self.stacker);
-        let mut saved_edit_idx: Option<usize> = None;
         let mut sketch = std::mem::take(&mut self.sketch);
         sketch.canvas_px = None;
         let mut explorer = std::mem::take(&mut self.explorer);
@@ -497,7 +495,6 @@ impl UiState {
                     explorer: &mut explorer,
                     editor_view: &mut editor_view,
                     recent_projects: &recent_projects,
-                    saved_edit_idx: &mut saved_edit_idx,
                     commands: &mut commands_out,
                 },
             });
@@ -521,14 +518,6 @@ impl UiState {
                     overlays::render_save_prompt(ctx, pc, save_prompt_error.as_deref());
             }
         });
-
-        // Apply inline edit after egui releases its temporary borrows.
-        if let Some(idx) = saved_edit_idx {
-            if apply_prompt_edit(&mut stacker.prompts, idx, &stacker.edit_text) {
-                stacker.dirty = true;
-            }
-            stacker.edit_text.clear();
-        }
 
         // Persist to disk when dirty
         stacker.persist_if_dirty();

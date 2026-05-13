@@ -2,6 +2,10 @@
 
 This is an isolated GPUI spike for LLNZY. It is intentionally outside the production app so GPUI can be tested without changing the current `winit`/`egui` runtime.
 
+## Retention Decision
+
+Keep this spike for now as archived GPUI research. The production GPUI workspace/editor/terminal/stacker surfaces have moved beyond this proof, but the spike still documents the first known-good dependency pin, Blade build path, and text-input observations. It should not be treated as production code or included in normal product builds.
+
 ## Goals
 
 - Prove a pinned GPUI dependency builds locally.

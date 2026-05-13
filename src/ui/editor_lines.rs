@@ -13,35 +13,46 @@ use super::editor_line_decorations::{
 };
 use super::editor_paint::{
     indent_level, render_highlighted_line, render_indentation_guides,
-    render_visible_whitespace_line, HighlightedLineRenderInput,
+    render_visible_whitespace_line, EditorPaintContext, HighlightedLineRenderInput,
 };
 use super::editor_wrap::WrapRow;
 
-#[allow(clippy::too_many_arguments)]
-pub(super) fn render_editor_lines(
-    painter: &egui::Painter,
-    text_clip: egui::Rect,
-    buf: &crate::editor::buffer::Buffer,
-    view: &BufferView,
-    editor_config: &EffectiveEditorConfig,
-    syntax_colors: &FxHashMap<HighlightGroup, [u8; 3]>,
-    inlay_hints: &[InlayHintInfo],
-    code_lenses: &[CodeLensInfo],
-    highlight_spans: &[Vec<HighlightSpan>],
-    foldable_ranges: &[FoldRange],
-    visible_window: &[usize],
-    visible_wrap_window: &[WrapRow],
-    rect: egui::Rect,
-    gutter_digits: usize,
-    gutter_width: f32,
-    text_margin: f32,
-    char_width: f32,
-    line_height: f32,
-    h_offset: f32,
-    syntax_start_line: usize,
-    editor_font_size: f32,
-    word_wrap: bool,
-) {
+pub(super) struct EditorLinesInput<'a> {
+    pub paint: EditorPaintContext<'a>,
+    pub buf: &'a crate::editor::buffer::Buffer,
+    pub view: &'a BufferView,
+    pub editor_config: &'a EffectiveEditorConfig,
+    pub syntax_colors: &'a FxHashMap<HighlightGroup, [u8; 3]>,
+    pub inlay_hints: &'a [InlayHintInfo],
+    pub code_lenses: &'a [CodeLensInfo],
+    pub highlight_spans: &'a [Vec<HighlightSpan>],
+    pub foldable_ranges: &'a [FoldRange],
+    pub visible_window: &'a [usize],
+    pub visible_wrap_window: &'a [WrapRow],
+    pub gutter_digits: usize,
+    pub syntax_start_line: usize,
+    pub editor_font_size: f32,
+    pub word_wrap: bool,
+}
+
+pub(super) fn render_editor_lines(input: EditorLinesInput<'_>) {
+    let EditorLinesInput {
+        paint,
+        buf,
+        view,
+        editor_config,
+        syntax_colors,
+        inlay_hints,
+        code_lenses,
+        highlight_spans,
+        foldable_ranges,
+        visible_window,
+        visible_wrap_window,
+        gutter_digits,
+        syntax_start_line,
+        editor_font_size,
+        word_wrap,
+    } = input;
     let text_color = egui::Color32::WHITE;
     let gutter_color = egui::Color32::from_rgb(100, 100, 120);
     let current_line_gutter = egui::Color32::from_rgb(180, 180, 200);
@@ -54,37 +65,19 @@ pub(super) fn render_editor_lines(
     let active_indent_level = indent_level(buf.line(view.cursor.pos.line), buf.indent_style);
 
     if !word_wrap {
-        render_indentation_guides(
-            painter,
-            text_clip,
-            buf,
-            visible_window,
-            active_indent_level,
-            rect,
-            gutter_width,
-            text_margin,
-            char_width,
-            line_height,
-            h_offset,
-        );
+        render_indentation_guides(paint, buf, visible_window, active_indent_level);
     }
 
     if word_wrap {
         render_wrapped_lines(
-            painter,
-            text_clip,
+            paint,
             buf,
             view,
             editor_config,
             syntax_colors,
             highlight_spans,
             visible_wrap_window,
-            rect,
             gutter_digits,
-            gutter_width,
-            text_margin,
-            char_width,
-            line_height,
             syntax_start_line,
             &font,
             text_color,
@@ -94,8 +87,7 @@ pub(super) fn render_editor_lines(
         );
     } else {
         render_unwrapped_lines(
-            painter,
-            text_clip,
+            paint,
             buf,
             view,
             editor_config,
@@ -105,13 +97,7 @@ pub(super) fn render_editor_lines(
             highlight_spans,
             foldable_ranges,
             visible_window,
-            rect,
             gutter_digits,
-            gutter_width,
-            text_margin,
-            char_width,
-            line_height,
-            h_offset,
             syntax_start_line,
             editor_font_size,
             &font,
@@ -123,22 +109,19 @@ pub(super) fn render_editor_lines(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "wrapped line rendering still carries syntax and style state until Phase 2 split"
+)]
 fn render_wrapped_lines(
-    painter: &egui::Painter,
-    text_clip: egui::Rect,
+    paint: EditorPaintContext<'_>,
     buf: &crate::editor::buffer::Buffer,
     view: &BufferView,
     editor_config: &EffectiveEditorConfig,
     syntax_colors: &FxHashMap<HighlightGroup, [u8; 3]>,
     highlight_spans: &[Vec<HighlightSpan>],
     visible_wrap_window: &[WrapRow],
-    rect: egui::Rect,
     gutter_digits: usize,
-    gutter_width: f32,
-    text_margin: f32,
-    char_width: f32,
-    line_height: f32,
     syntax_start_line: usize,
     font: &egui::FontId,
     text_color: egui::Color32,
@@ -146,14 +129,18 @@ fn render_wrapped_lines(
     current_line_gutter: egui::Color32,
     current_line_bg: egui::Color32,
 ) {
+    let painter = paint.painter;
+    let geometry = paint.geometry;
     for (vis_idx, row) in visible_wrap_window.iter().enumerate() {
-        let vis_y = vis_idx as f32 * line_height;
-        let y = rect.top() + vis_y;
+        let y = geometry.line_y(vis_idx);
 
         if row.doc_line == view.cursor.pos.line {
             let line_rect = egui::Rect::from_min_size(
-                egui::pos2(rect.left() + gutter_width, y),
-                egui::Vec2::new(rect.width() - gutter_width, line_height),
+                egui::pos2(geometry.rect.left() + geometry.gutter_width, y),
+                egui::Vec2::new(
+                    geometry.rect.width() - geometry.gutter_width,
+                    geometry.line_height,
+                ),
             );
             painter.rect_filled(line_rect, 0.0, current_line_bg);
         }
@@ -167,7 +154,7 @@ fn render_wrapped_lines(
             };
             if editor_config.show_line_numbers {
                 painter.text(
-                    egui::pos2(rect.left() + 4.0, y + 1.0),
+                    egui::pos2(geometry.rect.left() + 4.0, y + 1.0),
                     egui::Align2::LEFT_TOP,
                     &num_str,
                     font.clone(),
@@ -178,14 +165,14 @@ fn render_wrapped_lines(
                 painter,
                 view,
                 row.doc_line,
-                rect,
-                gutter_width,
+                geometry.rect,
+                geometry.gutter_width,
                 y,
-                line_height,
+                geometry.line_height,
             );
         } else if editor_config.show_line_numbers {
             painter.text(
-                egui::pos2(rect.left() + gutter_width - 12.0, y + 1.0),
+                egui::pos2(geometry.rect.left() + geometry.gutter_width - 12.0, y + 1.0),
                 egui::Align2::LEFT_TOP,
                 "~",
                 font.clone(),
@@ -198,20 +185,20 @@ fn render_wrapped_lines(
             continue;
         };
 
-        let text_x_base = rect.left() + gutter_width + text_margin;
+        let text_x_base = geometry.wrapped_text_x(0);
         let spans = highlight_spans
             .get(row.doc_line.saturating_sub(syntax_start_line))
             .map(Vec::as_slice)
             .unwrap_or(&[]);
         render_wrapped_row_text(
             painter,
-            text_clip,
+            geometry.text_clip,
             syntax_colors,
             row,
             row_text,
             text_x_base,
             y,
-            char_width,
+            geometry.char_width,
             font,
             text_color,
             spans,
@@ -219,7 +206,10 @@ fn render_wrapped_lines(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "row text chunk rendering carries syntax/style state until line renderer extraction"
+)]
 fn render_wrapped_row_text(
     painter: &egui::Painter,
     text_clip: egui::Rect,
@@ -290,10 +280,12 @@ fn render_wrapped_row_text(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "unwrapped line rendering still carries syntax and decoration state until Phase 2 split"
+)]
 fn render_unwrapped_lines(
-    painter: &egui::Painter,
-    text_clip: egui::Rect,
+    paint: EditorPaintContext<'_>,
     buf: &crate::editor::buffer::Buffer,
     view: &BufferView,
     editor_config: &EffectiveEditorConfig,
@@ -303,13 +295,7 @@ fn render_unwrapped_lines(
     highlight_spans: &[Vec<HighlightSpan>],
     foldable_ranges: &[FoldRange],
     visible_window: &[usize],
-    rect: egui::Rect,
     gutter_digits: usize,
-    gutter_width: f32,
-    text_margin: f32,
-    char_width: f32,
-    line_height: f32,
-    h_offset: f32,
     syntax_start_line: usize,
     editor_font_size: f32,
     font: &egui::FontId,
@@ -322,15 +308,19 @@ fn render_unwrapped_lines(
         LineDecorationBuckets::new(inlay_hints, visible_window, |hint| hint.line as usize);
     let code_lens_buckets =
         LineDecorationBuckets::new(code_lenses, visible_window, |lens| lens.line as usize);
+    let painter = paint.painter;
+    let geometry = paint.geometry;
 
     for (visible_offset, &line_idx) in visible_window.iter().enumerate() {
-        let vis_y = visible_offset as f32 * line_height;
-        let y = rect.top() + vis_y;
+        let y = geometry.line_y(visible_offset);
 
         if line_idx == view.cursor.pos.line {
             let line_rect = egui::Rect::from_min_size(
-                egui::pos2(rect.left() + gutter_width, y),
-                egui::Vec2::new(rect.width() - gutter_width, line_height),
+                egui::pos2(geometry.rect.left() + geometry.gutter_width, y),
+                egui::Vec2::new(
+                    geometry.rect.width() - geometry.gutter_width,
+                    geometry.line_height,
+                ),
             );
             painter.rect_filled(line_rect, 0.0, current_line_bg);
         }
@@ -343,7 +333,7 @@ fn render_unwrapped_lines(
         };
         if editor_config.show_line_numbers {
             painter.text(
-                egui::pos2(rect.left() + 4.0, y + 1.0),
+                egui::pos2(geometry.rect.left() + 4.0, y + 1.0),
                 egui::Align2::LEFT_TOP,
                 &num_str,
                 font.clone(),
@@ -351,14 +341,22 @@ fn render_unwrapped_lines(
             );
         }
 
-        render_git_gutter_change(painter, view, line_idx, rect, gutter_width, y, line_height);
+        render_git_gutter_change(
+            painter,
+            view,
+            line_idx,
+            geometry.rect,
+            geometry.gutter_width,
+            y,
+            geometry.line_height,
+        );
         render_fold_marker(
             painter,
             view,
             foldable_ranges,
             line_idx,
-            rect,
-            gutter_width,
+            geometry.rect,
+            geometry.gutter_width,
             y,
             font,
             gutter_color,
@@ -368,7 +366,7 @@ fn render_unwrapped_lines(
         if line_text.is_empty() {
             continue;
         }
-        let text_x_base = rect.left() + gutter_width + text_margin - h_offset;
+        let text_x_base = geometry.text_x(0);
         let spans = highlight_spans
             .get(line_idx.saturating_sub(syntax_start_line))
             .map(Vec::as_slice)
@@ -377,18 +375,18 @@ fn render_unwrapped_lines(
         if editor_config.visible_whitespace {
             render_visible_whitespace_line(
                 painter,
-                text_clip,
+                geometry.text_clip,
                 spans,
                 syntax_colors,
                 line_text,
                 text_x_base,
                 y,
-                char_width,
+                geometry.char_width,
                 font,
                 text_color,
             );
         } else if spans.is_empty() {
-            painter.with_clip_rect(text_clip).text(
+            painter.with_clip_rect(geometry.text_clip).text(
                 egui::pos2(text_x_base, y + 1.0),
                 egui::Align2::LEFT_TOP,
                 line_text,
@@ -398,13 +396,13 @@ fn render_unwrapped_lines(
         } else {
             render_highlighted_line(HighlightedLineRenderInput {
                 painter,
-                clip: text_clip,
+                clip: geometry.text_clip,
                 spans,
                 syntax_colors,
                 line_text,
                 text_x_base,
                 y,
-                char_width,
+                char_width: geometry.char_width,
                 font,
                 default_color: text_color,
             });
@@ -412,32 +410,32 @@ fn render_unwrapped_lines(
 
         render_fold_placeholder(
             painter,
-            text_clip,
+            geometry.text_clip,
             view,
             line_idx,
             line_text,
             text_x_base,
             y,
-            char_width,
+            geometry.char_width,
             font,
         );
         render_line_inlay_hints(
             painter,
-            text_clip,
+            geometry.text_clip,
             inlay_hint_buckets.get(visible_offset),
             text_x_base,
             y,
-            char_width,
+            geometry.char_width,
             editor_font_size,
         );
         render_line_code_lenses(
             painter,
-            text_clip,
+            geometry.text_clip,
             code_lens_buckets.get(visible_offset),
             text_x_base,
             y,
-            line_height,
-            rect,
+            geometry.line_height,
+            geometry.rect,
             editor_font_size,
         );
     }

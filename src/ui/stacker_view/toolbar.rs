@@ -16,19 +16,33 @@ use super::{
 };
 use crate::ui::stacker_cursor;
 
-#[allow(clippy::too_many_arguments)]
+pub(super) struct ToolbarContext<'a> {
+    pub(super) prompts: &'a mut Vec<StackerPrompt>,
+    pub(super) inbox_prompts: &'a mut Vec<StackerPrompt>,
+    pub(super) editor: &'a mut StackerSession,
+    pub(super) draft: &'a mut StackerDraft,
+    pub(super) pending_switch: &'a mut Option<PendingStackerDraftSwitch>,
+    pub(super) editing: &'a mut Option<usize>,
+    pub(super) dirty: &'a mut bool,
+    pub(super) editor_font_size: &'a mut f32,
+}
+
 pub(super) fn render_editor_toolbar(
     ui: &mut egui::Ui,
     editor_id: egui::Id,
-    prompts: &mut Vec<StackerPrompt>,
-    inbox_prompts: &mut Vec<StackerPrompt>,
-    editor: &mut StackerSession,
-    draft: &mut StackerDraft,
-    pending_switch: &mut Option<PendingStackerDraftSwitch>,
-    editing: &mut Option<usize>,
-    dirty: &mut bool,
-    editor_font_size: &mut f32,
+    input: ToolbarContext<'_>,
 ) {
+    let ToolbarContext {
+        prompts,
+        inbox_prompts,
+        editor,
+        draft,
+        pending_switch,
+        editing,
+        dirty,
+        editor_font_size,
+    } = input;
+
     ui.horizontal_wrapped(|ui| {
         ui.add_space(8.0);
         ui.spacing_mut().item_spacing.x = 4.0;

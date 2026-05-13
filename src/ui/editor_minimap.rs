@@ -4,7 +4,10 @@ use crate::editor::perf;
 use crate::editor::syntax::{HighlightGroup, HighlightSpan};
 use crate::lsp::{DiagSeverity, FileDiagnostic};
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "minimap rendering combines paint, scroll, syntax, and diagnostic state until a minimap input struct is introduced"
+)]
 pub(super) fn render_minimap(
     response: &egui::Response,
     painter: &egui::Painter,

@@ -34,7 +34,10 @@ impl<'a, T> LineDecorationBuckets<'a, T> {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "fold placeholder still receives per-line paint data until line decorations take EditorPaintContext"
+)]
 pub(super) fn render_fold_placeholder(
     painter: &egui::Painter,
     text_clip: egui::Rect,
@@ -63,7 +66,6 @@ pub(super) fn render_fold_placeholder(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn render_line_inlay_hints(
     painter: &egui::Painter,
     text_clip: egui::Rect,
@@ -93,7 +95,10 @@ pub(super) fn render_line_inlay_hints(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "code lens rendering still receives per-line paint data until line decorations take EditorPaintContext"
+)]
 pub(super) fn render_line_code_lenses(
     painter: &egui::Painter,
     text_clip: egui::Rect,

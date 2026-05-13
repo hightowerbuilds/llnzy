@@ -153,10 +153,8 @@ impl EditorSearch {
                     continue; // skip zero-length regex matches
                 }
 
-                if self.whole_word {
-                    if !is_whole_word_match(line_text, m.start(), m.end()) {
-                        continue;
-                    }
+                if self.whole_word && !is_whole_word_match(line_text, m.start(), m.end()) {
+                    continue;
                 }
 
                 self.matches.push(EditorMatch {
@@ -262,11 +260,11 @@ fn is_whole_word_match(text: &str, start_byte: usize, end_byte: usize) -> bool {
     let word_start = text[..start_byte]
         .chars()
         .next_back()
-        .map_or(true, |ch| !is_word_char(ch));
+        .is_none_or(|ch| !is_word_char(ch));
     let word_end = text[end_byte..]
         .chars()
         .next()
-        .map_or(true, |ch| !is_word_char(ch));
+        .is_none_or(|ch| !is_word_char(ch));
     word_start && word_end
 }
 

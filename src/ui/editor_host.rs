@@ -7,7 +7,10 @@ use crate::lsp::{CodeLensInfo, CompletionItem, FileDiagnostic, InlayHintInfo, Si
 
 use super::{editor_view, markdown_preview};
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "editor host bridges active buffer state and LSP snapshots until the editor host input is collapsed"
+)]
 pub(super) fn render_editor_content(
     ui: &mut egui::Ui,
     buf: &mut Buffer,
@@ -106,7 +109,10 @@ pub(super) fn render_editor_content(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "source editor host mirrors render_editor_content inputs before the host boundary is collapsed"
+)]
 fn render_source_editor(
     ui: &mut egui::Ui,
     buf: &mut Buffer,
@@ -167,7 +173,10 @@ fn render_source_editor(
 /// Input handling on macOS goes through `LlnzyStackerInputClient`, not the
 /// editor's keymap — `prose_mode = true` short-circuits `handle_editor_keys`
 /// inside the editor view.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "prose editor host must pass Stacker-owned editor state through the shared editor view"
+)]
 pub(crate) fn render_prose_editor(
     ui: &mut egui::Ui,
     buf: &mut Buffer,
@@ -205,6 +214,24 @@ pub(crate) fn render_prose_editor(
             prose_mode: true,
         },
     )
+}
+
+fn markdown_theme(config: &Config) -> markdown_preview::MarkdownPreviewTheme {
+    let bg = config.colors.background;
+    let fg = config.colors.foreground;
+    let cursor = config.colors.cursor;
+    let surface = egui::Color32::from_rgb(
+        bg[0].saturating_add(2),
+        bg[1].saturating_add(2),
+        bg[2].saturating_add(4),
+    );
+    markdown_preview::MarkdownPreviewTheme {
+        background: surface,
+        surface,
+        text: egui::Color32::from_rgb(fg[0], fg[1], fg[2]),
+        muted: egui::Color32::from_rgb(145, 150, 164),
+        accent: egui::Color32::from_rgb(cursor[0], cursor[1], cursor[2]),
+    }
 }
 
 #[cfg(test)]
@@ -256,23 +283,5 @@ mod tests {
 
         let result = frame_result_opt.expect("render produced a frame result");
         assert!(result.buffer_edit.is_none());
-    }
-}
-
-fn markdown_theme(config: &Config) -> markdown_preview::MarkdownPreviewTheme {
-    let bg = config.colors.background;
-    let fg = config.colors.foreground;
-    let cursor = config.colors.cursor;
-    let surface = egui::Color32::from_rgb(
-        bg[0].saturating_add(2),
-        bg[1].saturating_add(2),
-        bg[2].saturating_add(4),
-    );
-    markdown_preview::MarkdownPreviewTheme {
-        background: surface,
-        surface,
-        text: egui::Color32::from_rgb(fg[0], fg[1], fg[2]),
-        muted: egui::Color32::from_rgb(145, 150, 164),
-        accent: egui::Color32::from_rgb(cursor[0], cursor[1], cursor[2]),
     }
 }

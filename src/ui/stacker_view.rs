@@ -19,32 +19,53 @@ mod toolbar;
 
 pub(crate) const DEFAULT_EDITOR_FONT_SIZE: f32 = 16.0;
 
+pub(crate) struct StackerViewContext<'a> {
+    pub(crate) ui: &'a mut egui::Ui,
+    pub(crate) prompts: &'a mut Vec<StackerPrompt>,
+    pub(crate) inbox_prompts: &'a mut Vec<StackerPrompt>,
+    pub(crate) editor: &'a mut StackerSession,
+    pub(crate) draft: &'a mut StackerDraft,
+    pub(crate) pending_switch: &'a mut Option<PendingStackerDraftSwitch>,
+    pub(crate) pending_delete: &'a mut Option<PendingStackerPromptDelete>,
+    pub(crate) editing: &'a mut Option<usize>,
+    pub(crate) edit_text: &'a mut String,
+    pub(crate) dirty: &'a mut bool,
+    pub(crate) editor_font_size: &'a mut f32,
+    pub(crate) prompt_editor_rect: &'a mut Option<egui::Rect>,
+    pub(crate) prompt_editor_anchor: &'a mut Option<(std::sync::Arc<egui::Galley>, egui::Pos2)>,
+    pub(crate) queued_prompts: &'a mut Vec<QueuedPrompt>,
+    pub(crate) prompt_view_mode: &'a mut StackerPromptViewMode,
+    pub(crate) config: &'a Config,
+    pub(crate) prose_view: &'a mut BufferView,
+    pub(crate) prose_syntax: &'a SyntaxEngine,
+}
+
 /// Render the Stacker (prompt queue) view -- minimalist flat-list design.
 ///
 /// Takes ownership of mutable string state for closure-friendliness,
 /// writing values back through the mutable references on return.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn render_stacker_view(
-    ui: &mut egui::Ui,
-    prompts: &mut Vec<StackerPrompt>,
-    inbox_prompts: &mut Vec<StackerPrompt>,
-    editor: &mut StackerSession,
-    draft: &mut StackerDraft,
-    pending_switch: &mut Option<PendingStackerDraftSwitch>,
-    pending_delete: &mut Option<PendingStackerPromptDelete>,
-    editing: &mut Option<usize>,
-    edit_text: &mut String,
-    dirty: &mut bool,
-    _saved_edit_idx: &mut Option<usize>,
-    editor_font_size: &mut f32,
-    prompt_editor_rect: &mut Option<egui::Rect>,
-    prompt_editor_anchor: &mut Option<(std::sync::Arc<egui::Galley>, egui::Pos2)>,
-    queued_prompts: &mut Vec<QueuedPrompt>,
-    prompt_view_mode: &mut StackerPromptViewMode,
-    config: &Config,
-    prose_view: &mut BufferView,
-    prose_syntax: &SyntaxEngine,
-) {
+pub(crate) fn render_stacker_view(input: StackerViewContext<'_>) {
+    let StackerViewContext {
+        ui,
+        prompts,
+        inbox_prompts,
+        editor,
+        draft,
+        pending_switch,
+        pending_delete,
+        editing,
+        edit_text,
+        dirty,
+        editor_font_size,
+        prompt_editor_rect,
+        prompt_editor_anchor,
+        queued_prompts,
+        prompt_view_mode,
+        config,
+        prose_view,
+        prose_syntax,
+    } = input;
+
     *prompt_editor_rect = None;
     *prompt_editor_anchor = None;
 
@@ -113,15 +134,17 @@ pub(crate) fn render_stacker_view(
     prompts::render_prompt_list_panel(
         ui,
         list_h,
-        prompts,
-        inbox_prompts,
-        editing,
-        editor,
-        draft,
-        pending_switch,
-        pending_delete,
-        queued_prompts,
-        *prompt_view_mode,
+        prompts::PromptListContext {
+            prompts: &mut *prompts,
+            inbox_prompts: &mut *inbox_prompts,
+            editing: &mut *editing,
+            editor: &mut *editor,
+            draft: &mut *draft,
+            pending_switch: &mut *pending_switch,
+            pending_delete: &mut *pending_delete,
+            queued_prompts: &mut *queued_prompts,
+            view_mode: *prompt_view_mode,
+        },
     );
 
     ui.add_space(12.0);
@@ -130,38 +153,42 @@ pub(crate) fn render_stacker_view(
     editor_panel::render_prompt_editor_panel(
         ui,
         editor_h,
-        prompts,
-        inbox_prompts,
-        editor,
-        draft,
-        pending_switch,
-        editing,
-        dirty,
-        editor_font_size,
-        prompt_editor_rect,
-        prompt_editor_anchor,
-        config,
-        prose_view,
-        prose_syntax,
+        editor_panel::EditorPanelContext {
+            prompts: &mut *prompts,
+            inbox_prompts: &mut *inbox_prompts,
+            editor: &mut *editor,
+            draft: &mut *draft,
+            pending_switch: &mut *pending_switch,
+            editing: &mut *editing,
+            dirty: &mut *dirty,
+            editor_font_size: &mut *editor_font_size,
+            prompt_editor_rect: &mut *prompt_editor_rect,
+            prompt_editor_anchor: &mut *prompt_editor_anchor,
+            config,
+            prose_view: &mut *prose_view,
+            prose_syntax,
+        },
     );
 
     modals::render_discard_draft_modal(
         ui.ctx(),
-        prompts,
-        inbox_prompts,
-        editor,
-        draft,
-        pending_switch,
-        editing,
+        &*prompts,
+        &*inbox_prompts,
+        &mut *editor,
+        &mut *draft,
+        &mut *pending_switch,
+        &mut *editing,
     );
     modals::render_delete_prompt_modal(
         ui.ctx(),
-        prompts,
-        inbox_prompts,
-        editor,
-        draft,
-        editing,
-        dirty,
-        pending_delete,
+        modals::DeletePromptModalContext {
+            prompts: &mut *prompts,
+            inbox_prompts: &mut *inbox_prompts,
+            editor: &mut *editor,
+            draft: &mut *draft,
+            editing: &mut *editing,
+            dirty: &mut *dirty,
+            pending_delete: &mut *pending_delete,
+        },
     );
 }

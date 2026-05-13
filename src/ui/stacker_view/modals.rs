@@ -9,17 +9,27 @@ use super::{
     PendingStackerDraftSwitch, PendingStackerPromptDelete,
 };
 
-#[allow(clippy::too_many_arguments)]
-pub(super) fn render_delete_prompt_modal(
-    ctx: &egui::Context,
-    prompts: &mut Vec<StackerPrompt>,
-    inbox_prompts: &mut Vec<StackerPrompt>,
-    editor: &mut StackerSession,
-    draft: &mut StackerDraft,
-    editing: &mut Option<usize>,
-    dirty: &mut bool,
-    pending_delete: &mut Option<PendingStackerPromptDelete>,
-) {
+pub(super) struct DeletePromptModalContext<'a> {
+    pub(super) prompts: &'a mut Vec<StackerPrompt>,
+    pub(super) inbox_prompts: &'a mut Vec<StackerPrompt>,
+    pub(super) editor: &'a mut StackerSession,
+    pub(super) draft: &'a mut StackerDraft,
+    pub(super) editing: &'a mut Option<usize>,
+    pub(super) dirty: &'a mut bool,
+    pub(super) pending_delete: &'a mut Option<PendingStackerPromptDelete>,
+}
+
+pub(super) fn render_delete_prompt_modal(ctx: &egui::Context, input: DeletePromptModalContext<'_>) {
+    let DeletePromptModalContext {
+        prompts,
+        inbox_prompts,
+        editor,
+        draft,
+        editing,
+        dirty,
+        pending_delete,
+    } = input;
+
     let Some(target) = pending_delete.clone() else {
         return;
     };

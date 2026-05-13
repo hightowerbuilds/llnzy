@@ -6,23 +6,44 @@ use crate::lsp::{DiagSeverity, FileDiagnostic};
 
 use super::editor_line_decorations::visible_line_offset;
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "layout geometry must be passed explicitly"
-)]
+#[derive(Clone, Copy)]
+pub(super) struct EditorGeometry {
+    pub text_clip: egui::Rect,
+    pub rect: egui::Rect,
+    pub gutter_width: f32,
+    pub text_margin: f32,
+    pub char_width: f32,
+    pub line_height: f32,
+    pub h_offset: f32,
+}
+
+impl EditorGeometry {
+    pub(super) fn line_y(self, visible_offset: usize) -> f32 {
+        self.rect.top() + visible_offset as f32 * self.line_height
+    }
+
+    pub(super) fn text_x(self, col: usize) -> f32 {
+        self.wrapped_text_x(col) - self.h_offset
+    }
+
+    pub(super) fn wrapped_text_x(self, col: usize) -> f32 {
+        self.rect.left() + self.gutter_width + self.text_margin + col as f32 * self.char_width
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct EditorPaintContext<'a> {
+    pub painter: &'a egui::Painter,
+    pub geometry: EditorGeometry,
+}
+
 pub(super) fn render_bracket_match(
-    painter: &egui::Painter,
-    text_clip: egui::Rect,
+    ctx: EditorPaintContext<'_>,
     bracket_match: Option<(Position, Position)>,
     visible_window: &[usize],
-    rect: egui::Rect,
-    gutter_width: f32,
-    text_margin: f32,
-    char_width: f32,
-    line_height: f32,
-    h_offset: f32,
 ) {
     let Some((a, b)) = bracket_match else { return };
+    let geometry = ctx.geometry;
     let stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(120, 170, 255));
     let fill = egui::Color32::from_rgba_unmultiplied(120, 170, 255, 35);
 
@@ -30,40 +51,30 @@ pub(super) fn render_bracket_match(
         let Some(visible_offset) = visible_line_offset(visible_window, pos.line) else {
             continue;
         };
-        let y = rect.top() + visible_offset as f32 * line_height;
-        let x = rect.left() + gutter_width + text_margin + pos.col as f32 * char_width - h_offset;
+        let y = geometry.line_y(visible_offset);
+        let x = geometry.text_x(pos.col);
         let bracket_rect = egui::Rect::from_min_size(
             egui::pos2(x, y + 1.0),
-            egui::Vec2::new(char_width, line_height - 2.0),
+            egui::Vec2::new(geometry.char_width, geometry.line_height - 2.0),
         );
-        if bracket_rect.intersects(text_clip) {
-            painter
-                .with_clip_rect(text_clip)
+        if bracket_rect.intersects(geometry.text_clip) {
+            ctx.painter
+                .with_clip_rect(geometry.text_clip)
                 .rect_filled(bracket_rect, 1.0, fill);
-            painter
-                .with_clip_rect(text_clip)
+            ctx.painter
+                .with_clip_rect(geometry.text_clip)
                 .rect_stroke(bracket_rect, 1.0, stroke);
         }
     }
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "layout geometry must be passed explicitly"
-)]
 pub(super) fn render_indentation_guides(
-    painter: &egui::Painter,
-    text_clip: egui::Rect,
+    ctx: EditorPaintContext<'_>,
     buf: &crate::editor::buffer::Buffer,
     visible_window: &[usize],
     active_indent_level: usize,
-    rect: egui::Rect,
-    gutter_width: f32,
-    text_margin: f32,
-    char_width: f32,
-    line_height: f32,
-    h_offset: f32,
 ) {
+    let geometry = ctx.geometry;
     let indent_width = buf.indent_style.width().max(1);
     let guide_color = egui::Color32::from_rgba_unmultiplied(190, 200, 220, 26);
     let active_guide_color = egui::Color32::from_rgba_unmultiplied(120, 170, 255, 82);
@@ -75,13 +86,13 @@ pub(super) fn render_indentation_guides(
             continue;
         }
 
-        let y1 = rect.top() + visible_offset as f32 * line_height;
-        let y2 = y1 + line_height;
+        let y1 = geometry.line_y(visible_offset);
+        let y2 = y1 + geometry.line_height;
 
         for guide_level in 1..=level {
             let col = guide_level * indent_width;
-            let x = rect.left() + gutter_width + text_margin + col as f32 * char_width - h_offset;
-            if x < text_clip.left() || x > text_clip.right() {
+            let x = geometry.text_x(col);
+            if x < geometry.text_clip.left() || x > geometry.text_clip.right() {
                 continue;
             }
 
@@ -90,7 +101,7 @@ pub(super) fn render_indentation_guides(
             } else {
                 guide_color
             };
-            painter.with_clip_rect(text_clip).line_segment(
+            ctx.painter.with_clip_rect(geometry.text_clip).line_segment(
                 [egui::pos2(x, y1), egui::pos2(x, y2)],
                 egui::Stroke::new(1.0, color),
             );
@@ -249,34 +260,22 @@ pub(super) fn render_visible_whitespace_line(
     }
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "layout geometry must be passed explicitly"
-)]
 pub(super) fn render_diagnostics(
-    painter: &egui::Painter,
-    text_clip: egui::Rect,
+    ctx: EditorPaintContext<'_>,
     diagnostics: Option<&[FileDiagnostic]>,
     visible_window: &[usize],
-    rect: egui::Rect,
-    gutter_width: f32,
-    text_margin: f32,
-    char_width: f32,
-    line_height: f32,
-    h_offset: f32,
 ) {
     let Some(diags) = diagnostics else { return };
+    let geometry = ctx.geometry;
     for diag in diags {
         let Some(visible_offset) = visible_line_offset(visible_window, diag.line as usize) else {
             continue;
         };
-        let vis_y = visible_offset as f32 * line_height;
-        let y_base = rect.top() + vis_y + line_height - 2.0;
-        let x_start =
-            rect.left() + gutter_width + text_margin + diag.col as f32 * char_width - h_offset;
-        let x_end =
-            rect.left() + gutter_width + text_margin + diag.end_col as f32 * char_width - h_offset;
-        let width = (x_end - x_start).max(char_width);
+        let y = geometry.line_y(visible_offset);
+        let y_base = y + geometry.line_height - 2.0;
+        let x_start = geometry.text_x(diag.col as usize);
+        let x_end = geometry.text_x(diag.end_col as usize);
+        let width = (x_end - x_start).max(geometry.char_width);
 
         let color = match diag.severity {
             DiagSeverity::Error => egui::Color32::from_rgb(255, 80, 80),
@@ -290,7 +289,7 @@ pub(super) fn render_diagnostics(
         for i in 0..segments {
             let sx = x_start + i as f32 * seg_w;
             let offset = if i % 2 == 0 { 0.0 } else { 2.0 };
-            painter.with_clip_rect(text_clip).line_segment(
+            ctx.painter.with_clip_rect(geometry.text_clip).line_segment(
                 [
                     egui::pos2(sx, y_base + offset),
                     egui::pos2(sx + seg_w, y_base + 2.0 - offset),
@@ -305,8 +304,8 @@ pub(super) fn render_diagnostics(
             DiagSeverity::Info => "i",
             DiagSeverity::Hint => ".",
         };
-        painter.text(
-            egui::pos2(rect.left() + 1.0, rect.top() + vis_y + 1.0),
+        ctx.painter.text(
+            egui::pos2(geometry.rect.left() + 1.0, y + 1.0),
             egui::Align2::LEFT_TOP,
             marker,
             egui::FontId::monospace(10.0),
@@ -315,28 +314,20 @@ pub(super) fn render_diagnostics(
     }
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "layout geometry must be passed explicitly"
-)]
 pub(super) fn pixel_to_editor_pos(
     pos: egui::Pos2,
-    rect: egui::Rect,
-    gutter_width: f32,
-    text_margin: f32,
-    h_offset: f32,
-    char_width: f32,
-    line_height: f32,
+    geometry: EditorGeometry,
     scroll_line: usize,
     visible_doc_lines: &[usize],
     buf: &crate::editor::buffer::Buffer,
 ) -> (usize, usize) {
-    let rel_x = pos.x - rect.left() - gutter_width - text_margin + h_offset;
-    let rel_y = pos.y - rect.top();
-    let visible_line = (scroll_line + (rel_y / line_height).max(0.0) as usize)
+    let rel_x = pos.x - geometry.rect.left() - geometry.gutter_width - geometry.text_margin
+        + geometry.h_offset;
+    let rel_y = pos.y - geometry.rect.top();
+    let visible_line = (scroll_line + (rel_y / geometry.line_height).max(0.0) as usize)
         .min(visible_doc_lines.len().saturating_sub(1));
     let line = visible_doc_lines.get(visible_line).copied().unwrap_or(0);
-    let col = (rel_x / char_width).max(0.0) as usize;
+    let col = (rel_x / geometry.char_width).max(0.0) as usize;
     let col = col.min(buf.line_len(line));
     (line, col)
 }
@@ -350,6 +341,21 @@ mod tests {
         let mut buf = Buffer::empty();
         buf.insert(Position::new(0, 0), text);
         buf
+    }
+
+    fn geometry(rect: egui::Rect, h_offset: f32) -> EditorGeometry {
+        EditorGeometry {
+            text_clip: egui::Rect::from_min_max(
+                egui::pos2(rect.left() + 20.0, rect.top()),
+                rect.right_bottom(),
+            ),
+            rect,
+            gutter_width: 20.0,
+            text_margin: 4.0,
+            char_width: 10.0,
+            line_height: 20.0,
+            h_offset,
+        }
     }
 
     #[test]
@@ -383,18 +389,8 @@ mod tests {
         let buf = buf_with("abcdefghijklmnopqrstuvwxyz");
         let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(320.0, 80.0));
 
-        let (line, col) = pixel_to_editor_pos(
-            egui::pos2(44.0, 5.0),
-            rect,
-            20.0,
-            4.0,
-            80.0,
-            10.0,
-            20.0,
-            0,
-            &[0],
-            &buf,
-        );
+        let (line, col) =
+            pixel_to_editor_pos(egui::pos2(44.0, 5.0), geometry(rect, 80.0), 0, &[0], &buf);
 
         assert_eq!((line, col), (0, 10));
     }
@@ -406,12 +402,7 @@ mod tests {
 
         let (line, col) = pixel_to_editor_pos(
             egui::pos2(34.0, 25.0),
-            rect,
-            20.0,
-            4.0,
-            0.0,
-            10.0,
-            20.0,
+            geometry(rect, 0.0),
             0,
             &[0, 3],
             &buf,

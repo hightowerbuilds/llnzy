@@ -39,21 +39,24 @@ const LIST_EDIT_BUTTON_WIDTH: f32 = 44.0;
 const LIST_DELETE_BUTTON_WIDTH: f32 = 56.0;
 const LIST_CHARS_WIDTH: f32 = 48.0;
 
-#[allow(clippy::too_many_arguments)]
+pub(super) struct PromptListContext<'a> {
+    pub(super) prompts: &'a mut Vec<StackerPrompt>,
+    pub(super) inbox_prompts: &'a mut Vec<StackerPrompt>,
+    pub(super) editing: &'a mut Option<usize>,
+    pub(super) editor: &'a mut StackerSession,
+    pub(super) draft: &'a mut StackerDraft,
+    pub(super) pending_switch: &'a mut Option<PendingStackerDraftSwitch>,
+    pub(super) pending_delete: &'a mut Option<PendingStackerPromptDelete>,
+    pub(super) queued_prompts: &'a mut Vec<QueuedPrompt>,
+    pub(super) view_mode: StackerPromptViewMode,
+}
+
 pub(super) fn render_prompt_list_panel(
     ui: &mut egui::Ui,
     height: f32,
-    prompts: &mut Vec<StackerPrompt>,
-    inbox_prompts: &mut Vec<StackerPrompt>,
-    editing: &mut Option<usize>,
-    editor: &mut StackerSession,
-    draft: &mut StackerDraft,
-    pending_switch: &mut Option<PendingStackerDraftSwitch>,
-    pending_delete: &mut Option<PendingStackerPromptDelete>,
-    queued_prompts: &mut Vec<QueuedPrompt>,
-    view_mode: StackerPromptViewMode,
+    mut state: PromptListContext<'_>,
 ) {
-    queue::sanitize_prompt_queue(queued_prompts);
+    queue::sanitize_prompt_queue(state.queued_prompts);
 
     egui::Frame::none()
         .fill(PANEL_BG)
@@ -65,25 +68,13 @@ pub(super) fn render_prompt_list_panel(
                 let queue_w = 190.0_f32.min((ui.available_width() * 0.25).max(150.0));
                 ui.vertical(|ui| {
                     ui.set_width(queue_w);
-                    render_queue_bank(ui, queue_w, height, queued_prompts);
+                    render_queue_bank(ui, queue_w, height, &*state.queued_prompts);
                 });
 
                 ui.add_space(10.0);
 
                 ui.vertical(|ui| {
-                    render_saved_prompt_panel(
-                        ui,
-                        height,
-                        prompts,
-                        inbox_prompts,
-                        editing,
-                        editor,
-                        draft,
-                        pending_switch,
-                        pending_delete,
-                        queued_prompts,
-                        view_mode,
-                    );
+                    render_saved_prompt_panel(ui, height, &mut state);
                 });
             });
         });
@@ -143,74 +134,39 @@ fn render_queue_bank(ui: &mut egui::Ui, width: f32, height: f32, queued_prompts:
         });
 }
 
-#[allow(clippy::too_many_arguments)]
-fn render_saved_prompt_panel(
-    ui: &mut egui::Ui,
-    height: f32,
-    prompts: &mut Vec<StackerPrompt>,
-    inbox_prompts: &mut Vec<StackerPrompt>,
-    editing: &mut Option<usize>,
-    editor: &mut StackerSession,
-    draft: &mut StackerDraft,
-    pending_switch: &mut Option<PendingStackerDraftSwitch>,
-    pending_delete: &mut Option<PendingStackerPromptDelete>,
-    queued_prompts: &mut Vec<QueuedPrompt>,
-    view_mode: StackerPromptViewMode,
-) {
+fn render_saved_prompt_panel(ui: &mut egui::Ui, height: f32, state: &mut PromptListContext<'_>) {
     ui.set_height(height - 20.0);
     ui.horizontal(|ui| {
         ui.label(
-            egui::RichText::new(format!("Saved prompts ({})", prompts.len()))
+            egui::RichText::new(format!("Saved prompts ({})", state.prompts.len()))
                 .size(13.0)
                 .color(HEADING_COLOR),
         );
     });
     ui.add_space(8.0);
 
-    if prompts.is_empty() && inbox_prompts.is_empty() {
+    if state.prompts.is_empty() && state.inbox_prompts.is_empty() {
         ui.add_space(20.0);
         ui.label(small("No prompts yet.").color(DIM));
         return;
     }
 
-    match view_mode {
-        StackerPromptViewMode::List => render_saved_prompt_list(
-            ui,
-            prompts,
-            inbox_prompts,
-            editing,
-            editor,
-            draft,
-            pending_switch,
-            pending_delete,
-            queued_prompts,
-        ),
-        StackerPromptViewMode::Thumbnails => render_saved_prompt_thumbnails(
-            ui,
-            prompts,
-            inbox_prompts,
-            editing,
-            editor,
-            draft,
-            pending_switch,
-            pending_delete,
-            queued_prompts,
-        ),
+    match state.view_mode {
+        StackerPromptViewMode::List => render_saved_prompt_list(ui, state),
+        StackerPromptViewMode::Thumbnails => render_saved_prompt_thumbnails(ui, state),
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn render_saved_prompt_list(
-    ui: &mut egui::Ui,
-    prompts: &mut Vec<StackerPrompt>,
-    inbox_prompts: &mut Vec<StackerPrompt>,
-    editing: &mut Option<usize>,
-    editor: &mut StackerSession,
-    draft: &mut StackerDraft,
-    pending_switch: &mut Option<PendingStackerDraftSwitch>,
-    pending_delete: &mut Option<PendingStackerPromptDelete>,
-    queued_prompts: &mut Vec<QueuedPrompt>,
-) {
+fn render_saved_prompt_list(ui: &mut egui::Ui, state: &mut PromptListContext<'_>) {
+    let prompts = &mut *state.prompts;
+    let inbox_prompts = &mut *state.inbox_prompts;
+    let editing = &mut *state.editing;
+    let editor = &mut *state.editor;
+    let draft = &mut *state.draft;
+    let pending_switch = &mut *state.pending_switch;
+    let pending_delete = &mut *state.pending_delete;
+    let queued_prompts = &mut *state.queued_prompts;
+
     ui.horizontal(|ui| {
         ui.add_sized([LIST_QUEUE_BUTTON_WIDTH, 18.0], header_label("Queue"));
         ui.add_sized([LIST_EDIT_BUTTON_WIDTH, 18.0], header_label("Edit"));
@@ -466,18 +422,16 @@ fn render_saved_prompt_list(
         });
 }
 
-#[allow(clippy::too_many_arguments)]
-fn render_saved_prompt_thumbnails(
-    ui: &mut egui::Ui,
-    prompts: &mut Vec<StackerPrompt>,
-    inbox_prompts: &mut Vec<StackerPrompt>,
-    editing: &mut Option<usize>,
-    editor: &mut StackerSession,
-    draft: &mut StackerDraft,
-    pending_switch: &mut Option<PendingStackerDraftSwitch>,
-    pending_delete: &mut Option<PendingStackerPromptDelete>,
-    queued_prompts: &mut Vec<QueuedPrompt>,
-) {
+fn render_saved_prompt_thumbnails(ui: &mut egui::Ui, state: &mut PromptListContext<'_>) {
+    let prompts = &mut *state.prompts;
+    let inbox_prompts = &mut *state.inbox_prompts;
+    let editing = &mut *state.editing;
+    let editor = &mut *state.editor;
+    let draft = &mut *state.draft;
+    let pending_switch = &mut *state.pending_switch;
+    let pending_delete = &mut *state.pending_delete;
+    let queued_prompts = &mut *state.queued_prompts;
+
     egui::ScrollArea::horizontal()
         .id_salt("stacker_prompt_thumbnails")
         .auto_shrink([false; 2])

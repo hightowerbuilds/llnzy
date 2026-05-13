@@ -94,7 +94,7 @@ fn filtered_commits<'a>(snapshot: &'a GitSnapshot, filter: &str) -> Vec<&'a GitC
         .filter(|commit| {
             filter.is_empty()
                 || contains_case_insensitive(&commit.summary, filter)
-                || commit.oid.contains(&filter)
+                || commit.oid.contains(filter)
                 || contains_case_insensitive(&commit.author_name, filter)
                 || commit
                     .refs

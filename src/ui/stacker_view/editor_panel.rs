@@ -39,28 +39,46 @@ const MARKED_UNDERLINE_WIDTH: f32 = 1.5;
 
 use super::{
     layout::{MUTED, NOTE_BG, NOTE_PADDING, NOTE_TEXT},
-    toolbar::render_editor_toolbar,
+    toolbar::{render_editor_toolbar, ToolbarContext},
     PendingStackerDraftSwitch, STACKER_PROMPT_EDITOR_ID,
 };
 
-#[allow(clippy::too_many_arguments)]
+pub(super) struct EditorPanelContext<'a> {
+    pub(super) prompts: &'a mut Vec<StackerPrompt>,
+    pub(super) inbox_prompts: &'a mut Vec<StackerPrompt>,
+    pub(super) editor: &'a mut StackerSession,
+    pub(super) draft: &'a mut StackerDraft,
+    pub(super) pending_switch: &'a mut Option<PendingStackerDraftSwitch>,
+    pub(super) editing: &'a mut Option<usize>,
+    pub(super) dirty: &'a mut bool,
+    pub(super) editor_font_size: &'a mut f32,
+    pub(super) prompt_editor_rect: &'a mut Option<egui::Rect>,
+    pub(super) prompt_editor_anchor: &'a mut Option<(std::sync::Arc<egui::Galley>, egui::Pos2)>,
+    pub(super) config: &'a Config,
+    pub(super) prose_view: &'a mut BufferView,
+    pub(super) prose_syntax: &'a SyntaxEngine,
+}
+
 pub(super) fn render_prompt_editor_panel(
     ui: &mut egui::Ui,
     height: f32,
-    prompts: &mut Vec<StackerPrompt>,
-    inbox_prompts: &mut Vec<StackerPrompt>,
-    editor: &mut StackerSession,
-    draft: &mut StackerDraft,
-    pending_switch: &mut Option<PendingStackerDraftSwitch>,
-    editing: &mut Option<usize>,
-    dirty: &mut bool,
-    editor_font_size: &mut f32,
-    prompt_editor_rect: &mut Option<egui::Rect>,
-    prompt_editor_anchor: &mut Option<(std::sync::Arc<egui::Galley>, egui::Pos2)>,
-    config: &Config,
-    prose_view: &mut BufferView,
-    prose_syntax: &SyntaxEngine,
+    input: EditorPanelContext<'_>,
 ) {
+    let EditorPanelContext {
+        prompts,
+        inbox_prompts,
+        editor,
+        draft,
+        pending_switch,
+        editing,
+        dirty,
+        editor_font_size,
+        prompt_editor_rect,
+        prompt_editor_anchor,
+        config,
+        prose_view,
+        prose_syntax,
+    } = input;
     let editor_id = egui::Id::new(STACKER_PROMPT_EDITOR_ID);
 
     ui.allocate_ui_with_layout(
@@ -70,14 +88,16 @@ pub(super) fn render_prompt_editor_panel(
             render_editor_toolbar(
                 ui,
                 editor_id,
-                prompts,
-                inbox_prompts,
-                editor,
-                draft,
-                pending_switch,
-                editing,
-                dirty,
-                editor_font_size,
+                ToolbarContext {
+                    prompts: &mut *prompts,
+                    inbox_prompts: &mut *inbox_prompts,
+                    editor: &mut *editor,
+                    draft: &mut *draft,
+                    pending_switch: &mut *pending_switch,
+                    editing: &mut *editing,
+                    dirty: &mut *dirty,
+                    editor_font_size: &mut *editor_font_size,
+                },
             );
 
             render_editor_status(ui, editor, draft, *editing);

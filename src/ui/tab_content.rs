@@ -24,7 +24,6 @@ pub(super) struct TabContentState<'a> {
     pub explorer: &'a mut ExplorerState,
     pub editor_view: &'a mut explorer_view::EditorViewState,
     pub recent_projects: &'a [std::path::PathBuf],
-    pub saved_edit_idx: &'a mut Option<usize>,
     pub commands: &'a mut Vec<AppCommand>,
 }
 
@@ -231,7 +230,10 @@ fn render_joined_tabs(input: JoinedTabsRenderInput<'_, '_>) {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "joined panes bridge active tab metadata, layout, config, and shared UI state"
+)]
 fn render_joined_pane(
     ui: &mut egui::Ui,
     ctx: &egui::Context,
@@ -267,27 +269,26 @@ fn render_joined_pane(
         }
         TabKind::Stacker => {
             render_pane_frame(pane_ui, egui::Color32::from_rgb(36, 36, 36), 0.0, |ui| {
-                stacker_view::render_stacker_view(
+                stacker_view::render_stacker_view(stacker_view::StackerViewContext {
                     ui,
-                    &mut state.stacker.prompts,
-                    &mut state.stacker.inbox_prompts,
-                    &mut state.stacker.editor,
-                    &mut state.stacker.draft,
-                    &mut state.stacker.pending_draft_switch,
-                    &mut state.stacker.pending_prompt_delete,
-                    &mut state.stacker.editing,
-                    &mut state.stacker.edit_text,
-                    &mut state.stacker.dirty,
-                    state.saved_edit_idx,
-                    &mut state.stacker.editor_font_size,
-                    &mut state.stacker.prompt_editor_rect,
-                    &mut state.stacker.prompt_editor_anchor,
-                    &mut state.stacker.queued_prompts,
-                    &mut state.stacker.prompt_view_mode,
+                    prompts: &mut state.stacker.prompts,
+                    inbox_prompts: &mut state.stacker.inbox_prompts,
+                    editor: &mut state.stacker.editor,
+                    draft: &mut state.stacker.draft,
+                    pending_switch: &mut state.stacker.pending_draft_switch,
+                    pending_delete: &mut state.stacker.pending_prompt_delete,
+                    editing: &mut state.stacker.editing,
+                    edit_text: &mut state.stacker.edit_text,
+                    dirty: &mut state.stacker.dirty,
+                    editor_font_size: &mut state.stacker.editor_font_size,
+                    prompt_editor_rect: &mut state.stacker.prompt_editor_rect,
+                    prompt_editor_anchor: &mut state.stacker.prompt_editor_anchor,
+                    queued_prompts: &mut state.stacker.queued_prompts,
+                    prompt_view_mode: &mut state.stacker.prompt_view_mode,
                     config,
-                    &mut state.stacker.prose_view,
-                    &state.stacker.prose_syntax,
-                );
+                    prose_view: &mut state.stacker.prose_view,
+                    prose_syntax: &state.stacker.prose_syntax,
+                });
             });
         }
         TabKind::CodeFile => {
@@ -396,27 +397,26 @@ fn render_stacker(ctx: &egui::Context, config: &Config, state: TabContentState<'
     egui::CentralPanel::default()
         .frame(content_frame(egui::Color32::from_rgb(36, 36, 36), 0.0))
         .show(ctx, |ui| {
-            stacker_view::render_stacker_view(
+            stacker_view::render_stacker_view(stacker_view::StackerViewContext {
                 ui,
-                &mut state.stacker.prompts,
-                &mut state.stacker.inbox_prompts,
-                &mut state.stacker.editor,
-                &mut state.stacker.draft,
-                &mut state.stacker.pending_draft_switch,
-                &mut state.stacker.pending_prompt_delete,
-                &mut state.stacker.editing,
-                &mut state.stacker.edit_text,
-                &mut state.stacker.dirty,
-                state.saved_edit_idx,
-                &mut state.stacker.editor_font_size,
-                &mut state.stacker.prompt_editor_rect,
-                &mut state.stacker.prompt_editor_anchor,
-                &mut state.stacker.queued_prompts,
-                &mut state.stacker.prompt_view_mode,
+                prompts: &mut state.stacker.prompts,
+                inbox_prompts: &mut state.stacker.inbox_prompts,
+                editor: &mut state.stacker.editor,
+                draft: &mut state.stacker.draft,
+                pending_switch: &mut state.stacker.pending_draft_switch,
+                pending_delete: &mut state.stacker.pending_prompt_delete,
+                editing: &mut state.stacker.editing,
+                edit_text: &mut state.stacker.edit_text,
+                dirty: &mut state.stacker.dirty,
+                editor_font_size: &mut state.stacker.editor_font_size,
+                prompt_editor_rect: &mut state.stacker.prompt_editor_rect,
+                prompt_editor_anchor: &mut state.stacker.prompt_editor_anchor,
+                queued_prompts: &mut state.stacker.queued_prompts,
+                prompt_view_mode: &mut state.stacker.prompt_view_mode,
                 config,
-                &mut state.stacker.prose_view,
-                &state.stacker.prose_syntax,
-            );
+                prose_view: &mut state.stacker.prose_view,
+                prose_syntax: &state.stacker.prose_syntax,
+            });
         });
 }
 

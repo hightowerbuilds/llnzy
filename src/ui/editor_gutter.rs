@@ -40,7 +40,10 @@ pub(super) fn render_git_gutter_change(
     );
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "fold marker uses gutter paint coordinates until gutter rendering takes EditorPaintContext"
+)]
 pub(super) fn render_fold_marker(
     painter: &egui::Painter,
     view: &BufferView,

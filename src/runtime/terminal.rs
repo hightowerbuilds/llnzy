@@ -105,6 +105,7 @@ impl App {
         });
     }
 
+    #[cfg(not(target_os = "macos"))]
     pub(crate) fn append_text_to_stacker_editor(&mut self, text: &str) -> bool {
         if !self.active_stacker_tab() {
             return false;

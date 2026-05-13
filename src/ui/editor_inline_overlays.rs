@@ -1,73 +1,29 @@
 use crate::editor::BufferView;
 use crate::lsp::{CompletionItem, SignatureInfo};
 
-#[allow(clippy::too_many_arguments)]
+use super::editor_paint::EditorPaintContext;
+
 pub(super) fn render_inline_lsp_overlays(
-    painter: &egui::Painter,
+    ctx: EditorPaintContext<'_>,
     hover_text: Option<&str>,
     completions: Option<(&[&CompletionItem], usize)>,
     signature_help: Option<&SignatureInfo>,
     view: &BufferView,
     visible_window: &[usize],
-    rect: egui::Rect,
-    gutter_width: f32,
-    text_margin: f32,
-    char_width: f32,
-    line_height: f32,
-    h_offset: f32,
 ) {
-    render_hover_tooltip(
-        painter,
-        hover_text,
-        view,
-        visible_window,
-        rect,
-        gutter_width,
-        text_margin,
-        char_width,
-        line_height,
-        h_offset,
-    );
-    render_signature_help(
-        painter,
-        signature_help,
-        view,
-        visible_window,
-        rect,
-        gutter_width,
-        text_margin,
-        char_width,
-        line_height,
-        h_offset,
-    );
-    render_completion_popup(
-        painter,
-        completions,
-        view,
-        visible_window,
-        rect,
-        gutter_width,
-        text_margin,
-        char_width,
-        line_height,
-        h_offset,
-    );
+    render_hover_tooltip(ctx, hover_text, view, visible_window);
+    render_signature_help(ctx, signature_help, view, visible_window);
+    render_completion_popup(ctx, completions, view, visible_window);
 }
 
-#[allow(clippy::too_many_arguments)]
 fn render_hover_tooltip(
-    painter: &egui::Painter,
+    ctx: EditorPaintContext<'_>,
     hover_text: Option<&str>,
     view: &BufferView,
     visible_window: &[usize],
-    rect: egui::Rect,
-    gutter_width: f32,
-    text_margin: f32,
-    char_width: f32,
-    line_height: f32,
-    h_offset: f32,
 ) {
     let Some(hover) = hover_text else { return };
+    let geometry = ctx.geometry;
     let Some(cursor_visible_offset) = visible_window
         .iter()
         .position(|&line| line == view.cursor.pos.line)
@@ -75,33 +31,35 @@ fn render_hover_tooltip(
         return;
     };
 
-    let vis_y = cursor_visible_offset as f32 * line_height;
-    let tooltip_x =
-        rect.left() + gutter_width + text_margin + view.cursor.pos.col as f32 * char_width
-            - h_offset;
-    let tooltip_y = rect.top() + vis_y - 4.0;
-    let max_w = (rect.width() - gutter_width - 40.0).max(200.0);
+    let y = geometry.line_y(cursor_visible_offset);
+    let tooltip_x = geometry.text_x(view.cursor.pos.col);
+    let tooltip_y = y - 4.0;
+    let max_w = (geometry.rect.width() - geometry.gutter_width - 40.0).max(200.0);
     let lines: Vec<&str> = hover.lines().take(12).collect();
     let tooltip_h = lines.len() as f32 * 16.0 + 8.0;
-    let tooltip_y = if tooltip_y - tooltip_h < rect.top() {
-        rect.top() + vis_y + line_height + 4.0
+    let tooltip_y = if tooltip_y - tooltip_h < geometry.rect.top() {
+        y + geometry.line_height + 4.0
     } else {
         tooltip_y - tooltip_h
     };
 
     let bg_rect = egui::Rect::from_min_size(
-        egui::pos2(tooltip_x.max(rect.left() + gutter_width), tooltip_y),
+        egui::pos2(
+            tooltip_x.max(geometry.rect.left() + geometry.gutter_width),
+            tooltip_y,
+        ),
         egui::Vec2::new(max_w, tooltip_h),
     );
-    painter.rect_filled(bg_rect, 4.0, egui::Color32::from_rgb(40, 42, 54));
-    painter.rect_stroke(
+    ctx.painter
+        .rect_filled(bg_rect, 4.0, egui::Color32::from_rgb(40, 42, 54));
+    ctx.painter.rect_stroke(
         bg_rect,
         4.0,
         egui::Stroke::new(1.0, egui::Color32::from_rgb(80, 85, 100)),
     );
 
     for (i, line) in lines.iter().enumerate() {
-        painter.text(
+        ctx.painter.text(
             egui::pos2(bg_rect.left() + 6.0, bg_rect.top() + 4.0 + i as f32 * 16.0),
             egui::Align2::LEFT_TOP,
             line,
@@ -111,20 +69,14 @@ fn render_hover_tooltip(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn render_signature_help(
-    painter: &egui::Painter,
+    ctx: EditorPaintContext<'_>,
     signature_help: Option<&SignatureInfo>,
     view: &BufferView,
     visible_window: &[usize],
-    rect: egui::Rect,
-    gutter_width: f32,
-    text_margin: f32,
-    char_width: f32,
-    line_height: f32,
-    h_offset: f32,
 ) {
     let Some(sig) = signature_help else { return };
+    let geometry = ctx.geometry;
     let Some(cursor_visible_offset) = visible_window
         .iter()
         .position(|&line| line == view.cursor.pos.line)
@@ -132,25 +84,28 @@ fn render_signature_help(
         return;
     };
 
-    let vis_y = cursor_visible_offset as f32 * line_height;
-    let sig_x = rect.left() + gutter_width + text_margin + view.cursor.pos.col as f32 * char_width
-        - h_offset;
-    let sig_y = rect.top() + vis_y - 4.0;
+    let y = geometry.line_y(cursor_visible_offset);
+    let sig_x = geometry.text_x(view.cursor.pos.col);
+    let sig_y = y - 4.0;
     let label = &sig.label;
     let sig_h = 20.0;
-    let sig_y = if sig_y - sig_h < rect.top() {
-        rect.top() + vis_y + line_height + 4.0
+    let sig_y = if sig_y - sig_h < geometry.rect.top() {
+        y + geometry.line_height + 4.0
     } else {
         sig_y - sig_h
     };
 
-    let max_w = (rect.width() - gutter_width - 40.0).max(200.0);
+    let max_w = (geometry.rect.width() - geometry.gutter_width - 40.0).max(200.0);
     let bg_rect = egui::Rect::from_min_size(
-        egui::pos2(sig_x.max(rect.left() + gutter_width), sig_y),
+        egui::pos2(
+            sig_x.max(geometry.rect.left() + geometry.gutter_width),
+            sig_y,
+        ),
         egui::Vec2::new(max_w, sig_h),
     );
-    painter.rect_filled(bg_rect, 4.0, egui::Color32::from_rgb(35, 38, 52));
-    painter.rect_stroke(
+    ctx.painter
+        .rect_filled(bg_rect, 4.0, egui::Color32::from_rgb(35, 38, 52));
+    ctx.painter.rect_stroke(
         bg_rect,
         4.0,
         egui::Stroke::new(1.0, egui::Color32::from_rgb(70, 75, 95)),
@@ -166,7 +121,7 @@ fn render_signature_help(
             let highlight_color = egui::Color32::from_rgb(255, 220, 100);
             let sig_font = egui::FontId::monospace(12.0);
 
-            painter.text(
+            ctx.painter.text(
                 egui::pos2(x, bg_rect.top() + 3.0),
                 egui::Align2::LEFT_TOP,
                 before,
@@ -174,7 +129,7 @@ fn render_signature_help(
                 dim_color,
             );
             let before_w = before.len() as f32 * 7.2;
-            painter.text(
+            ctx.painter.text(
                 egui::pos2(x + before_w, bg_rect.top() + 3.0),
                 egui::Align2::LEFT_TOP,
                 active_param,
@@ -182,7 +137,7 @@ fn render_signature_help(
                 highlight_color,
             );
             let param_w = active_param.len() as f32 * 7.2;
-            painter.text(
+            ctx.painter.text(
                 egui::pos2(x + before_w + param_w, bg_rect.top() + 3.0),
                 egui::Align2::LEFT_TOP,
                 after,
@@ -193,7 +148,7 @@ fn render_signature_help(
         }
     }
 
-    painter.text(
+    ctx.painter.text(
         egui::pos2(bg_rect.left() + 6.0, bg_rect.top() + 3.0),
         egui::Align2::LEFT_TOP,
         label,
@@ -202,18 +157,11 @@ fn render_signature_help(
     );
 }
 
-#[allow(clippy::too_many_arguments)]
 fn render_completion_popup(
-    painter: &egui::Painter,
+    ctx: EditorPaintContext<'_>,
     completions: Option<(&[&CompletionItem], usize)>,
     view: &BufferView,
     visible_window: &[usize],
-    rect: egui::Rect,
-    gutter_width: f32,
-    text_margin: f32,
-    char_width: f32,
-    line_height: f32,
-    h_offset: f32,
 ) {
     let Some((items, selected)) = completions else {
         return;
@@ -222,28 +170,28 @@ fn render_completion_popup(
         return;
     }
 
+    let geometry = ctx.geometry;
     let vis_y = visible_window
         .iter()
         .position(|&line| line == view.cursor.pos.line)
         .unwrap_or(0) as f32
-        * line_height;
-    let popup_x =
-        rect.left() + gutter_width + text_margin + view.cursor.pos.col as f32 * char_width
-            - h_offset;
-    let popup_y = rect.top() + vis_y + line_height + 2.0;
+        * geometry.line_height;
+    let popup_x = geometry.text_x(view.cursor.pos.col);
+    let popup_y = geometry.rect.top() + vis_y + geometry.line_height + 2.0;
     let item_h = 20.0;
     let popup_w = 320.0;
     let popup_h = (items.len() as f32 * item_h).min(200.0) + 4.0;
     let popup_x = popup_x
-        .min(rect.right() - popup_w - 4.0)
-        .max(rect.left() + gutter_width);
+        .min(geometry.rect.right() - popup_w - 4.0)
+        .max(geometry.rect.left() + geometry.gutter_width);
 
     let bg = egui::Rect::from_min_size(
         egui::pos2(popup_x, popup_y),
         egui::Vec2::new(popup_w, popup_h),
     );
-    painter.rect_filled(bg, 4.0, egui::Color32::from_rgb(30, 32, 42));
-    painter.rect_stroke(
+    ctx.painter
+        .rect_filled(bg, 4.0, egui::Color32::from_rgb(30, 32, 42));
+    ctx.painter.rect_stroke(
         bg,
         4.0,
         egui::Stroke::new(1.0, egui::Color32::from_rgb(60, 65, 80)),
@@ -256,7 +204,7 @@ fn render_completion_popup(
         }
 
         if i == selected {
-            painter.rect_filled(
+            ctx.painter.rect_filled(
                 egui::Rect::from_min_size(
                     egui::pos2(popup_x + 2.0, y),
                     egui::Vec2::new(popup_w - 4.0, item_h),
@@ -282,7 +230,7 @@ fn render_completion_popup(
             Some(lsp_types::CompletionItemKind::TYPE_PARAMETER) => "T",
             _ => " ",
         };
-        painter.text(
+        ctx.painter.text(
             egui::pos2(popup_x + 6.0, y + 2.0),
             egui::Align2::LEFT_TOP,
             kind_char,
@@ -295,7 +243,7 @@ fn render_completion_popup(
         } else {
             egui::Color32::from_rgb(200, 205, 215)
         };
-        painter.text(
+        ctx.painter.text(
             egui::pos2(popup_x + 22.0, y + 2.0),
             egui::Align2::LEFT_TOP,
             &item.label,
@@ -309,7 +257,7 @@ fn render_completion_popup(
             } else {
                 detail
             };
-            painter.text(
+            ctx.painter.text(
                 egui::pos2(popup_x + popup_w - 8.0, y + 2.0),
                 egui::Align2::RIGHT_TOP,
                 short,

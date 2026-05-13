@@ -17,9 +17,11 @@ use super::editor_folding::{
 };
 use super::editor_inline_overlays::render_inline_lsp_overlays;
 use super::editor_input::handle_editor_pointer_input;
-use super::editor_lines::render_editor_lines;
+use super::editor_lines::{render_editor_lines, EditorLinesInput};
 use super::editor_minimap::render_minimap;
-use super::editor_paint::{render_bracket_match, render_diagnostics};
+use super::editor_paint::{
+    render_bracket_match, render_diagnostics, EditorGeometry, EditorPaintContext,
+};
 use super::editor_search_bar::render_search_bar;
 use super::editor_selection::{
     render_extra_cursors, render_primary_selection, render_search_matches,
@@ -304,8 +306,25 @@ pub(crate) fn render_text_editor(
         egui::Sense::click_and_drag(),
     );
     let rect = response.rect;
+    let text_clip = egui::Rect::from_min_max(
+        egui::pos2(rect.left() + gutter_width, rect.top()),
+        rect.right_bottom(),
+    );
+    let editor_geometry = EditorGeometry {
+        text_clip,
+        rect,
+        gutter_width,
+        text_margin,
+        char_width,
+        line_height,
+        h_offset,
+    };
+    let paint = EditorPaintContext {
+        painter: &painter,
+        geometry: editor_geometry,
+    };
 
-    let text_clip = handle_editor_pointer_input(
+    handle_editor_pointer_input(
         ui,
         &response,
         &painter,
@@ -314,45 +333,21 @@ pub(crate) fn render_text_editor(
         &foldable_ranges,
         &visible_doc_lines,
         &wrap_rows,
-        rect,
-        gutter_width,
-        text_margin,
-        h_offset,
-        char_width,
-        line_height,
+        editor_geometry,
         max_scroll,
         word_wrap,
     );
 
     render_primary_selection(
-        &painter,
-        text_clip,
+        paint,
         buf,
         view,
         &visible_window,
         &visible_wrap_window,
-        rect,
-        gutter_width,
-        text_margin,
-        char_width,
-        line_height,
-        h_offset,
         word_wrap,
     );
     if !prose_mode {
-        render_search_matches(
-            &painter,
-            text_clip,
-            buf,
-            editor_search,
-            &visible_window,
-            rect,
-            gutter_width,
-            text_margin,
-            char_width,
-            line_height,
-            h_offset,
-        );
+        render_search_matches(paint, buf, editor_search, &visible_window);
     }
 
     // Update git gutter. Invariant: in prose mode `view.git_gutter` is
@@ -387,92 +382,43 @@ pub(crate) fn render_text_editor(
     } else {
         buf.matching_bracket(view.cursor.pos)
     };
-    render_editor_lines(
-        &painter,
-        text_clip,
+    render_editor_lines(EditorLinesInput {
+        paint,
         buf,
         view,
         editor_config,
         syntax_colors,
         inlay_hints,
         code_lenses,
-        &highlight_spans,
-        &foldable_ranges,
-        &visible_window,
-        &visible_wrap_window,
-        rect,
+        highlight_spans: &highlight_spans,
+        foldable_ranges: &foldable_ranges,
+        visible_window: &visible_window,
+        visible_wrap_window: &visible_wrap_window,
         gutter_digits,
-        gutter_width,
-        text_margin,
-        char_width,
-        line_height,
-        h_offset,
         syntax_start_line,
         editor_font_size,
         word_wrap,
-    );
+    });
 
-    render_bracket_match(
-        &painter,
-        text_clip,
-        bracket_match,
-        &visible_window,
-        rect,
-        gutter_width,
-        text_margin,
-        char_width,
-        line_height,
-        h_offset,
-    );
+    render_bracket_match(paint, bracket_match, &visible_window);
 
     // Diagnostic underlines. Prose buffers never have diagnostics, but
     // guard explicitly so a future code path that hands non-empty
     // diagnostics into a prose render doesn't paint them over prompt text.
     if !prose_mode {
-        render_diagnostics(
-            &painter,
-            text_clip,
-            diagnostics,
-            &visible_window,
-            rect,
-            gutter_width,
-            text_margin,
-            char_width,
-            line_height,
-            h_offset,
-        );
+        render_diagnostics(paint, diagnostics, &visible_window);
     }
 
     render_primary_cursor(
         ui,
-        &painter,
-        text_clip,
+        paint,
         view,
         &visible_window,
         &visible_wrap_window,
-        rect,
-        gutter_width,
-        text_margin,
-        char_width,
-        line_height,
-        h_offset,
         word_wrap,
     );
 
-    render_extra_cursors(
-        ui,
-        &painter,
-        text_clip,
-        buf,
-        view,
-        &visible_window,
-        rect,
-        gutter_width,
-        text_margin,
-        char_width,
-        line_height,
-        h_offset,
-    );
+    render_extra_cursors(ui, paint, buf, view, &visible_window);
 
     if !prose_mode {
         render_minimap(
@@ -495,18 +441,12 @@ pub(crate) fn render_text_editor(
         );
 
         render_inline_lsp_overlays(
-            &painter,
+            paint,
             hover_text,
             completions,
             signature_help,
             view,
             &visible_window,
-            rect,
-            gutter_width,
-            text_margin,
-            char_width,
-            line_height,
-            h_offset,
         );
 
         // Status bar
@@ -551,6 +491,10 @@ pub(crate) fn render_text_editor(
 ///
 /// Returns `None` for empty buffers (no anchor to compute) so the input
 /// client falls back to view-rect anchoring instead of pinning to (0, 0).
+#[expect(
+    clippy::too_many_arguments,
+    reason = "temporary until Phase 1 introduces an egui prose input geometry context"
+)]
 fn compute_prose_input_anchor(
     ui: &egui::Ui,
     buf: &crate::editor::buffer::Buffer,
@@ -881,7 +825,7 @@ mod tests {
 
         let mut buf = Buffer::empty_prose();
         // 2000-char single line, no newlines.
-        let long_line: String = std::iter::repeat('a').take(2000).collect();
+        let long_line = "a".repeat(2000);
         buf.insert(crate::editor::buffer::Position::default(), &long_line);
         let mut view = BufferView::default();
         let syntax = SyntaxEngine::new();
