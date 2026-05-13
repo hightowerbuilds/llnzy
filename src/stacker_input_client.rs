@@ -28,8 +28,8 @@ use objc2::{define_class, msg_send};
 use objc2::{ClassType, MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{
     NSAccessibilityFocusedUIElementChangedNotification, NSAccessibilityPostNotification,
-    NSAccessibilityRole, NSAccessibilitySelectedTextChangedNotification, NSAccessibilityTextAreaRole,
-    NSAccessibilityValueChangedNotification, NSResponder, NSView,
+    NSAccessibilityRole, NSAccessibilitySelectedTextChangedNotification,
+    NSAccessibilityTextAreaRole, NSAccessibilityValueChangedNotification, NSResponder, NSView,
 };
 use objc2_foundation::{NSPoint, NSRange, NSRect, NSSize, NSString};
 use winit::event_loop::EventLoopProxy;
@@ -687,10 +687,8 @@ impl StackerInputClient {
             state.selection_start_char = new_sel_start;
             state.selection_end_char = new_sel_end;
             if sel_changed {
-                state.selection_start_u16 =
-                    char_index_to_utf16_index(&state.text, new_sel_start);
-                state.selection_end_u16 =
-                    char_index_to_utf16_index(&state.text, new_sel_end);
+                state.selection_start_u16 = char_index_to_utf16_index(&state.text, new_sel_start);
+                state.selection_end_u16 = char_index_to_utf16_index(&state.text, new_sel_end);
             }
 
             let new_marked = marked_range.map(|r| {
@@ -737,7 +735,6 @@ impl StackerInputClient {
                     );
                 }
             }
-
         }
     }
 
@@ -746,10 +743,7 @@ impl StackerInputClient {
     /// `firstRectForCharacterRange:` and `characterIndexForPoint:` can
     /// return accurate screen rects. Call this every frame alongside
     /// `set_state`. `None` when the prose buffer is empty.
-    pub fn set_galley(
-        &mut self,
-        galley: Option<(std::sync::Arc<egui::Galley>, egui::Pos2)>,
-    ) {
+    pub fn set_galley(&mut self, galley: Option<(std::sync::Arc<egui::Galley>, egui::Pos2)>) {
         let mut state = client_state()
             .lock()
             .expect("stacker input client state poisoned");

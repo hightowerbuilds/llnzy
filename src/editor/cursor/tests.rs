@@ -142,6 +142,45 @@ fn move_without_shift_clears_selection() {
 }
 
 #[test]
+fn shift_left_creates_ordered_selection() {
+    let buf = buf_with("hello");
+    let mut c = EditorCursor::at(0, 4);
+
+    c.move_left(&buf, true);
+    c.move_left(&buf, true);
+
+    assert_eq!(c.pos, Position::new(0, 2));
+    assert_eq!(
+        c.selection(),
+        Some((Position::new(0, 2), Position::new(0, 4)))
+    );
+}
+
+#[test]
+fn extending_selection_back_through_anchor_keeps_original_anchor() {
+    let buf = buf_with("hello");
+    let mut c = EditorCursor::at(0, 2);
+
+    c.move_right(&buf, true);
+    c.move_right(&buf, true);
+    assert_eq!(
+        c.selection(),
+        Some((Position::new(0, 2), Position::new(0, 4)))
+    );
+
+    c.move_left(&buf, true);
+    c.move_left(&buf, true);
+    c.move_left(&buf, true);
+
+    assert_eq!(c.pos, Position::new(0, 1));
+    assert_eq!(c.anchor, Some(Position::new(0, 2)));
+    assert_eq!(
+        c.selection(),
+        Some((Position::new(0, 1), Position::new(0, 2)))
+    );
+}
+
+#[test]
 fn select_word() {
     let buf = buf_with("hello world");
     let mut c = EditorCursor::at(0, 2);
@@ -241,6 +280,50 @@ fn vertical_movement_restores_column_on_long_lines() {
 }
 
 #[test]
+fn vertical_movement_keeps_preferred_column_through_uneven_lines() {
+    let buf = buf_with("0123456789\nabc\n\n012345\n012345678901");
+    let mut c = EditorCursor::at(0, 9);
+
+    c.move_down(&buf, false);
+    assert_eq!(c.pos, Position::new(1, 3));
+    assert_eq!(c.desired_col, Some(9));
+
+    c.move_down(&buf, false);
+    assert_eq!(c.pos, Position::new(2, 0));
+    assert_eq!(c.desired_col, Some(9));
+
+    c.move_down(&buf, false);
+    assert_eq!(c.pos, Position::new(3, 6));
+    assert_eq!(c.desired_col, Some(9));
+
+    c.move_down(&buf, false);
+    assert_eq!(c.pos, Position::new(4, 9));
+    assert_eq!(c.desired_col, Some(9));
+
+    c.move_up(&buf, false);
+    assert_eq!(c.pos, Position::new(3, 6));
+    assert_eq!(c.desired_col, Some(9));
+}
+
+#[test]
+fn horizontal_movement_resets_preferred_column_after_vertical_clamp() {
+    let buf = buf_with("0123456789\nab\n0123456789");
+    let mut c = EditorCursor::at(0, 8);
+
+    c.move_down(&buf, false);
+    assert_eq!(c.pos, Position::new(1, 2));
+    assert_eq!(c.desired_col, Some(8));
+
+    c.move_left(&buf, false);
+    assert_eq!(c.pos, Position::new(1, 1));
+    assert_eq!(c.desired_col, None);
+
+    c.move_down(&buf, false);
+    assert_eq!(c.pos, Position::new(2, 1));
+    assert_eq!(c.desired_col, Some(1));
+}
+
+#[test]
 fn document_start_and_end_extend_selection() {
     let buf = buf_with("abc\ndef");
     let mut c = EditorCursor::at(0, 2);
@@ -284,6 +367,30 @@ fn page_movement_extends_selection_from_anchor() {
     assert_eq!(
         c.selection(),
         Some((Position::new(1, 1), Position::new(3, 1)))
+    );
+}
+
+#[test]
+fn vertical_selection_preserves_anchor_and_desired_column() {
+    let buf = buf_with("0123456789\nx\n0123456789");
+    let mut c = EditorCursor::at(0, 8);
+
+    c.move_down(&buf, true);
+    assert_eq!(c.pos, Position::new(1, 1));
+    assert_eq!(c.anchor, Some(Position::new(0, 8)));
+    assert_eq!(c.desired_col, Some(8));
+    assert_eq!(
+        c.selection(),
+        Some((Position::new(0, 8), Position::new(1, 1)))
+    );
+
+    c.move_down(&buf, true);
+    assert_eq!(c.pos, Position::new(2, 8));
+    assert_eq!(c.anchor, Some(Position::new(0, 8)));
+    assert_eq!(c.desired_col, Some(8));
+    assert_eq!(
+        c.selection(),
+        Some((Position::new(0, 8), Position::new(2, 8)))
     );
 }
 

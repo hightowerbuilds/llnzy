@@ -280,11 +280,16 @@ fn next_char_boundary(text: &str, byte_idx: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_SEARCH_TEST_FILE: AtomicU64 = AtomicU64::new(0);
 
     fn make_buf(text: &str) -> Buffer {
+        let seq = NEXT_SEARCH_TEST_FILE.fetch_add(1, Ordering::Relaxed);
         let path = std::env::temp_dir().join(format!(
-            "llnzy_search_test_{}_{}.txt",
+            "llnzy_search_test_{}_{}_{}.txt",
             std::process::id(),
+            seq,
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()

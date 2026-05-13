@@ -10,6 +10,34 @@ use tokio::sync::{mpsc, oneshot, Mutex};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Wakes whichever UI runtime owns the LSP manager after server activity.
+#[derive(Clone)]
+pub struct LspNotifier {
+    notify: Arc<dyn Fn() + Send + Sync + 'static>,
+}
+
+impl LspNotifier {
+    pub fn new(notify: impl Fn() + Send + Sync + 'static) -> Self {
+        Self {
+            notify: Arc::new(notify),
+        }
+    }
+
+    pub fn noop() -> Self {
+        Self::new(|| {})
+    }
+
+    pub fn from_event_proxy(proxy: winit::event_loop::EventLoopProxy<crate::UserEvent>) -> Self {
+        Self::new(move || {
+            let _ = proxy.send_event(crate::UserEvent::LspMessage);
+        })
+    }
+
+    pub fn notify(&self) {
+        (self.notify)();
+    }
+}
+
 /// A JSON-RPC message from the server.
 #[derive(Debug)]
 pub enum ServerMessage {
@@ -45,6 +73,15 @@ impl Transport {
         args: &[&str],
         proxy: winit::event_loop::EventLoopProxy<crate::UserEvent>,
     ) -> std::io::Result<(Self, mpsc::UnboundedReceiver<ServerMessage>)> {
+        Self::spawn_with_notifier(command, args, LspNotifier::from_event_proxy(proxy))
+    }
+
+    /// Spawn a language server process and set up the transport.
+    pub fn spawn_with_notifier(
+        command: &str,
+        args: &[&str],
+        notifier: LspNotifier,
+    ) -> std::io::Result<(Self, mpsc::UnboundedReceiver<ServerMessage>)> {
         let mut child = tokio::process::Command::new(command)
             .args(args)
             .stdin(std::process::Stdio::piped())
@@ -66,7 +103,8 @@ impl Transport {
         let pending_clone = pending.clone();
         let writer_clone = writer.clone();
         tokio::spawn(async move {
-            if let Err(e) = read_loop(stdout, writer_clone, pending_clone, notif_tx, proxy).await {
+            if let Err(e) = read_loop(stdout, writer_clone, pending_clone, notif_tx, notifier).await
+            {
                 log::warn!("LSP reader exited: {e}");
             }
         });
@@ -167,7 +205,7 @@ async fn read_loop(
     writer: Arc<Mutex<ChildStdin>>,
     pending: Arc<Mutex<FxHashMap<i64, oneshot::Sender<ServerMessage>>>>,
     notif_tx: mpsc::UnboundedSender<ServerMessage>,
-    proxy: winit::event_loop::EventLoopProxy<crate::UserEvent>,
+    notifier: LspNotifier,
 ) -> Result<(), String> {
     let mut reader = BufReader::new(stdout);
     let mut header_buf = String::new();
@@ -223,7 +261,7 @@ async fn read_loop(
                     method,
                     params,
                 });
-                let _ = proxy.send_event(crate::UserEvent::LspMessage);
+                notifier.notify();
             } else {
                 // Response to our request
                 let id_num = id.as_i64().unwrap_or(-1);
@@ -244,7 +282,7 @@ async fn read_loop(
             let method = msg["method"].as_str().unwrap_or("").to_string();
             let params = msg.get("params").cloned().unwrap_or(Value::Null);
             let _ = notif_tx.send(ServerMessage::Notification { method, params });
-            let _ = proxy.send_event(crate::UserEvent::LspMessage);
+            notifier.notify();
         }
     }
 }
@@ -330,5 +368,30 @@ async fn stderr_log_loop(command: String, stderr: ChildStderr) -> Result<(), Str
         if !trimmed.is_empty() {
             log::warn!("LSP {command} stderr: {trimmed}");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn notifier_invokes_shared_callback_for_clones() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let calls_for_notifier = calls.clone();
+        let notifier = LspNotifier::new(move || {
+            calls_for_notifier.fetch_add(1, Ordering::SeqCst);
+        });
+
+        notifier.notify();
+        notifier.clone().notify();
+
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn noop_notifier_can_be_called() {
+        LspNotifier::noop().notify();
     }
 }

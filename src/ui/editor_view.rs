@@ -382,7 +382,11 @@ pub(crate) fn render_text_editor(
         vec![Vec::new(); syntax_end_line.saturating_sub(syntax_start_line)]
     };
 
-    let bracket_match = if prose_mode { None } else { buf.matching_bracket(view.cursor.pos) };
+    let bracket_match = if prose_mode {
+        None
+    } else {
+        buf.matching_bracket(view.cursor.pos)
+    };
     render_editor_lines(
         &painter,
         text_clip,

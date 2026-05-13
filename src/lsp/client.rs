@@ -8,7 +8,7 @@ use tokio::sync::mpsc;
 use crate::path_utils::file_name_or_display;
 
 use super::document::{path_to_uri, DocumentStore, OpenAction};
-use super::transport::{ServerMessage, Transport};
+use super::transport::{LspNotifier, ServerMessage, Transport};
 
 /// Convert a URI back to a file path.
 pub fn uri_to_path(uri: &Uri) -> Option<PathBuf> {
@@ -52,7 +52,24 @@ impl LspClient {
         workspace_roots: &[PathBuf],
         proxy: winit::event_loop::EventLoopProxy<crate::UserEvent>,
     ) -> Result<Self, String> {
-        let (transport, notifications_rx) = Transport::spawn(command, args, proxy)
+        Self::new_with_notifier(
+            lang_id,
+            command,
+            args,
+            workspace_roots,
+            LspNotifier::from_event_proxy(proxy),
+        )
+    }
+
+    /// Create a new client using a caller-supplied UI wake notifier.
+    pub fn new_with_notifier(
+        lang_id: &'static str,
+        command: &str,
+        args: &[&str],
+        workspace_roots: &[PathBuf],
+        notifier: LspNotifier,
+    ) -> Result<Self, String> {
+        let (transport, notifications_rx) = Transport::spawn_with_notifier(command, args, notifier)
             .map_err(|e| format!("Failed to spawn {command}: {e}"))?;
 
         let workspace_folders = workspace_folders_from_paths(workspace_roots);

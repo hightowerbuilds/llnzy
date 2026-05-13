@@ -239,8 +239,7 @@ impl App {
         );
         client.set_galley(ui.stacker.prompt_editor_anchor.clone());
         let became_visible = client.set_visible(true);
-        let should_focus =
-            focus_when_shown && (self.stacker_pending_focus || became_visible);
+        let should_focus = focus_when_shown && (self.stacker_pending_focus || became_visible);
         if should_focus {
             client.focus();
             self.stacker_pending_focus = false;
@@ -261,7 +260,11 @@ impl App {
         llnzy::external_input_trace::trace("stacker.insert_text_entry", || {
             format!("text={:?}, replacement={:?}", text, replacement_utf16)
         });
-        if !text.is_empty() && text.chars().all(|c| c.is_control() && c != '\n' && c != '\t') {
+        if !text.is_empty()
+            && text
+                .chars()
+                .all(|c| c.is_control() && c != '\n' && c != '\t')
+        {
             llnzy::external_input_trace::trace("stacker.insert_text_dropped_control", || {
                 format!("text={text:?}")
             });
@@ -323,10 +326,7 @@ impl App {
 
         let replacement = replacement_utf16.map(|pair| {
             // Borrow only when needed; avoids an O(n) alloc on the common path.
-            llnzy::stacker_input_client::utf16_pair_to_selection(
-                ui.stacker.editor.text(),
-                pair,
-            )
+            llnzy::stacker_input_client::utf16_pair_to_selection(ui.stacker.editor.text(), pair)
         });
 
         // The internal selection's UTF-16 indices are relative to the new

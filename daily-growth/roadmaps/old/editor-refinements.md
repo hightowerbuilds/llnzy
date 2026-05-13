@@ -1,5 +1,13 @@
 # Roadmap: Editor Refinements
 
+## Status
+
+This first refinement pass is now substantially complete for daily editor usability:
+
+- GPUI editor focus, typing, save, undo/redo, clipboard, movement, selection, scrolling, mouse placement, drag selection, double-click word selection, triple-click line selection, find, replace, buffer tabs, core coding commands, active-line highlight, and cursor blink have landed.
+- The release-build smoke checklist lives in `daily-growth/roadmaps/release-build-editor-smoke-checklist.md`.
+- Remaining larger work has been split into `daily-growth/roadmaps/editor-refinements-part-two.md`.
+
 ## Purpose
 
 This is the active follow-up roadmap for the GPUI editor. It carries forward the unfinished work from `gpui-editor-professional-grade.md` after the initial GPUI editor migration and keyboard/focus slice landed.

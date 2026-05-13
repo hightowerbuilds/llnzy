@@ -148,7 +148,6 @@ pub(super) fn render_prompt_editor_panel(
     );
 }
 
-
 /// Paint a thin underline beneath the marked (IME-composing) range.
 /// Coordinates come from the same galley the input client uses, so the
 /// underline tracks dictation refinement positions exactly.
@@ -328,15 +327,15 @@ mod tests {
     fn marked_underline_single_row_emits_one_segment() {
         let g = galley("hello world", 14.0, 1000.0);
         let origin = egui::pos2(10.0, 20.0);
-        let segs = compute_marked_underline_segments(
-            &g,
-            origin,
-            StackerSelection { start: 0, end: 5 },
-        );
+        let segs =
+            compute_marked_underline_segments(&g, origin, StackerSelection { start: 0, end: 5 });
         assert_eq!(segs.len(), 1);
         let (a, b) = segs[0];
         assert!(b.x > a.x, "underline should advance left to right");
-        assert!((a.y - b.y).abs() < 0.5, "single-row underline is horizontal");
+        assert!(
+            (a.y - b.y).abs() < 0.5,
+            "single-row underline is horizontal"
+        );
         // Origin offset honored.
         assert!(a.x >= origin.x);
         assert!(a.y >= origin.y);

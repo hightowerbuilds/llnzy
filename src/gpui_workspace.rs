@@ -444,7 +444,9 @@ impl WorkspacePrototype {
         self.tab_name_overrides
             .get(&tab.id.0)
             .cloned()
-            .unwrap_or_else(|| workspace_tab_label(tab.surface, self.selected_path.as_deref()))
+            .unwrap_or_else(|| {
+                workspace_tab_label(tab.surface, self.selected_path.as_deref(), None)
+            })
     }
 
     fn tab_choices(&self) -> Vec<GpuiTabChoice> {
@@ -972,6 +974,9 @@ impl WorkspacePrototype {
 
     fn apply_appearance_config(&mut self, cx: &mut Context<Self>) {
         let config = self.appearance_config.clone();
+        self.editor.update(cx, |editor, cx| {
+            editor.set_appearance_config(config.clone(), cx)
+        });
         self.terminal
             .update(cx, |terminal, cx| terminal.set_config(config, cx));
         cx.notify();
@@ -1109,7 +1114,7 @@ impl WorkspacePrototype {
             .font_size
             .unwrap_or((self.appearance_config.font_size - 2.0).max(10.0));
         self.appearance_config.editor.font_size = Some((current + delta).clamp(8.0, 28.0));
-        cx.notify();
+        self.apply_appearance_config(cx);
     }
 
     fn adjust_sidebar_font_size(&mut self, delta: f32, cx: &mut Context<Self>) {
@@ -1260,6 +1265,8 @@ impl WorkspacePrototype {
 
     fn menu_find(&mut self, _: &MenuFind, window: &mut Window, cx: &mut Context<Self>) {
         self.open_or_activate_surface(WorkspaceSurface::Editor, window, cx);
+        self.editor
+            .update(cx, |editor, cx| editor.open_find_from_workspace(window, cx));
     }
 
     fn menu_toggle_sidebar(
@@ -1368,6 +1375,7 @@ impl Render for WorkspacePrototype {
             .map(|root| collect_explorer_entries(root, &self.expanded_dirs))
             .unwrap_or_default();
         let selected_path = self.selected_path.clone();
+        let editor_active_path = self.editor.read(cx).active_path();
         let workspace_root = self.workspace_root.clone();
         let recent_projects = self.recent_projects.clone();
         let recent_projects_open = self.recent_projects_open;
@@ -1451,6 +1459,7 @@ impl Render for WorkspacePrototype {
                 tabs,
                 active_tab_id,
                 selected_path.clone(),
+                editor_active_path,
                 tab_name_overrides,
                 &self.tab_manager,
                 cx,
@@ -1473,6 +1482,7 @@ fn workspace_tab_bar(
     tabs: Vec<WorkspaceTab>,
     active_tab_id: WorkspaceTabId,
     selected_path: Option<PathBuf>,
+    editor_active_path: Option<PathBuf>,
     tab_name_overrides: BTreeMap<u64, String>,
     tab_manager: &GpuiTabManager,
     cx: &mut Context<WorkspacePrototype>,
@@ -1494,7 +1504,13 @@ fn workspace_tab_bar(
         let label = tab_name_overrides
             .get(&tab.id.0)
             .cloned()
-            .unwrap_or_else(|| workspace_tab_label(tab.surface, selected_path.as_deref()));
+            .unwrap_or_else(|| {
+                workspace_tab_label(
+                    tab.surface,
+                    selected_path.as_deref(),
+                    editor_active_path.as_deref(),
+                )
+            });
         let menu_anchor =
             workspace_tab_menu_anchor(tab.id, &tabs, active_tab_id, tab_manager, &layouts);
         bar = bar.child(workspace_tab(
@@ -1650,9 +1666,14 @@ fn workspace_tab(
         )
 }
 
-fn workspace_tab_label(surface: WorkspaceSurface, selected_path: Option<&Path>) -> String {
+fn workspace_tab_label(
+    surface: WorkspaceSurface,
+    selected_path: Option<&Path>,
+    editor_active_path: Option<&Path>,
+) -> String {
     if surface == WorkspaceSurface::Editor {
-        return selected_path
+        return editor_active_path
+            .or(selected_path)
             .map(project_display_name)
             .unwrap_or_else(|| surface.title().to_string());
     }

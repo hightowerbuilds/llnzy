@@ -506,22 +506,19 @@ impl ApplicationHandler<UserEvent> for App {
                 {
                     match key_event.logical_key {
                         Key::Named(NamedKey::Backspace) => {
-                            llnzy::external_input_trace::trace(
-                                "stacker.winit_backspace",
-                                || "winit Backspace path fired".to_string(),
-                            );
+                            llnzy::external_input_trace::trace("stacker.winit_backspace", || {
+                                "winit Backspace path fired".to_string()
+                            });
                             let handled = self.delete_stacker_editor_backward();
-                            llnzy::external_input_trace::trace(
-                                "stacker.winit_backspace",
-                                || format!("handled={handled}"),
-                            );
+                            llnzy::external_input_trace::trace("stacker.winit_backspace", || {
+                                format!("handled={handled}")
+                            });
                             return;
                         }
                         Key::Named(NamedKey::Delete) => {
-                            llnzy::external_input_trace::trace(
-                                "stacker.winit_delete",
-                                || "winit Delete path fired".to_string(),
-                            );
+                            llnzy::external_input_trace::trace("stacker.winit_delete", || {
+                                "winit Delete path fired".to_string()
+                            });
                             self.delete_stacker_editor_forward();
                             return;
                         }

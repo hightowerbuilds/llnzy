@@ -14,7 +14,7 @@ use super::lifecycle::{
     LspLifecycleStatus,
 };
 use super::registry::{resolve_server, ServerLookup};
-use super::transport::{ServerMessage, Transport};
+use super::transport::{LspNotifier, ServerMessage, Transport};
 use super::types::FileDiagnostic;
 
 /// Manages all LSP clients and provides a synchronous interface for the editor.
@@ -29,7 +29,7 @@ pub struct LspManager {
     pub(super) progress: FxHashMap<&'static str, String>,
     pub diagnostics: FxHashMap<PathBuf, Vec<FileDiagnostic>>,
     pub(super) workspace_roots: Vec<PathBuf>,
-    pub(super) proxy: winit::event_loop::EventLoopProxy<crate::UserEvent>,
+    pub(super) notifier: LspNotifier,
 }
 
 pub(super) struct PendingOpenDoc {
@@ -50,6 +50,14 @@ pub struct IncrementalDocumentChange<'a> {
 
 impl LspManager {
     pub fn new(proxy: winit::event_loop::EventLoopProxy<crate::UserEvent>) -> Self {
+        Self::new_with_notifier(LspNotifier::from_event_proxy(proxy))
+    }
+
+    pub fn new_without_event_proxy() -> Self {
+        Self::new_with_notifier(LspNotifier::noop())
+    }
+
+    pub fn new_with_notifier(notifier: LspNotifier) -> Self {
         let runtime = Runtime::new().expect("failed to create tokio runtime");
         LspManager {
             runtime,
@@ -62,7 +70,7 @@ impl LspManager {
             progress: FxHashMap::default(),
             diagnostics: FxHashMap::default(),
             workspace_roots: Vec::new(),
-            proxy,
+            notifier,
         }
     }
 
@@ -117,25 +125,25 @@ impl LspManager {
 
         log::info!("Starting LSP {} for {}", config.command, lang_id);
         let workspace_roots = self.workspace_roots.clone();
-        let proxy = self.proxy.clone();
-        let completion_proxy = self.proxy.clone();
+        let notifier = self.notifier.clone();
+        let completion_notifier = self.notifier.clone();
         let (tx, rx) = oneshot::channel();
 
         self.runtime.spawn(async move {
             let result = async {
-                let mut client = LspClient::new(
+                let mut client = LspClient::new_with_notifier(
                     lang_id,
                     config.command,
                     config.args,
                     &workspace_roots,
-                    proxy,
+                    notifier,
                 )?;
                 client.initialize().await?;
                 Ok::<LspClient, String>(client)
             }
             .await;
             let _ = tx.send(result);
-            let _ = completion_proxy.send_event(crate::UserEvent::LspMessage);
+            completion_notifier.notify();
         });
 
         self.starting.insert(lang_id, rx);
@@ -489,7 +497,7 @@ impl LspManager {
                 continue;
             }
             let transport = client.transport().clone();
-            let proxy = self.proxy.clone();
+            let notifier = self.notifier.clone();
             let (tx, rx) = oneshot::channel();
             self.runtime.spawn(async move {
                 let is_dead = transport
@@ -497,7 +505,7 @@ impl LspManager {
                     .await
                     .is_err();
                 let _ = tx.send(is_dead);
-                let _ = proxy.send_event(crate::UserEvent::LspMessage);
+                notifier.notify();
             });
             self.health_checks.insert(lang_id, rx);
         }
@@ -795,5 +803,17 @@ mod tests {
             Some("unsupported language")
         ));
         assert!(!should_restart_crashed_server(true, None));
+    }
+
+    #[test]
+    fn manager_can_be_created_without_event_proxy() {
+        let manager = LspManager::new_without_event_proxy();
+
+        assert_eq!(manager.pending_open_doc_count("rust"), 0);
+        assert!(manager.unavailable_reason("rust").is_none());
+        assert_eq!(
+            manager.lifecycle_status("rust").state,
+            LspLifecycleState::Idle
+        );
     }
 }

@@ -154,6 +154,28 @@ impl LspManager {
         })
     }
 
+    pub fn range_format_async(
+        &self,
+        path: &Path,
+        lang_id: &str,
+        start_line: u32,
+        start_col: u32,
+        end_line: u32,
+        end_col: u32,
+    ) -> Option<oneshot::Receiver<Vec<FormatEdit>>> {
+        self.spawn_doc_request(path, lang_id, move |transport, uri| async move {
+            async_range_format(
+                transport.as_ref(),
+                &uri,
+                start_line,
+                start_col,
+                end_line,
+                end_col,
+            )
+            .await
+        })
+    }
+
     pub fn inlay_hints_async(
         &self,
         path: &Path,
@@ -525,6 +547,57 @@ async fn async_format(
         Ok(r) => r,
         Err(_) => return Vec::new(),
     };
+    text_edits_to_format_edits(edits)
+}
+
+async fn async_range_format(
+    transport: &(impl LspRequestExecutor + ?Sized),
+    uri: &lsp_types::Uri,
+    start_line: u32,
+    start_col: u32,
+    end_line: u32,
+    end_col: u32,
+) -> Vec<FormatEdit> {
+    let params = lsp_types::DocumentRangeFormattingParams {
+        text_document: lsp_types::TextDocumentIdentifier { uri: uri.clone() },
+        range: lsp_types::Range {
+            start: lsp_types::Position {
+                line: start_line,
+                character: start_col,
+            },
+            end: lsp_types::Position {
+                line: end_line,
+                character: end_col,
+            },
+        },
+        options: lsp_types::FormattingOptions {
+            tab_size: 4,
+            insert_spaces: true,
+            ..Default::default()
+        },
+        work_done_progress_params: Default::default(),
+    };
+    let result = match transport
+        .request(
+            "textDocument/rangeFormatting",
+            serde_json::to_value(params).unwrap(),
+        )
+        .await
+    {
+        Ok(r) => r,
+        Err(_) => return Vec::new(),
+    };
+    if result.is_null() {
+        return Vec::new();
+    }
+    let edits: Vec<lsp_types::TextEdit> = match serde_json::from_value(result) {
+        Ok(r) => r,
+        Err(_) => return Vec::new(),
+    };
+    text_edits_to_format_edits(edits)
+}
+
+fn text_edits_to_format_edits(edits: Vec<lsp_types::TextEdit>) -> Vec<FormatEdit> {
     edits
         .into_iter()
         .map(|e| FormatEdit {
@@ -947,6 +1020,43 @@ mod tests {
         assert_eq!(
             requests[0].params["position"],
             serde_json::json!({"line": 12, "character": 4})
+        );
+    }
+
+    #[tokio::test]
+    async fn fake_lsp_harness_drives_range_formatting() {
+        let server = FakeLspServer::new();
+        let document_uri = uri("/tmp/llnzy-fake-range-format.rs");
+        server.respond(
+            "textDocument/rangeFormatting",
+            serde_json::json!([
+                {
+                    "range": {
+                        "start": {"line": 2, "character": 4},
+                        "end": {"line": 2, "character": 12}
+                    },
+                    "newText": "formatted"
+                }
+            ]),
+        );
+
+        let edits = async_range_format(&server, &document_uri, 2, 4, 2, 12).await;
+
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].start_line, 2);
+        assert_eq!(edits[0].start_col, 4);
+        assert_eq!(edits[0].end_col, 12);
+        assert_eq!(edits[0].new_text, "formatted");
+
+        let requests = server.requests();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].method, "textDocument/rangeFormatting");
+        assert_eq!(
+            requests[0].params["range"],
+            serde_json::json!({
+                "start": {"line": 2, "character": 4},
+                "end": {"line": 2, "character": 12}
+            })
         );
     }
 

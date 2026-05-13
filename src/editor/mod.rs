@@ -313,11 +313,16 @@ impl EditorState {
         if idx >= self.buffers.len() {
             return false;
         }
+        let closing_active = self.active == idx;
         self.buffers.remove(idx);
         self.views.remove(idx);
         self.buffer_ids.remove(idx);
         if self.buffers.is_empty() {
             self.active = 0;
+        } else if closing_active {
+            self.active = idx.min(self.buffers.len() - 1);
+        } else if idx < self.active {
+            self.active -= 1;
         } else if self.active >= self.buffers.len() {
             self.active = self.buffers.len() - 1;
         }
@@ -386,6 +391,10 @@ impl EditorState {
             return;
         }
         let line_count = self.buffers[self.active].line_count();
+        if !perf::syntax_enabled(line_count) {
+            disable_syntax_for_large_view(&mut self.views[self.active]);
+            return;
+        }
         let (lang_id, old_tree, used_incremental) =
             match plan_syntax_reparse(line_count, &self.views[self.active]) {
                 SyntaxReparsePlan::Skip => return,
@@ -454,6 +463,17 @@ impl EditorState {
         let Some(view_index) = self.index_for_id(result.buffer_id) else {
             return;
         };
+        let current_line_count = self
+            .buffers
+            .get(view_index)
+            .map(Buffer::line_count)
+            .unwrap_or_default();
+        if !perf::syntax_enabled(current_line_count) || !perf::syntax_enabled(result.line_count) {
+            if let Some(view) = self.views.get_mut(view_index) {
+                disable_syntax_for_large_view(view);
+            }
+            return;
+        }
         let Some(view) = self.views.get_mut(view_index) else {
             return;
         };
@@ -499,6 +519,14 @@ impl Default for EditorState {
     fn default() -> Self {
         Self::new()
     }
+}
+
+fn disable_syntax_for_large_view(view: &mut BufferView) {
+    view.parse_pending = false;
+    view.pending_tree_edit = None;
+    view.tree = None;
+    view.last_parse_used_incremental = false;
+    view.folded_ranges.clear();
 }
 
 fn input_edit_from_positions(
@@ -632,6 +660,72 @@ mod tests {
     }
 
     #[test]
+    fn large_buffer_reparse_clears_existing_syntax_state() {
+        let source = "fn main() {}\n";
+        let path = temp_file("large_clears_existing_tree.rs", source);
+        let mut editor = EditorState::new();
+        let buffer_id = editor.open(path.clone()).unwrap();
+        let idx = editor.index_for_id(buffer_id).unwrap();
+
+        editor.views[idx].tree = editor.syntax.parse("rust", source);
+        editor.views[idx].parse_pending = true;
+        editor.views[idx].pending_tree_edit = Some(input_edit_from_positions(
+            source,
+            buffer::Position::new(0, 0),
+            buffer::Position::new(0, 0),
+            "// ",
+        ));
+        editor.views[idx].folded_ranges.push(FoldRange {
+            start_line: 0,
+            end_line: 1,
+        });
+        assert!(editor.views[idx].tree.is_some());
+
+        let extra_lines = "let value = 1;\n".repeat(perf::SYNTAX_LINE_LIMIT + 1);
+        editor.buffers[idx].insert(buffer::Position::new(1, 0), &extra_lines);
+        editor.active = idx;
+        editor.reparse_active();
+
+        assert!(!editor.views[idx].parse_pending);
+        assert!(editor.views[idx].pending_tree_edit.is_none());
+        assert!(editor.views[idx].tree.is_none());
+        assert!(editor.views[idx].folded_ranges.is_empty());
+        assert!(editor.views[idx].tree_dirty);
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn late_parse_result_does_not_restore_tree_for_large_buffer() {
+        let source = "fn main() {}\n";
+        let path = temp_file("large_rejects_late_parse.rs", source);
+        let mut editor = EditorState::new();
+        let buffer_id = editor.open(path.clone()).unwrap();
+        let idx = editor.index_for_id(buffer_id).unwrap();
+
+        editor.views[idx].parse_pending = true;
+        editor.views[idx].parse_generation = 7;
+        let parsed_tree = editor.syntax.parse("rust", source);
+        let extra_lines = "let value = 1;\n".repeat(perf::SYNTAX_LINE_LIMIT + 1);
+        editor.buffers[idx].insert(buffer::Position::new(1, 0), &extra_lines);
+
+        editor.apply_parse_result(ParseResult {
+            buffer_id,
+            generation: 7,
+            path: Some(path.clone()),
+            lang_id: "rust",
+            tree: parsed_tree,
+            line_count: 1,
+            used_incremental: false,
+        });
+
+        assert!(!editor.views[idx].parse_pending);
+        assert!(editor.views[idx].tree.is_none());
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
     fn dirty_parsed_buffer_plans_incremental_reparse_with_previous_tree() {
         let source = "fn main() {\n    let value = 1;\n}\n";
         let path = temp_file("incremental_plan.rs", source);
@@ -715,6 +809,49 @@ mod tests {
         assert_eq!(edit.old_end_position, Point { row: 1, column: 13 });
         assert_eq!(edit.new_end_position, Point { row: 1, column: 13 });
         assert_eq!(edit.new_end_byte, edit.start_byte + "value".len());
+    }
+
+    #[test]
+    fn buffer_position_utf16_conversion_uses_character_indices() {
+        use crate::stacker::utf16::{char_index_to_utf16_index, utf16_index_to_char_index};
+
+        let mut buffer = Buffer::empty();
+        buffer.insert(
+            crate::editor::buffer::Position::new(0, 0),
+            "a\u{1f600}\nbc\u{1d11e}d",
+        );
+        let text = buffer.text();
+
+        let before_emoji = crate::editor::buffer::Position::new(0, 1);
+        let after_emoji = crate::editor::buffer::Position::new(0, 2);
+        let before_g_clef = crate::editor::buffer::Position::new(1, 2);
+        let after_g_clef = crate::editor::buffer::Position::new(1, 3);
+
+        assert_eq!(
+            char_index_to_utf16_index(&text, buffer.pos_to_char(before_emoji)),
+            1
+        );
+        assert_eq!(
+            char_index_to_utf16_index(&text, buffer.pos_to_char(after_emoji)),
+            3
+        );
+        assert_eq!(
+            char_index_to_utf16_index(&text, buffer.pos_to_char(before_g_clef)),
+            6
+        );
+        assert_eq!(
+            char_index_to_utf16_index(&text, buffer.pos_to_char(after_g_clef)),
+            8
+        );
+
+        assert_eq!(
+            buffer.char_to_pos(utf16_index_to_char_index(&text, 2)),
+            after_emoji
+        );
+        assert_eq!(
+            buffer.char_to_pos(utf16_index_to_char_index(&text, 7)),
+            after_g_clef
+        );
     }
 
     #[test]
@@ -802,6 +939,29 @@ mod tests {
 
         let _ = std::fs::remove_file(first);
         let _ = std::fs::remove_file(second);
+    }
+
+    #[test]
+    fn closing_buffer_before_active_preserves_active_buffer_identity() {
+        let first = temp_file("close_before_active_first.txt", "first");
+        let second = temp_file("close_before_active_second.txt", "second");
+        let third = temp_file("close_before_active_third.txt", "third");
+
+        let mut editor = EditorState::new();
+        let first_id = editor.open(first.clone()).unwrap();
+        let second_id = editor.open(second.clone()).unwrap();
+        let third_id = editor.open(third.clone()).unwrap();
+        assert!(editor.switch_to_id(second_id));
+
+        assert!(editor.close_id(first_id));
+
+        assert_eq!(editor.active_buffer_id(), Some(second_id));
+        assert_eq!(editor.index_for_id(second_id), Some(0));
+        assert_eq!(editor.index_for_id(third_id), Some(1));
+
+        let _ = std::fs::remove_file(first);
+        let _ = std::fs::remove_file(second);
+        let _ = std::fs::remove_file(third);
     }
 
     #[test]
