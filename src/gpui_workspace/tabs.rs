@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, path::Path, path::PathBuf};
 
 use gpui::prelude::*;
-use gpui::{div, px, rgb, Context, MouseButton, MouseDownEvent, Window};
+use gpui::{div, px, rgb, App, Context, MouseButton, MouseDownEvent, Render, Window};
 
 use crate::gpui_tabs::{GpuiTabChoice, GpuiTabContextMenu, GpuiTabContextMenuView, GpuiTabManager};
 
@@ -16,6 +16,10 @@ const TAB_BAR_PADDING_Y: f32 = 4.0;
 const TAB_BAR_GAP: f32 = 4.0;
 const TAB_HEIGHT: f32 = 32.0;
 const TAB_MENU_ITEM_HEIGHT: f32 = 32.0;
+const TAB_MIN_WIDTH: f32 = 92.0;
+const TAB_MAX_WIDTH: f32 = 240.0;
+const TAB_LABEL_CHAR_WIDTH: f32 = 7.5;
+const TAB_LABEL_WIDTH_BUFFER: f32 = 54.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct WorkspaceTabId(pub(super) u64);
@@ -53,6 +57,45 @@ pub(super) struct TabRenameState {
     pub(super) replace_on_input: bool,
 }
 
+#[derive(Clone, Debug)]
+struct WorkspaceTabDragPayload {
+    tab_id: WorkspaceTabId,
+    label: String,
+}
+
+struct WorkspaceTabDragPreview {
+    label: String,
+}
+
+impl WorkspaceTabDragPreview {
+    fn new(payload: &WorkspaceTabDragPayload) -> Self {
+        Self {
+            label: payload.label.clone(),
+        }
+    }
+}
+
+impl Render for WorkspaceTabDragPreview {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .w(px(workspace_tab_width_for_label(&self.label, true)))
+            .h(px(TAB_HEIGHT))
+            .flex()
+            .items_center()
+            .rounded_sm()
+            .border_1()
+            .border_color(rgb(0x4c5262))
+            .bg(rgb(0x20232b))
+            .px_3()
+            .text_size(px(13.0))
+            .text_color(rgb(ACTIVE_TEXT))
+            .shadow_md()
+            .overflow_hidden()
+            .whitespace_nowrap()
+            .child(self.label.clone())
+    }
+}
+
 pub(super) fn workspace_tab_bar(
     tabs: Vec<WorkspaceTab>,
     active_tab_id: WorkspaceTabId,
@@ -62,7 +105,24 @@ pub(super) fn workspace_tab_bar(
     tab_manager: &GpuiTabManager,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
-    let layouts = workspace_tab_layouts(&tabs, active_tab_id);
+    let tab_items = tabs
+        .iter()
+        .cloned()
+        .map(|tab| {
+            let label = tab_name_overrides
+                .get(&tab.id.0)
+                .cloned()
+                .unwrap_or_else(|| {
+                    workspace_tab_label(
+                        tab.surface,
+                        selected_path.as_deref(),
+                        editor_active_path.as_deref(),
+                    )
+                });
+            (tab, label)
+        })
+        .collect::<Vec<_>>();
+    let layouts = workspace_tab_layouts(&tab_items, active_tab_id);
     let mut bar = div()
         .h(px(TAB_BAR_HEIGHT))
         .w_full()
@@ -75,23 +135,15 @@ pub(super) fn workspace_tab_bar(
         .border_color(rgb(BORDER))
         .bg(rgb(CHROME_BG));
 
-    for tab in tabs.iter().cloned() {
-        let label = tab_name_overrides
-            .get(&tab.id.0)
-            .cloned()
-            .unwrap_or_else(|| {
-                workspace_tab_label(
-                    tab.surface,
-                    selected_path.as_deref(),
-                    editor_active_path.as_deref(),
-                )
-            });
+    for (tab, label) in tab_items {
         let menu_anchor =
             workspace_tab_menu_anchor(tab.id, &tabs, active_tab_id, tab_manager, &layouts);
+        let width = workspace_tab_width_for_label(&label, tab.id == active_tab_id);
         bar = bar.child(workspace_tab(
             tab.clone(),
             active_tab_id,
             label,
+            width,
             tab_manager.is_joined(tab.id.0),
             menu_anchor,
             cx,
@@ -114,13 +166,13 @@ pub(super) fn workspace_tab_bar(
 }
 
 pub(super) fn workspace_tab_layouts(
-    tabs: &[WorkspaceTab],
+    tabs: &[(WorkspaceTab, String)],
     active_tab_id: WorkspaceTabId,
 ) -> Vec<WorkspaceTabLayout> {
     let mut x = TAB_BAR_PADDING_X;
     tabs.iter()
-        .map(|tab| {
-            let width = workspace_tab_width(tab.surface, tab.id == active_tab_id);
+        .map(|(tab, label)| {
+            let width = workspace_tab_width_for_label(label, tab.id == active_tab_id);
             let layout = WorkspaceTabLayout {
                 id: tab.id,
                 x,
@@ -147,7 +199,10 @@ pub(super) fn workspace_tab_menu_anchor(
         .unwrap_or(WorkspaceTabLayout {
             id: tab_id,
             x: TAB_BAR_PADDING_X,
-            width: workspace_tab_width(WorkspaceSurface::Home, tab_id == active_tab_id),
+            width: workspace_tab_width_for_label(
+                WorkspaceSurface::Home.title(),
+                tab_id == active_tab_id,
+            ),
         });
 
     if let Some(joined) = tab_manager.joined_pair_for(tab_id.0, &valid_tabs) {
@@ -181,14 +236,22 @@ fn workspace_tab(
     tab: WorkspaceTab,
     active_tab_id: WorkspaceTabId,
     label: String,
+    width: f32,
     joined: bool,
     menu_anchor: WorkspaceTabMenuAnchor,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     let active = tab.id == active_tab_id;
     let tab_id = tab.id;
+    let drag_payload = WorkspaceTabDragPayload {
+        tab_id,
+        label: label.clone(),
+    };
     div()
-        .w(px(workspace_tab_width(tab.surface, active)))
+        .id(("workspace-tab", tab_id.0))
+        .w(px(width))
+        .min_w(px(TAB_MIN_WIDTH))
+        .max_w(px(TAB_MAX_WIDTH))
         .h(px(TAB_HEIGHT))
         .flex()
         .items_center()
@@ -204,7 +267,25 @@ fn workspace_tab(
         }))
         .text_color(rgb(if active { ACTIVE_TEXT } else { MUTED_TEXT }))
         .text_size(px(14.0))
-        .cursor_pointer()
+        .cursor_move()
+        .on_drag(
+            drag_payload,
+            |payload: &WorkspaceTabDragPayload, _offset, _window, cx: &mut App| {
+                cx.new(|_| WorkspaceTabDragPreview::new(payload))
+            },
+        )
+        .drag_over::<WorkspaceTabDragPayload>(move |style, payload, _window, _cx| {
+            if payload.tab_id == tab_id {
+                style
+            } else {
+                style.border_color(rgb(QUEUE_GREEN)).bg(rgb(0x1b2a22))
+            }
+        })
+        .on_drop(cx.listener(
+            move |this, payload: &WorkspaceTabDragPayload, _window, cx| {
+                this.reorder_tab(payload.tab_id, tab_id, cx);
+            },
+        ))
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |this, _: &MouseDownEvent, window, cx| {
@@ -218,7 +299,13 @@ fn workspace_tab(
                 this.open_tab_context_menu(tab_id, menu_anchor, window, cx);
             }),
         )
-        .child(label)
+        .child(
+            div()
+                .flex_1()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .child(label),
+        )
         .child(
             div()
                 .w(px(18.0))
@@ -255,19 +342,62 @@ pub(super) fn workspace_tab_label(
     surface.title().to_string()
 }
 
-fn workspace_tab_width(surface: WorkspaceSurface, active: bool) -> f32 {
-    match (surface, active) {
-        (WorkspaceSurface::Editor, true) => 184.0,
-        (WorkspaceSurface::Editor, false) => 170.0,
-        (WorkspaceSurface::Sketch, true) => 150.0,
-        (WorkspaceSurface::Sketch, false) => 132.0,
-        (WorkspaceSurface::Appearances, true) => 156.0,
-        (WorkspaceSurface::Appearances, false) => 142.0,
-        (WorkspaceSurface::Settings, _) => 128.0,
-        (WorkspaceSurface::Home, _) => 104.0,
-        (_, true) => 140.0,
-        (_, false) => 120.0,
+fn workspace_tab_width_for_label(label: &str, active: bool) -> f32 {
+    let measured = label.chars().count() as f32 * TAB_LABEL_CHAR_WIDTH + TAB_LABEL_WIDTH_BUFFER;
+    let active_buffer = if active { 10.0 } else { 0.0 };
+    (measured + active_buffer).clamp(TAB_MIN_WIDTH, TAB_MAX_WIDTH)
+}
+
+pub(super) fn reorder_workspace_tab_block(
+    tabs: &mut Vec<WorkspaceTab>,
+    block_ids: &[WorkspaceTabId],
+    target_id: WorkspaceTabId,
+) -> bool {
+    if block_ids.is_empty() || block_ids.contains(&target_id) {
+        return false;
     }
+
+    let Some(target_index) = tabs.iter().position(|tab| tab.id == target_id) else {
+        return false;
+    };
+    let Some(first_block_index) = tabs
+        .iter()
+        .position(|tab| block_ids.iter().any(|id| *id == tab.id))
+    else {
+        return false;
+    };
+
+    let mut moving = Vec::new();
+    let mut remaining = Vec::with_capacity(tabs.len());
+    for tab in tabs.drain(..) {
+        if block_ids.iter().any(|id| *id == tab.id) {
+            moving.push(tab);
+        } else {
+            remaining.push(tab);
+        }
+    }
+
+    if moving.len() != block_ids.len() {
+        remaining.extend(moving);
+        *tabs = remaining;
+        return false;
+    }
+
+    let Some(target_index_after_removal) = remaining.iter().position(|tab| tab.id == target_id)
+    else {
+        remaining.extend(moving);
+        *tabs = remaining;
+        return false;
+    };
+    let moving_right = first_block_index < target_index;
+    let insert_index = if moving_right {
+        target_index_after_removal + 1
+    } else {
+        target_index_after_removal
+    };
+    remaining.splice(insert_index..insert_index, moving);
+    *tabs = remaining;
+    true
 }
 
 pub(super) fn workspace_tab_context_menu(
@@ -508,4 +638,72 @@ fn tab_join_side_menu(
     }
 
     side_menu.into_any_element()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tab_width_scales_with_label_length() {
+        let short = workspace_tab_width_for_label("Home", false);
+        let medium = workspace_tab_width_for_label("Appearances", false);
+        let long = workspace_tab_width_for_label("this-is-a-long-file-name.md", false);
+
+        assert!(short < medium);
+        assert!(medium < long);
+        assert_eq!(
+            workspace_tab_width_for_label("a".repeat(100).as_str(), false),
+            TAB_MAX_WIDTH
+        );
+    }
+
+    #[test]
+    fn tab_reorder_moves_single_tab_by_visual_direction() {
+        let mut tabs = vec![
+            WorkspaceTab::new(WorkspaceTabId(1), WorkspaceSurface::Home),
+            WorkspaceTab::new(WorkspaceTabId(2), WorkspaceSurface::Stacker),
+            WorkspaceTab::new(WorkspaceTabId(3), WorkspaceSurface::Terminal),
+        ];
+
+        assert!(reorder_workspace_tab_block(
+            &mut tabs,
+            &[WorkspaceTabId(1)],
+            WorkspaceTabId(3)
+        ));
+        assert_eq!(
+            tabs.iter().map(|tab| tab.id.0).collect::<Vec<_>>(),
+            vec![2, 3, 1]
+        );
+
+        assert!(reorder_workspace_tab_block(
+            &mut tabs,
+            &[WorkspaceTabId(1)],
+            WorkspaceTabId(2)
+        ));
+        assert_eq!(
+            tabs.iter().map(|tab| tab.id.0).collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
+    }
+
+    #[test]
+    fn tab_reorder_moves_joined_block_together() {
+        let mut tabs = vec![
+            WorkspaceTab::new(WorkspaceTabId(1), WorkspaceSurface::Home),
+            WorkspaceTab::new(WorkspaceTabId(2), WorkspaceSurface::Stacker),
+            WorkspaceTab::new(WorkspaceTabId(3), WorkspaceSurface::Terminal),
+            WorkspaceTab::new(WorkspaceTabId(4), WorkspaceSurface::Sketch),
+        ];
+
+        assert!(reorder_workspace_tab_block(
+            &mut tabs,
+            &[WorkspaceTabId(2), WorkspaceTabId(3)],
+            WorkspaceTabId(4)
+        ));
+        assert_eq!(
+            tabs.iter().map(|tab| tab.id.0).collect::<Vec<_>>(),
+            vec![1, 4, 2, 3]
+        );
+    }
 }

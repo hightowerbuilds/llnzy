@@ -6,7 +6,7 @@ use std::{
 use crate::text_utils::contains_case_insensitive;
 
 pub const PREVIEW_IMAGE_EXTS: &[&str] = &[
-    "png", "jpg", "jpeg", "gif", "bmp", "webp", "tiff", "tif", "ico",
+    "png", "jpg", "jpeg", "gif", "bmp", "webp", "tiff", "tif", "ico", "svg",
 ];
 pub const IMAGE_ICON_EXTS: &[&str] = &["png", "jpg", "jpeg", "gif", "bmp", "webp", "svg", "ico"];
 pub const BACKGROUND_IMAGE_EXTS: &[&str] = &["png", "jpg", "jpeg", "bmp", "webp", "gif"];
@@ -140,7 +140,7 @@ mod tests {
             PREVIEW_IMAGE_EXTS
         ));
         assert!(!path_extension_matches(
-            Path::new("diagram.svg"),
+            Path::new("src/main.rs"),
             PREVIEW_IMAGE_EXTS
         ));
     }

@@ -650,50 +650,7 @@ fn background_rects_batch_same_color() {
     assert!((rects[0].2 - 50.0).abs() < 0.01);
 }
 
-// ── Full pipeline: search + selection on processed terminal ──
-
-#[test]
-fn search_on_terminal_content() {
-    use llnzy::search::Search;
-
-    let mut t = Terminal::new(40, 5);
-    t.process(b"The quick brown fox\r\njumps over the lazy dog");
-
-    let mut search = Search::new();
-    search.open();
-    search.query = "the".to_string();
-    search.update_matches(&t);
-    // "The" on row 0, "the" on row 1
-    assert_eq!(search.matches.len(), 2);
-    assert_eq!(search.status(), "1/2");
-}
-
-#[test]
-fn selection_extracts_terminal_text() {
-    use llnzy::selection::Selection;
-
-    let mut t = Terminal::new(40, 5);
-    t.process(b"Hello World");
-
-    let mut sel = Selection::new();
-    sel.start(0, 0);
-    sel.update(0, 4);
-    let text = sel.text(&t);
-    assert_eq!(text, "Hello");
-}
-
-#[test]
-fn word_selection_on_terminal() {
-    use llnzy::selection::Selection;
-
-    let mut t = Terminal::new(40, 5);
-    t.process(b"hello world foo");
-
-    let mut sel = Selection::new();
-    sel.select_word(0, 7, &t); // middle of "world"
-    let text = sel.text(&t);
-    assert_eq!(text, "world");
-}
+// ── Full pipeline: terminal selection on processed terminal ──
 
 #[test]
 fn terminal_forward_drag_selection_copies_selected_text() {

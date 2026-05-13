@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use gpui::{px, Context, Pixels, Window};
+use gpui::{px, ClipboardItem, Context, KeyDownEvent, Pixels, Window};
 
 use crate::{
     path_utils::{path_contains, same_path},
@@ -11,7 +11,9 @@ use crate::{
 };
 
 use super::{
-    sidebar::initial_expanded_dirs,
+    sidebar::{
+        initial_expanded_dirs, SidebarContextMenuState, SidebarContextMenuView, SidebarRenameState,
+    },
     tabs::{WorkspaceTab, WorkspaceTabId},
     WorkspacePrototype, WorkspaceSurface, BUMPER_RESIZE_WIDTH, SIDEBAR_MAX_WIDTH,
     SIDEBAR_MIN_WIDTH,
@@ -61,13 +63,292 @@ impl WorkspacePrototype {
         self.open_or_activate_surface(WorkspaceSurface::Editor, window, cx);
     }
 
+    pub(super) fn open_sidebar_context_menu(
+        &mut self,
+        path: PathBuf,
+        name: String,
+        is_dir: bool,
+        x: f32,
+        y: f32,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        window.focus(&self.focus_handle);
+        self.tab_manager.close_context_menu();
+        self.tab_rename = None;
+        self.sidebar_rename = None;
+        self.sidebar_context_menu = Some(SidebarContextMenuState {
+            path,
+            name,
+            is_dir,
+            x,
+            y,
+            view: SidebarContextMenuView::Main,
+        });
+        cx.notify();
+    }
+
+    pub(super) fn show_sidebar_main_menu(&mut self, cx: &mut Context<Self>) {
+        if let Some(menu) = &mut self.sidebar_context_menu {
+            menu.view = SidebarContextMenuView::Main;
+            self.sidebar_rename = None;
+            cx.notify();
+        }
+    }
+
+    pub(super) fn show_sidebar_move_targets(&mut self, cx: &mut Context<Self>) {
+        if let Some(menu) = &mut self.sidebar_context_menu {
+            menu.view = SidebarContextMenuView::Move;
+            self.sidebar_rename = None;
+            cx.notify();
+        }
+    }
+
+    pub(super) fn show_sidebar_delete_confirm(&mut self, cx: &mut Context<Self>) {
+        if let Some(menu) = &mut self.sidebar_context_menu {
+            menu.view = SidebarContextMenuView::DeleteConfirm;
+            self.sidebar_rename = None;
+            cx.notify();
+        }
+    }
+
+    pub(super) fn start_sidebar_rename(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        let Some(menu) = &mut self.sidebar_context_menu else {
+            return;
+        };
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(&menu.name)
+            .to_string();
+        menu.view = SidebarContextMenuView::Rename;
+        self.sidebar_rename = Some(SidebarRenameState {
+            path,
+            text: name,
+            replace_on_input: true,
+        });
+        cx.notify();
+    }
+
+    pub(super) fn on_sidebar_rename_key_down(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) {
+        cx.stop_propagation();
+        match event.keystroke.key.as_str() {
+            "enter" => self.commit_sidebar_rename(cx),
+            "escape" => self.close_sidebar_context_menu(cx),
+            "backspace" => {
+                if let Some(rename) = &mut self.sidebar_rename {
+                    if rename.replace_on_input {
+                        rename.text.clear();
+                        rename.replace_on_input = false;
+                    } else {
+                        rename.text.pop();
+                    }
+                    cx.notify();
+                }
+            }
+            _ => {
+                let modifiers = event.keystroke.modifiers;
+                if modifiers.control || modifiers.alt || modifiers.platform || modifiers.function {
+                    return;
+                }
+                let Some(text) = event.keystroke.key_char.as_deref() else {
+                    return;
+                };
+                if text.chars().any(char::is_control) {
+                    return;
+                }
+                if let Some(rename) = &mut self.sidebar_rename {
+                    if rename.text.chars().count() < 128 {
+                        if rename.replace_on_input {
+                            rename.text.clear();
+                            rename.replace_on_input = false;
+                        }
+                        rename.text.push_str(text);
+                        cx.notify();
+                    }
+                }
+            }
+        }
+    }
+
+    pub(super) fn commit_sidebar_rename(&mut self, cx: &mut Context<Self>) {
+        let Some(rename) = self.sidebar_rename.take() else {
+            return;
+        };
+        let source = rename.path;
+        let new_name = rename.text.trim();
+        if let Err(message) = validate_sidebar_entry_name(new_name) {
+            self.explorer_status = Some(message);
+            self.sidebar_rename = Some(SidebarRenameState {
+                path: source,
+                text: new_name.to_string(),
+                replace_on_input: false,
+            });
+            cx.notify();
+            return;
+        }
+        let Some(parent) = source.parent().map(Path::to_path_buf) else {
+            self.explorer_status = Some("Cannot rename project root".to_string());
+            cx.notify();
+            return;
+        };
+        let destination = parent.join(new_name);
+        if same_path(&source, &destination) {
+            self.close_sidebar_context_menu(cx);
+            return;
+        }
+        if destination.exists() {
+            self.explorer_status = Some(format!("{new_name} already exists"));
+            cx.notify();
+            return;
+        }
+        let is_dir = source.is_dir();
+        let moved_sources = vec![(source.clone(), is_dir)];
+        if let Some(message) = self
+            .editor
+            .read(cx)
+            .modified_open_path_for_move(&moved_sources)
+        {
+            self.explorer_status = Some(message);
+            cx.notify();
+            return;
+        }
+        if let Err(error) = fs::rename(&source, &destination) {
+            self.explorer_status = Some(format!("Rename failed: {error}"));
+            cx.notify();
+            return;
+        }
+
+        self.remap_after_explorer_move(
+            &[SidebarMovePlanItem {
+                source: source.clone(),
+                destination: destination.clone(),
+                is_dir,
+            }],
+            cx,
+        );
+        self.expanded_dirs.insert(parent);
+        self.sidebar_context_menu = None;
+        self.explorer_status = Some(format!("Renamed to {}", display_path_name(&destination)));
+        cx.notify();
+    }
+
+    pub(super) fn copy_sidebar_path(
+        &mut self,
+        path: PathBuf,
+        relative: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let text = if relative {
+            let Some(root) = self.workspace_root.as_ref() else {
+                self.explorer_status = Some("No project root for relative path".to_string());
+                cx.notify();
+                return;
+            };
+            match path.strip_prefix(root) {
+                Ok(relative_path) => relative_path.display().to_string(),
+                Err(_) => {
+                    self.explorer_status = Some("Path is not inside the open project".to_string());
+                    cx.notify();
+                    return;
+                }
+            }
+        } else {
+            path.display().to_string()
+        };
+        cx.write_to_clipboard(ClipboardItem::new_string(text));
+        self.sidebar_context_menu = None;
+        self.explorer_status = Some(if relative {
+            "Copied relative path".to_string()
+        } else {
+            "Copied path".to_string()
+        });
+        cx.notify();
+    }
+
+    pub(super) fn move_sidebar_entry_to_folder(
+        &mut self,
+        source: PathBuf,
+        destination_folder: PathBuf,
+        cx: &mut Context<Self>,
+    ) {
+        self.sidebar_context_menu = None;
+        self.sidebar_rename = None;
+        self.move_explorer_items_to_folder_with_origin(
+            vec![source],
+            destination_folder,
+            MoveOrigin::ContextMenu,
+            cx,
+        );
+    }
+
+    pub(super) fn delete_sidebar_entry(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        let is_dir = path.is_dir();
+        let moved_sources = vec![(path.clone(), is_dir)];
+        if let Some(message) = self
+            .editor
+            .read(cx)
+            .modified_open_path_for_move(&moved_sources)
+        {
+            self.explorer_status = Some(message.replace("moving", "deleting"));
+            cx.notify();
+            return;
+        }
+
+        self.editor.update(cx, |editor, cx| {
+            editor.close_clean_paths_for_delete(&moved_sources, cx);
+        });
+
+        let result = if is_dir {
+            fs::remove_dir_all(&path)
+        } else {
+            fs::remove_file(&path)
+        };
+        if let Err(error) = result {
+            self.explorer_status = Some(format!("Delete failed: {error}"));
+            cx.notify();
+            return;
+        }
+
+        self.expanded_dirs
+            .retain(|dir| !same_path(dir, &path) && !(is_dir && path_contains(&path, dir)));
+        if self.selected_path.as_ref().is_some_and(|selected| {
+            same_path(selected, &path) || (is_dir && path_contains(&path, selected))
+        }) {
+            self.selected_path = None;
+        }
+        self.sidebar_context_menu = None;
+        self.sidebar_rename = None;
+        self.explorer_status = Some(format!("Deleted {}", display_path_name(&path)));
+        cx.notify();
+    }
+
     pub(super) fn move_explorer_items_to_folder(
         &mut self,
         sources: Vec<PathBuf>,
         destination_folder: PathBuf,
         cx: &mut Context<Self>,
     ) {
-        let request = SidebarMoveRequest::new(sources, destination_folder, MoveOrigin::DragDrop);
+        self.move_explorer_items_to_folder_with_origin(
+            sources,
+            destination_folder,
+            MoveOrigin::DragDrop,
+            cx,
+        );
+    }
+
+    fn move_explorer_items_to_folder_with_origin(
+        &mut self,
+        sources: Vec<PathBuf>,
+        destination_folder: PathBuf,
+        origin: MoveOrigin,
+        cx: &mut Context<Self>,
+    ) {
+        let request = SidebarMoveRequest::new(sources, destination_folder, origin);
         let plan = match plan_sidebar_move(&request) {
             Ok(plan) => plan,
             Err(message) => {
@@ -166,6 +447,9 @@ impl WorkspacePrototype {
         }
         crate::explorer::add_recent_project(&mut self.recent_projects, path.clone());
         self.workspace_root = Some(path.clone());
+        self.sketch.update(cx, |sketch, _cx| {
+            sketch.set_workspace_root(Some(path.clone()))
+        });
         self.expanded_dirs = initial_expanded_dirs(&path);
         self.selected_path = None;
         self.close_editor_file_tab();
@@ -177,6 +461,8 @@ impl WorkspacePrototype {
 
     pub(super) fn close_project(&mut self, cx: &mut Context<Self>) {
         self.workspace_root = None;
+        self.sketch
+            .update(cx, |sketch, _cx| sketch.set_workspace_root(None));
         self.expanded_dirs.clear();
         self.selected_path = None;
         self.close_editor_file_tab();
@@ -242,4 +528,24 @@ fn remap_path_after_explorer_move(path: &Path, moved: &[SidebarMovePlanItem]) ->
         }
     }
     None
+}
+
+fn validate_sidebar_entry_name(name: &str) -> Result<(), String> {
+    if name.is_empty() {
+        return Err("Name cannot be empty".to_string());
+    }
+    if name == "." || name == ".." {
+        return Err("Name cannot be . or ..".to_string());
+    }
+    if name.contains('/') || name.contains('\\') {
+        return Err("Name cannot contain path separators".to_string());
+    }
+    Ok(())
+}
+
+fn display_path_name(path: &Path) -> String {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("item")
+        .to_string()
 }

@@ -86,7 +86,7 @@ pub struct PerfStats {
     /// Per-subsystem frame time breakdown (ms).
     pub render_ms: f32,
     pub syntax_ms: f32,
-    pub egui_ms: f32,
+    pub ui_ms: f32,
     /// Memory estimates.
     pub rope_bytes: usize,
     pub undo_depth: usize,
@@ -100,7 +100,7 @@ impl Default for PerfStats {
             last_keystroke: None,
             render_ms: 0.0,
             syntax_ms: 0.0,
-            egui_ms: 0.0,
+            ui_ms: 0.0,
             rope_bytes: 0,
             undo_depth: 0,
             tree_sitter_active: false,

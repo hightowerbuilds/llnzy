@@ -26,50 +26,15 @@ pub struct Pty {
 }
 
 impl Pty {
-    pub fn spawn(
-        shell: &str,
-        cols: u16,
-        rows: u16,
-        proxy: winit::event_loop::EventLoopProxy<crate::UserEvent>,
-    ) -> io::Result<Self> {
-        Self::spawn_in(shell, cols, rows, proxy, None)
+    pub fn spawn(shell: &str, cols: u16, rows: u16) -> io::Result<Self> {
+        Self::spawn_in(shell, cols, rows, None)
     }
 
-    pub fn spawn_in(
-        shell: &str,
-        cols: u16,
-        rows: u16,
-        proxy: winit::event_loop::EventLoopProxy<crate::UserEvent>,
-        cwd: Option<&str>,
-    ) -> io::Result<Self> {
-        Self::spawn_with_proxy(launch_spec(shell, cols, rows, cwd), Some(proxy))
+    pub fn spawn_in(shell: &str, cols: u16, rows: u16, cwd: Option<&str>) -> io::Result<Self> {
+        Self::spawn_with_spec(launch_spec(shell, cols, rows, cwd))
     }
 
-    pub fn spawn_with_spec(
-        spec: TerminalLaunchSpec,
-        proxy: winit::event_loop::EventLoopProxy<crate::UserEvent>,
-    ) -> io::Result<Self> {
-        Self::spawn_with_proxy(spec, Some(proxy))
-    }
-
-    pub fn spawn_with_spec_without_proxy(spec: TerminalLaunchSpec) -> io::Result<Self> {
-        Self::spawn_with_proxy(spec, None)
-    }
-
-    #[cfg(test)]
-    fn spawn_in_without_proxy(
-        shell: &str,
-        cols: u16,
-        rows: u16,
-        cwd: Option<&str>,
-    ) -> io::Result<Self> {
-        Self::spawn_with_proxy(launch_spec(shell, cols, rows, cwd), None)
-    }
-
-    fn spawn_with_proxy(
-        spec: TerminalLaunchSpec,
-        proxy: Option<winit::event_loop::EventLoopProxy<crate::UserEvent>>,
-    ) -> io::Result<Self> {
+    pub fn spawn_with_spec(spec: TerminalLaunchSpec) -> io::Result<Self> {
         let pty_system = native_pty_system();
         let size = PtySize {
             rows: spec.rows,
@@ -112,10 +77,6 @@ impl Pty {
                     Ok(n) => {
                         if read_tx.send(buf[..n].to_vec()).is_err() {
                             break;
-                        }
-                        // Wake the event loop so it processes the output
-                        if let Some(proxy) = &proxy {
-                            let _ = proxy.send_event(crate::UserEvent::PtyOutput);
                         }
                     }
                     Err(_) => break,
@@ -220,7 +181,7 @@ mod tests {
 
     #[test]
     fn reports_process_identity_and_exit_once() {
-        let mut pty = Pty::spawn_in_without_proxy("/bin/sh", 80, 24, None).unwrap();
+        let mut pty = Pty::spawn_in("/bin/sh", 80, 24, None).unwrap();
 
         assert!(pty.process_id().is_some());
         pty.write(b"exit 7\n");
@@ -241,7 +202,7 @@ mod tests {
 
     #[test]
     fn kill_reports_disconnect() {
-        let mut pty = Pty::spawn_in_without_proxy("/bin/sh", 80, 24, None).unwrap();
+        let mut pty = Pty::spawn_in("/bin/sh", 80, 24, None).unwrap();
         pty.kill().unwrap();
 
         let deadline = Instant::now() + Duration::from_secs(5);

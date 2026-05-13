@@ -27,12 +27,6 @@ impl LspNotifier {
         Self::new(|| {})
     }
 
-    pub fn from_event_proxy(proxy: winit::event_loop::EventLoopProxy<crate::UserEvent>) -> Self {
-        Self::new(move || {
-            let _ = proxy.send_event(crate::UserEvent::LspMessage);
-        })
-    }
-
     pub fn notify(&self) {
         (self.notify)();
     }
@@ -67,15 +61,6 @@ pub struct Transport {
 }
 
 impl Transport {
-    /// Spawn a language server process and set up the transport.
-    pub fn spawn(
-        command: &str,
-        args: &[&str],
-        proxy: winit::event_loop::EventLoopProxy<crate::UserEvent>,
-    ) -> std::io::Result<(Self, mpsc::UnboundedReceiver<ServerMessage>)> {
-        Self::spawn_with_notifier(command, args, LspNotifier::from_event_proxy(proxy))
-    }
-
     /// Spawn a language server process and set up the transport.
     pub fn spawn_with_notifier(
         command: &str,

@@ -1,12 +1,12 @@
 # llnzy
 
-A GPU-accelerated terminal emulator and source code editor built from scratch in Rust.
+A native GPUI developer workspace built from scratch in Rust.
 
 ![llnzy](llnzy.jpg)
 
 ## What it does
 
-llnzy is a single native app that combines a terminal, a code editor, a local Git dashboard, a drawing canvas, and a prompt manager. The terminal and visual effects render through wgpu, while the app chrome and editor views are drawn with egui. It runs your shell, edits your code with tree-sitter and LSP support when language servers are installed, shows local repository state, and lets you customize the look of the workspace.
+llnzy is a single native GPUI app that combines a terminal, a code editor, a project sidebar, a drawing canvas, an appearances surface, and a prompt manager. It runs your shell, edits your code with tree-sitter and LSP support when language servers are installed, opens project folders, and lets you tune the workspace presentation.
 
 ## Status
 
@@ -20,32 +20,35 @@ cd llnzy
 cargo run --release
 ```
 
-To build a macOS .app bundle and DMG:
+To build a macOS .app bundle:
 ```sh
 ./bundle.sh --release
 ```
 
-Requires Rust 1.75+ and a GPU that supports wgpu (Metal on macOS, Vulkan/DX12 elsewhere).
+To build an installer package that also installs the `llnzy` CLI into `/usr/local/bin`:
+```sh
+./bundle.sh --release --pkg --dmg
+```
+
+Requires Rust 1.75+. macOS is the active release target.
 
 ## Features
 
-**Terminal** -- ANSI/VT emulation via alacritty_terminal. GPU text rendering, true color, tabbed shells, scrollback, regex search, mouse reporting, OSC title/CWD tracking, URL detection, and Cmd-click file/URL opening.
+**Terminal** -- ANSI/VT emulation via alacritty_terminal and portable-pty. Supports true color, scrollback, selection/copy/paste, bracketed paste, app cursor mode, title/CWD events, session restart, shell exit reporting, background images, and cursor effects.
 
-**Code Editor** -- Multi-buffer tabbed editor with rope-backed editing, undo/redo, tree-sitter syntax highlighting for Rust, JavaScript, TypeScript, TSX, Python, Go, C, JSON, HTML, CSS, and Bash. TOML files open as plain text. LSP integration covers diagnostics, hover, completions, go-to-definition, find references, signature help, rename, code actions, formatting, inlay hints, code lens, document symbols, and workspace symbols when the matching language server is available on PATH. Find & replace, project search, multi-cursor (Cmd+D), code folding, bracket matching, comment toggle, git gutter indicators, minimap, word wrap, snippets, fuzzy file finding, file watching, and build task detection are included.
+**Code Editor** -- Rope-backed editing with undo/redo, tree-sitter syntax highlighting for Rust, JavaScript, TypeScript, TSX, Python, Go, C, JSON, HTML, CSS, and Bash. LSP integration covers diagnostics, hover, completions, go-to-definition, find references, signature help, rename, code actions, formatting, inlay hints, code lens, document symbols, and workspace symbols when the matching language server is available on PATH. Find, go-to-line, selection movement, line movement, duplicate/delete line, comment toggle, save, recently closed files, and git gutter indicators are included.
 
-**Git** -- Local-only Git dashboard for the active project repository. Shows branch and dirty/clean state, staged/unstaged/untracked files, recent commits with inline graph markers, stash and reflog activity, and lazy-loaded commit details with changed files and patch previews. This is Git integration, not GitHub integration: it does not use GitHub/GitLab APIs, OAuth, pull requests, issues, or network fetch/push/pull.
+**Project Sidebar** -- Open a project folder, browse files, open files in the GPUI editor, drag files/folders into folders, resize or hide the sidebar, and reopen recent projects.
 
-**Sketch** -- Drawing canvas with marker, rectangle, and text tools. Save and recall named sketches.
+**Sketch** -- Drawing canvas with marker, rectangle, symbol, image, and text tools. Supports selection, moving/resizing, undo/redo, save, export, and saved appearance settings.
 
-**Stacker** -- Prompt queue manager. Save, edit, delete, categorize, search, queue, and copy prompts. Optional prompt bar above the footer for quick access. Current command and saved-prompt workflow notes live in `docs/stacker-command-workflow-05-05-2026.md`.
+**Stacker** -- Prompt queue manager. Save, edit, delete, categorize, search, queue, and copy prompts. Optional prompt bar above the footer for quick access. Agents and scripts can manage saved prompts with `llnzy stacker add/save/list/edit/delete` while the app owns the prompt store. Current command and saved-prompt workflow notes live in `docs/stacker-command-workflow-05-05-2026.md`.
 
-**Visual Effects** -- Animated shader backgrounds, custom WGSL shader loading, image backgrounds, bloom/glow, GPU particle system, CRT scanlines with curvature/vignette/chromatic aberration, cursor glow, and cursor trail. Effects can be enabled, tuned, and included in saved themes.
+**Appearances** -- Apply built-in themes, tune terminal/editor/sketch colors, import terminal background images, and adjust cursor presentation.
 
-**Themes** -- Two built-in presets, Minimalist and Buzz, plus custom theme creation. Save colors, effects, and backgrounds as named themes, and manage a persistent background image gallery.
+**Tabs** -- Home, Stacker, Terminal, Sketch, Editor, Appearances, and Settings surfaces can be opened from the workspace menus. Tabs can be joined, separated, swapped, renamed, and closed.
 
-**Workspaces** -- Bundle a theme, a project folder, and a tab layout into a named workspace. Launch from the Home screen or command palette workspace switcher. The last session saves project and tab layout on close and restores them on startup; active theme autosave is not wired yet.
-
-**Keybinding Presets** -- VS Code (default), Vim (normal/insert/visual modes with motions), Emacs (Ctrl chords). Cross-platform modifier handling (Cmd on macOS, Ctrl on Linux/Windows).
+**Themes** -- Built-in presets plus persistent background image management through the GPUI appearances workflow.
 
 ## Keyboard Shortcuts
 
@@ -53,22 +56,21 @@ Requires Rust 1.75+ and a GPU that supports wgpu (Metal on macOS, Vulkan/DX12 el
 |---|---|
 | Cmd+T | New terminal tab |
 | Cmd+W | Close tab |
+| Cmd+[ / Cmd+] | Previous / next tab |
 | Cmd+B | Toggle sidebar |
-| Cmd+P | Fuzzy file finder |
 | Cmd+F | Find in file |
-| Cmd+H | Find & replace |
-| Cmd+Shift+G | Search across project |
-| Cmd+Shift+B | Run build task |
-| Cmd+Shift+T | Workspace symbols |
-| Cmd+D | Add cursor at next occurrence |
-| Cmd+Shift+L | Select all occurrences |
+| Cmd+G / Cmd+Shift+G | Next / previous find match |
+| Ctrl+G | Go to line |
+| Cmd+D | Select word |
+| Cmd+L | Select line |
 | Cmd+= / Cmd+- | Zoom in / out |
 | Cmd+0 | Reset zoom |
-| F12 | Go to definition |
-| Shift+F12 | Find references |
-| F1 | Hover info |
-| F2 | Rename symbol |
-| Cmd+Shift+P | Command palette |
+| Cmd+/ | Toggle line comment |
+| Cmd+Shift+D | Duplicate line or selection |
+| Cmd+Shift+K | Delete line |
+| Alt+Up / Alt+Down | Move line |
+| Shift+PageUp / Shift+PageDown | Scroll terminal page |
+| Cmd+R | Restart terminal session |
 
 ## Config
 
@@ -97,12 +99,9 @@ keybinding_preset = "vscode"  # or "vim" or "emacs"
 
 | Layer | Crate |
 |---|---|
-| Window | winit 0.30 |
-| GPU | wgpu 22 |
-| Text rendering | glyphon 0.6 |
+| App UI | GPUI 0.2.2 |
 | Terminal | alacritty_terminal 0.26 |
 | PTY | portable-pty 0.8 |
-| UI overlays | egui 0.29 |
 | Syntax | tree-sitter 0.26 (11 grammars) |
 | LSP | lsp-types 0.97 + tokio |
 | File watching | notify 7 |

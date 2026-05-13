@@ -1,9 +1,9 @@
-//! `llnzy prompt add` — headless CLI used by external agents to drop a
-//! suggestion into the Stacker inbox without launching the GUI.
+//! `llnzy stacker ...` / `llnzy prompt ...` - headless CLI used by external agents to manage
+//! Stacker prompts without launching the GUI.
 //!
 //! The trust boundary lives here: argv comes from another process, stdin
 //! and `--file` come from disk. Every input is sized, type-checked, and
-//! sanitized before any byte hits the inbox directory.
+//! sanitized before any byte hits the app-owned prompt storage.
 
 use std::fs;
 use std::io::{self, Read, Write};
@@ -11,8 +11,10 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use super::storage::{
-    body_hash, new_id, rfc3339_utc, write_atomic, PromptFrontmatter, PromptRecord, PromptState,
+    self, body_hash, new_id, rfc3339_utc, write_atomic, PromptFrontmatter, PromptRecord,
+    PromptState,
 };
+use super::{load_queue_from_path, prompt_label, save_queue_to_path};
 use crate::platform::paths;
 
 const BODY_MAX_BYTES: usize = 256 * 1024;
@@ -27,19 +29,38 @@ pub const EXIT_INPUT: i32 = 2;
 pub const EXIT_QUOTA: i32 = 3;
 
 const USAGE: &str = "Usage:
+  llnzy stacker add --label <text> [options] < body
+  llnzy stacker add --label <text> [options] --file <path>
+  llnzy stacker save --label <text> [options] < body
+  llnzy stacker save --label <text> [options] --file <path>
+  llnzy stacker list [--state saved|inbox|archive] [--format text|json]
+  llnzy stacker edit <id> [--state saved|inbox] [--label <text>] [--category <slug>] [--body <text>|--file <path>|--stdin]
+  llnzy stacker delete <id> [--state saved|inbox]
   llnzy prompt add --label <text> [options] < body
   llnzy prompt add --label <text> [options] --file <path>
+  llnzy prompt save --label <text> [options] < body
+  llnzy prompt save --label <text> [options] --file <path>
+  llnzy prompt list [--state saved|inbox|archive] [--format text|json]
+  llnzy prompt edit <id> [--state saved|inbox] [--label <text>] [--category <slug>] [--body <text>|--file <path>|--stdin]
+  llnzy prompt delete <id> [--state saved|inbox]
 
 Options:
-  --label <text>          required; human-readable title (max 256 chars)
+  --label <text>          human-readable title (max 256 chars)
   --category <slug>       optional; tag for grouping
   --workspace <name>      optional; workspace this prompt is for
   --source-agent <name>   optional; agent identifier
   --session <id>          optional; opaque session identifier
+  --state <state>         target state for list/edit/delete; defaults to saved
+  --format <format>       list output format; text or json
+  --body <text>           prompt body from argv
   --file <path>           read body from file instead of stdin
+  --stdin                 edit body from stdin
+
+Aliases:
+  llnzy prompt ...        backwards-compatible Stacker CLI spelling
 
 Exit codes:
-  0  prompt written
+  0  prompt changed
   1  usage error
   2  bad input (size/encoding/file/label)
   3  inbox quota exceeded";
@@ -47,17 +68,95 @@ Exit codes:
 #[derive(Clone, Copy, Debug)]
 pub struct CliPaths<'a> {
     pub inbox_dir: &'a Path,
+    pub saved_dir: &'a Path,
+    pub archive_dir: &'a Path,
     pub tmp_dir: &'a Path,
+    pub legacy_path: &'a Path,
+    pub queue_path: &'a Path,
 }
 
 #[derive(Debug)]
-struct ParsedArgs {
+struct AddArgs {
     label: String,
     category: Option<String>,
     workspace: Option<String>,
     source_agent: Option<String>,
     session_id: Option<String>,
     file: Option<PathBuf>,
+    body: Option<String>,
+}
+
+#[derive(Debug)]
+struct ListArgs {
+    state: PromptCliState,
+    format: ListFormat,
+}
+
+#[derive(Debug)]
+struct EditArgs {
+    id: String,
+    state: PromptCliState,
+    label: Option<String>,
+    category: Option<String>,
+    file: Option<PathBuf>,
+    body: Option<String>,
+    read_stdin: bool,
+}
+
+#[derive(Debug)]
+struct DeleteArgs {
+    id: String,
+    state: PromptCliState,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PromptCliState {
+    Saved,
+    Inbox,
+    Archive,
+}
+
+impl PromptCliState {
+    fn from_flag(value: &str) -> Result<Self, String> {
+        match value {
+            "saved" => Ok(Self::Saved),
+            "inbox" | "pending" => Ok(Self::Inbox),
+            "archive" | "archived" => Ok(Self::Archive),
+            other => Err(format!("unknown state: {other}")),
+        }
+    }
+
+    fn storage_state(self) -> PromptState {
+        match self {
+            Self::Saved => PromptState::Saved,
+            Self::Inbox => PromptState::Pending,
+            Self::Archive => PromptState::Archived,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Saved => "saved",
+            Self::Inbox => "inbox",
+            Self::Archive => "archive",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ListFormat {
+    Text,
+    Json,
+}
+
+impl ListFormat {
+    fn from_flag(value: &str) -> Result<Self, String> {
+        match value {
+            "text" => Ok(Self::Text),
+            "json" => Ok(Self::Json),
+            other => Err(format!("unknown format: {other}")),
+        }
+    }
 }
 
 /// Wire-up for the real `main()`. Reads argv, stdin, and config paths from
@@ -70,7 +169,11 @@ pub fn run_from_env() -> i32 {
         return EXIT_INPUT;
     };
     let inbox_dir = set.prompts_inbox_dir();
+    let saved_dir = set.prompts_saved_dir();
+    let archive_dir = set.prompts_archive_dir();
     let tmp_dir = set.prompts_tmp_dir();
+    let legacy_path = set.stacker_file();
+    let queue_path = set.stacker_queue_file();
     let mut stdin = io::stdin().lock();
     let mut stdout = io::stdout().lock();
     let mut stderr = io::stderr().lock();
@@ -81,7 +184,11 @@ pub fn run_from_env() -> i32 {
         &mut stderr,
         CliPaths {
             inbox_dir: &inbox_dir,
+            saved_dir: &saved_dir,
+            archive_dir: &archive_dir,
             tmp_dir: &tmp_dir,
+            legacy_path: &legacy_path,
+            queue_path: &queue_path,
         },
     )
 }
@@ -96,71 +203,81 @@ pub fn run<R: Read, W: Write, E: Write>(
     stderr: &mut E,
     paths: CliPaths<'_>,
 ) -> i32 {
-    if args.first().map(String::as_str) != Some("prompt") {
+    let Some(root_command) = args.first().map(String::as_str) else {
         let _ = writeln!(stderr, "{USAGE}");
         return EXIT_USAGE;
-    }
-    if args.get(1).map(String::as_str) != Some("add") {
-        let _ = writeln!(stderr, "llnzy prompt: only `add` is supported");
+    };
+    if !matches!(root_command, "prompt" | "stacker") {
         let _ = writeln!(stderr, "{USAGE}");
         return EXIT_USAGE;
     }
 
-    let parsed = match parse_flags(&args[2..]) {
+    match args.get(1).map(String::as_str) {
+        Some("add") => {
+            let target = if root_command == "stacker" {
+                PromptCliState::Saved
+            } else {
+                PromptCliState::Inbox
+            };
+            run_add(args, stdin, stdout, stderr, paths, target)
+        }
+        Some("save") => run_add(args, stdin, stdout, stderr, paths, PromptCliState::Saved),
+        Some("list") => run_list(args, stdout, stderr, paths),
+        Some("edit") => run_edit(args, stdin, stdout, stderr, paths),
+        Some("delete") | Some("remove") => run_delete(args, stdout, stderr, paths),
+        Some(command) => {
+            let _ = writeln!(stderr, "llnzy prompt: unknown command `{command}`");
+            let _ = writeln!(stderr, "{USAGE}");
+            EXIT_USAGE
+        }
+        None => {
+            let _ = writeln!(stderr, "{USAGE}");
+            EXIT_USAGE
+        }
+    }
+}
+
+fn run_add<R: Read, W: Write, E: Write>(
+    args: &[String],
+    stdin: &mut R,
+    stdout: &mut W,
+    stderr: &mut E,
+    paths: CliPaths<'_>,
+    target: PromptCliState,
+) -> i32 {
+    let command = args.get(1).map(String::as_str).unwrap_or("add");
+    let parsed = match parse_add_flags(&args[2..]) {
         Ok(parsed) => parsed,
         Err(msg) => {
-            let _ = writeln!(stderr, "llnzy prompt add: {msg}");
+            let _ = writeln!(stderr, "llnzy prompt {command}: {msg}");
             let _ = writeln!(stderr, "{USAGE}");
             return EXIT_USAGE;
         }
     };
 
-    let body = match parsed.file.as_deref() {
-        Some(path) => match read_file_body(path) {
-            Ok(body) => body,
-            Err(msg) => {
-                let _ = writeln!(stderr, "llnzy prompt add: {msg}");
-                return EXIT_INPUT;
-            }
-        },
-        None => match read_stdin_body(stdin) {
-            Ok(body) => body,
-            Err(msg) => {
-                let _ = writeln!(stderr, "llnzy prompt add: {msg}");
-                return EXIT_INPUT;
-            }
-        },
+    let body = match read_body_source(
+        parsed.file.as_deref(),
+        parsed.body.as_deref(),
+        parsed.file.is_none() && parsed.body.is_none(),
+        stdin,
+    ) {
+        Ok(body) => body,
+        Err(msg) => {
+            let _ = writeln!(stderr, "llnzy prompt {command}: {msg}");
+            return EXIT_INPUT;
+        }
     };
 
     if body.trim().is_empty() {
-        let _ = writeln!(stderr, "llnzy prompt add: body is empty");
+        let _ = writeln!(stderr, "llnzy prompt {command}: body is empty");
         return EXIT_INPUT;
-    }
-
-    match inbox_quota_status(paths.inbox_dir) {
-        Ok(status) if status.over_limit() => {
-            let _ = writeln!(
-                stderr,
-                "llnzy prompt add: inbox quota exceeded ({} files, {} bytes); user must clear inbox before more suggestions",
-                status.files, status.bytes,
-            );
-            return EXIT_QUOTA;
-        }
-        Ok(_) => {}
-        Err(err) => {
-            let _ = writeln!(
-                stderr,
-                "llnzy prompt add: failed to check inbox quota: {err}"
-            );
-            return EXIT_INPUT;
-        }
     }
 
     let label = sanitize_label(&parsed.label);
     if label.is_empty() {
         let _ = writeln!(
             stderr,
-            "llnzy prompt add: --label has no printable characters"
+            "llnzy prompt {command}: --label has no printable characters"
         );
         return EXIT_INPUT;
     }
@@ -170,15 +287,20 @@ pub fn run<R: Read, W: Write, E: Write>(
         .map(sanitize_category)
         .unwrap_or_default();
 
+    let state = target.storage_state();
     let record = PromptRecord {
         frontmatter: PromptFrontmatter {
             id: new_id(),
-            state: PromptState::Pending,
+            state,
             label,
             category,
             created: rfc3339_utc(SystemTime::now()),
-            source_agent: parsed.source_agent,
-            session_id: parsed.session_id,
+            source_agent: (target == PromptCliState::Inbox)
+                .then(|| parsed.source_agent.clone())
+                .flatten(),
+            session_id: (target == PromptCliState::Inbox)
+                .then(|| parsed.session_id.clone())
+                .flatten(),
             workspace: parsed.workspace,
             related_files: Vec::new(),
             body_hash: body_hash(&body),
@@ -186,25 +308,325 @@ pub fn run<R: Read, W: Write, E: Write>(
         body,
     };
 
-    match write_atomic(&record, paths.inbox_dir, paths.tmp_dir) {
+    let target_dir = match target {
+        PromptCliState::Inbox => {
+            match inbox_quota_status(paths.inbox_dir) {
+                Ok(status) if status.over_limit() => {
+                    let _ = writeln!(
+                        stderr,
+                        "llnzy prompt add: inbox quota exceeded ({} files, {} bytes); user must clear inbox before more suggestions",
+                        status.files, status.bytes,
+                    );
+                    return EXIT_QUOTA;
+                }
+                Ok(_) => {}
+                Err(err) => {
+                    let _ = writeln!(
+                        stderr,
+                        "llnzy prompt add: failed to check inbox quota: {err}"
+                    );
+                    return EXIT_INPUT;
+                }
+            }
+            paths.inbox_dir
+        }
+        PromptCliState::Saved => {
+            if let Err(err) = migrate_legacy(paths) {
+                let _ = writeln!(stderr, "llnzy prompt save: {err}");
+                return EXIT_INPUT;
+            }
+            paths.saved_dir
+        }
+        PromptCliState::Archive => paths.archive_dir,
+    };
+
+    match write_atomic(&record, target_dir, paths.tmp_dir) {
         Ok(path) => {
             let _ = writeln!(stdout, "{}", path.display());
             EXIT_OK
         }
         Err(err) => {
-            let _ = writeln!(stderr, "llnzy prompt add: failed to write prompt: {err}");
+            let _ = writeln!(
+                stderr,
+                "llnzy prompt {command}: failed to write prompt: {err}"
+            );
             EXIT_INPUT
         }
     }
 }
 
-fn parse_flags(args: &[String]) -> Result<ParsedArgs, String> {
+fn run_list<W: Write, E: Write>(
+    args: &[String],
+    stdout: &mut W,
+    stderr: &mut E,
+    paths: CliPaths<'_>,
+) -> i32 {
+    let parsed = match parse_list_flags(&args[2..]) {
+        Ok(parsed) => parsed,
+        Err(msg) => {
+            let _ = writeln!(stderr, "llnzy prompt list: {msg}");
+            let _ = writeln!(stderr, "{USAGE}");
+            return EXIT_USAGE;
+        }
+    };
+
+    if parsed.state == PromptCliState::Saved {
+        if let Err(err) = migrate_legacy(paths) {
+            let _ = writeln!(stderr, "llnzy prompt list: {err}");
+            return EXIT_INPUT;
+        }
+    }
+
+    let dir = prompt_dir(paths, parsed.state);
+    let records = match storage::list(dir) {
+        Ok(records) => records,
+        Err(err) => {
+            let _ = writeln!(stderr, "llnzy prompt list: failed to list prompts: {err}");
+            return EXIT_INPUT;
+        }
+    };
+
+    match parsed.format {
+        ListFormat::Text => {
+            for record in records {
+                let _ = writeln!(
+                    stdout,
+                    "{}\t{}\t{}\t{}",
+                    record.frontmatter.id,
+                    parsed.state.as_str(),
+                    record.frontmatter.label,
+                    record.frontmatter.category
+                );
+            }
+            EXIT_OK
+        }
+        ListFormat::Json => {
+            let value = records
+                .into_iter()
+                .map(|record| {
+                    serde_json::json!({
+                        "id": record.frontmatter.id,
+                        "state": parsed.state.as_str(),
+                        "label": record.frontmatter.label,
+                        "category": record.frontmatter.category,
+                        "created": record.frontmatter.created,
+                        "source_agent": record.frontmatter.source_agent,
+                        "session_id": record.frontmatter.session_id,
+                        "workspace": record.frontmatter.workspace,
+                        "body": record.body,
+                    })
+                })
+                .collect::<Vec<_>>();
+            match serde_json::to_string_pretty(&value) {
+                Ok(json) => {
+                    let _ = writeln!(stdout, "{json}");
+                    EXIT_OK
+                }
+                Err(err) => {
+                    let _ = writeln!(stderr, "llnzy prompt list: json failed: {err}");
+                    EXIT_INPUT
+                }
+            }
+        }
+    }
+}
+
+fn run_edit<R: Read, W: Write, E: Write>(
+    args: &[String],
+    stdin: &mut R,
+    stdout: &mut W,
+    stderr: &mut E,
+    paths: CliPaths<'_>,
+) -> i32 {
+    let parsed = match parse_edit_flags(&args[2..]) {
+        Ok(parsed) => parsed,
+        Err(msg) => {
+            let _ = writeln!(stderr, "llnzy prompt edit: {msg}");
+            let _ = writeln!(stderr, "{USAGE}");
+            return EXIT_USAGE;
+        }
+    };
+    if parsed.state == PromptCliState::Archive {
+        let _ = writeln!(stderr, "llnzy prompt edit: archived prompts are read-only");
+        return EXIT_USAGE;
+    }
+
+    if parsed.state == PromptCliState::Saved {
+        if let Err(err) = migrate_legacy(paths) {
+            let _ = writeln!(stderr, "llnzy prompt edit: {err}");
+            return EXIT_INPUT;
+        }
+    }
+
+    let source_count = parsed.file.is_some() as usize
+        + parsed.body.is_some() as usize
+        + parsed.read_stdin as usize;
+    if source_count > 1 {
+        let _ = writeln!(
+            stderr,
+            "llnzy prompt edit: choose only one of --body, --file, or --stdin"
+        );
+        return EXIT_USAGE;
+    }
+
+    let maybe_body = if source_count == 0 {
+        None
+    } else {
+        match read_body_source(
+            parsed.file.as_deref(),
+            parsed.body.as_deref(),
+            parsed.read_stdin,
+            stdin,
+        ) {
+            Ok(body) => Some(body),
+            Err(msg) => {
+                let _ = writeln!(stderr, "llnzy prompt edit: {msg}");
+                return EXIT_INPUT;
+            }
+        }
+    };
+
+    let dir = prompt_dir(paths, parsed.state);
+    let path = prompt_path(dir, &parsed.id);
+    let mut record = match storage::read(&path) {
+        Ok(record) => record,
+        Err(err) => {
+            let _ = writeln!(
+                stderr,
+                "llnzy prompt edit: failed to read {}: {err}",
+                path.display()
+            );
+            return EXIT_INPUT;
+        }
+    };
+    let previous_body = record.body.clone();
+
+    if let Some(label) = parsed.label.as_deref() {
+        let label = sanitize_label(label);
+        if label.is_empty() {
+            let _ = writeln!(
+                stderr,
+                "llnzy prompt edit: --label has no printable characters"
+            );
+            return EXIT_INPUT;
+        }
+        record.frontmatter.label = label;
+    }
+    if let Some(category) = parsed.category.as_deref() {
+        record.frontmatter.category = sanitize_category(category);
+    }
+    if let Some(body) = maybe_body {
+        if body.trim().is_empty() {
+            let _ = writeln!(stderr, "llnzy prompt edit: body is empty");
+            return EXIT_INPUT;
+        }
+        record.body = body;
+        if parsed.label.is_none() {
+            record.frontmatter.label = prompt_label(&record.body);
+        }
+    }
+    record.frontmatter.state = parsed.state.storage_state();
+    record.frontmatter.body_hash = body_hash(&record.body);
+
+    match write_atomic(&record, dir, paths.tmp_dir) {
+        Ok(path) => {
+            warn_queue_sync(
+                stderr,
+                "edit",
+                sync_queue_after_prompt_edit(paths.queue_path, &previous_body, &record),
+            );
+            let _ = writeln!(stdout, "{}", path.display());
+            EXIT_OK
+        }
+        Err(err) => {
+            let _ = writeln!(stderr, "llnzy prompt edit: failed to write prompt: {err}");
+            EXIT_INPUT
+        }
+    }
+}
+
+fn run_delete<W: Write, E: Write>(
+    args: &[String],
+    stdout: &mut W,
+    stderr: &mut E,
+    paths: CliPaths<'_>,
+) -> i32 {
+    let parsed = match parse_delete_flags(&args[2..]) {
+        Ok(parsed) => parsed,
+        Err(msg) => {
+            let _ = writeln!(stderr, "llnzy prompt delete: {msg}");
+            let _ = writeln!(stderr, "{USAGE}");
+            return EXIT_USAGE;
+        }
+    };
+
+    if parsed.state == PromptCliState::Archive {
+        let _ = writeln!(
+            stderr,
+            "llnzy prompt delete: archived prompts are already deleted from active Stacker state"
+        );
+        return EXIT_USAGE;
+    }
+    if parsed.state == PromptCliState::Saved {
+        if let Err(err) = migrate_legacy(paths) {
+            let _ = writeln!(stderr, "llnzy prompt delete: {err}");
+            return EXIT_INPUT;
+        }
+    }
+
+    let dir = prompt_dir(paths, parsed.state);
+    let path = prompt_path(dir, &parsed.id);
+    let mut record = match storage::read(&path) {
+        Ok(record) => record,
+        Err(err) => {
+            let _ = writeln!(
+                stderr,
+                "llnzy prompt delete: failed to read {}: {err}",
+                path.display()
+            );
+            return EXIT_INPUT;
+        }
+    };
+    let previous_body = record.body.clone();
+
+    record.frontmatter.state = PromptState::Archived;
+    record.frontmatter.body_hash = body_hash(&record.body);
+    match write_atomic(&record, paths.archive_dir, paths.tmp_dir) {
+        Ok(archive_path) => {
+            if let Err(err) = fs::remove_file(&path) {
+                let _ = writeln!(
+                    stderr,
+                    "llnzy prompt delete: archived prompt but failed to remove {}: {err}",
+                    path.display()
+                );
+                return EXIT_INPUT;
+            }
+            warn_queue_sync(
+                stderr,
+                "delete",
+                sync_queue_after_prompt_delete(paths.queue_path, &previous_body),
+            );
+            let _ = writeln!(stdout, "{}", archive_path.display());
+            EXIT_OK
+        }
+        Err(err) => {
+            let _ = writeln!(
+                stderr,
+                "llnzy prompt delete: failed to archive prompt: {err}"
+            );
+            EXIT_INPUT
+        }
+    }
+}
+
+fn parse_add_flags(args: &[String]) -> Result<AddArgs, String> {
     let mut label: Option<String> = None;
     let mut category = None;
     let mut workspace = None;
     let mut source_agent = None;
     let mut session_id = None;
     let mut file = None;
+    let mut body = None;
 
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
@@ -215,19 +637,200 @@ fn parse_flags(args: &[String]) -> Result<ParsedArgs, String> {
             "--source-agent" => source_agent = Some(next_value(&mut iter, "--source-agent")?),
             "--session" => session_id = Some(next_value(&mut iter, "--session")?),
             "--file" => file = Some(PathBuf::from(next_value(&mut iter, "--file")?)),
+            "--body" => body = Some(next_value(&mut iter, "--body")?),
             other => return Err(format!("unknown flag: {other}")),
         }
     }
 
+    if file.is_some() && body.is_some() {
+        return Err("choose only one of --body or --file".to_string());
+    }
+
     let label = label.ok_or_else(|| "missing required --label".to_string())?;
-    Ok(ParsedArgs {
+    Ok(AddArgs {
         label,
         category,
         workspace,
         source_agent,
         session_id,
         file,
+        body,
     })
+}
+
+fn parse_list_flags(args: &[String]) -> Result<ListArgs, String> {
+    let mut state = PromptCliState::Saved;
+    let mut format = ListFormat::Text;
+
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--state" => state = PromptCliState::from_flag(&next_value(&mut iter, "--state")?)?,
+            "--format" => format = ListFormat::from_flag(&next_value(&mut iter, "--format")?)?,
+            other => return Err(format!("unknown flag: {other}")),
+        }
+    }
+
+    Ok(ListArgs { state, format })
+}
+
+fn parse_edit_flags(args: &[String]) -> Result<EditArgs, String> {
+    let mut id = None;
+    let mut state = PromptCliState::Saved;
+    let mut label = None;
+    let mut category = None;
+    let mut file = None;
+    let mut body = None;
+    let mut read_stdin = false;
+
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--state" => state = PromptCliState::from_flag(&next_value(&mut iter, "--state")?)?,
+            "--label" => label = Some(next_value(&mut iter, "--label")?),
+            "--category" => category = Some(next_value(&mut iter, "--category")?),
+            "--file" => file = Some(PathBuf::from(next_value(&mut iter, "--file")?)),
+            "--body" => body = Some(next_value(&mut iter, "--body")?),
+            "--stdin" => read_stdin = true,
+            other if other.starts_with("--") => return Err(format!("unknown flag: {other}")),
+            other => {
+                if id.is_some() {
+                    return Err(format!("unexpected argument: {other}"));
+                }
+                id = Some(other.to_string());
+            }
+        }
+    }
+
+    let id = parse_prompt_id(&id.ok_or_else(|| "missing prompt id".to_string())?)?;
+    Ok(EditArgs {
+        id,
+        state,
+        label,
+        category,
+        file,
+        body,
+        read_stdin,
+    })
+}
+
+fn parse_delete_flags(args: &[String]) -> Result<DeleteArgs, String> {
+    let mut id = None;
+    let mut state = PromptCliState::Saved;
+
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--state" => state = PromptCliState::from_flag(&next_value(&mut iter, "--state")?)?,
+            other if other.starts_with("--") => return Err(format!("unknown flag: {other}")),
+            other => {
+                if id.is_some() {
+                    return Err(format!("unexpected argument: {other}"));
+                }
+                id = Some(other.to_string());
+            }
+        }
+    }
+
+    let id = parse_prompt_id(&id.ok_or_else(|| "missing prompt id".to_string())?)?;
+    Ok(DeleteArgs { id, state })
+}
+
+fn read_body_source<R: Read>(
+    file: Option<&Path>,
+    body: Option<&str>,
+    read_stdin: bool,
+    stdin: &mut R,
+) -> Result<String, String> {
+    let source_count = file.is_some() as usize + body.is_some() as usize + read_stdin as usize;
+    if source_count > 1 {
+        return Err("choose only one body source".to_string());
+    }
+    if let Some(path) = file {
+        return read_file_body(path);
+    }
+    if let Some(body) = body {
+        if body.len() > BODY_MAX_BYTES {
+            return Err(format!("body exceeds {BODY_MAX_BYTES} byte limit"));
+        }
+        return Ok(body.to_string());
+    }
+    if read_stdin {
+        return read_stdin_body(stdin);
+    }
+    Ok(String::new())
+}
+
+fn prompt_dir<'a>(paths: CliPaths<'a>, state: PromptCliState) -> &'a Path {
+    match state {
+        PromptCliState::Saved => paths.saved_dir,
+        PromptCliState::Inbox => paths.inbox_dir,
+        PromptCliState::Archive => paths.archive_dir,
+    }
+}
+
+fn prompt_path(dir: &Path, id: &str) -> PathBuf {
+    dir.join(format!("{id}.md"))
+}
+
+fn parse_prompt_id(input: &str) -> Result<String, String> {
+    let trimmed = input.trim();
+    if trimmed.parse::<ulid::Ulid>().is_err() {
+        return Err("invalid prompt id".to_string());
+    }
+    Ok(trimmed.to_string())
+}
+
+fn migrate_legacy(paths: CliPaths<'_>) -> Result<(), String> {
+    storage::migrate_legacy_json(paths.legacy_path, paths.saved_dir, paths.tmp_dir)
+        .map(|_| ())
+        .map_err(|err| format!("legacy saved prompt migration failed: {err}"))
+}
+
+fn sync_queue_after_prompt_edit(
+    queue_path: &Path,
+    previous_body: &str,
+    next_record: &PromptRecord,
+) -> Result<bool, String> {
+    if !queue_path.exists() {
+        return Ok(false);
+    }
+    let mut queue = load_queue_from_path(queue_path)?;
+    let mut changed = false;
+    for queued in &mut queue {
+        if queued.text == previous_body {
+            queued.text = next_record.body.clone();
+            queued.label = next_record.frontmatter.label.clone();
+            changed = true;
+        }
+    }
+    if changed {
+        save_queue_to_path(&queue, queue_path)?;
+    }
+    Ok(changed)
+}
+
+fn sync_queue_after_prompt_delete(queue_path: &Path, previous_body: &str) -> Result<bool, String> {
+    if !queue_path.exists() {
+        return Ok(false);
+    }
+    let mut queue = load_queue_from_path(queue_path)?;
+    let before = queue.len();
+    queue.retain(|queued| queued.text != previous_body);
+    let changed = queue.len() != before;
+    if changed {
+        save_queue_to_path(&queue, queue_path)?;
+    }
+    Ok(changed)
+}
+
+fn warn_queue_sync<E: Write>(stderr: &mut E, command: &str, result: Result<bool, String>) {
+    if let Err(err) = result {
+        let _ = writeln!(
+            stderr,
+            "llnzy prompt {command}: warning: prompt changed but queue sync failed: {err}"
+        );
+    }
 }
 
 fn next_value(iter: &mut std::slice::Iter<'_, String>, flag: &str) -> Result<String, String> {
@@ -343,6 +946,11 @@ mod tests {
         let mut stdin_cursor = stdin;
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
+        let root = inbox.parent().expect("inbox should live under test root");
+        let saved_dir = root.join("saved");
+        let archive_dir = root.join("archive");
+        let legacy_path = root.join("stacker.json");
+        let queue_path = root.join("stacker_queue.json");
         let code = run(
             &owned,
             &mut stdin_cursor,
@@ -350,7 +958,11 @@ mod tests {
             &mut stderr,
             CliPaths {
                 inbox_dir: inbox,
+                saved_dir: &saved_dir,
+                archive_dir: &archive_dir,
                 tmp_dir: tmp,
+                legacy_path: &legacy_path,
+                queue_path: &queue_path,
             },
         );
         (
@@ -587,6 +1199,179 @@ mod tests {
         );
         assert_eq!(code, EXIT_INPUT);
         assert!(err.contains("--label"));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn stacker_add_saves_prompt_to_saved_library() {
+        let root = temp_root("save");
+        let (inbox, tmp) = paths_in(&root);
+        let saved = root.join("saved");
+        let (code, out, err) = invoke(
+            &[
+                "stacker",
+                "add",
+                "--label",
+                "Release Checklist",
+                "--category",
+                "ship",
+                "--workspace",
+                "llnzy",
+            ],
+            b"Run the release checklist.\n",
+            &inbox,
+            &tmp,
+        );
+        assert_eq!(code, EXIT_OK, "stderr: {err}");
+        assert!(out.trim().ends_with(".md"));
+
+        let saved_records = storage::list(&saved).unwrap();
+        assert_eq!(saved_records.len(), 1);
+        let record = &saved_records[0];
+        assert_eq!(record.frontmatter.state, PromptState::Saved);
+        assert_eq!(record.frontmatter.label, "Release Checklist");
+        assert_eq!(record.frontmatter.category, "ship");
+        assert_eq!(record.frontmatter.workspace.as_deref(), Some("llnzy"));
+        assert_eq!(record.frontmatter.source_agent, None);
+        assert_eq!(record.frontmatter.session_id, None);
+        assert_eq!(record.body, "Run the release checklist.\n");
+        assert!(storage::list(&inbox).unwrap().is_empty());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn list_saved_prompts_outputs_json() {
+        let root = temp_root("list-json");
+        let (inbox, tmp) = paths_in(&root);
+        let (code, _out, err) = invoke(
+            &["stacker", "save", "--label", "One", "--body", "First body"],
+            &[],
+            &inbox,
+            &tmp,
+        );
+        assert_eq!(code, EXIT_OK, "stderr: {err}");
+
+        let (code, out, err) = invoke(&["stacker", "list", "--format", "json"], &[], &inbox, &tmp);
+        assert_eq!(code, EXIT_OK, "stderr: {err}");
+        let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let records = value.as_array().expect("list should be a JSON array");
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0]["state"], "saved");
+        assert_eq!(records[0]["label"], "One");
+        assert_eq!(records[0]["body"], "First body");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn edit_saved_prompt_updates_record_and_queue_entry() {
+        let root = temp_root("edit-saved");
+        let (inbox, tmp) = paths_in(&root);
+        let saved = root.join("saved");
+        let queue_path = root.join("stacker_queue.json");
+        let (code, _out, err) = invoke(
+            &[
+                "stacker",
+                "save",
+                "--label",
+                "Original",
+                "--body",
+                "Original body",
+            ],
+            &[],
+            &inbox,
+            &tmp,
+        );
+        assert_eq!(code, EXIT_OK, "stderr: {err}");
+        let id = storage::list(&saved).unwrap()[0].frontmatter.id.clone();
+        save_queue_to_path(
+            &[crate::stacker::queue::QueuedPrompt {
+                text: "Original body".to_string(),
+                label: "Original".to_string(),
+            }],
+            &queue_path,
+        )
+        .unwrap();
+
+        let (code, _out, err) = invoke(
+            &[
+                "stacker",
+                "edit",
+                &id,
+                "--label",
+                "Edited",
+                "--category",
+                "ops",
+                "--body",
+                "Edited body",
+            ],
+            &[],
+            &inbox,
+            &tmp,
+        );
+        assert_eq!(code, EXIT_OK, "stderr: {err}");
+        let record = storage::read(&saved.join(format!("{id}.md"))).unwrap();
+        assert_eq!(record.frontmatter.state, PromptState::Saved);
+        assert_eq!(record.frontmatter.label, "Edited");
+        assert_eq!(record.frontmatter.category, "ops");
+        assert_eq!(record.frontmatter.body_hash, body_hash("Edited body"));
+        assert_eq!(record.body, "Edited body");
+
+        let queued = load_queue_from_path(&queue_path).unwrap();
+        assert_eq!(queued.len(), 1);
+        assert_eq!(queued[0].text, "Edited body");
+        assert_eq!(queued[0].label, "Edited");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn delete_saved_prompt_archives_record_and_removes_queue_entry() {
+        let root = temp_root("delete-saved");
+        let (inbox, tmp) = paths_in(&root);
+        let saved = root.join("saved");
+        let archive = root.join("archive");
+        let queue_path = root.join("stacker_queue.json");
+        let (code, _out, err) = invoke(
+            &[
+                "stacker",
+                "save",
+                "--label",
+                "Remove Me",
+                "--body",
+                "Queued body",
+            ],
+            &[],
+            &inbox,
+            &tmp,
+        );
+        assert_eq!(code, EXIT_OK, "stderr: {err}");
+        let id = storage::list(&saved).unwrap()[0].frontmatter.id.clone();
+        save_queue_to_path(
+            &[crate::stacker::queue::QueuedPrompt {
+                text: "Queued body".to_string(),
+                label: "Remove Me".to_string(),
+            }],
+            &queue_path,
+        )
+        .unwrap();
+
+        let (code, out, err) = invoke(&["stacker", "delete", &id], &[], &inbox, &tmp);
+        assert_eq!(code, EXIT_OK, "stderr: {err}");
+        assert!(out.trim().ends_with(".md"));
+        assert!(!saved.join(format!("{id}.md")).exists());
+        let archived = storage::read(&archive.join(format!("{id}.md"))).unwrap();
+        assert_eq!(archived.frontmatter.state, PromptState::Archived);
+        assert_eq!(archived.body, "Queued body");
+        assert!(load_queue_from_path(&queue_path).unwrap().is_empty());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn invalid_prompt_id_exits_usage_before_path_lookup() {
+        let root = temp_root("invalid-id");
+        let (inbox, tmp) = paths_in(&root);
+        let (code, _out, err) = invoke(&["stacker", "delete", "../../x"], &[], &inbox, &tmp);
+        assert_eq!(code, EXIT_USAGE);
+        assert!(err.contains("invalid prompt id"));
         fs::remove_dir_all(&root).unwrap();
     }
 

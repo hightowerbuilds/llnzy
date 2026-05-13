@@ -49,10 +49,6 @@ pub struct IncrementalDocumentChange<'a> {
 }
 
 impl LspManager {
-    pub fn new(proxy: winit::event_loop::EventLoopProxy<crate::UserEvent>) -> Self {
-        Self::new_with_notifier(LspNotifier::from_event_proxy(proxy))
-    }
-
     pub fn new_without_event_proxy() -> Self {
         Self::new_with_notifier(LspNotifier::noop())
     }

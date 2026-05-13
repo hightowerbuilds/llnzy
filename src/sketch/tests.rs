@@ -217,6 +217,29 @@ fn resize_handle_hit_test_uses_selected_resizable_element() {
 }
 
 #[test]
+fn image_resize_handle_can_be_hit_tested() {
+    let mut state = SketchState::default();
+    state
+        .document
+        .elements
+        .push(SketchElement::Image(ImageElement {
+            x: 12.0,
+            y: 14.0,
+            w: 200.0,
+            h: 100.0,
+            original_w: 200.0,
+            original_h: 100.0,
+            path: "/tmp/image.png".to_string(),
+        }));
+    state.selected = Some(0);
+
+    assert_eq!(
+        state.selected_resize_handle_at(point(212.0, 114.0)),
+        Some(ResizeHandle::BottomRight)
+    );
+}
+
+#[test]
 fn resize_from_painted_handle_does_not_jump_by_handle_offset() {
     let mut state = SketchState::default();
     state.begin_rectangle(point(10.0, 10.0));

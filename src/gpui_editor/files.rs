@@ -3,7 +3,10 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::{refresh_active_syntax, EditorPrototype, ExternalFileChange, RECENTLY_CLOSED_LIMIT};
+use super::{
+    is_preview_image_path, refresh_active_syntax, EditorImagePreview, EditorPrototype,
+    ExternalFileChange, RECENTLY_CLOSED_LIMIT,
+};
 use crate::editor::buffer::Buffer;
 use crate::editor::{BufferId, EditorState};
 #[cfg(feature = "gpui-workspace")]
@@ -43,8 +46,14 @@ fn remap_path_after_move(path: &Path, moved: &[(PathBuf, PathBuf, bool)]) -> Opt
 impl EditorPrototype {
     #[cfg(feature = "gpui-workspace")]
     pub(crate) fn open_path(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        if is_preview_image_path(&path) {
+            self.open_image_path(path, cx);
+            return;
+        }
+
         match self.editor.open(path.clone()) {
             Ok(buffer_id) => {
+                self.image_preview_active = false;
                 refresh_active_syntax(&mut self.editor);
                 self.editor_search.mark_dirty();
                 self.remember_disk_text_for_path(&path);
@@ -63,6 +72,12 @@ impl EditorPrototype {
 
     #[cfg(feature = "gpui-workspace")]
     pub(crate) fn active_path(&self) -> Option<PathBuf> {
+        if self.image_preview_active {
+            if let Some(preview) = &self.image_preview {
+                return Some(preview.path.clone());
+            }
+        }
+
         self.editor
             .active_buffer_view()
             .and_then(|(_, buffer, _)| buffer.path().map(PathBuf::from))
@@ -83,6 +98,52 @@ impl EditorPrototype {
                 buffer.file_name()
             ))
         })
+    }
+
+    #[cfg(feature = "gpui-workspace")]
+    pub(crate) fn close_clean_paths_for_delete(
+        &mut self,
+        deleted_sources: &[(PathBuf, bool)],
+        cx: &mut Context<Self>,
+    ) {
+        let closing_ids = self
+            .editor
+            .buffers
+            .iter()
+            .zip(self.editor.buffer_ids.iter().copied())
+            .filter_map(|(buffer, id)| {
+                let path = buffer.path()?;
+                (move_sources_affect_path(deleted_sources, path) && !buffer.is_modified())
+                    .then_some(id)
+            })
+            .collect::<Vec<_>>();
+        if closing_ids.is_empty() {
+            if self
+                .image_preview
+                .as_ref()
+                .is_some_and(|preview| move_sources_affect_path(deleted_sources, &preview.path))
+            {
+                self.image_preview = None;
+                self.image_preview_active = false;
+                self.status_message = Some("Closed deleted image preview".to_string());
+                cx.notify();
+            }
+            return;
+        }
+
+        let closed = self.close_buffer_ids(&closing_ids);
+        if self
+            .image_preview
+            .as_ref()
+            .is_some_and(|preview| move_sources_affect_path(deleted_sources, &preview.path))
+        {
+            self.image_preview = None;
+            self.image_preview_active = false;
+        }
+        refresh_active_syntax(&mut self.editor);
+        self.editor_search.mark_dirty();
+        self.status_message = Some(format!("Closed {closed} deleted buffer(s)"));
+        cx.notify();
     }
 
     #[cfg(feature = "gpui-workspace")]
@@ -118,11 +179,25 @@ impl EditorPrototype {
         if let Some(path) = remapped_active_path {
             self.status_message = Some(format!("Moved {}", path.display()));
         }
+        if let Some(preview) = &mut self.image_preview {
+            if let Some(new_path) = remap_path_after_move(&preview.path, moved) {
+                preview.path = new_path.clone();
+                if self.image_preview_active {
+                    self.status_message = Some(format!("Moved {}", new_path.display()));
+                }
+            }
+        }
         self.rebuild_last_seen_disk_text();
         cx.notify();
     }
 
     pub(crate) fn save_active_buffer(&mut self, cx: &mut Context<Self>) {
+        if self.image_preview_active {
+            self.status_message = Some("Image previews are read-only".to_string());
+            cx.notify();
+            return;
+        }
+
         let active = self.editor.active;
         let Some(buffer) = self.editor.buffers.get_mut(active) else {
             self.status_message = Some("No active buffer to save".to_string());
@@ -161,6 +236,7 @@ impl EditorPrototype {
         if index >= self.editor.buffers.len() {
             return;
         }
+        self.image_preview_active = false;
         self.editor.switch_to(index);
         refresh_active_syntax(&mut self.editor);
         self.editor_search.mark_dirty();
@@ -259,15 +335,21 @@ impl EditorPrototype {
     }
 
     pub(super) fn reopen_recent_buffer_tab(&mut self, cx: &mut Context<Self>) {
-        let open_paths = self.open_buffer_paths();
+        let open_paths = self.open_paths();
         let Some(path) = pop_reopen_candidate(&mut self.recently_closed_paths, &open_paths) else {
             self.status_message = Some("No recently closed file to reopen".to_string());
             cx.notify();
             return;
         };
 
+        if is_preview_image_path(&path) {
+            self.open_image_path(path, cx);
+            return;
+        }
+
         match self.editor.open(path.clone()) {
             Ok(buffer_id) => {
+                self.image_preview_active = false;
                 refresh_active_syntax(&mut self.editor);
                 self.editor_search.mark_dirty();
                 self.remember_disk_text_for_path(&path);
@@ -437,6 +519,50 @@ impl EditorPrototype {
         remember_recently_closed_path(&mut self.recently_closed_paths, path.to_path_buf());
     }
 
+    pub(super) fn activate_image_preview(&mut self, cx: &mut Context<Self>) {
+        let Some(preview) = &self.image_preview else {
+            return;
+        };
+        self.image_preview_active = true;
+        self.lsp_panel = None;
+        self.status_message = Some(format!("Previewing {}", preview.path.display()));
+        cx.notify();
+    }
+
+    pub(super) fn close_image_preview(&mut self, cx: &mut Context<Self>) {
+        let Some(preview) = self.image_preview.take() else {
+            return;
+        };
+        self.remember_recently_closed_path(&preview.path);
+        self.image_preview_active = false;
+        self.status_message = Some(format!("Closed {}", preview.path.display()));
+        cx.notify();
+    }
+
+    fn open_image_path(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        if !path.is_file() {
+            self.load_error = Some(format!("{} is not a file", path.display()));
+            self.status_message = Some("Open failed".to_string());
+            cx.notify();
+            return;
+        }
+        let dimensions = image::image_dimensions(&path).ok();
+        let file_size = fs::metadata(&path).ok().map(|metadata| metadata.len());
+        self.image_preview = Some(EditorImagePreview {
+            path: path.clone(),
+            dimensions,
+            file_size,
+        });
+        self.image_preview_active = true;
+        self.lsp_panel = None;
+        self.rename_active = false;
+        self.go_to_line_active = false;
+        self.editor_search.active = false;
+        self.load_error = None;
+        self.status_message = Some(format!("Previewing {}", path.display()));
+        cx.notify();
+    }
+
     pub(super) fn remember_disk_text_for_path(&mut self, path: &Path) {
         if let Ok(text) = read_normalized_file_text(path) {
             self.last_seen_disk_text.insert(path.to_path_buf(), text);
@@ -467,6 +593,14 @@ impl EditorPrototype {
             .iter()
             .filter_map(|buffer| buffer.path().map(PathBuf::from))
             .collect()
+    }
+
+    fn open_paths(&self) -> HashSet<PathBuf> {
+        let mut paths = self.open_buffer_paths();
+        if let Some(preview) = &self.image_preview {
+            paths.insert(preview.path.clone());
+        }
+        paths
     }
 }
 

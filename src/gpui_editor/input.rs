@@ -167,6 +167,10 @@ impl EditorPrototype {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.image_preview_active {
+            return;
+        }
+
         let appearance = self.active_appearance();
         let pixel_delta = event.delta.pixel_delta(appearance.line_height);
         let lines = (pixel_delta.y / appearance.line_height).round() as isize;

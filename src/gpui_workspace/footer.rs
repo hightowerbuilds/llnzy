@@ -141,7 +141,7 @@ fn footer_button(
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |this, _: &MouseDownEvent, window, cx| {
-                this.open_or_activate_surface(surface, window, cx);
+                this.open_footer_surface(surface, window, cx);
             }),
         )
         .child(label)

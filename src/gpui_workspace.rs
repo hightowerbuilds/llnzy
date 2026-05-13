@@ -28,12 +28,13 @@ use self::footer::{load_workspace_queue, workspace_footer};
 use self::panes::{workspace_content, WorkspaceSurfaceContext};
 use self::sidebar::{
     collect_explorer_entries, initial_expanded_dirs, sidebar_bumper, workspace_sidebar,
+    workspace_sidebar_context_menu, SidebarContextMenuState, SidebarRenameState,
     WorkspaceSidebarContext,
 };
 use self::tabs::{
-    workspace_tab_bar, workspace_tab_context_menu, workspace_tab_label, workspace_tab_layouts,
-    workspace_tab_menu_anchor, TabRenameState, WorkspaceTab, WorkspaceTabId,
-    WorkspaceTabMenuAnchor,
+    reorder_workspace_tab_block, workspace_tab_bar, workspace_tab_context_menu,
+    workspace_tab_label, workspace_tab_layouts, workspace_tab_menu_anchor, TabRenameState,
+    WorkspaceTab, WorkspaceTabId, WorkspaceTabMenuAnchor,
 };
 
 actions!(
@@ -128,6 +129,7 @@ impl WorkspaceSurface {
 enum AppearancePage {
     Terminal,
     Editor,
+    Markdown,
     Sketch,
 }
 
@@ -136,6 +138,7 @@ impl AppearancePage {
         match self {
             AppearancePage::Terminal => "Terminal",
             AppearancePage::Editor => "Editor",
+            AppearancePage::Markdown => "Markdown",
             AppearancePage::Sketch => "Sketch",
         }
     }
@@ -157,7 +160,13 @@ pub fn run_workspace_prototype() {
         bind_terminal_keys(cx);
         bind_sketch_keys(cx);
         install_workspace_menu_bar(cx);
-        cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
+        cx.bind_keys([
+            KeyBinding::new("cmd-q", Quit, None),
+            KeyBinding::new("cmd-t", MenuNewTab, None),
+            KeyBinding::new("cmd-w", MenuCloseTab, None),
+            KeyBinding::new("cmd-]", MenuNextTab, None),
+            KeyBinding::new("cmd-[", MenuPreviousTab, None),
+        ]);
 
         let bounds = Bounds::centered(None, size(px(1320.0), px(820.0)), cx);
         let window = cx
@@ -246,13 +255,15 @@ fn install_workspace_menu_bar(cx: &mut App) {
 struct WorkspacePrototype {
     stacker: Entity<StackerPrototype>,
     editor: Entity<EditorPrototype>,
-    terminal: Entity<TerminalSurface>,
+    terminals: BTreeMap<u64, Entity<TerminalSurface>>,
     sketch: Entity<SketchSurface>,
     focus_handle: FocusHandle,
     tabs: Vec<WorkspaceTab>,
     tab_manager: GpuiTabManager,
     tab_name_overrides: BTreeMap<u64, String>,
     tab_rename: Option<TabRenameState>,
+    sidebar_context_menu: Option<SidebarContextMenuState>,
+    sidebar_rename: Option<SidebarRenameState>,
     active_tab_id: WorkspaceTabId,
     next_tab_id: u64,
     workspace_root: Option<PathBuf>,
@@ -282,16 +293,26 @@ impl WorkspacePrototype {
             .as_ref()
             .map(|root| initial_expanded_dirs(root))
             .unwrap_or_default();
+        let sketch = cx.new(SketchSurface::new);
+        sketch.update(cx, |sketch, _cx| {
+            sketch.set_workspace_root(workspace_root.clone());
+        });
+
+        let mut terminals = BTreeMap::new();
+        terminals.insert(3, cx.new(TerminalSurface::new));
+
         Self {
             stacker: cx.new(StackerPrototype::embedded),
             editor: cx.new(EditorPrototype::new),
-            terminal: cx.new(TerminalSurface::new),
-            sketch: cx.new(SketchSurface::new),
+            terminals,
+            sketch,
             focus_handle: cx.focus_handle(),
             tabs,
             tab_manager: GpuiTabManager::default(),
             tab_name_overrides: BTreeMap::new(),
             tab_rename: None,
+            sidebar_context_menu: None,
+            sidebar_rename: None,
             active_tab_id: WorkspaceTabId(1),
             next_tab_id: 5,
             workspace_root,
@@ -371,6 +392,26 @@ impl WorkspacePrototype {
         }
     }
 
+    fn close_sidebar_context_menu(&mut self, cx: &mut Context<Self>) {
+        if self.sidebar_context_menu.is_some() || self.sidebar_rename.is_some() {
+            self.sidebar_context_menu = None;
+            self.sidebar_rename = None;
+            cx.notify();
+        }
+    }
+
+    fn close_context_menus(&mut self, cx: &mut Context<Self>) {
+        let had_tab_menu = self.tab_manager.context_menu().is_some();
+        let had_sidebar_menu = self.sidebar_context_menu.is_some() || self.sidebar_rename.is_some();
+        self.tab_manager.close_context_menu();
+        self.tab_rename = None;
+        self.sidebar_context_menu = None;
+        self.sidebar_rename = None;
+        if had_tab_menu || had_sidebar_menu {
+            cx.notify();
+        }
+    }
+
     fn open_tab_context_menu(
         &mut self,
         tab_id: WorkspaceTabId,
@@ -380,6 +421,8 @@ impl WorkspacePrototype {
     ) {
         window.focus(&self.focus_handle);
         self.tab_rename = None;
+        self.sidebar_context_menu = None;
+        self.sidebar_rename = None;
         self.tab_manager
             .open_context_menu(tab_id.0, anchor.x, anchor.y, anchor.width);
         cx.notify();
@@ -438,6 +481,11 @@ impl WorkspacePrototype {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.sidebar_rename.is_some() {
+            self.on_sidebar_rename_key_down(event, cx);
+            return;
+        }
+
         if self.tab_rename.is_none() {
             return;
         }
@@ -540,7 +588,16 @@ impl WorkspacePrototype {
     }
 
     fn active_tab_menu_anchor(&self) -> WorkspaceTabMenuAnchor {
-        let layouts = workspace_tab_layouts(&self.tabs, self.active_tab_id);
+        let tabs = self
+            .tabs
+            .iter()
+            .cloned()
+            .map(|tab| {
+                let label = self.tab_label(&tab);
+                (tab, label)
+            })
+            .collect::<Vec<_>>();
+        let layouts = workspace_tab_layouts(&tabs, self.active_tab_id);
         workspace_tab_menu_anchor(
             self.active_tab_id,
             &self.tabs,
@@ -564,6 +621,41 @@ impl WorkspacePrototype {
         true
     }
 
+    fn reorder_tab(
+        &mut self,
+        dragged_id: WorkspaceTabId,
+        target_id: WorkspaceTabId,
+        cx: &mut Context<Self>,
+    ) {
+        if dragged_id == target_id {
+            return;
+        }
+
+        let valid_tabs = self.tab_ids();
+        let block_ids = self
+            .tab_manager
+            .joined_pair_for(dragged_id.0, &valid_tabs)
+            .map(|joined| {
+                let mut ids = [
+                    WorkspaceTabId(joined.primary),
+                    WorkspaceTabId(joined.secondary),
+                ];
+                ids.sort_by_key(|id| {
+                    self.tabs
+                        .iter()
+                        .position(|tab| tab.id == *id)
+                        .unwrap_or(usize::MAX)
+                });
+                ids.to_vec()
+            })
+            .unwrap_or_else(|| vec![dragged_id]);
+
+        if reorder_workspace_tab_block(&mut self.tabs, &block_ids, target_id) {
+            self.close_tab_context_menu(cx);
+            cx.notify();
+        }
+    }
+
     fn focus_surface(
         &self,
         surface: WorkspaceSurface,
@@ -578,7 +670,13 @@ impl WorkspacePrototype {
             | WorkspaceSurface::Settings => {
                 window.focus(&self.editor.focus_handle(cx));
             }
-            WorkspaceSurface::Terminal => window.focus(&self.terminal.focus_handle(cx)),
+            WorkspaceSurface::Terminal => {
+                if let Some(terminal) = self.terminals.get(&self.active_tab_id.0) {
+                    window.focus(&terminal.focus_handle(cx));
+                } else {
+                    window.focus(&self.focus_handle);
+                }
+            }
             WorkspaceSurface::Sketch => window.focus(&self.sketch.focus_handle(cx)),
         }
     }
@@ -614,10 +712,47 @@ impl WorkspacePrototype {
         let tab_id = WorkspaceTabId(self.next_tab_id);
         self.next_tab_id += 1;
         self.tabs.push(WorkspaceTab::new(tab_id, surface));
+        if surface == WorkspaceSurface::Terminal {
+            let terminal = self.new_terminal_surface(cx);
+            self.terminals.insert(tab_id.0, terminal);
+        }
         self.active_tab_id = tab_id;
         self.tab_manager.set_active_tab(tab_id.0);
         self.focus_surface(surface, window, cx);
         cx.notify();
+    }
+
+    fn new_terminal_surface(&self, cx: &mut Context<Self>) -> Entity<TerminalSurface> {
+        let terminal = cx.new(TerminalSurface::new);
+        let config = self.appearance_config.clone();
+        terminal.update(cx, |terminal, cx| terminal.set_config(config, cx));
+        terminal
+    }
+
+    fn open_new_terminal_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let tab_id = WorkspaceTabId(self.next_tab_id);
+        self.next_tab_id += 1;
+        self.tabs
+            .push(WorkspaceTab::new(tab_id, WorkspaceSurface::Terminal));
+        let terminal = self.new_terminal_surface(cx);
+        self.terminals.insert(tab_id.0, terminal);
+        self.active_tab_id = tab_id;
+        self.tab_manager.set_active_tab(tab_id.0);
+        self.focus_surface(WorkspaceSurface::Terminal, window, cx);
+        cx.notify();
+    }
+
+    fn open_footer_surface(
+        &mut self,
+        surface: WorkspaceSurface,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if surface == WorkspaceSurface::Terminal {
+            self.open_new_terminal_tab(window, cx);
+        } else {
+            self.open_or_activate_surface(surface, window, cx);
+        }
     }
 
     fn close_tab(&mut self, tab_id: WorkspaceTabId, window: &mut Window, cx: &mut Context<Self>) {
@@ -626,6 +761,9 @@ impl WorkspacePrototype {
         };
 
         let was_active = self.active_tab_id == tab_id;
+        if self.tabs[index].surface == WorkspaceSurface::Terminal {
+            self.terminals.remove(&tab_id.0);
+        }
         self.tabs.remove(index);
         self.tab_name_overrides.remove(&tab_id.0);
         if self
@@ -671,6 +809,8 @@ impl Render for WorkspacePrototype {
         let tab_context_menu = self.tab_manager.context_menu();
         let tab_name_overrides = self.tab_name_overrides.clone();
         let tab_rename = self.tab_rename.clone();
+        let sidebar_context_menu = self.sidebar_context_menu.clone();
+        let sidebar_rename = self.sidebar_rename.clone();
         let queued_prompts = load_workspace_queue();
         let appearance_config = self.appearance_config.clone();
         let appearance_page = self.appearance_page;
@@ -710,7 +850,7 @@ impl Render for WorkspacePrototype {
                 WorkspaceSurfaceContext {
                     stacker: self.stacker.clone(),
                     editor: self.editor.clone(),
-                    terminal: self.terminal.clone(),
+                    terminals: self.terminals.clone(),
                     sketch: self.sketch.clone(),
                     workspace_root,
                     recent_projects,
@@ -719,6 +859,7 @@ impl Render for WorkspacePrototype {
                     terminal_background_import_error,
                 },
                 active_surface,
+                active_tab_id,
                 joined_panes,
                 cx,
             ));
@@ -735,7 +876,7 @@ impl Render for WorkspacePrototype {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _: &MouseDownEvent, _window, cx| {
-                    this.close_tab_context_menu(cx);
+                    this.close_context_menus(cx);
                 }),
             )
             .on_key_down(cx.listener(Self::on_workspace_key_down))
@@ -782,6 +923,14 @@ impl Render for WorkspacePrototype {
                     self.tab_choices(),
                     &self.tab_manager,
                     tab_rename,
+                    cx,
+                ))
+            })
+            .when_some(sidebar_context_menu, |root, menu| {
+                root.child(workspace_sidebar_context_menu(
+                    menu,
+                    self.workspace_root.clone(),
+                    sidebar_rename,
                     cx,
                 ))
             })

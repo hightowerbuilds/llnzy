@@ -4,22 +4,16 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-default = []
+default = ["gpui-workspace"]
 gpui-editor = ["dep:gpui"]
 gpui-stacker = ["dep:gpui"]
 gpui-workspace = ["gpui-editor", "gpui-stacker"]
 
 [dependencies]
-winit = "0.30"
-wgpu = "22"
-glyphon = "0.6"
 alacritty_terminal = "0.26"
 portable-pty = "0.8"
 log = "0.4"
 env_logger = "0.11"
-pollster = "0.4"
-bytemuck = { version = "1", features = ["derive"] }
-arboard = "3"
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 dirs = "6"
@@ -27,10 +21,8 @@ regex = "1"
 serde_json = "1"
 image = "0.25"
 rfd = "0.15"
-taffy = "0.7"
-egui = "0.29"
-egui-wgpu = "0.29"
-egui-winit = "0.29"
+resvg = "0.45.1"
+usvg = "0.45.1"
 libc = "0.2"
 ropey = "1"
 unicode-segmentation = "1"
@@ -70,12 +62,8 @@ name = "gpui-workspace"
 path = "src/bin/gpui_workspace.rs"
 required-features = ["gpui-workspace"]
 
-[target.'cfg(target_os = "macos")'.dependencies]
-objc2 = "0.6"
-objc2-app-kit = { version = "0.3", features = ["NSAccessibility", "NSAccessibilityConstants", "NSApplication", "NSColor", "NSFont", "NSMenu", "NSMenuItem", "NSResponder", "NSScrollView", "NSText", "NSTextInputClient", "NSTextView", "NSView", "NSWindow"] }
-objc2-foundation = { version = "0.3", features = ["NSGeometry", "NSString"] }
 # Compile dependencies with full optimizations even in dev builds.
-# wgpu/glyphon/egui/ropey are unusable at opt-level=0.
+# GPUI and editor parsing dependencies are noticeably sluggish at opt-level=0.
 [profile.dev.package."*"]
 opt-level = 3
 

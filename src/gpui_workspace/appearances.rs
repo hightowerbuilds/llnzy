@@ -82,6 +82,7 @@ fn appearance_page_nav(
         .gap_1()
         .child(appearance_page_button(AppearancePage::Terminal, page, cx))
         .child(appearance_page_button(AppearancePage::Editor, page, cx))
+        .child(appearance_page_button(AppearancePage::Markdown, page, cx))
         .child(appearance_page_button(AppearancePage::Sketch, page, cx))
 }
 
@@ -201,6 +202,7 @@ fn appearance_controls_column(
             terminal_appearance_controls(content, config, terminal_background_import_error, cx)
         }
         AppearancePage::Editor => editor_appearance_controls(content, config, cx),
+        AppearancePage::Markdown => markdown_appearance_controls(content, config),
         AppearancePage::Sketch => sketch_appearance_controls(content),
     }
 }
@@ -496,6 +498,60 @@ fn sketch_appearance_controls(content: gpui::Div) -> gpui::Div {
                 .text_size(px(12.0))
                 .text_color(rgb(MUTED_TEXT))
                 .child("The next pass should expose full canvas color, grid spacing, image, symbol, and text editing controls here."),
+        )
+}
+
+fn markdown_appearance_controls(content: gpui::Div, config: Config) -> gpui::Div {
+    let editor_font = config
+        .editor
+        .font_size
+        .unwrap_or((config.font_size - 2.0).max(10.0));
+    content
+        .child(metric_readout(
+            "Preview Font",
+            format!("{editor_font:.0}px editor base"),
+        ))
+        .child(metric_readout(
+            "Preview Width",
+            "Matches editor pane or split pane".to_string(),
+        ))
+        .child(
+            div()
+                .mt_2()
+                .text_size(px(13.0))
+                .text_color(rgb(SIDEBAR_TEXT))
+                .child("Markdown preview uses the editor theme colors and keeps source, preview, and split modes separate from terminal and sketch settings."),
+        )
+        .child(
+            div()
+                .mt_2()
+                .text_size(px(12.0))
+                .text_color(rgb(MUTED_TEXT))
+                .child("Dedicated markdown typography controls can build on this page after the live preview workflow settles."),
+        )
+}
+
+fn metric_readout(label: &'static str, value: String) -> impl IntoElement {
+    div()
+        .w_full()
+        .flex()
+        .items_center()
+        .gap_2()
+        .child(control_label(label))
+        .child(
+            div()
+                .h(px(30.0))
+                .min_w(px(150.0))
+                .flex()
+                .items_center()
+                .rounded_sm()
+                .border_1()
+                .border_color(rgb(0x3a3f4d))
+                .bg(rgb(0x11131a))
+                .px_2()
+                .text_size(px(12.0))
+                .text_color(rgb(SIDEBAR_TEXT))
+                .child(value),
         )
 }
 

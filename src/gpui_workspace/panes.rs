@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{collections::BTreeMap, path::PathBuf};
 
 use gpui::prelude::*;
 use gpui::{div, px, relative, rgb, Context, Entity, MouseButton, MouseDownEvent};
@@ -20,7 +20,7 @@ use super::{
 pub(super) struct WorkspaceSurfaceContext {
     pub(super) stacker: Entity<StackerPrototype>,
     pub(super) editor: Entity<EditorPrototype>,
-    pub(super) terminal: Entity<TerminalSurface>,
+    pub(super) terminals: BTreeMap<u64, Entity<TerminalSurface>>,
     pub(super) sketch: Entity<SketchSurface>,
     pub(super) workspace_root: Option<PathBuf>,
     pub(super) recent_projects: Vec<PathBuf>,
@@ -32,6 +32,7 @@ pub(super) struct WorkspaceSurfaceContext {
 pub(super) fn workspace_content(
     context: WorkspaceSurfaceContext,
     active_surface: WorkspaceSurface,
+    active_tab_id: WorkspaceTabId,
     joined_panes: Option<JoinedWorkspacePanes>,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
@@ -80,7 +81,7 @@ pub(super) fn workspace_content(
         );
     }
 
-    content.child(workspace_surface_pane(context, active_surface, None, cx).flex_1())
+    content.child(workspace_surface_pane(context, active_surface, Some(active_tab_id), cx).flex_1())
 }
 
 pub(super) fn workspace_surface_pane(
@@ -92,7 +93,7 @@ pub(super) fn workspace_surface_pane(
     let WorkspaceSurfaceContext {
         stacker,
         editor,
-        terminal,
+        terminals,
         sketch,
         workspace_root,
         recent_projects,
@@ -141,9 +142,19 @@ pub(super) fn workspace_surface_pane(
                         .child(editor),
                 ),
             ),
-        WorkspaceSurface::Terminal => {
-            pane.child(div().size_full().overflow_hidden().child(terminal))
-        }
+        WorkspaceSurface::Terminal => match terminal_for_pane(&terminals, tab_id) {
+            Some(terminal) => pane.child(div().size_full().overflow_hidden().child(terminal)),
+            None => pane.child(
+                div()
+                    .size_full()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_size(px(14.0))
+                    .text_color(rgb(0xff7a7a))
+                    .child("Terminal session unavailable"),
+            ),
+        },
         WorkspaceSurface::Sketch => pane.child(sketch),
         WorkspaceSurface::Appearances => pane.child(appearances_surface(
             appearance_config,
@@ -154,4 +165,13 @@ pub(super) fn workspace_surface_pane(
         WorkspaceSurface::Home => pane.child(home_surface(workspace_root, recent_projects, cx)),
         WorkspaceSurface::Settings => pane.child(settings_placeholder()),
     }
+}
+
+fn terminal_for_pane(
+    terminals: &BTreeMap<u64, Entity<TerminalSurface>>,
+    tab_id: Option<WorkspaceTabId>,
+) -> Option<Entity<TerminalSurface>> {
+    tab_id
+        .and_then(|tab_id| terminals.get(&tab_id.0).cloned())
+        .or_else(|| terminals.values().next().cloned())
 }

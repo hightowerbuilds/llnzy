@@ -1,18 +1,19 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use gpui::prelude::*;
 use gpui::{
-    actions, div, fill, point, px, relative, rgb, rgba, size, App, Bounds, ContentMask, Context,
-    Element, ElementId, Entity, FocusHandle, Focusable, GlobalElementId, KeyBinding, LayoutId,
-    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Path as GpuiPath,
-    PathBuilder, Pixels, Point, Render, SharedString, Style, TextAlign, TextRun, Window,
-    WrappedLine,
+    actions, div, fill, img, point, px, relative, rgb, rgba, size, App, Bounds, ContentMask,
+    Context, Element, ElementId, Entity, FocusHandle, Focusable, GlobalElementId, KeyBinding,
+    LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, PaintQuad,
+    Path as GpuiPath, PathBuilder, Pixels, Point, Render, SharedString, Style, StyledImage,
+    TextAlign, TextRun, Window, WrappedLine,
 };
 
 use crate::sketch::{
-    save_appearance_settings, save_default_document, save_named_sketch, DraftElement, RectElement,
-    SketchCanvasBackgroundMode, SketchElement, SketchGridMode, SketchPoint, SketchState,
-    SketchTool,
+    default_jpeg_export_file_name, export_jpeg_to_path, save_appearance_settings,
+    save_default_document, save_named_sketch, sketch_screenshot_drop_dir, DraftElement,
+    ImageElement, RectElement, SketchCanvasBackgroundMode, SketchElement, SketchGridMode,
+    SketchPoint, SketchState, SketchTool,
 };
 
 const SKETCH_BG: u32 = 0x191920;
@@ -51,6 +52,7 @@ pub(crate) fn bind_sketch_keys(cx: &mut App) {
 pub(crate) struct SketchSurface {
     focus_handle: FocusHandle,
     state: SketchState,
+    workspace_root: Option<PathBuf>,
     last_bounds: Option<Bounds<Pixels>>,
     is_dragging: bool,
     status_message: Option<String>,
@@ -61,10 +63,15 @@ impl SketchSurface {
         Self {
             focus_handle: cx.focus_handle(),
             state: SketchState::load_default(),
+            workspace_root: None,
             last_bounds: None,
             is_dragging: false,
             status_message: None,
         }
+    }
+
+    pub(crate) fn set_workspace_root(&mut self, workspace_root: Option<PathBuf>) {
+        self.workspace_root = workspace_root;
     }
 
     fn set_tool(&mut self, tool: SketchTool, cx: &mut Context<Self>) {
@@ -133,6 +140,122 @@ impl SketchSurface {
         }
         self.state.mark_saved();
         Ok(())
+    }
+
+    fn import_image(&mut self, cx: &mut Context<Self>) {
+        let insert_point = self.default_import_point();
+        cx.spawn(
+            move |surface: gpui::WeakEntity<SketchSurface>, cx: &mut gpui::AsyncApp| {
+                let mut cx = cx.clone();
+                async move {
+                    let Some(file) = rfd::AsyncFileDialog::new()
+                        .set_title("Import Sketch Image")
+                        .add_filter("Images", &["png", "jpg", "jpeg", "bmp", "webp", "gif"])
+                        .pick_file()
+                        .await
+                    else {
+                        return;
+                    };
+                    let path = file.path().to_path_buf();
+                    let _ = surface.update(&mut cx, |surface, cx| {
+                        match surface.state.add_image_from_path(&path, insert_point) {
+                            Ok(_) => {
+                                surface.state.set_tool(SketchTool::Select);
+                                surface.status_message = Some(format!(
+                                    "Imported {}",
+                                    path.file_name()
+                                        .and_then(|name| name.to_str())
+                                        .unwrap_or("image")
+                                ));
+                                surface.persist_if_dirty();
+                            }
+                            Err(err) => {
+                                surface.status_message = Some(format!("Import failed: {err}"));
+                            }
+                        }
+                        cx.notify();
+                    });
+                }
+            },
+        )
+        .detach();
+    }
+
+    fn export_jpeg(&mut self, cx: &mut Context<Self>) {
+        if let Some(root) = self.workspace_root.clone() {
+            self.export_jpeg_to_dir(root.join("sketches"), cx);
+            return;
+        }
+
+        cx.spawn(
+            |surface: gpui::WeakEntity<SketchSurface>, cx: &mut gpui::AsyncApp| {
+                let mut cx = cx.clone();
+                async move {
+                    let Some(folder) = rfd::AsyncFileDialog::new()
+                        .set_title("Export Sketch JPEG")
+                        .pick_folder()
+                        .await
+                    else {
+                        return;
+                    };
+                    let directory = folder.path().to_path_buf();
+                    let _ = surface.update(&mut cx, |surface, cx| {
+                        surface.export_jpeg_to_dir(directory, cx);
+                    });
+                }
+            },
+        )
+        .detach();
+    }
+
+    fn export_jpeg_to_dir(&mut self, directory: PathBuf, cx: &mut Context<Self>) {
+        let filename = default_jpeg_export_file_name(self.state.active_sketch_name.as_deref());
+        let path = unique_export_path(&directory, &filename);
+        let canvas_size = self.export_canvas_size();
+        match export_jpeg_to_path(&self.state.document, &path, canvas_size) {
+            Ok(result) => {
+                self.status_message = Some(format!(
+                    "Exported {} ({}x{})",
+                    result.path.display(),
+                    result.width,
+                    result.height
+                ));
+            }
+            Err(err) => {
+                self.status_message = Some(format!("Export failed: {err}"));
+            }
+        }
+        cx.notify();
+    }
+
+    fn open_screenshot_drop_folder(&mut self, cx: &mut Context<Self>) {
+        match sketch_screenshot_drop_dir() {
+            Ok(dir) => {
+                self.status_message = Some(format!("Screenshot drop folder: {}", dir.display()));
+                let _ = std::process::Command::new("open").arg(&dir).spawn();
+            }
+            Err(err) => {
+                self.status_message = Some(format!("Drop folder failed: {err}"));
+            }
+        }
+        cx.notify();
+    }
+
+    fn resize_selected_image(&mut self, scale: f32, cx: &mut Context<Self>) {
+        if self.state.resize_selected_image_to_scale(scale) {
+            self.status_message = Some(format!("Image {:.0}%", scale * 100.0));
+            self.persist_if_dirty();
+            cx.notify();
+        }
+    }
+
+    fn default_import_point(&self) -> SketchPoint {
+        SketchPoint::new(24.0, 24.0)
+    }
+
+    fn export_canvas_size(&self) -> [f32; 2] {
+        let [width, height] = self.state.last_canvas_size;
+        [width.max(1.0), height.max(1.0)]
     }
 
     fn on_mouse_down(
@@ -308,6 +431,7 @@ impl Render for SketchSurface {
             .child(sketch_toolbar(
                 self.state.tool,
                 self.state.appearance.grid_mode,
+                self.state.selected_image_scale(),
                 cx,
             ))
             .child(
@@ -323,6 +447,12 @@ impl Render for SketchSurface {
                     .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
                     .child(SketchCanvasElement {
                         surface: cx.entity(),
+                        layer: SketchCanvasLayer::Background,
+                    })
+                    .child(sketch_image_layer(&self.state))
+                    .child(SketchCanvasElement {
+                        surface: cx.entity(),
+                        layer: SketchCanvasLayer::Foreground,
                     }),
             )
     }
@@ -384,9 +514,10 @@ fn sketch_header(surface: &SketchSurface) -> impl IntoElement {
 fn sketch_toolbar(
     active_tool: SketchTool,
     grid_mode: SketchGridMode,
+    selected_image_scale: Option<f32>,
     cx: &mut Context<SketchSurface>,
 ) -> impl IntoElement {
-    div()
+    let mut toolbar = div()
         .h(px(44.0))
         .w_full()
         .flex()
@@ -435,12 +566,45 @@ fn sketch_toolbar(
         .child(tool_button("Redo", false, cx, |this, cx| {
             this.redo_from_workspace(cx);
         }))
+        .child(div().w(px(1.0)).h(px(24.0)).bg(rgb(SKETCH_BORDER)))
+        .child(tool_button("Import", false, cx, |this, cx| {
+            this.import_image(cx);
+        }))
+        .child(tool_button("Drop Folder", false, cx, |this, cx| {
+            this.open_screenshot_drop_folder(cx);
+        }));
+
+    if let Some(scale) = selected_image_scale {
+        let smaller = (scale * 0.8).max(0.05);
+        let larger = (scale * 1.25).min(2.0);
+        toolbar = toolbar
+            .child(div().w(px(1.0)).h(px(24.0)).bg(rgb(SKETCH_BORDER)))
+            .child(tool_button("Image -", false, cx, move |this, cx| {
+                this.resize_selected_image(smaller, cx);
+            }))
+            .child(tool_button(
+                "Image 100%",
+                (scale - 1.0).abs() < 0.01,
+                cx,
+                |this, cx| {
+                    this.resize_selected_image(1.0, cx);
+                },
+            ))
+            .child(tool_button("Image +", false, cx, move |this, cx| {
+                this.resize_selected_image(larger, cx);
+            }));
+    }
+
+    toolbar
         .child(div().flex_1())
         .child(tool_button("Clear", false, cx, |this, cx| {
             this.clear_canvas(cx);
         }))
         .child(tool_button("Save", false, cx, |this, cx| {
             this.save_from_workspace(cx);
+        }))
+        .child(tool_button("Export JPG", false, cx, |this, cx| {
+            this.export_jpeg(cx);
         }))
 }
 
@@ -453,11 +617,12 @@ fn grid_label(grid_mode: SketchGridMode) -> &'static str {
 }
 
 fn tool_button(
-    label: &'static str,
+    label: impl Into<SharedString>,
     active: bool,
     cx: &mut Context<SketchSurface>,
     on_click: impl Fn(&mut SketchSurface, &mut Context<SketchSurface>) + 'static,
 ) -> impl IntoElement {
+    let label = label.into();
     div()
         .h(px(30.0))
         .flex()
@@ -487,6 +652,13 @@ fn tool_button(
 
 struct SketchCanvasElement {
     surface: Entity<SketchSurface>,
+    layer: SketchCanvasLayer,
+}
+
+#[derive(Clone, Copy)]
+enum SketchCanvasLayer {
+    Background,
+    Foreground,
 }
 
 struct SketchPrepaintState {
@@ -544,7 +716,7 @@ impl Element for SketchCanvasElement {
         cx: &mut App,
     ) -> Self::PrepaintState {
         let surface = self.surface.read(cx);
-        build_canvas_paint(&surface.state, bounds, window)
+        build_canvas_paint(&surface.state, bounds, self.layer, window)
     }
 
     fn paint(
@@ -589,6 +761,7 @@ impl Element for SketchCanvasElement {
 fn build_canvas_paint(
     state: &SketchState,
     bounds: Bounds<Pixels>,
+    layer: SketchCanvasLayer,
     window: &mut Window,
 ) -> SketchPrepaintState {
     let mut paint = SketchPrepaintState {
@@ -596,17 +769,26 @@ fn build_canvas_paint(
         paths: Vec::new(),
         text: Vec::new(),
     };
-    let canvas_bg = match state.appearance.canvas_background_mode {
-        SketchCanvasBackgroundMode::Theme => rgb(SKETCH_CANVAS_BG),
-        SketchCanvasBackgroundMode::Solid => {
-            rgba(rgba_u32(state.appearance.canvas_background_color))
-        }
-    };
-    paint.quads.push(fill(bounds, canvas_bg));
 
-    paint_grid(&mut paint, bounds, state);
+    match layer {
+        SketchCanvasLayer::Background => {
+            let canvas_bg = match state.appearance.canvas_background_mode {
+                SketchCanvasBackgroundMode::Theme => rgb(SKETCH_CANVAS_BG),
+                SketchCanvasBackgroundMode::Solid => {
+                    rgba(rgba_u32(state.appearance.canvas_background_color))
+                }
+            };
+            paint.quads.push(fill(bounds, canvas_bg));
+            paint_grid(&mut paint, bounds, state);
+            return paint;
+        }
+        SketchCanvasLayer::Foreground => {}
+    }
 
     for element in &state.document.elements {
+        if matches!(element, SketchElement::Image(_)) {
+            continue;
+        }
         paint_element(&mut paint, element, bounds, window);
     }
 
@@ -628,6 +810,64 @@ fn build_canvas_paint(
     }
 
     paint
+}
+
+fn sketch_image_layer(state: &SketchState) -> gpui::Div {
+    state
+        .document
+        .elements
+        .iter()
+        .filter_map(|element| match element {
+            SketchElement::Image(image) => Some(image.clone()),
+            _ => None,
+        })
+        .fold(
+            div()
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full()
+                .overflow_hidden(),
+            |layer, image| layer.child(sketch_image_element(image)),
+        )
+}
+
+fn sketch_image_element(image: ImageElement) -> impl IntoElement {
+    div()
+        .absolute()
+        .left(px(image.x))
+        .top(px(image.y))
+        .w(px(image.w.max(1.0)))
+        .h(px(image.h.max(1.0)))
+        .overflow_hidden()
+        .border_1()
+        .border_color(rgb(0x111722))
+        .child(
+            img(PathBuf::from(image.path))
+                .size_full()
+                .object_fit(ObjectFit::Fill),
+        )
+}
+
+fn unique_export_path(directory: &Path, filename: &str) -> PathBuf {
+    let source = Path::new(filename);
+    let stem = source
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .filter(|stem| !stem.trim().is_empty())
+        .unwrap_or("sketch");
+    let extension = source
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .filter(|extension| !extension.trim().is_empty())
+        .unwrap_or("jpg");
+    let mut candidate = directory.join(format!("{stem}.{extension}"));
+    let mut index = 1;
+    while candidate.exists() {
+        candidate = directory.join(format!("{stem}-{index}.{extension}"));
+        index += 1;
+    }
+    candidate
 }
 
 fn paint_grid(paint: &mut SketchPrepaintState, bounds: Bounds<Pixels>, state: &SketchState) {
@@ -799,7 +1039,7 @@ fn paint_selection(
 
     if matches!(
         element,
-        SketchElement::Rectangle(_) | SketchElement::Symbol(_)
+        SketchElement::Rectangle(_) | SketchElement::Image(_) | SketchElement::Symbol(_)
     ) {
         let handle = state.appearance.effective_handle_size();
         for corner in [

@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::{ops::Range, time::Duration};
 
 use gpui::prelude::*;
 use gpui::{
@@ -32,6 +32,7 @@ const TEXT: u32 = 0xe8e8ee;
 const MUTED_TEXT: u32 = 0xa8a8b4;
 const SELECTED_BG: u32 = 0x313846;
 const QUEUE_GREEN: u32 = 0x6aff90;
+const PROMPT_REFRESH_TICK: Duration = Duration::from_millis(1000);
 
 actions!(
     stacker_gpui,
@@ -126,6 +127,7 @@ impl StackerPrototype {
             .unwrap_or_else(|| "Draft a prompt with GPUI-native text input.".to_string());
         let active_prompt = (!prompts.is_empty()).then_some(0);
         let editor = cx.new(|cx| StackerTextInput::new(cx, initial_text));
+        start_prompt_refresh_task(cx);
         Self {
             editor,
             prompts,
@@ -157,6 +159,72 @@ impl StackerPrototype {
         save_stacker_queue(&self.queued_prompts);
         cx.notify();
     }
+
+    fn refresh_external_prompt_state(&mut self, cx: &mut Context<Self>) -> bool {
+        let mut next_queue = load_stacker_queue();
+        queue::sanitize_prompt_queue(&mut next_queue);
+        let next_prompts = load_saved_prompts();
+        if next_prompts == self.prompts && next_queue == self.queued_prompts {
+            return false;
+        }
+
+        let previous_active = self.active_prompt;
+        let previous_active_id = previous_active
+            .and_then(|index| self.prompts.get(index))
+            .and_then(|prompt| prompt.id.clone());
+        let previous_active_text = previous_active
+            .and_then(|index| self.prompts.get(index))
+            .map(|prompt| prompt.text.clone());
+        let editor_text = self.editor.read(cx).session.text().to_string();
+
+        self.prompts = next_prompts;
+        self.queued_prompts = next_queue;
+        self.active_prompt = previous_active_id
+            .as_deref()
+            .and_then(|id| {
+                self.prompts
+                    .iter()
+                    .position(|prompt| prompt.id.as_deref() == Some(id))
+            })
+            .or_else(|| (!self.prompts.is_empty()).then_some(0));
+
+        let should_replace_editor = previous_active_text
+            .as_ref()
+            .map_or(true, |text| editor_text == *text);
+        if should_replace_editor {
+            let text = self
+                .active_prompt
+                .and_then(|index| self.prompts.get(index))
+                .map(|prompt| prompt.text.clone())
+                .unwrap_or_default();
+            self.editor.update(cx, |editor, cx| {
+                editor.session.set_text(text);
+                cx.notify();
+            });
+        }
+        true
+    }
+}
+
+fn start_prompt_refresh_task(cx: &mut Context<StackerPrototype>) {
+    cx.spawn(
+        |stacker: gpui::WeakEntity<StackerPrototype>, cx: &mut gpui::AsyncApp| {
+            let mut cx = cx.clone();
+            async move {
+                loop {
+                    cx.background_executor().timer(PROMPT_REFRESH_TICK).await;
+                    let Ok(()) = stacker.update(&mut cx, |stacker, cx| {
+                        if stacker.refresh_external_prompt_state(cx) {
+                            cx.notify();
+                        }
+                    }) else {
+                        break;
+                    };
+                }
+            }
+        },
+    )
+    .detach();
 }
 
 impl Focusable for StackerPrototype {

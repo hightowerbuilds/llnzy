@@ -1,9 +1,9 @@
 use super::geometry::{distance, rect_from_drag, translate_element};
 use super::{
-    fit_image_size, import_sketch_image, DraftElement, ImageElement, MoveDraft, RectElement,
-    ResizeDraft, ResizeHandle, SketchElement, SketchPoint, SketchState, SketchSymbolKind,
-    SketchTool, StrokeElement, SymbolElement, TextDraft, TextElement, DEFAULT_SYMBOL_H,
-    DEFAULT_SYMBOL_W, DEFAULT_TEXT_H, DEFAULT_TEXT_W, MIN_POINTS_FOR_STROKE, MIN_RECT_SIZE,
+    import_sketch_image, DraftElement, ImageElement, MoveDraft, RectElement, ResizeDraft,
+    ResizeHandle, SketchElement, SketchPoint, SketchState, SketchSymbolKind, SketchTool,
+    StrokeElement, SymbolElement, TextDraft, TextElement, DEFAULT_SYMBOL_H, DEFAULT_SYMBOL_W,
+    DEFAULT_TEXT_H, DEFAULT_TEXT_W, MIN_POINTS_FOR_STROKE, MIN_RECT_SIZE,
 };
 use std::path::Path;
 
@@ -182,7 +182,8 @@ impl SketchState {
         point: SketchPoint,
     ) -> Result<usize, String> {
         let (imported, original_w, original_h) = import_sketch_image(path)?;
-        let (w, h) = fit_image_size(original_w, original_h, 360.0);
+        let w = original_w.max(1) as f32;
+        let h = original_h.max(1) as f32;
         self.push_undo();
         let index = self.document.elements.len();
         self.document
@@ -471,6 +472,12 @@ fn resizable_element_bounds(element: &SketchElement) -> Option<ElementBounds> {
             w: rect.w,
             h: rect.h,
         }),
+        SketchElement::Image(image) => Some(ElementBounds {
+            x: image.x,
+            y: image.y,
+            w: image.w,
+            h: image.h,
+        }),
         SketchElement::Symbol(symbol) => Some(ElementBounds {
             x: symbol.x,
             y: symbol.y,
@@ -488,6 +495,13 @@ fn apply_resizable_element_bounds(element: &mut SketchElement, bounds: ElementBo
             rect.y = bounds.y;
             rect.w = bounds.w;
             rect.h = bounds.h;
+            true
+        }
+        SketchElement::Image(image) => {
+            image.x = bounds.x;
+            image.y = bounds.y;
+            image.w = bounds.w;
+            image.h = bounds.h;
             true
         }
         SketchElement::Symbol(symbol) => {

@@ -72,6 +72,25 @@ impl EditorPrototype {
         command: EditorCommand,
         cx: &mut Context<Self>,
     ) {
+        if self.image_preview_active {
+            match command {
+                EditorCommand::Copy => {
+                    if let Some(preview) = &self.image_preview {
+                        cx.write_to_clipboard(ClipboardItem::new_string(
+                            preview.path.display().to_string(),
+                        ));
+                        self.status_message = Some("Copied image path".to_string());
+                    }
+                }
+                EditorCommand::Save => {
+                    self.status_message = Some("Image previews are read-only".to_string());
+                }
+                _ => {}
+            }
+            cx.notify();
+            return;
+        }
+
         match command {
             EditorCommand::Move { motion, extend } => self.move_cursor(motion, extend, cx),
             EditorCommand::Delete(target) => self.delete_target(target, cx),
@@ -321,6 +340,11 @@ impl EditorPrototype {
     }
 
     pub(super) fn copy_selection_or_line(&mut self, cx: &mut Context<Self>) {
+        if self.image_preview_active {
+            self.dispatch_editor_command(EditorCommand::Copy, cx);
+            return;
+        }
+
         if let Some(text) = self.selected_text_or_current_line() {
             if !text.is_empty() {
                 cx.write_to_clipboard(ClipboardItem::new_string(text));
@@ -360,12 +384,22 @@ impl EditorPrototype {
     }
 
     pub(crate) fn paste_from_clipboard(&mut self, cx: &mut Context<Self>) {
+        if self.image_preview_active {
+            self.status_message = Some("Image previews are read-only".to_string());
+            cx.notify();
+            return;
+        }
+
         if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
             self.replace_selection_or_range(cx, None, &text);
         }
     }
 
     pub(crate) fn undo_edit(&mut self, cx: &mut Context<Self>) {
+        if self.image_preview_active {
+            return;
+        }
+
         self.edit_active(cx, |buffer, view| {
             if let Some(pos) = buffer.undo() {
                 view.cursor.pos = pos;
@@ -376,6 +410,10 @@ impl EditorPrototype {
     }
 
     pub(crate) fn redo_edit(&mut self, cx: &mut Context<Self>) {
+        if self.image_preview_active {
+            return;
+        }
+
         self.edit_active(cx, |buffer, view| {
             if let Some(pos) = buffer.redo() {
                 view.cursor.pos = pos;

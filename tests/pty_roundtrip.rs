@@ -3,9 +3,8 @@
 //! These tests spawn a real PTY with a shell, send commands,
 //! and verify output comes back through the terminal emulator.
 //!
-//! We use portable_pty directly (the same library llnzy uses) rather than
-//! going through our Pty wrapper, which requires a winit EventLoopProxy
-//! that can't be created in test threads on macOS.
+//! We use portable_pty directly so the tests can control the child process
+//! lifetime and terminal drain loop explicitly.
 
 use std::io::{Read, Write};
 use std::sync::mpsc;

@@ -22,8 +22,11 @@ pub use appearance::{
     save_appearance_settings, save_appearance_settings_to_path, SketchAppearanceSettings,
     SketchCanvasBackgroundMode, SketchGridMode, SketchToolbarPosition,
 };
-pub use export::{default_export_file_name, export_svg_to_path};
-pub use media::{fit_image_size, import_sketch_image};
+pub use export::{
+    default_export_file_name, default_jpeg_export_file_name, export_jpeg_to_path,
+    export_svg_to_path, JpegExportResult,
+};
+pub use media::{import_sketch_image, sketch_screenshot_drop_dir};
 pub use model::{
     DraftElement, ImageElement, MoveDraft, RectElement, ResizeDraft, ResizeHandle, SketchDocument,
     SketchElement, SketchPoint, SketchStyle, SketchSymbolKind, SketchTool, StrokeElement,

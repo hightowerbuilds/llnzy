@@ -1,9 +1,7 @@
 pub mod buffer;
 pub mod cursor;
-pub mod file_watcher;
 pub mod git_gutter;
 pub mod history;
-pub mod keymap;
 pub mod perf;
 pub mod project_search;
 pub mod recovery;

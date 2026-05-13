@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 #[cfg(test)]
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use crate::config::{Config, CursorStyle as ConfigCursorStyle, EditorConfig};
@@ -9,8 +9,9 @@ use crate::editor::buffer::{Buffer, Position};
 use crate::editor::perf;
 use crate::editor::search::EditorSearch;
 use crate::editor::syntax::{group_color, HighlightGroup, HighlightSpan};
-use crate::editor::{BufferId, BufferView, EditorState};
+use crate::editor::{BufferId, BufferView, EditorState, MarkdownViewMode};
 use crate::lsp::{DiagSeverity, LspManager};
+use crate::path_utils::{file_name_or_display, path_extension_matches, PREVIEW_IMAGE_EXTS};
 use crate::stacker::utf16::{char_index_to_utf16_index, utf16_index_to_char_index};
 use gpui::prelude::*;
 use gpui::{
@@ -184,6 +185,8 @@ pub(crate) struct EditorPrototype {
     lsp_snapshot_key: String,
     appearance_config: EditorAppearanceConfig,
     editor_search: EditorSearch,
+    image_preview: Option<EditorImagePreview>,
+    image_preview_active: bool,
     search_input_target: EditorSearchInputTarget,
     go_to_line_active: bool,
     go_to_line_input: String,
@@ -202,6 +205,13 @@ pub(crate) struct EditorPrototype {
     cursor_blink_anchor: Instant,
     cursor_blink_visible: bool,
     show_chrome: bool,
+}
+
+#[derive(Clone)]
+struct EditorImagePreview {
+    path: PathBuf,
+    dimensions: Option<(u32, u32)>,
+    file_size: Option<u64>,
 }
 
 #[derive(Clone)]
@@ -365,6 +375,13 @@ struct EditorBufferTabSnapshot {
 }
 
 #[derive(Clone)]
+struct EditorImageTabSnapshot {
+    title: String,
+    subtitle: Option<String>,
+    active: bool,
+}
+
+#[derive(Clone)]
 struct EditorDiagnosticSnapshot {
     line: usize,
     col: usize,
@@ -404,11 +421,20 @@ impl EditorPrototype {
 
     #[cfg(feature = "gpui-workspace")]
     pub(crate) fn copy_selection_to_clipboard(&mut self, cx: &mut Context<Self>) {
+        if self.image_preview_active {
+            self.dispatch_editor_command(EditorCommand::Copy, cx);
+            return;
+        }
         self.copy_selection_or_line(cx);
     }
 
     #[cfg(feature = "gpui-workspace")]
     pub(crate) fn select_all_text(&mut self, cx: &mut Context<Self>) {
+        if self.image_preview_active {
+            self.status_message = Some("Image previews are read-only".to_string());
+            cx.notify();
+            return;
+        }
         let visible_cols = self.visible_col_limit();
         if let Some((buffer, view)) = self.active_buffer_and_view() {
             view.cursor.select_all(buffer);
@@ -447,6 +473,8 @@ impl EditorPrototype {
             lsp_snapshot_key: String::new(),
             appearance_config: EditorAppearanceConfig::default(),
             editor_search: EditorSearch::default(),
+            image_preview: None,
+            image_preview_active: false,
             search_input_target: EditorSearchInputTarget::Query,
             go_to_line_active: false,
             go_to_line_input: String::new(),
@@ -484,7 +512,18 @@ impl EditorPrototype {
                 self.editor_search.update_if_dirty(buffer);
             }
         }
-        let buffer_tabs = buffer_tab_snapshots(&self.editor);
+        let image_preview = self.image_preview.clone();
+        let image_preview_active = self.image_preview_active && image_preview.is_some();
+        let buffer_tabs = buffer_tab_snapshots(&self.editor, !image_preview_active);
+        let image_tab = image_preview
+            .as_ref()
+            .map(|preview| EditorImageTabSnapshot {
+                title: image_title(&preview.path),
+                subtitle: preview
+                    .dimensions
+                    .map(|(width, height)| format!("{width}x{height}")),
+                active: image_preview_active,
+            });
         let search_active = self.editor_search.active;
         let search_query = self.editor_search.query.clone();
         let search_replacement = self.editor_search.replacement.clone();
@@ -509,8 +548,64 @@ impl EditorPrototype {
                         .map(|name| name.to_string_lossy().into_owned())
                         .unwrap_or_else(|| change.path.display().to_string()),
                 });
+        if image_preview_active {
+            let preview = image_preview.expect("checked active image preview");
+            let appearance = self.appearance_config.for_language(None);
+            return EditorSnapshot {
+                title: preview.path.display().to_string(),
+                subtitle: image_subtitle(&preview),
+                language: "image".to_string(),
+                lines: Vec::new(),
+                first_line_number: 0,
+                cursor: None,
+                cursor_visible: false,
+                selection: None,
+                scroll_col: 0,
+                total_lines: 0,
+                load_error: self.load_error.clone(),
+                status_message: self.status_message.clone(),
+                buffer_tabs,
+                image_tab,
+                image_preview: Some(EditorImagePreviewSnapshot {
+                    path: preview.path,
+                    dimensions: preview.dimensions,
+                    file_size: preview.file_size,
+                }),
+                search_active,
+                search_query,
+                search_replacement,
+                search_replace_mode,
+                search_input_target,
+                search_status,
+                go_to_line_active,
+                go_to_line_input,
+                rename_active,
+                rename_input,
+                can_reopen_recent,
+                external_change: None,
+                lsp_status: String::new(),
+                diagnostics: Vec::new(),
+                lsp_panel: None,
+                degraded_notice: None,
+                cursor_diagnostic_message: None,
+                sample: false,
+                markdown: false,
+                markdown_mode: MarkdownViewMode::Source,
+                markdown_preview: None,
+                appearance,
+            };
+        }
+
         if let Some((buffer_id, buffer, view)) = self.editor.active_buffer_view() {
             let appearance = self.appearance_config.for_language(view.lang_id);
+            let markdown = buffer.path().is_some_and(is_markdown_path);
+            let markdown_mode = if markdown {
+                view.markdown_mode
+            } else {
+                MarkdownViewMode::Source
+            };
+            let markdown_preview = (markdown && markdown_mode != MarkdownViewMode::Source)
+                .then(|| markdown_preview_blocks(&buffer.text()));
             let line_count = buffer.line_count();
             let degraded_notice =
                 perf::LargeFileDegradation::for_line_count(line_count).status_label();
@@ -575,6 +670,8 @@ impl EditorPrototype {
                 load_error: self.load_error.clone(),
                 status_message: self.status_message.clone(),
                 buffer_tabs,
+                image_tab,
+                image_preview: None,
                 search_active,
                 search_query,
                 search_replacement,
@@ -593,6 +690,9 @@ impl EditorPrototype {
                 degraded_notice,
                 cursor_diagnostic_message,
                 sample: false,
+                markdown,
+                markdown_mode,
+                markdown_preview,
                 appearance,
             };
         }
@@ -628,6 +728,8 @@ impl EditorPrototype {
             load_error: self.load_error.clone(),
             status_message: self.status_message.clone(),
             buffer_tabs,
+            image_tab,
+            image_preview: None,
             search_active,
             search_query,
             search_replacement,
@@ -646,6 +748,9 @@ impl EditorPrototype {
             degraded_notice: None,
             cursor_diagnostic_message: None,
             sample: true,
+            markdown: false,
+            markdown_mode: MarkdownViewMode::Source,
+            markdown_preview: None,
             appearance,
         }
     }
@@ -760,6 +865,23 @@ impl EditorPrototype {
             buffer.pos_to_char(position),
         ))
     }
+
+    fn cycle_markdown_preview(&mut self, cx: &mut Context<Self>) {
+        let Some((buffer, view)) = self.active_buffer_and_view_mut() else {
+            return;
+        };
+        if !buffer.path().is_some_and(is_markdown_path) {
+            self.status_message = Some("Markdown preview is available for .md files".to_string());
+            cx.notify();
+            return;
+        }
+        view.markdown_mode = view.markdown_mode.cycle();
+        self.status_message = Some(format!(
+            "Markdown {}",
+            markdown_mode_label(view.markdown_mode)
+        ));
+        cx.notify();
+    }
 }
 
 impl Focusable for EditorPrototype {
@@ -770,6 +892,167 @@ impl Focusable for EditorPrototype {
 
 fn language_label(view: &BufferView) -> String {
     view.lang_id.unwrap_or("plain text").to_string()
+}
+
+fn is_markdown_path(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            matches!(
+                extension.to_ascii_lowercase().as_str(),
+                "md" | "markdown" | "mdown" | "mkd"
+            )
+        })
+}
+
+fn is_preview_image_path(path: &Path) -> bool {
+    path_extension_matches(path, PREVIEW_IMAGE_EXTS)
+}
+
+fn image_title(path: &Path) -> String {
+    file_name_or_display(path).into_owned()
+}
+
+fn image_subtitle(preview: &EditorImagePreview) -> String {
+    let kind = preview
+        .path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| extension.to_ascii_uppercase())
+        .unwrap_or_else(|| "Image".to_string());
+    let dimensions = preview
+        .dimensions
+        .map(|(width, height)| format!("{width}x{height}"))
+        .unwrap_or_else(|| "dimensions unavailable".to_string());
+    let size = preview
+        .file_size
+        .map(format_file_size)
+        .unwrap_or_else(|| "size unavailable".to_string());
+    format!("{kind} image, {dimensions}, {size}")
+}
+
+fn format_file_size(bytes: u64) -> String {
+    const KB: f64 = 1024.0;
+    const MB: f64 = 1024.0 * 1024.0;
+    if bytes < 1024 {
+        format!("{bytes} B")
+    } else if bytes < 1024 * 1024 {
+        format!("{:.1} KB", bytes as f64 / KB)
+    } else {
+        format!("{:.1} MB", bytes as f64 / MB)
+    }
+}
+
+fn markdown_mode_label(mode: MarkdownViewMode) -> &'static str {
+    match mode {
+        MarkdownViewMode::Source => "Source",
+        MarkdownViewMode::Preview => "Preview",
+        MarkdownViewMode::Split => "Split",
+    }
+}
+
+fn markdown_preview_blocks(source: &str) -> Vec<MarkdownPreviewBlock> {
+    let mut blocks = Vec::new();
+    let mut paragraph = Vec::new();
+    let mut code = Vec::new();
+    let mut in_code = false;
+
+    for line in source.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("```") {
+            flush_markdown_paragraph(&mut blocks, &mut paragraph);
+            if in_code {
+                blocks.push(MarkdownPreviewBlock {
+                    kind: MarkdownPreviewBlockKind::Code,
+                    text: code.join("\n"),
+                });
+                code.clear();
+                in_code = false;
+            } else {
+                in_code = true;
+            }
+            continue;
+        }
+
+        if in_code {
+            code.push(line.to_string());
+            continue;
+        }
+
+        if trimmed.is_empty() {
+            flush_markdown_paragraph(&mut blocks, &mut paragraph);
+            continue;
+        }
+
+        if let Some((level, text)) = markdown_heading(trimmed) {
+            flush_markdown_paragraph(&mut blocks, &mut paragraph);
+            blocks.push(MarkdownPreviewBlock {
+                kind: MarkdownPreviewBlockKind::Heading(level),
+                text: strip_markdown_inline(text),
+            });
+        } else if let Some(text) = markdown_bullet(trimmed) {
+            flush_markdown_paragraph(&mut blocks, &mut paragraph);
+            blocks.push(MarkdownPreviewBlock {
+                kind: MarkdownPreviewBlockKind::Bullet,
+                text: strip_markdown_inline(text),
+            });
+        } else if let Some(text) = trimmed.strip_prefix("> ") {
+            flush_markdown_paragraph(&mut blocks, &mut paragraph);
+            blocks.push(MarkdownPreviewBlock {
+                kind: MarkdownPreviewBlockKind::Quote,
+                text: strip_markdown_inline(text),
+            });
+        } else {
+            paragraph.push(strip_markdown_inline(trimmed));
+        }
+    }
+
+    if in_code && !code.is_empty() {
+        blocks.push(MarkdownPreviewBlock {
+            kind: MarkdownPreviewBlockKind::Code,
+            text: code.join("\n"),
+        });
+    }
+    flush_markdown_paragraph(&mut blocks, &mut paragraph);
+
+    if blocks.is_empty() {
+        blocks.push(MarkdownPreviewBlock {
+            kind: MarkdownPreviewBlockKind::Paragraph,
+            text: "Empty markdown document".to_string(),
+        });
+    }
+
+    blocks
+}
+
+fn flush_markdown_paragraph(blocks: &mut Vec<MarkdownPreviewBlock>, paragraph: &mut Vec<String>) {
+    if paragraph.is_empty() {
+        return;
+    }
+    blocks.push(MarkdownPreviewBlock {
+        kind: MarkdownPreviewBlockKind::Paragraph,
+        text: paragraph.join(" "),
+    });
+    paragraph.clear();
+}
+
+fn markdown_heading(line: &str) -> Option<(u8, &str)> {
+    let level = line.chars().take_while(|ch| *ch == '#').count();
+    if !(1..=6).contains(&level) {
+        return None;
+    }
+    let text = line.get(level..)?.trim_start();
+    (!text.is_empty()).then_some((level as u8, text))
+}
+
+fn markdown_bullet(line: &str) -> Option<&str> {
+    line.strip_prefix("- ")
+        .or_else(|| line.strip_prefix("* "))
+        .or_else(|| line.strip_prefix("+ "))
+}
+
+fn strip_markdown_inline(text: &str) -> String {
+    text.replace(['`', '*', '_'], "")
 }
 
 fn refresh_active_syntax(editor: &mut EditorState) {
@@ -798,7 +1081,10 @@ fn refresh_active_syntax(editor: &mut EditorState) {
     editor.views[active].folded_ranges.clear();
 }
 
-fn buffer_tab_snapshots(editor: &EditorState) -> Vec<EditorBufferTabSnapshot> {
+fn buffer_tab_snapshots(
+    editor: &EditorState,
+    text_buffer_active: bool,
+) -> Vec<EditorBufferTabSnapshot> {
     editor
         .buffers
         .iter()
@@ -819,7 +1105,7 @@ fn buffer_tab_snapshots(editor: &EditorState) -> Vec<EditorBufferTabSnapshot> {
                 title,
                 subtitle,
                 dirty: buffer.is_modified(),
-                active: index == editor.active,
+                active: text_buffer_active && index == editor.active,
             }
         })
         .collect()
@@ -843,6 +1129,8 @@ struct EditorSnapshot {
     language: String,
     lines: Vec<EditorLineSnapshot>,
     buffer_tabs: Vec<EditorBufferTabSnapshot>,
+    image_tab: Option<EditorImageTabSnapshot>,
+    image_preview: Option<EditorImagePreviewSnapshot>,
     first_line_number: usize,
     cursor: Option<Position>,
     cursor_visible: bool,
@@ -869,7 +1157,17 @@ struct EditorSnapshot {
     lsp_panel: Option<GpuiLspPanel>,
     degraded_notice: Option<String>,
     cursor_diagnostic_message: Option<String>,
+    markdown: bool,
+    markdown_mode: MarkdownViewMode,
+    markdown_preview: Option<Vec<MarkdownPreviewBlock>>,
     appearance: EditorAppearance,
+}
+
+#[derive(Clone)]
+struct EditorImagePreviewSnapshot {
+    path: PathBuf,
+    dimensions: Option<(u32, u32)>,
+    file_size: Option<u64>,
 }
 
 struct EditorLineSnapshot {
@@ -878,6 +1176,21 @@ struct EditorLineSnapshot {
     highlights: Vec<HighlightSpan>,
     search_matches: Vec<EditorSearchLineMatch>,
     diagnostic: Option<EditorDiagnosticSnapshot>,
+}
+
+#[derive(Clone)]
+struct MarkdownPreviewBlock {
+    kind: MarkdownPreviewBlockKind,
+    text: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MarkdownPreviewBlockKind {
+    Heading(u8),
+    Paragraph,
+    Bullet,
+    Code,
+    Quote,
 }
 
 const EDITOR_CHROME_BG: u32 = 0x242424;
@@ -953,6 +1266,29 @@ mod tests {
         assert_eq!(appearance.cursor_style, ConfigCursorStyle::Underline);
         assert_eq!(appearance.foreground, [10, 20, 30]);
         assert_eq!(appearance.background, [1, 2, 3]);
+    }
+
+    #[test]
+    fn markdown_preview_blocks_parse_common_blocks() {
+        let blocks = markdown_preview_blocks("# Title\n\n- Item\n\n```rust\nfn main() {}\n```");
+
+        assert_eq!(blocks.len(), 3);
+        assert!(matches!(
+            blocks[0].kind,
+            MarkdownPreviewBlockKind::Heading(1)
+        ));
+        assert_eq!(blocks[0].text, "Title");
+        assert_eq!(blocks[1].text, "Item");
+        assert!(matches!(blocks[2].kind, MarkdownPreviewBlockKind::Code));
+    }
+
+    #[test]
+    fn preview_image_detection_matches_repo_images() {
+        assert!(is_preview_image_path(Path::new("assets/screenshot.PNG")));
+        assert!(is_preview_image_path(Path::new("assets/photo.jpeg")));
+        assert!(is_preview_image_path(Path::new("assets/icon.webp")));
+        assert!(is_preview_image_path(Path::new("assets/diagram.svg")));
+        assert!(!is_preview_image_path(Path::new("src/main.rs")));
     }
 
     #[test]

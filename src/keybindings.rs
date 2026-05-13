@@ -1,5 +1,4 @@
-use winit::event::KeyEvent;
-use winit::keyboard::{Key, ModifiersState, NamedKey};
+use std::ops::{BitOr, BitOrAssign};
 
 /// Editor keybinding preset.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -37,10 +36,76 @@ pub enum VimMode {
     Visual,
 }
 
+/// Keyboard modifiers for parsed LLNZY keybindings.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Modifiers {
+    pub super_key: bool,
+    pub ctrl: bool,
+    pub alt: bool,
+    pub shift: bool,
+}
+
+impl Modifiers {
+    pub const SUPER: Self = Self {
+        super_key: true,
+        ctrl: false,
+        alt: false,
+        shift: false,
+    };
+    pub const CONTROL: Self = Self {
+        super_key: false,
+        ctrl: true,
+        alt: false,
+        shift: false,
+    };
+    pub const ALT: Self = Self {
+        super_key: false,
+        ctrl: false,
+        alt: true,
+        shift: false,
+    };
+    pub const SHIFT: Self = Self {
+        super_key: false,
+        ctrl: false,
+        alt: false,
+        shift: true,
+    };
+
+    pub fn empty() -> Self {
+        Self::default()
+    }
+}
+
+impl BitOr for Modifiers {
+    type Output = Self;
+
+    fn bitor(self, rhs: Self) -> Self::Output {
+        Self {
+            super_key: self.super_key || rhs.super_key,
+            ctrl: self.ctrl || rhs.ctrl,
+            alt: self.alt || rhs.alt,
+            shift: self.shift || rhs.shift,
+        }
+    }
+}
+
+impl BitOrAssign for Modifiers {
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.super_key |= rhs.super_key;
+        self.ctrl |= rhs.ctrl;
+        self.alt |= rhs.alt;
+        self.shift |= rhs.shift;
+    }
+}
+
 /// Returns true if the "primary" modifier is held: Cmd on macOS, Ctrl on Linux/Windows.
 /// This allows the same keybinding config to work cross-platform.
-pub fn primary_modifier(mods: ModifiersState) -> bool {
-    crate::platform::input::primary_modifier_pressed(mods)
+pub fn primary_modifier(mods: Modifiers) -> bool {
+    if cfg!(target_os = "macos") {
+        mods.super_key
+    } else {
+        mods.ctrl
+    }
 }
 
 /// All actions the user can bind to keys.
@@ -87,6 +152,36 @@ pub struct KeyCombo {
 pub enum KeyMatch {
     Char(String),
     Named(NamedKey),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NamedKey {
+    Enter,
+    Tab,
+    Escape,
+    Space,
+    Backspace,
+    Delete,
+    ArrowUp,
+    ArrowDown,
+    ArrowLeft,
+    ArrowRight,
+    PageUp,
+    PageDown,
+    Home,
+    End,
+    F1,
+    F2,
+    F3,
+    F4,
+    F5,
+    F6,
+    F7,
+    F8,
+    F9,
+    F10,
+    F11,
+    F12,
 }
 
 #[derive(Clone)]
@@ -171,17 +266,8 @@ impl KeyBindings {
         KeyBindings { bindings }
     }
 
-    /// Match a key event against the bindings. Returns the first matching action.
-    ///
-    /// Cross-platform: when a combo has `super_key: true`, on macOS we check
-    /// `modifiers.super_key()`. On Linux/Windows we also accept
-    /// `modifiers.control_key()` via `primary_modifier()`, so the same
-    /// keybinding config works on all platforms.
-    pub fn match_key(&self, event: &KeyEvent, modifiers: ModifiersState) -> Option<Action> {
-        self.match_key_parts(&event.logical_key, modifiers)
-    }
-
-    pub fn match_key_parts(&self, key: &Key, modifiers: ModifiersState) -> Option<Action> {
+    /// Match a normalized key against the bindings.
+    pub fn match_key_parts(&self, key: &KeyMatch, modifiers: Modifiers) -> Option<Action> {
         let has_primary = primary_modifier(modifiers);
         for (combo, action) in &self.bindings {
             // Check the primary modifier (Cmd on macOS, Ctrl on Linux/Windows).
@@ -191,42 +277,18 @@ impl KeyBindings {
                 if !has_primary {
                     continue;
                 }
-            } else if combo.ctrl != modifiers.control_key() {
+            } else if combo.ctrl != modifiers.ctrl {
                 continue;
             }
-            // When matching a primary-modifier combo, skip raw-ctrl check
-            // because on Linux/Windows primary_modifier already consumed ctrl.
-            if !combo.super_key && combo.ctrl != modifiers.control_key() {
+            if combo.alt != modifiers.alt {
                 continue;
             }
-            if combo.alt != modifiers.alt_key() {
+            if combo.shift != modifiers.shift {
                 continue;
             }
 
-            match &combo.key {
-                KeyMatch::Named(named) => {
-                    if let Key::Named(k) = key {
-                        if k == named {
-                            // For shift-specific bindings, check shift matches
-                            if combo.shift != modifiers.shift_key() {
-                                continue;
-                            }
-                            return Some(action.clone());
-                        }
-                    }
-                }
-                KeyMatch::Char(ch) => {
-                    if let Key::Character(c) = key {
-                        let input = c.as_str();
-                        if input.eq_ignore_ascii_case(ch) {
-                            // For Cmd+Shift+F vs Cmd+F: only match if shift matches
-                            if combo.shift != modifiers.shift_key() {
-                                continue;
-                            }
-                            return Some(action.clone());
-                        }
-                    }
-                }
+            if key_matches(&combo.key, key) {
+                return Some(action.clone());
             }
         }
         None
@@ -237,6 +299,14 @@ impl KeyBindings {
         // Remove existing binding for this action
         self.bindings.retain(|(_, a)| a != &action);
         self.bindings.push((combo, action));
+    }
+}
+
+fn key_matches(binding: &KeyMatch, input: &KeyMatch) -> bool {
+    match (binding, input) {
+        (KeyMatch::Named(expected), KeyMatch::Named(actual)) => expected == actual,
+        (KeyMatch::Char(expected), KeyMatch::Char(actual)) => actual.eq_ignore_ascii_case(expected),
+        _ => false,
     }
 }
 
@@ -319,16 +389,16 @@ pub fn parse_key_combo(s: &str) -> Option<KeyCombo> {
 mod tests {
     use super::*;
 
-    fn primary_mods() -> ModifiersState {
+    fn primary_mods() -> Modifiers {
         if cfg!(target_os = "macos") {
-            ModifiersState::SUPER
+            Modifiers::SUPER
         } else {
-            ModifiersState::CONTROL
+            Modifiers::CONTROL
         }
     }
 
-    fn ch(s: &str) -> Key {
-        Key::Character(s.into())
+    fn ch(s: &str) -> KeyMatch {
+        KeyMatch::Char(s.to_string())
     }
 
     #[test]
@@ -339,10 +409,7 @@ mod tests {
             bindings.match_key_parts(&ch("c"), primary_mods()),
             Some(Action::Copy)
         );
-        assert_eq!(
-            bindings.match_key_parts(&ch("c"), ModifiersState::empty()),
-            None
-        );
+        assert_eq!(bindings.match_key_parts(&ch("c"), Modifiers::empty()), None);
     }
 
     #[test]
@@ -353,10 +420,7 @@ mod tests {
             bindings.match_key_parts(&ch("v"), primary_mods()),
             Some(Action::Paste)
         );
-        assert_eq!(
-            bindings.match_key_parts(&ch("v"), ModifiersState::empty()),
-            None
-        );
+        assert_eq!(bindings.match_key_parts(&ch("v"), Modifiers::empty()), None);
     }
 
     #[test]
@@ -367,10 +431,7 @@ mod tests {
             bindings.match_key_parts(&ch("n"), primary_mods()),
             Some(Action::NewWindow)
         );
-        assert_eq!(
-            bindings.match_key_parts(&ch("n"), ModifiersState::empty()),
-            None
-        );
+        assert_eq!(bindings.match_key_parts(&ch("n"), Modifiers::empty()), None);
     }
 
     #[test]
@@ -382,7 +443,7 @@ mod tests {
             Some(Action::Search)
         );
         assert_eq!(
-            bindings.match_key_parts(&ch("f"), primary_mods() | ModifiersState::SHIFT),
+            bindings.match_key_parts(&ch("f"), primary_mods() | Modifiers::SHIFT),
             Some(Action::ToggleEffects)
         );
     }
@@ -390,23 +451,20 @@ mod tests {
     #[test]
     fn terminal_scroll_keys_require_shift_keybinding() {
         let bindings = KeyBindings::default_bindings();
-        let page_up = Key::Named(NamedKey::PageUp);
-        let page_down = Key::Named(NamedKey::PageDown);
+        let page_up = KeyMatch::Named(NamedKey::PageUp);
+        let page_down = KeyMatch::Named(NamedKey::PageDown);
 
         assert_eq!(
-            bindings.match_key_parts(&page_up, ModifiersState::SHIFT),
+            bindings.match_key_parts(&page_up, Modifiers::SHIFT),
             Some(Action::ScrollPageUp)
         );
         assert_eq!(
-            bindings.match_key_parts(&page_down, ModifiersState::SHIFT),
+            bindings.match_key_parts(&page_down, Modifiers::SHIFT),
             Some(Action::ScrollPageDown)
         );
+        assert_eq!(bindings.match_key_parts(&page_up, Modifiers::empty()), None);
         assert_eq!(
-            bindings.match_key_parts(&page_up, ModifiersState::empty()),
-            None
-        );
-        assert_eq!(
-            bindings.match_key_parts(&page_down, ModifiersState::empty()),
+            bindings.match_key_parts(&page_down, Modifiers::empty()),
             None
         );
         assert_eq!(bindings.match_key_parts(&page_up, primary_mods()), None);
@@ -426,11 +484,11 @@ mod tests {
             Some(Action::ZoomIn)
         );
         assert_eq!(
-            bindings.match_key_parts(&ch("="), primary_mods() | ModifiersState::SHIFT),
+            bindings.match_key_parts(&ch("="), primary_mods() | Modifiers::SHIFT),
             Some(Action::ZoomIn)
         );
         assert_eq!(
-            bindings.match_key_parts(&ch("+"), primary_mods() | ModifiersState::SHIFT),
+            bindings.match_key_parts(&ch("+"), primary_mods() | Modifiers::SHIFT),
             Some(Action::ZoomIn)
         );
         assert_eq!(
@@ -448,7 +506,7 @@ mod tests {
         let bindings = KeyBindings::default_bindings();
 
         assert_eq!(
-            bindings.match_key_parts(&Key::Named(NamedKey::Backspace), ModifiersState::SUPER),
+            bindings.match_key_parts(&KeyMatch::Named(NamedKey::Backspace), Modifiers::SUPER),
             None
         );
     }

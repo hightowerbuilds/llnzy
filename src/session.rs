@@ -18,38 +18,6 @@ pub struct Session {
 }
 
 impl Session {
-    pub fn new(
-        cols: u16,
-        rows: u16,
-        config: &Config,
-        proxy: winit::event_loop::EventLoopProxy<crate::UserEvent>,
-    ) -> std::io::Result<Self> {
-        Self::new_in_dir(cols, rows, config, proxy, None)
-    }
-
-    pub fn new_in_dir(
-        cols: u16,
-        rows: u16,
-        config: &Config,
-        proxy: winit::event_loop::EventLoopProxy<crate::UserEvent>,
-        cwd: Option<&str>,
-    ) -> std::io::Result<Self> {
-        let terminal = Terminal::new(cols, rows);
-        let shell_profile = ShellProfile::interactive_default(&config.shell, cwd);
-        let launch_spec = TerminalLaunchSpec::interactive_shell(&shell_profile, cols, rows);
-        let pty = Pty::spawn_with_spec(launch_spec, proxy)?;
-        let process_id = pty.process_id();
-        Ok(Session {
-            terminal,
-            pty,
-            title: "shell".to_string(),
-            cwd: cwd.map(|s| s.to_string()),
-            custom_name: None,
-            exited: None,
-            process_id,
-        })
-    }
-
     pub fn new_without_proxy(
         cols: u16,
         rows: u16,
@@ -59,7 +27,7 @@ impl Session {
         let terminal = Terminal::new(cols, rows);
         let shell_profile = ShellProfile::interactive_default(&config.shell, cwd);
         let launch_spec = TerminalLaunchSpec::interactive_shell(&shell_profile, cols, rows);
-        let pty = Pty::spawn_with_spec_without_proxy(launch_spec)?;
+        let pty = Pty::spawn_with_spec(launch_spec)?;
         let process_id = pty.process_id();
         Ok(Session {
             terminal,

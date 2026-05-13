@@ -12,7 +12,10 @@ use gpui::{
     Window,
 };
 
-use crate::sidebar_move::{plan_sidebar_move, MoveOrigin, SidebarMoveRequest};
+use crate::sidebar_move::{
+    collect_sidebar_move_destinations, plan_sidebar_move, MoveOrigin, SidebarMoveDestination,
+    SidebarMoveRequest,
+};
 
 use super::{
     WorkspacePrototype, ACCENT, ACTIVE_TEXT, BORDER, BUMPER_BG, BUMPER_RESIZE_WIDTH, BUMPER_WIDTH,
@@ -39,6 +42,31 @@ pub(super) struct WorkspaceSidebarContext {
     pub(super) recent_projects_open: bool,
     pub(super) sidebar_width: f32,
     pub(super) explorer_status: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum SidebarContextMenuView {
+    Main,
+    Rename,
+    Move,
+    DeleteConfirm,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct SidebarContextMenuState {
+    pub(super) path: PathBuf,
+    pub(super) name: String,
+    pub(super) is_dir: bool,
+    pub(super) x: f32,
+    pub(super) y: f32,
+    pub(super) view: SidebarContextMenuView,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct SidebarRenameState {
+    pub(super) path: PathBuf,
+    pub(super) text: String,
+    pub(super) replace_on_input: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -237,6 +265,211 @@ pub(super) fn workspace_sidebar(
     sidebar
 }
 
+pub(super) fn workspace_sidebar_context_menu(
+    menu: SidebarContextMenuState,
+    workspace_root: Option<PathBuf>,
+    rename: Option<SidebarRenameState>,
+    cx: &mut Context<WorkspacePrototype>,
+) -> impl IntoElement {
+    let menu_width = match menu.view {
+        SidebarContextMenuView::Move => 300.0,
+        _ => 220.0,
+    };
+    let mut panel = div()
+        .absolute()
+        .left(px(menu.x))
+        .top(px(menu.y))
+        .w(px(menu_width))
+        .max_h(px(420.0))
+        .overflow_hidden()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .rounded_sm()
+        .border_1()
+        .border_color(rgb(0x454a56))
+        .bg(rgb(0x202229))
+        .p_1()
+        .text_size(px(13.0))
+        .shadow_lg()
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|_this, _: &MouseDownEvent, _window, cx| {
+                cx.stop_propagation();
+            }),
+        )
+        .on_mouse_down(
+            MouseButton::Right,
+            cx.listener(|_this, _: &MouseDownEvent, _window, cx| {
+                cx.stop_propagation();
+            }),
+        );
+
+    match menu.view {
+        SidebarContextMenuView::Main => {
+            let has_relative_path = workspace_root
+                .as_ref()
+                .is_some_and(|root| menu.path.strip_prefix(root).is_ok());
+            panel = panel
+                .child(sidebar_menu_header(menu.name.clone(), menu.is_dir))
+                .child(sidebar_menu_button("Rename".to_string(), false, cx, {
+                    let path = menu.path.clone();
+                    move |this, _window, cx| this.start_sidebar_rename(path.clone(), cx)
+                }))
+                .child(sidebar_menu_button("Copy Path".to_string(), false, cx, {
+                    let path = menu.path.clone();
+                    move |this, _window, cx| this.copy_sidebar_path(path.clone(), false, cx)
+                }));
+            if has_relative_path {
+                panel = panel.child(sidebar_menu_button(
+                    "Copy Relative Path".to_string(),
+                    false,
+                    cx,
+                    {
+                        let path = menu.path.clone();
+                        move |this, _window, cx| this.copy_sidebar_path(path.clone(), true, cx)
+                    },
+                ));
+            }
+            panel = panel
+                .child(sidebar_menu_button(
+                    "Move...".to_string(),
+                    false,
+                    cx,
+                    |_this, _window, cx| {
+                        _this.show_sidebar_move_targets(cx);
+                    },
+                ))
+                .child(sidebar_menu_button(
+                    "Delete...".to_string(),
+                    false,
+                    cx,
+                    |_this, _window, cx| {
+                        _this.show_sidebar_delete_confirm(cx);
+                    },
+                ));
+        }
+        SidebarContextMenuView::Rename => {
+            let rename_text = rename
+                .as_ref()
+                .filter(|rename| rename.path == menu.path)
+                .map(|rename| rename.text.clone())
+                .unwrap_or(menu.name.clone());
+            let replace_on_input = rename
+                .as_ref()
+                .filter(|rename| rename.path == menu.path)
+                .is_some_and(|rename| rename.replace_on_input);
+            let field_text = if rename_text.is_empty() {
+                "Type name".to_string()
+            } else {
+                rename_text
+            };
+            let field_color = if field_text == "Type name" {
+                MUTED_TEXT
+            } else {
+                ACTIVE_TEXT
+            };
+            panel = panel
+                .child(sidebar_menu_header("Rename".to_string(), menu.is_dir))
+                .child(
+                    div()
+                        .w_full()
+                        .h(px(32.0))
+                        .flex()
+                        .items_center()
+                        .rounded_sm()
+                        .border_1()
+                        .border_color(rgb(0x4f5666))
+                        .bg(rgb(if replace_on_input { 0x253044 } else { 0x15171d }))
+                        .px_2()
+                        .text_size(px(13.0))
+                        .text_color(rgb(field_color))
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .child(field_text),
+                )
+                .child(sidebar_menu_button(
+                    "Save".to_string(),
+                    false,
+                    cx,
+                    |this, _window, cx| {
+                        this.commit_sidebar_rename(cx);
+                    },
+                ))
+                .child(sidebar_menu_button(
+                    "Cancel".to_string(),
+                    false,
+                    cx,
+                    |this, _window, cx| {
+                        this.close_sidebar_context_menu(cx);
+                    },
+                ));
+        }
+        SidebarContextMenuView::Move => {
+            panel = panel
+                .child(sidebar_menu_header(
+                    format!("Move {}", menu.name),
+                    menu.is_dir,
+                ))
+                .child(sidebar_menu_button(
+                    "Back".to_string(),
+                    false,
+                    cx,
+                    |this, _window, cx| {
+                        this.show_sidebar_main_menu(cx);
+                    },
+                ));
+
+            let destinations = workspace_root
+                .as_ref()
+                .map(|root| collect_sidebar_move_destinations(root, &[menu.path.clone()]))
+                .unwrap_or_default();
+            let mut list = div()
+                .id(("workspace-sidebar-move-list", explorer_row_id(&menu.path)))
+                .w_full()
+                .max_h(px(320.0))
+                .overflow_y_scroll()
+                .scrollbar_width(px(8.0))
+                .flex()
+                .flex_col()
+                .gap_1();
+
+            if destinations.is_empty() {
+                list = list.child(sidebar_menu_note("No move destinations".to_string()));
+            } else {
+                for destination in destinations {
+                    list = list.child(sidebar_move_destination_row(
+                        destination,
+                        menu.path.clone(),
+                        cx,
+                    ));
+                }
+            }
+            panel = panel.child(list);
+        }
+        SidebarContextMenuView::DeleteConfirm => {
+            let noun = if menu.is_dir { "folder" } else { "file" };
+            panel = panel
+                .child(sidebar_menu_header(format!("Delete {noun}?"), menu.is_dir))
+                .child(sidebar_menu_note(menu.name.clone()))
+                .child(sidebar_danger_button(format!("Delete {noun}"), cx, {
+                    let path = menu.path.clone();
+                    move |this, _window, cx| this.delete_sidebar_entry(path.clone(), cx)
+                }))
+                .child(sidebar_menu_button(
+                    "Cancel".to_string(),
+                    false,
+                    cx,
+                    |this, _window, cx| {
+                        this.close_sidebar_context_menu(cx);
+                    },
+                ));
+        }
+    }
+
+    panel
+}
+
 fn sidebar_close_project_button(
     has_project: bool,
     cx: &mut Context<WorkspacePrototype>,
@@ -409,6 +642,25 @@ fn sidebar_tree_row(
                 cx.new(|_| ExplorerDragPreview::new(payload))
             },
         )
+        .on_mouse_down(
+            MouseButton::Right,
+            cx.listener({
+                let context_path = path.clone();
+                let context_name = name.clone();
+                move |this, event: &MouseDownEvent, window, cx| {
+                    cx.stop_propagation();
+                    this.open_sidebar_context_menu(
+                        context_path.clone(),
+                        context_name.clone(),
+                        is_dir,
+                        event.position.x / px(1.0),
+                        event.position.y / px(1.0),
+                        window,
+                        cx,
+                    );
+                }
+            }),
+        )
         .on_click(cx.listener({
             let path = path.clone();
             move |this, _: &ClickEvent, window, cx| {
@@ -447,6 +699,154 @@ fn sidebar_tree_row(
             .whitespace_nowrap()
             .child(name),
     )
+}
+
+fn sidebar_menu_header(label: String, is_dir: bool) -> impl IntoElement {
+    div()
+        .w_full()
+        .h(px(28.0))
+        .flex()
+        .items_center()
+        .gap_2()
+        .rounded_sm()
+        .bg(rgb(0x17191f))
+        .px_2()
+        .text_size(px(12.0))
+        .text_color(rgb(if is_dir { FOLDER_BLUE } else { ACTIVE_TEXT }))
+        .overflow_hidden()
+        .whitespace_nowrap()
+        .child(if is_dir { "DIR" } else { "FILE" })
+        .child(
+            div()
+                .flex_1()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .child(label),
+        )
+}
+
+fn sidebar_menu_note(label: String) -> impl IntoElement {
+    div()
+        .w_full()
+        .min_h(px(28.0))
+        .flex()
+        .items_center()
+        .rounded_sm()
+        .px_2()
+        .text_size(px(12.0))
+        .text_color(rgb(MUTED_TEXT))
+        .overflow_hidden()
+        .whitespace_nowrap()
+        .child(label)
+}
+
+fn sidebar_menu_button(
+    label: String,
+    active: bool,
+    cx: &mut Context<WorkspacePrototype>,
+    on_click: impl Fn(&mut WorkspacePrototype, &mut Window, &mut Context<WorkspacePrototype>) + 'static,
+) -> impl IntoElement {
+    div()
+        .w_full()
+        .h(px(30.0))
+        .flex()
+        .items_center()
+        .rounded_sm()
+        .bg(rgb(if active { 0x303644 } else { 0x202229 }))
+        .px_2()
+        .text_size(px(13.0))
+        .text_color(rgb(SIDEBAR_TEXT))
+        .cursor_pointer()
+        .hover(|style| style.bg(rgb(0x303644)))
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, _: &MouseDownEvent, window, cx| {
+                cx.stop_propagation();
+                on_click(this, window, cx);
+            }),
+        )
+        .child(label)
+}
+
+fn sidebar_danger_button(
+    label: String,
+    cx: &mut Context<WorkspacePrototype>,
+    on_click: impl Fn(&mut WorkspacePrototype, &mut Window, &mut Context<WorkspacePrototype>) + 'static,
+) -> impl IntoElement {
+    div()
+        .w_full()
+        .h(px(30.0))
+        .flex()
+        .items_center()
+        .rounded_sm()
+        .bg(rgb(0x3d2428))
+        .px_2()
+        .text_size(px(13.0))
+        .text_color(rgb(0xffb4b4))
+        .cursor_pointer()
+        .hover(|style| style.bg(rgb(0x4a2a30)))
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, _: &MouseDownEvent, window, cx| {
+                cx.stop_propagation();
+                on_click(this, window, cx);
+            }),
+        )
+        .child(label)
+}
+
+fn sidebar_move_destination_row(
+    destination: SidebarMoveDestination,
+    source_path: PathBuf,
+    cx: &mut Context<WorkspacePrototype>,
+) -> impl IntoElement {
+    let label = if destination.is_valid {
+        destination.label
+    } else {
+        format!(
+            "{} - {}",
+            destination.label,
+            destination
+                .reason
+                .unwrap_or_else(|| "Unavailable".to_string())
+        )
+    };
+    let row = div()
+        .w_full()
+        .h(px(28.0))
+        .flex()
+        .items_center()
+        .rounded_sm()
+        .pl(px(8.0 + destination.depth as f32 * 12.0))
+        .pr_2()
+        .text_size(px(12.0))
+        .text_color(rgb(if destination.is_valid {
+            SIDEBAR_TEXT
+        } else {
+            0x686d79
+        }))
+        .overflow_hidden()
+        .whitespace_nowrap()
+        .child(label);
+
+    if destination.is_valid {
+        let destination_path = destination.path;
+        row.cursor_pointer()
+            .hover(|style| style.bg(rgb(0x303644)))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _: &MouseDownEvent, _window, cx| {
+                    cx.stop_propagation();
+                    this.move_sidebar_entry_to_folder(
+                        source_path.clone(),
+                        destination_path.clone(),
+                        cx,
+                    );
+                }),
+            )
+    } else {
+        row
+    }
 }
 
 fn explorer_drop_background(payload: &ExplorerDragPayload, destination_folder: &Path) -> u32 {

@@ -46,23 +46,6 @@ pub struct LspClient {
 }
 
 impl LspClient {
-    /// Create a new client but don't initialize yet.
-    pub fn new(
-        lang_id: &'static str,
-        command: &str,
-        args: &[&str],
-        workspace_roots: &[PathBuf],
-        proxy: winit::event_loop::EventLoopProxy<crate::UserEvent>,
-    ) -> Result<Self, String> {
-        Self::new_with_notifier(
-            lang_id,
-            command,
-            args,
-            workspace_roots,
-            LspNotifier::from_event_proxy(proxy),
-        )
-    }
-
     /// Create a new client using a caller-supplied UI wake notifier.
     pub fn new_with_notifier(
         lang_id: &'static str,

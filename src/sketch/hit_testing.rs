@@ -99,6 +99,12 @@ fn resizable_bounds(element: &SketchElement) -> Option<Bounds> {
             w: rect.w,
             h: rect.h,
         }),
+        SketchElement::Image(image) => Some(Bounds {
+            x: image.x,
+            y: image.y,
+            w: image.w,
+            h: image.h,
+        }),
         SketchElement::Symbol(symbol) => Some(Bounds {
             x: symbol.x,
             y: symbol.y,

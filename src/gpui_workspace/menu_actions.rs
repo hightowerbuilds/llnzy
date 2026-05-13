@@ -37,7 +37,7 @@ impl WorkspacePrototype {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.open_or_activate_surface(WorkspaceSurface::Terminal, window, cx);
+        self.open_new_terminal_tab(window, cx);
     }
 
     pub(super) fn menu_close_tab(

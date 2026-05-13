@@ -109,6 +109,58 @@ prompt store dirty so the change is persisted. If the deleted prompt was open,
 Stacker starts a scratch prompt; if a later prompt was open, its saved-prompt
 index shifts to match the shortened list.
 
+## External Stacker CLI
+
+> **Updated 2026-05-13.** Agents and scripts can now manage the app-owned saved
+> prompt library through the local executable while LLNZY remains the state
+> owner.
+
+Primary commands:
+
+```sh
+llnzy stacker add --label "Release Checklist" --body "Run the release checks."
+llnzy stacker save --label "Release Checklist" --file prompt.md
+llnzy stacker list --format json
+llnzy stacker edit <prompt-id> --label "Updated" --body "Updated prompt text."
+llnzy stacker delete <prompt-id>
+```
+
+The packaged app contains the CLI logic in `LLNZY.app/Contents/MacOS/llnzy`.
+The macOS package built by `./bundle.sh --release --pkg --dmg` installs a
+launcher at `/usr/local/bin/llnzy`, so normal shells and terminal-hosted agents
+can discover it with `command -v llnzy`. App-bundle DMGs also include
+`Install LLNZY CLI.command`, which installs the same launcher after the app is
+dragged into `/Applications`.
+
+`llnzy prompt ...` remains accepted as the backwards-compatible spelling. The
+existing `llnzy prompt add --label ...` path still writes a pending agent
+suggestion into the Stacker inbox; `llnzy stacker add` and `llnzy stacker save`
+write directly into the saved library.
+
+CLI writes use the same file-per-prompt Markdown records as the GPUI app under
+`$config/prompts/{inbox,saved,archive}`. Deletes archive records instead of
+hard-deleting prompt data. Edits and deletes also synchronize any matching
+queued prompt entry so the footer prompt bar does not keep stale prompt text.
+
+The embedded GPUI Stacker surface polls the prompt library and queue state while
+the app is open. External CLI changes are picked up without restarting the app;
+the editor text is only replaced when it still matches the previously active
+saved prompt, so an unsaved draft is not overwritten by a background refresh.
+
+### Parking Note
+
+As of 2026-05-13, stop the Stacker CLI pass here and return later for live
+GPUI smoke testing and editor-experience polish. The useful checkpoint is:
+
+- `llnzy stacker add/save/list/edit/delete` exists for agents and shell scripts.
+- The CLI writes through the same prompt-library records used by the app.
+- GPUI polls prompt-library changes while the app is open.
+- Release packaging can install a shell-visible `/usr/local/bin/llnzy` launcher
+  with `./bundle.sh --release --pkg --dmg`.
+
+Do not expand this into IPC, shell automation, or code-editor insertion until
+the remaining live-app Stacker flows have been tested.
+
 ## Deferred Boundaries
 
 Public local IPC remains disabled until LLNZY has a security and permission
