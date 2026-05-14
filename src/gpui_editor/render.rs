@@ -154,10 +154,7 @@ fn editor_header(snapshot: &EditorSnapshot) -> impl IntoElement {
 
 fn editor_file_tabs(snapshot: &EditorSnapshot, cx: &mut Context<EditorPrototype>) -> gpui::Div {
     let mut bar = div();
-    if snapshot.buffer_tabs.is_empty()
-        && snapshot.image_tab.is_none()
-        && !snapshot.can_reopen_recent
-    {
+    if snapshot.buffer_tabs.is_empty() && snapshot.image_tab.is_none() {
         return bar;
     }
 
@@ -180,69 +177,6 @@ fn editor_file_tabs(snapshot: &EditorSnapshot, cx: &mut Context<EditorPrototype>
         bar = bar.child(editor_image_tab(tab, cx));
     }
     bar.child(div().flex_1())
-        .when(
-            !snapshot.buffer_tabs.is_empty() && snapshot.image_preview.is_none(),
-            |bar| {
-                bar.when(snapshot.markdown, |bar| {
-                    bar.child(editor_tab_action_button(
-                        markdown_toggle_button_label(snapshot.markdown_mode),
-                        cx,
-                        |editor, cx| {
-                            editor.cycle_markdown_preview(cx);
-                        },
-                    ))
-                })
-                .child(editor_tab_action_button("Check Disk", cx, |editor, cx| {
-                    editor.check_active_external_change(cx);
-                }))
-                .child(editor_tab_action_button("Hover", cx, |editor, cx| {
-                    editor.request_lsp_hover(cx);
-                }))
-                .child(editor_tab_action_button("Complete", cx, |editor, cx| {
-                    editor.request_lsp_completion(cx);
-                }))
-                .child(editor_tab_action_button("Def", cx, |editor, cx| {
-                    editor.request_lsp_definition(cx);
-                }))
-                .child(editor_tab_action_button("Refs", cx, |editor, cx| {
-                    editor.request_lsp_references(cx);
-                }))
-                .child(editor_tab_action_button("Sig", cx, |editor, cx| {
-                    editor.request_lsp_signature_help(cx);
-                }))
-                .child(editor_tab_action_button("Rename", cx, |editor, cx| {
-                    editor.open_lsp_rename(cx);
-                }))
-                .child(editor_tab_action_button("Actions", cx, |editor, cx| {
-                    editor.request_lsp_code_actions(cx);
-                }))
-                .child(editor_tab_action_button("Format", cx, |editor, cx| {
-                    editor.request_lsp_format(cx);
-                }))
-                .child(editor_tab_action_button("Symbols", cx, |editor, cx| {
-                    editor.request_lsp_symbols(cx);
-                }))
-                .child(editor_tab_action_button(
-                    "Close Others",
-                    cx,
-                    |editor, cx| {
-                        editor.close_other_buffer_tabs(cx);
-                    },
-                ))
-                .child(editor_tab_action_button(
-                    "Close Saved",
-                    cx,
-                    |editor, cx| {
-                        editor.close_saved_buffer_tabs(cx);
-                    },
-                ))
-            },
-        )
-        .when(snapshot.can_reopen_recent, |bar| {
-            bar.child(editor_tab_action_button("Reopen", cx, |editor, cx| {
-                editor.reopen_recent_buffer_tab(cx);
-            }))
-        })
 }
 
 fn editor_file_tab(
@@ -395,35 +329,6 @@ fn editor_image_tab(
                 )
                 .child("x"),
         )
-}
-
-fn editor_tab_action_button(
-    label: &'static str,
-    cx: &mut Context<EditorPrototype>,
-    handler: fn(&mut EditorPrototype, &mut Context<EditorPrototype>),
-) -> impl IntoElement {
-    div()
-        .h(px(24.0))
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded_sm()
-        .border_1()
-        .border_color(rgb(0x3c4658))
-        .bg(rgb(0x171923))
-        .px_2()
-        .text_size(px(11.0))
-        .text_color(rgb(EDITOR_MUTED_FG))
-        .cursor_pointer()
-        .hover(|style| style.bg(rgb(0x242b38)))
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |this, _: &MouseDownEvent, _window, cx| {
-                cx.stop_propagation();
-                handler(this, cx);
-            }),
-        )
-        .child(label)
 }
 
 fn editor_body(
@@ -587,14 +492,6 @@ fn image_preview_body(
         )
 }
 
-fn markdown_toggle_button_label(mode: MarkdownViewMode) -> &'static str {
-    match mode {
-        MarkdownViewMode::Source => "Preview",
-        MarkdownViewMode::Preview => "Split",
-        MarkdownViewMode::Split => "Source",
-    }
-}
-
 fn markdown_preview_body(snapshot: &EditorSnapshot) -> impl IntoElement {
     let blocks = snapshot.markdown_preview.clone().unwrap_or_else(|| {
         vec![MarkdownPreviewBlock {
@@ -615,6 +512,7 @@ fn markdown_preview_body(snapshot: &EditorSnapshot) -> impl IntoElement {
         .w_full()
         .h_full()
         .overflow_y_scroll()
+        .track_scroll(&snapshot.markdown_preview_scroll)
         .scrollbar_width(px(8.0))
         .bg(snapshot.appearance.background_color())
         .child(content)

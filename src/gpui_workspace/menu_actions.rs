@@ -1,16 +1,34 @@
 use gpui::{Context, Window};
 
 use crate::config::Config;
+use crate::editor::MarkdownViewMode;
 
 use super::{
-    MenuCloseProject, MenuCloseTab, MenuCopy, MenuFind, MenuJoinTabs, MenuNewTab, MenuNextTab,
-    MenuOpenProject, MenuPaste, MenuPreviousTab, MenuRedo, MenuSave, MenuSelectAll,
-    MenuSeparateTabs, MenuShowAppearances, MenuShowEditor, MenuShowHome, MenuShowSketch,
-    MenuShowStacker, MenuShowTerminal, MenuSwapTabs, MenuToggleSidebar, MenuUndo, MenuZoomIn,
-    MenuZoomOut, MenuZoomReset, WorkspacePrototype, WorkspaceSurface,
+    MenuCloseProject, MenuCloseTab, MenuCopy, MenuEditorCheckDisk, MenuEditorCloseOthers,
+    MenuEditorCloseSaved, MenuEditorReopenClosed, MenuFind, MenuJoinTabs, MenuLspCodeActions,
+    MenuLspCompletion, MenuLspDefinition, MenuLspFormat, MenuLspHover, MenuLspReferences,
+    MenuLspRename, MenuLspSignatureHelp, MenuLspSymbols, MenuMarkdownCycle, MenuMarkdownPreview,
+    MenuMarkdownSource, MenuMarkdownSplit, MenuNewTab, MenuNextTab, MenuOpenProject, MenuPaste,
+    MenuPreviousTab, MenuRedo, MenuSave, MenuSelectAll, MenuSeparateTabs, MenuShowAppearances,
+    MenuShowEditor, MenuShowHome, MenuShowSketch, MenuShowStacker, MenuShowTerminal, MenuSwapTabs,
+    MenuToggleSidebar, MenuUndo, MenuZoomIn, MenuZoomOut, MenuZoomReset, WorkspacePrototype,
+    WorkspaceSurface,
 };
 
 impl WorkspacePrototype {
+    fn with_editor_menu_action(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        action: impl FnOnce(
+            &mut crate::gpui_editor::EditorPrototype,
+            &mut Context<crate::gpui_editor::EditorPrototype>,
+        ),
+    ) {
+        self.open_or_activate_surface(WorkspaceSurface::Editor, window, cx);
+        self.editor.update(cx, action);
+    }
+
     pub(super) fn activate_relative_tab(
         &mut self,
         offset: isize,
@@ -184,6 +202,193 @@ impl WorkspacePrototype {
         self.open_or_activate_surface(WorkspaceSurface::Editor, window, cx);
         self.editor
             .update(cx, |editor, cx| editor.open_find_from_workspace(window, cx));
+    }
+
+    pub(super) fn menu_editor_check_disk(
+        &mut self,
+        _: &MenuEditorCheckDisk,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.with_editor_menu_action(window, cx, |editor, cx| {
+            editor.check_active_external_change_from_workspace(cx);
+        });
+    }
+
+    pub(super) fn menu_editor_reopen_closed(
+        &mut self,
+        _: &MenuEditorReopenClosed,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.with_editor_menu_action(window, cx, |editor, cx| {
+            editor.reopen_recent_buffer_tab_from_workspace(cx);
+        });
+    }
+
+    pub(super) fn menu_editor_close_others(
+        &mut self,
+        _: &MenuEditorCloseOthers,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.with_editor_menu_action(window, cx, |editor, cx| {
+            editor.close_other_buffer_tabs_from_workspace(cx);
+        });
+    }
+
+    pub(super) fn menu_editor_close_saved(
+        &mut self,
+        _: &MenuEditorCloseSaved,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.with_editor_menu_action(window, cx, |editor, cx| {
+            editor.close_saved_buffer_tabs_from_workspace(cx);
+        });
+    }
+
+    pub(super) fn menu_markdown_source(
+        &mut self,
+        _: &MenuMarkdownSource,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.with_editor_menu_action(window, cx, |editor, cx| {
+            editor.set_markdown_mode_from_workspace(MarkdownViewMode::Source, cx);
+        });
+    }
+
+    pub(super) fn menu_markdown_preview(
+        &mut self,
+        _: &MenuMarkdownPreview,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.with_editor_menu_action(window, cx, |editor, cx| {
+            editor.set_markdown_mode_from_workspace(MarkdownViewMode::Preview, cx);
+        });
+    }
+
+    pub(super) fn menu_markdown_split(
+        &mut self,
+        _: &MenuMarkdownSplit,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.with_editor_menu_action(window, cx, |editor, cx| {
+            editor.set_markdown_mode_from_workspace(MarkdownViewMode::Split, cx);
+        });
+    }
+
+    pub(super) fn menu_markdown_cycle(
+        &mut self,
+        _: &MenuMarkdownCycle,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.with_editor_menu_action(window, cx, |editor, cx| {
+            editor.cycle_markdown_preview_from_workspace(cx);
+        });
+    }
+
+    pub(super) fn menu_lsp_hover(
+        &mut self,
+        _: &MenuLspHover,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.with_editor_menu_action(window, cx, |editor, cx| {
+            editor.request_lsp_hover_from_workspace(cx);
+        });
+    }
+
+    pub(super) fn menu_lsp_completion(
+        &mut self,
+        _: &MenuLspCompletion,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.with_editor_menu_action(window, cx, |editor, cx| {
+            editor.request_lsp_completion_from_workspace(cx);
+        });
+    }
+
+    pub(super) fn menu_lsp_definition(
+        &mut self,
+        _: &MenuLspDefinition,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.with_editor_menu_action(window, cx, |editor, cx| {
+            editor.request_lsp_definition_from_workspace(cx);
+        });
+    }
+
+    pub(super) fn menu_lsp_references(
+        &mut self,
+        _: &MenuLspReferences,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.with_editor_menu_action(window, cx, |editor, cx| {
+            editor.request_lsp_references_from_workspace(cx);
+        });
+    }
+
+    pub(super) fn menu_lsp_signature_help(
+        &mut self,
+        _: &MenuLspSignatureHelp,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.with_editor_menu_action(window, cx, |editor, cx| {
+            editor.request_lsp_signature_help_from_workspace(cx);
+        });
+    }
+
+    pub(super) fn menu_lsp_rename(
+        &mut self,
+        _: &MenuLspRename,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.with_editor_menu_action(window, cx, |editor, cx| {
+            editor.open_lsp_rename_from_workspace(cx);
+        });
+    }
+
+    pub(super) fn menu_lsp_code_actions(
+        &mut self,
+        _: &MenuLspCodeActions,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.with_editor_menu_action(window, cx, |editor, cx| {
+            editor.request_lsp_code_actions_from_workspace(cx);
+        });
+    }
+
+    pub(super) fn menu_lsp_format(
+        &mut self,
+        _: &MenuLspFormat,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.with_editor_menu_action(window, cx, |editor, cx| {
+            editor.request_lsp_format_from_workspace(cx);
+        });
+    }
+
+    pub(super) fn menu_lsp_symbols(
+        &mut self,
+        _: &MenuLspSymbols,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.with_editor_menu_action(window, cx, |editor, cx| {
+            editor.request_lsp_symbols_from_workspace(cx);
+        });
     }
 
     pub(super) fn menu_toggle_sidebar(

@@ -57,6 +57,23 @@ actions!(
         MenuPaste,
         MenuSelectAll,
         MenuFind,
+        MenuEditorCheckDisk,
+        MenuEditorReopenClosed,
+        MenuEditorCloseOthers,
+        MenuEditorCloseSaved,
+        MenuMarkdownSource,
+        MenuMarkdownPreview,
+        MenuMarkdownSplit,
+        MenuMarkdownCycle,
+        MenuLspHover,
+        MenuLspCompletion,
+        MenuLspDefinition,
+        MenuLspReferences,
+        MenuLspSignatureHelp,
+        MenuLspRename,
+        MenuLspCodeActions,
+        MenuLspFormat,
+        MenuLspSymbols,
         MenuToggleSidebar,
         MenuShowHome,
         MenuShowTerminal,
@@ -217,6 +234,31 @@ fn install_workspace_menu_bar(cx: &mut App) {
                 MenuItem::action("Select All", MenuSelectAll),
                 MenuItem::separator(),
                 MenuItem::action("Find", MenuFind),
+            ],
+        },
+        Menu {
+            name: "Editor".into(),
+            items: vec![
+                MenuItem::action("Check Disk for Changes", MenuEditorCheckDisk),
+                MenuItem::action("Reopen Closed File", MenuEditorReopenClosed),
+                MenuItem::separator(),
+                MenuItem::action("Close Other Files", MenuEditorCloseOthers),
+                MenuItem::action("Close Saved Files", MenuEditorCloseSaved),
+                MenuItem::separator(),
+                MenuItem::action("Markdown Source", MenuMarkdownSource),
+                MenuItem::action("Markdown Preview", MenuMarkdownPreview),
+                MenuItem::action("Markdown Split", MenuMarkdownSplit),
+                MenuItem::action("Cycle Markdown Mode", MenuMarkdownCycle),
+                MenuItem::separator(),
+                MenuItem::action("Hover", MenuLspHover),
+                MenuItem::action("Completion", MenuLspCompletion),
+                MenuItem::action("Go to Definition", MenuLspDefinition),
+                MenuItem::action("Find References", MenuLspReferences),
+                MenuItem::action("Signature Help", MenuLspSignatureHelp),
+                MenuItem::action("Rename Symbol", MenuLspRename),
+                MenuItem::action("Code Actions", MenuLspCodeActions),
+                MenuItem::action("Format Document", MenuLspFormat),
+                MenuItem::action("Document Symbols", MenuLspSymbols),
             ],
         },
         Menu {
@@ -896,6 +938,23 @@ impl Render for WorkspacePrototype {
             .on_action(cx.listener(Self::menu_paste))
             .on_action(cx.listener(Self::menu_select_all))
             .on_action(cx.listener(Self::menu_find))
+            .on_action(cx.listener(Self::menu_editor_check_disk))
+            .on_action(cx.listener(Self::menu_editor_reopen_closed))
+            .on_action(cx.listener(Self::menu_editor_close_others))
+            .on_action(cx.listener(Self::menu_editor_close_saved))
+            .on_action(cx.listener(Self::menu_markdown_source))
+            .on_action(cx.listener(Self::menu_markdown_preview))
+            .on_action(cx.listener(Self::menu_markdown_split))
+            .on_action(cx.listener(Self::menu_markdown_cycle))
+            .on_action(cx.listener(Self::menu_lsp_hover))
+            .on_action(cx.listener(Self::menu_lsp_completion))
+            .on_action(cx.listener(Self::menu_lsp_definition))
+            .on_action(cx.listener(Self::menu_lsp_references))
+            .on_action(cx.listener(Self::menu_lsp_signature_help))
+            .on_action(cx.listener(Self::menu_lsp_rename))
+            .on_action(cx.listener(Self::menu_lsp_code_actions))
+            .on_action(cx.listener(Self::menu_lsp_format))
+            .on_action(cx.listener(Self::menu_lsp_symbols))
             .on_action(cx.listener(Self::menu_toggle_sidebar))
             .on_action(cx.listener(Self::menu_show_home))
             .on_action(cx.listener(Self::menu_show_terminal))

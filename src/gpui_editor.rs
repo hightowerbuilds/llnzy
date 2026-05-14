@@ -18,8 +18,8 @@ use gpui::{
     actions, div, font, px, relative, rgb, rgba, size, App, Application, Bounds, Context,
     CursorStyle, Element, ElementId, ElementInputHandler, Entity, EntityInputHandler, FocusHandle,
     Focusable, GlobalElementId, KeyBinding, KeyDownEvent, LayoutId, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, Pixels, Render, ScrollWheelEvent, ShapedLine, SharedString,
-    Style, TextRun, UTF16Selection, Window, WindowBounds, WindowOptions,
+    MouseMoveEvent, MouseUpEvent, Pixels, Render, ScrollHandle, ScrollWheelEvent, ShapedLine,
+    SharedString, Style, TextRun, UTF16Selection, Window, WindowBounds, WindowOptions,
 };
 
 mod commands;
@@ -187,6 +187,7 @@ pub(crate) struct EditorPrototype {
     editor_search: EditorSearch,
     image_preview: Option<EditorImagePreview>,
     image_preview_active: bool,
+    markdown_preview_scroll: ScrollHandle,
     search_input_target: EditorSearchInputTarget,
     go_to_line_active: bool,
     go_to_line_input: String,
@@ -443,6 +444,70 @@ impl EditorPrototype {
         }
     }
 
+    pub(crate) fn cycle_markdown_preview_from_workspace(&mut self, cx: &mut Context<Self>) {
+        self.cycle_markdown_preview(cx);
+    }
+
+    pub(crate) fn set_markdown_mode_from_workspace(
+        &mut self,
+        mode: MarkdownViewMode,
+        cx: &mut Context<Self>,
+    ) {
+        self.set_markdown_mode(mode, cx);
+    }
+
+    pub(crate) fn check_active_external_change_from_workspace(&mut self, cx: &mut Context<Self>) {
+        self.check_active_external_change(cx);
+    }
+
+    pub(crate) fn request_lsp_hover_from_workspace(&mut self, cx: &mut Context<Self>) {
+        self.request_lsp_hover(cx);
+    }
+
+    pub(crate) fn request_lsp_completion_from_workspace(&mut self, cx: &mut Context<Self>) {
+        self.request_lsp_completion(cx);
+    }
+
+    pub(crate) fn request_lsp_definition_from_workspace(&mut self, cx: &mut Context<Self>) {
+        self.request_lsp_definition(cx);
+    }
+
+    pub(crate) fn request_lsp_references_from_workspace(&mut self, cx: &mut Context<Self>) {
+        self.request_lsp_references(cx);
+    }
+
+    pub(crate) fn request_lsp_signature_help_from_workspace(&mut self, cx: &mut Context<Self>) {
+        self.request_lsp_signature_help(cx);
+    }
+
+    pub(crate) fn open_lsp_rename_from_workspace(&mut self, cx: &mut Context<Self>) {
+        self.open_lsp_rename(cx);
+    }
+
+    pub(crate) fn request_lsp_code_actions_from_workspace(&mut self, cx: &mut Context<Self>) {
+        self.request_lsp_code_actions(cx);
+    }
+
+    pub(crate) fn request_lsp_format_from_workspace(&mut self, cx: &mut Context<Self>) {
+        self.request_lsp_format(cx);
+    }
+
+    pub(crate) fn request_lsp_symbols_from_workspace(&mut self, cx: &mut Context<Self>) {
+        self.request_lsp_symbols(cx);
+    }
+
+    pub(crate) fn close_other_buffer_tabs_from_workspace(&mut self, cx: &mut Context<Self>) {
+        self.close_other_buffer_tabs(cx);
+    }
+
+    pub(crate) fn close_saved_buffer_tabs_from_workspace(&mut self, cx: &mut Context<Self>) {
+        self.close_saved_buffer_tabs(cx);
+    }
+
+    pub(crate) fn reopen_recent_buffer_tab_from_workspace(&mut self, cx: &mut Context<Self>) {
+        self.reopen_recent_buffer_tab(cx);
+    }
+
     fn with_chrome(cx: &mut Context<Self>, show_chrome: bool) -> Self {
         start_cursor_blink_task(cx);
         start_lsp_poll_task(cx);
@@ -475,6 +540,7 @@ impl EditorPrototype {
             editor_search: EditorSearch::default(),
             image_preview: None,
             image_preview_active: false,
+            markdown_preview_scroll: ScrollHandle::new(),
             search_input_target: EditorSearchInputTarget::Query,
             go_to_line_active: false,
             go_to_line_input: String::new(),
@@ -535,7 +601,6 @@ impl EditorPrototype {
         let rename_active = self.rename_active;
         let rename_input = self.rename_input.clone();
         let cursor_visible = is_focused && (self.is_selecting || self.cursor_blink_visible);
-        let can_reopen_recent = !self.recently_closed_paths.is_empty();
         let lsp_status = self.active_lsp_status();
         let diagnostics = self.active_diagnostics_snapshot();
         let external_change =
@@ -581,7 +646,6 @@ impl EditorPrototype {
                 go_to_line_input,
                 rename_active,
                 rename_input,
-                can_reopen_recent,
                 external_change: None,
                 lsp_status: String::new(),
                 diagnostics: Vec::new(),
@@ -591,6 +655,7 @@ impl EditorPrototype {
                 sample: false,
                 markdown: false,
                 markdown_mode: MarkdownViewMode::Source,
+                markdown_preview_scroll: self.markdown_preview_scroll.clone(),
                 markdown_preview: None,
                 appearance,
             };
@@ -682,7 +747,6 @@ impl EditorPrototype {
                 go_to_line_input,
                 rename_active,
                 rename_input,
-                can_reopen_recent,
                 external_change,
                 lsp_status,
                 diagnostics,
@@ -692,6 +756,7 @@ impl EditorPrototype {
                 sample: false,
                 markdown,
                 markdown_mode,
+                markdown_preview_scroll: self.markdown_preview_scroll.clone(),
                 markdown_preview,
                 appearance,
             };
@@ -740,7 +805,6 @@ impl EditorPrototype {
             go_to_line_input,
             rename_active,
             rename_input,
-            can_reopen_recent,
             external_change,
             lsp_status,
             diagnostics,
@@ -750,6 +814,7 @@ impl EditorPrototype {
             sample: true,
             markdown: false,
             markdown_mode: MarkdownViewMode::Source,
+            markdown_preview_scroll: self.markdown_preview_scroll.clone(),
             markdown_preview: None,
             appearance,
         }
@@ -867,7 +932,16 @@ impl EditorPrototype {
     }
 
     fn cycle_markdown_preview(&mut self, cx: &mut Context<Self>) {
+        let Some(mode) = self.active_markdown_mode(cx) else {
+            return;
+        };
+        self.set_markdown_mode(mode.cycle(), cx);
+    }
+
+    fn set_markdown_mode(&mut self, mode: MarkdownViewMode, cx: &mut Context<Self>) {
         let Some((buffer, view)) = self.active_buffer_and_view_mut() else {
+            self.status_message = Some("Markdown preview is available for .md files".to_string());
+            cx.notify();
             return;
         };
         if !buffer.path().is_some_and(is_markdown_path) {
@@ -875,12 +949,30 @@ impl EditorPrototype {
             cx.notify();
             return;
         }
-        view.markdown_mode = view.markdown_mode.cycle();
+        view.markdown_mode = mode;
         self.status_message = Some(format!(
             "Markdown {}",
             markdown_mode_label(view.markdown_mode)
         ));
+        if mode == MarkdownViewMode::Source {
+            self.markdown_preview_scroll
+                .set_offset(gpui::point(px(0.0), px(0.0)));
+        }
         cx.notify();
+    }
+
+    fn active_markdown_mode(&mut self, cx: &mut Context<Self>) -> Option<MarkdownViewMode> {
+        let Some((buffer, view)) = self.active_buffer_and_view_mut() else {
+            self.status_message = Some("Markdown preview is available for .md files".to_string());
+            cx.notify();
+            return None;
+        };
+        if !buffer.path().is_some_and(is_markdown_path) {
+            self.status_message = Some("Markdown preview is available for .md files".to_string());
+            cx.notify();
+            return None;
+        }
+        Some(view.markdown_mode)
     }
 }
 
@@ -1150,7 +1242,6 @@ struct EditorSnapshot {
     go_to_line_input: String,
     rename_active: bool,
     rename_input: String,
-    can_reopen_recent: bool,
     external_change: Option<ExternalFileChangeSnapshot>,
     lsp_status: String,
     diagnostics: Vec<EditorDiagnosticSnapshot>,
@@ -1159,6 +1250,7 @@ struct EditorSnapshot {
     cursor_diagnostic_message: Option<String>,
     markdown: bool,
     markdown_mode: MarkdownViewMode,
+    markdown_preview_scroll: ScrollHandle,
     markdown_preview: Option<Vec<MarkdownPreviewBlock>>,
     appearance: EditorAppearance,
 }
