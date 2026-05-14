@@ -9,7 +9,7 @@ mod schema;
 pub use colors::{apply_time_of_day, indexed_color, ColorTransition};
 pub use model::{
     BackgroundImageFit, ColorScheme, Config, CursorStyle, EditorConfig, EditorLanguageConfig,
-    EffectiveEditorConfig, EffectsConfig,
+    EffectiveEditorConfig, EffectsConfig, TerminalLayoutMode,
 };
 
 #[cfg(test)]

@@ -1,11 +1,14 @@
 use gpui::Context;
 
 use crate::{
-    config::{BackgroundImageFit, CursorStyle},
+    config::{BackgroundImageFit, CursorStyle, TerminalLayoutMode},
     theme::builtin_themes,
 };
 
-use super::{appearances::gpui_terminal_background_reference, AppearancePage, WorkspacePrototype};
+use super::{
+    appearances::{gpui_terminal_background_reference, is_display_font},
+    AppearancePage, WorkspacePrototype,
+};
 
 impl WorkspacePrototype {
     pub(super) fn apply_appearance_config(&mut self, cx: &mut Context<Self>) {
@@ -48,6 +51,36 @@ impl WorkspacePrototype {
     pub(super) fn adjust_line_height(&mut self, delta: f32, cx: &mut Context<Self>) {
         self.appearance_config.line_height =
             (self.appearance_config.line_height + delta).clamp(0.9, 2.2);
+        self.apply_appearance_config(cx);
+    }
+
+    pub(super) fn set_terminal_font_family(
+        &mut self,
+        family: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        self.appearance_config.font_family = family;
+        self.apply_appearance_config(cx);
+    }
+
+    pub(super) fn set_terminal_layout_mode(
+        &mut self,
+        mode: TerminalLayoutMode,
+        cx: &mut Context<Self>,
+    ) {
+        self.appearance_config.terminal_layout = mode;
+        // If the active font doesn't belong to the new mode's font list,
+        // clear it so the picker below isn't showing a selection from a
+        // hidden row. Display fonts are explicit; anything else is treated
+        // as monospace.
+        let belongs = match (mode, self.appearance_config.font_family.as_deref()) {
+            (_, None) => true,
+            (TerminalLayoutMode::Display, Some(family)) => is_display_font(family),
+            (TerminalLayoutMode::Monospace, Some(family)) => !is_display_font(family),
+        };
+        if !belongs {
+            self.appearance_config.font_family = None;
+        }
         self.apply_appearance_config(cx);
     }
 

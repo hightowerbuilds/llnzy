@@ -4,7 +4,7 @@ use gpui::prelude::*;
 use gpui::{div, px, rgb, Context, MouseButton, MouseDownEvent};
 
 use crate::{
-    config::{BackgroundImageFit, Config, CursorStyle},
+    config::{BackgroundImageFit, Config, CursorStyle, TerminalLayoutMode},
     theme::builtin_themes,
 };
 
@@ -12,6 +12,32 @@ use super::{
     AppearancePage, WorkspacePrototype, ACTIVE_TEXT, BORDER, EDITOR_BG,
     GPUI_TERMINAL_BACKGROUND_MAX_EDGE, MUTED_TEXT, PANEL_BG, QUEUE_GREEN, SIDEBAR_TEXT,
 };
+
+// Monospace families. `None` means "use the system default", which is what
+// gpui hands the terminal when `config.font_family` is unset.
+pub(super) const TERMINAL_MONO_FONT_CHOICES: &[(&str, Option<&str>)] = &[
+    ("Default", None),
+    ("Menlo", Some("Menlo")),
+    ("Courier", Some("Courier")),
+];
+
+// Proportional families used in Display mode. The flow renderer shapes each
+// row as a single line so glyphs use their natural advance widths.
+pub(super) const TERMINAL_DISPLAY_FONT_CHOICES: &[(&str, &str)] = &[
+    ("Atkinson Hyperlegible", "Atkinson Hyperlegible"),
+    ("Helvetica", "Helvetica"),
+    ("Georgia", "Georgia"),
+    ("Palatino", "Palatino"),
+    ("Verdana", "Verdana"),
+];
+
+/// Whether `family` is one of the curated Display-mode (proportional)
+/// families. Used when switching modes to clear a stranded font selection.
+pub(super) fn is_display_font(family: &str) -> bool {
+    TERMINAL_DISPLAY_FONT_CHOICES
+        .iter()
+        .any(|(_, candidate)| *candidate == family)
+}
 
 pub(super) fn appearances_surface(
     config: Config,
@@ -213,6 +239,57 @@ fn terminal_appearance_controls(
     terminal_background_import_error: Option<String>,
     cx: &mut Context<WorkspacePrototype>,
 ) -> gpui::Div {
+    let layout_mode = config.terminal_layout;
+    let layout_row = div()
+        .flex()
+        .items_center()
+        .gap_2()
+        .child(control_label("Layout"))
+        .child(appearance_button(
+            "Monospace".to_string(),
+            layout_mode == TerminalLayoutMode::Monospace,
+            cx,
+            |this, cx| this.set_terminal_layout_mode(TerminalLayoutMode::Monospace, cx),
+        ))
+        .child(appearance_button(
+            "Display".to_string(),
+            layout_mode == TerminalLayoutMode::Display,
+            cx,
+            |this, cx| this.set_terminal_layout_mode(TerminalLayoutMode::Display, cx),
+        ));
+
+    let mut font_row = div()
+        .flex()
+        .items_center()
+        .gap_2()
+        .child(control_label("Font"));
+    match layout_mode {
+        TerminalLayoutMode::Monospace => {
+            for (label, family) in TERMINAL_MONO_FONT_CHOICES {
+                let family = *family;
+                let active = config.font_family.as_deref() == family;
+                font_row = font_row.child(appearance_button(
+                    (*label).to_string(),
+                    active,
+                    cx,
+                    move |this, cx| this.set_terminal_font_family(family.map(String::from), cx),
+                ));
+            }
+        }
+        TerminalLayoutMode::Display => {
+            for (label, family) in TERMINAL_DISPLAY_FONT_CHOICES {
+                let family = *family;
+                let active = config.font_family.as_deref() == Some(family);
+                font_row = font_row.child(appearance_button(
+                    (*label).to_string(),
+                    active,
+                    cx,
+                    move |this, cx| this.set_terminal_font_family(Some(family.to_string()), cx),
+                ));
+            }
+        }
+    }
+
     content
         .child(metric_row(
             "App Font Size",
@@ -228,6 +305,20 @@ fn terminal_appearance_controls(
             |this, cx| this.adjust_line_height(-0.05, cx),
             |this, cx| this.adjust_line_height(0.05, cx),
         ))
+        .child(layout_row)
+        .child(font_row)
+        .child(
+            div()
+                .pl(px(150.0))
+                .text_size(px(12.0))
+                .text_color(rgb(MUTED_TEXT))
+                .child(if layout_mode == TerminalLayoutMode::Display {
+                    "Display layout flows text with natural advance widths — \
+                     TUIs and box-drawing characters will look broken."
+                } else {
+                    ""
+                }),
+        )
         .child(
             div()
                 .flex()

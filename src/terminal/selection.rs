@@ -145,6 +145,53 @@ impl Terminal {
         self.bump_selection_revision();
     }
 
+    /// Return the current selection as viewport-row + column-range tuples
+    /// (`(viewport_row, col_start, col_end_inclusive)`), one per visible row
+    /// covered by the selection. Used by the Display-mode renderer to build
+    /// selection rectangles from a per-row x-offset table instead of a
+    /// monospace advance.
+    pub fn selection_cells(&self) -> Vec<(usize, usize, usize)> {
+        let Some(selection_range) = self.selection_range() else {
+            return Vec::new();
+        };
+
+        let (cols, rows) = self.size();
+        if cols == 0 || rows == 0 {
+            return Vec::new();
+        }
+
+        let mut out = Vec::new();
+        for line in selection_range.start.line.0..=selection_range.end.line.0 {
+            let point = Point::new(Line(line), Column(0));
+            let Some(viewport_row) =
+                term::point_to_viewport(self.term.grid().display_offset(), point)
+                    .map(|point| point.line)
+            else {
+                continue;
+            };
+            if viewport_row >= rows {
+                continue;
+            }
+
+            let max_col = cols.saturating_sub(1);
+            let col_start = if selection_range.is_block || line == selection_range.start.line.0 {
+                selection_range.start.column.0.min(max_col)
+            } else {
+                0
+            };
+            let col_end = if selection_range.is_block || line == selection_range.end.line.0 {
+                selection_range.end.column.0.min(max_col)
+            } else {
+                max_col
+            };
+            if col_end < col_start {
+                continue;
+            }
+            out.push((viewport_row, col_start, col_end));
+        }
+        out
+    }
+
     pub fn selection_rects(
         &self,
         cell_w: f32,

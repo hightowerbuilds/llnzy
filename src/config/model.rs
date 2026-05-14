@@ -16,6 +16,18 @@ pub enum CursorStyle {
     Underline,
 }
 
+/// Terminal layout mode. `Monospace` is the classic terminal grid: every
+/// character occupies one column of `metrics.advance` pixels. `Display` lets
+/// rows flow with the font's natural advance widths, so proportional fonts
+/// render the way they would in a web page or document. TUI box drawing
+/// looks broken in Display mode — that's the tradeoff.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TerminalLayoutMode {
+    #[default]
+    Monospace,
+    Display,
+}
+
 /// The 16 ANSI colors plus fg/bg/cursor/selection.
 #[derive(Clone, Debug)]
 pub struct ColorScheme {
@@ -68,6 +80,7 @@ pub struct Config {
     pub shell: String,
     pub colors: ColorScheme,
     pub cursor_style: CursorStyle,
+    pub terminal_layout: TerminalLayoutMode,
     pub cursor_blink_ms: u64,
     pub padding_x: f32,
     pub padding_y: f32,
@@ -330,6 +343,7 @@ impl Default for Config {
             shell,
             colors: ColorScheme::default(),
             cursor_style: CursorStyle::Block,
+            terminal_layout: TerminalLayoutMode::default(),
             cursor_blink_ms: 0,
             padding_x: 20.0,
             padding_y: 25.0,

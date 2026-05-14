@@ -1,5 +1,5 @@
 use alacritty_terminal::term::cell::Flags;
-use gpui::{rgb, Font, FontStyle, FontWeight, TextRun};
+use gpui::{rgb, Font, FontStyle, FontWeight, Pixels, ShapedLine, SharedString, TextRun, Window};
 
 use super::effects::rgb_u32;
 use crate::config::Config;
@@ -139,6 +139,87 @@ fn display_cell_char(c: char) -> char {
         ' '
     } else {
         c
+    }
+}
+
+/// Display-mode (flow) layout for one terminal row. The row is shaped as one
+/// `shape_line` call so glyphs use their natural advance widths; `col_offsets`
+/// records the x-pixel position of each column boundary so cursor placement,
+/// selection rectangles, click hit-testing, and decoration rects can map
+/// column ↔ pixel through a single source of truth.
+pub(super) struct RowLayout {
+    pub(super) shaped: ShapedLine,
+    /// Length = num_cols + 1. `col_offsets[col]` is the x-pixel where column
+    /// `col` starts; `col_offsets[cols]` is the right edge of the rightmost
+    /// column. Wide-character spacer columns share the offset of their
+    /// preceding wide-char column (zero-width in the table).
+    pub(super) col_offsets: Vec<f32>,
+}
+
+pub(super) fn terminal_row_flow(
+    session: &Session,
+    config: &Config,
+    row: usize,
+    cols: usize,
+    block_cursor: Option<(usize, usize)>,
+    base_font: &Font,
+    font_size: Pixels,
+    window: &Window,
+) -> RowLayout {
+    let mut row_text = String::new();
+    let mut byte_index_at_col: Vec<usize> = Vec::with_capacity(cols + 1);
+    let mut cell_styles: Vec<(usize, TerminalTextStyle)> = Vec::new();
+
+    for col in 0..cols {
+        let flags = session.terminal.cell_flags(row, col);
+        let is_spacer = flags.contains(Flags::WIDE_CHAR_SPACER)
+            || flags.contains(Flags::LEADING_WIDE_CHAR_SPACER);
+        byte_index_at_col.push(row_text.len());
+        if is_spacer {
+            continue;
+        }
+        let raw = session.terminal.cell_char(row, col);
+        let ch = display_cell_char(raw);
+        let mut buf = [0u8; 4];
+        let s = ch.encode_utf8(&mut buf);
+        let style = terminal_cell_text_style(session, config, row, col, block_cursor);
+        cell_styles.push((s.len(), style));
+        row_text.push_str(s);
+    }
+    byte_index_at_col.push(row_text.len());
+
+    // Coalesce adjacent cells with the same style into one `TextRun` so the
+    // shaper sees a few large runs instead of one run per cell.
+    let mut runs: Vec<TextRun> = Vec::new();
+    let mut iter = cell_styles.into_iter();
+    if let Some((first_len, first_style)) = iter.next() {
+        let mut current_len = first_len;
+        let mut current_style = first_style;
+        for (len, style) in iter {
+            if style == current_style {
+                current_len += len;
+            } else {
+                runs.push(text_run(current_style, current_len, base_font));
+                current_len = len;
+                current_style = style;
+            }
+        }
+        runs.push(text_run(current_style, current_len, base_font));
+    }
+
+    let shaped =
+        window
+            .text_system()
+            .shape_line(SharedString::from(row_text), font_size, &runs, None);
+
+    let mut col_offsets = Vec::with_capacity(cols + 1);
+    for &bi in &byte_index_at_col {
+        col_offsets.push(f32::from(shaped.x_for_index(bi)));
+    }
+
+    RowLayout {
+        shaped,
+        col_offsets,
     }
 }
 
