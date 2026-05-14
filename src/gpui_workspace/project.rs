@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use gpui::{px, ClipboardItem, Context, KeyDownEvent, Pixels, Window};
+use gpui::{px, AppContext, ClipboardItem, Context, KeyDownEvent, Pixels, Window};
 
 use crate::{
     path_utils::{path_contains, same_path},
@@ -56,11 +56,87 @@ impl WorkspacePrototype {
         cx: &mut Context<Self>,
     ) {
         self.selected_path = Some(path.clone());
-        let editor_path = path.clone();
-        self.editor.update(cx, |editor, cx| {
-            editor.open_path(editor_path, cx);
+        if let Some(tab_id) = self
+            .tabs
+            .iter()
+            .find(|tab| {
+                tab.file_path
+                    .as_ref()
+                    .is_some_and(|open| same_path(open, &path))
+            })
+            .map(|tab| tab.id)
+        {
+            let Some(editor) = self.file_editor_for_tab(tab_id, path.clone(), cx) else {
+                cx.notify();
+                return;
+            };
+            let activated = editor.update(cx, |editor, cx| {
+                editor.activate_path_from_workspace(path.clone(), cx)
+            });
+            if !activated {
+                cx.notify();
+                return;
+            }
+            self.active_tab_id = tab_id;
+            self.tab_manager.set_active_tab(tab_id.0);
+        } else {
+            let tab_id = WorkspaceTabId(self.next_tab_id);
+            self.next_tab_id += 1;
+            let Some(editor) = self.new_file_editor(path.clone(), cx) else {
+                cx.notify();
+                return;
+            };
+            self.file_editors.insert(tab_id.0, editor);
+            self.tabs.push(WorkspaceTab::file(tab_id, path.clone()));
+            self.active_tab_id = tab_id;
+            self.tab_manager.set_active_tab(tab_id.0);
+        }
+        self.tab_overflow_open = false;
+        self.focus_surface(WorkspaceSurface::Editor, window, cx);
+        cx.notify();
+    }
+
+    fn new_file_editor(
+        &self,
+        path: PathBuf,
+        cx: &mut Context<Self>,
+    ) -> Option<gpui::Entity<crate::gpui_editor::EditorPrototype>> {
+        let editor = cx.new(crate::gpui_editor::EditorPrototype::new);
+        let config = self.appearance_config.clone();
+        let opened = editor.update(cx, |editor, cx| {
+            editor.set_appearance_config(config, cx);
+            editor.open_path(path, cx)
         });
-        self.open_or_activate_surface(WorkspaceSurface::Editor, window, cx);
+        opened.then_some(editor)
+    }
+
+    fn file_editor_for_tab(
+        &mut self,
+        tab_id: WorkspaceTabId,
+        path: PathBuf,
+        cx: &mut Context<Self>,
+    ) -> Option<gpui::Entity<crate::gpui_editor::EditorPrototype>> {
+        if let Some(editor) = self.file_editors.get(&tab_id.0) {
+            return Some(editor.clone());
+        }
+        let editor = self.new_file_editor(path, cx)?;
+        self.file_editors.insert(tab_id.0, editor.clone());
+        Some(editor)
+    }
+
+    fn modified_open_editor_path_for_move(
+        &self,
+        moved_sources: &[(PathBuf, bool)],
+        cx: &mut Context<Self>,
+    ) -> Option<String> {
+        self.editor
+            .read(cx)
+            .modified_open_path_for_move(moved_sources)
+            .or_else(|| {
+                self.file_editors
+                    .values()
+                    .find_map(|editor| editor.read(cx).modified_open_path_for_move(moved_sources))
+            })
     }
 
     pub(super) fn open_sidebar_context_menu(
@@ -75,6 +151,7 @@ impl WorkspacePrototype {
     ) {
         window.focus(&self.focus_handle);
         self.tab_manager.close_context_menu();
+        self.tab_overflow_open = false;
         self.tab_rename = None;
         self.sidebar_rename = None;
         self.sidebar_context_menu = Some(SidebarContextMenuState {
@@ -208,11 +285,7 @@ impl WorkspacePrototype {
         }
         let is_dir = source.is_dir();
         let moved_sources = vec![(source.clone(), is_dir)];
-        if let Some(message) = self
-            .editor
-            .read(cx)
-            .modified_open_path_for_move(&moved_sources)
-        {
+        if let Some(message) = self.modified_open_editor_path_for_move(&moved_sources, cx) {
             self.explorer_status = Some(message);
             cx.notify();
             return;
@@ -289,11 +362,7 @@ impl WorkspacePrototype {
     pub(super) fn delete_sidebar_entry(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         let is_dir = path.is_dir();
         let moved_sources = vec![(path.clone(), is_dir)];
-        if let Some(message) = self
-            .editor
-            .read(cx)
-            .modified_open_path_for_move(&moved_sources)
-        {
+        if let Some(message) = self.modified_open_editor_path_for_move(&moved_sources, cx) {
             self.explorer_status = Some(message.replace("moving", "deleting"));
             cx.notify();
             return;
@@ -302,6 +371,11 @@ impl WorkspacePrototype {
         self.editor.update(cx, |editor, cx| {
             editor.close_clean_paths_for_delete(&moved_sources, cx);
         });
+        for editor in self.file_editors.values() {
+            editor.update(cx, |editor, cx| {
+                editor.close_clean_paths_for_delete(&moved_sources, cx);
+            });
+        }
 
         let result = if is_dir {
             fs::remove_dir_all(&path)
@@ -320,6 +394,31 @@ impl WorkspacePrototype {
             same_path(selected, &path) || (is_dir && path_contains(&path, selected))
         }) {
             self.selected_path = None;
+        }
+        let mut removed_tab_ids = Vec::new();
+        self.tabs.retain(|tab| {
+            let remove = tab.file_path.as_ref().is_some_and(|open| {
+                same_path(open, &path) || (is_dir && path_contains(&path, open))
+            });
+            if remove {
+                removed_tab_ids.push(tab.id.0);
+            }
+            !remove
+        });
+        for tab_id in removed_tab_ids {
+            self.file_editors.remove(&tab_id);
+        }
+        let valid_tabs = self.tab_ids();
+        self.tab_manager.retain_tabs(&valid_tabs);
+        if !valid_tabs.contains(&self.active_tab_id.0) {
+            self.active_tab_id = self
+                .tabs
+                .iter()
+                .find(|tab| tab.surface == WorkspaceSurface::Home)
+                .or_else(|| self.tabs.first())
+                .map(|tab| tab.id)
+                .unwrap_or(self.active_tab_id);
+            self.tab_manager.set_active_tab(self.active_tab_id.0);
         }
         self.sidebar_context_menu = None;
         self.sidebar_rename = None;
@@ -363,11 +462,7 @@ impl WorkspacePrototype {
             .iter()
             .map(|item| (item.source.clone(), item.is_dir))
             .collect::<Vec<_>>();
-        if let Some(message) = self
-            .editor
-            .read(cx)
-            .modified_open_path_for_move(&moved_sources)
-        {
+        if let Some(message) = self.modified_open_editor_path_for_move(&moved_sources, cx) {
             self.explorer_status = Some(message);
             cx.notify();
             return;
@@ -411,12 +506,23 @@ impl WorkspacePrototype {
             }
         }
 
+        for tab in &mut self.tabs {
+            if let Some(path) = tab.file_path.clone() {
+                if let Some(remapped) = remap_path_after_explorer_move(&path, moved) {
+                    tab.file_path = Some(remapped);
+                }
+            }
+        }
+
         let editor_moves = moved
             .iter()
             .map(|item| (item.source.clone(), item.destination.clone(), item.is_dir))
             .collect::<Vec<_>>();
         self.editor
             .update(cx, |editor, cx| editor.remap_moved_paths(&editor_moves, cx));
+        for editor in self.file_editors.values() {
+            editor.update(cx, |editor, cx| editor.remap_moved_paths(&editor_moves, cx));
+        }
     }
 
     pub(super) fn pick_open_project(&mut self, cx: &mut Context<Self>) {
@@ -476,6 +582,7 @@ impl WorkspacePrototype {
         let active_was_editor = self.active_surface() == WorkspaceSurface::Editor;
         self.tabs
             .retain(|tab| tab.surface != WorkspaceSurface::Editor);
+        self.file_editors.clear();
         if self.tabs.is_empty() {
             self.tabs.push(WorkspaceTab::new(
                 WorkspaceTabId(self.next_tab_id),

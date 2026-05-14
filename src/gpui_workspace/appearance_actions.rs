@@ -13,6 +13,10 @@ impl WorkspacePrototype {
         self.editor.update(cx, |editor, cx| {
             editor.set_appearance_config(config.clone(), cx)
         });
+        for editor in self.file_editors.values() {
+            let config = config.clone();
+            editor.update(cx, |editor, cx| editor.set_appearance_config(config, cx));
+        }
         for terminal in self.terminals.values() {
             let config = config.clone();
             terminal.update(cx, |terminal, cx| terminal.set_config(config, cx));

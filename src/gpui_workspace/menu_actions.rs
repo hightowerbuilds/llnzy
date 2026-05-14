@@ -25,8 +25,10 @@ impl WorkspacePrototype {
             &mut Context<crate::gpui_editor::EditorPrototype>,
         ),
     ) {
-        self.open_or_activate_surface(WorkspaceSurface::Editor, window, cx);
-        self.editor.update(cx, action);
+        if self.active_surface() != WorkspaceSurface::Editor {
+            self.open_or_activate_surface(WorkspaceSurface::Editor, window, cx);
+        }
+        self.active_editor_entity().update(cx, action);
     }
 
     pub(super) fn activate_relative_tab(
@@ -135,7 +137,7 @@ impl WorkspacePrototype {
     pub(super) fn menu_save(&mut self, _: &MenuSave, _: &mut Window, cx: &mut Context<Self>) {
         match self.active_surface() {
             WorkspaceSurface::Editor => {
-                self.editor
+                self.active_editor_entity()
                     .update(cx, |editor, cx| editor.save_active_buffer(cx));
             }
             WorkspaceSurface::Sketch => {
@@ -149,7 +151,8 @@ impl WorkspacePrototype {
     pub(super) fn menu_undo(&mut self, _: &MenuUndo, _: &mut Window, cx: &mut Context<Self>) {
         match self.active_surface() {
             WorkspaceSurface::Editor => {
-                self.editor.update(cx, |editor, cx| editor.undo_edit(cx));
+                self.active_editor_entity()
+                    .update(cx, |editor, cx| editor.undo_edit(cx));
             }
             WorkspaceSurface::Sketch => {
                 self.sketch
@@ -162,7 +165,8 @@ impl WorkspacePrototype {
     pub(super) fn menu_redo(&mut self, _: &MenuRedo, _: &mut Window, cx: &mut Context<Self>) {
         match self.active_surface() {
             WorkspaceSurface::Editor => {
-                self.editor.update(cx, |editor, cx| editor.redo_edit(cx));
+                self.active_editor_entity()
+                    .update(cx, |editor, cx| editor.redo_edit(cx));
             }
             WorkspaceSurface::Sketch => {
                 self.sketch
@@ -174,14 +178,14 @@ impl WorkspacePrototype {
 
     pub(super) fn menu_copy(&mut self, _: &MenuCopy, _: &mut Window, cx: &mut Context<Self>) {
         if self.active_surface() == WorkspaceSurface::Editor {
-            self.editor
+            self.active_editor_entity()
                 .update(cx, |editor, cx| editor.copy_selection_to_clipboard(cx));
         }
     }
 
     pub(super) fn menu_paste(&mut self, _: &MenuPaste, _: &mut Window, cx: &mut Context<Self>) {
         if self.active_surface() == WorkspaceSurface::Editor {
-            self.editor
+            self.active_editor_entity()
                 .update(cx, |editor, cx| editor.paste_from_clipboard(cx));
         }
     }
@@ -193,14 +197,16 @@ impl WorkspacePrototype {
         cx: &mut Context<Self>,
     ) {
         if self.active_surface() == WorkspaceSurface::Editor {
-            self.editor
+            self.active_editor_entity()
                 .update(cx, |editor, cx| editor.select_all_text(cx));
         }
     }
 
     pub(super) fn menu_find(&mut self, _: &MenuFind, window: &mut Window, cx: &mut Context<Self>) {
-        self.open_or_activate_surface(WorkspaceSurface::Editor, window, cx);
-        self.editor
+        if self.active_surface() != WorkspaceSurface::Editor {
+            self.open_or_activate_surface(WorkspaceSurface::Editor, window, cx);
+        }
+        self.active_editor_entity()
             .update(cx, |editor, cx| editor.open_find_from_workspace(window, cx));
     }
 

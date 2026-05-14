@@ -127,6 +127,10 @@ impl GpuiTabManager {
         self.groups.set_active_tab(tab_id);
     }
 
+    pub fn set_ratio_for_tab(&mut self, tab_id: TabId, ratio: f32) -> bool {
+        self.groups.set_ratio_for_tab(tab_id, ratio)
+    }
+
     pub fn retain_tabs(&mut self, valid_tabs: &[TabId]) {
         self.groups
             .retain_tabs(|tab_id| valid_tabs.contains(&tab_id));

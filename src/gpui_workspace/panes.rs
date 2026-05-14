@@ -1,11 +1,17 @@
 use std::{collections::BTreeMap, path::PathBuf};
 
 use gpui::prelude::*;
-use gpui::{div, px, relative, rgb, Context, Entity, MouseButton, MouseDownEvent};
+use gpui::{
+    div, px, relative, rgb, App, Context, DragMoveEvent, Entity, MouseButton, MouseDownEvent,
+    Render, Window,
+};
 
 use crate::{
-    config::Config, gpui_editor::EditorPrototype, gpui_sketch::SketchSurface,
-    gpui_stacker::StackerPrototype, gpui_terminal::TerminalSurface,
+    config::Config,
+    gpui_editor::EditorPrototype,
+    gpui_sketch::SketchSurface,
+    gpui_stacker::StackerPrototype,
+    gpui_terminal::{terminal_background_layer, TerminalSurface},
 };
 
 use super::{
@@ -20,6 +26,7 @@ use super::{
 pub(super) struct WorkspaceSurfaceContext {
     pub(super) stacker: Entity<StackerPrototype>,
     pub(super) editor: Entity<EditorPrototype>,
+    pub(super) file_editors: BTreeMap<u64, Entity<EditorPrototype>>,
     pub(super) terminals: BTreeMap<u64, Entity<TerminalSurface>>,
     pub(super) sketch: Entity<SketchSurface>,
     pub(super) workspace_root: Option<PathBuf>,
@@ -27,6 +34,14 @@ pub(super) struct WorkspaceSurfaceContext {
     pub(super) appearance_config: Config,
     pub(super) appearance_page: AppearancePage,
     pub(super) terminal_background_import_error: Option<String>,
+}
+
+struct JoinedPaneResizeDrag;
+
+impl Render for JoinedPaneResizeDrag {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        div().w(px(2.0)).h(px(40.0)).rounded_sm().bg(rgb(BORDER))
+    }
 }
 
 pub(super) fn workspace_content(
@@ -45,35 +60,69 @@ pub(super) fn workspace_content(
 
     if let Some(joined) = joined_panes {
         let ratio = joined.ratio.clamp(0.18, 0.82);
+        let shared_terminal_background = joined.primary_surface == WorkspaceSurface::Terminal
+            && joined.secondary_surface == WorkspaceSurface::Terminal;
+        let resize_tab_id = joined.primary_id;
+        let mut joined_container = div()
+            .id("joined-workspace-panes")
+            .relative()
+            .flex_1()
+            .h_full()
+            .flex()
+            .overflow_hidden()
+            .on_drag_move::<JoinedPaneResizeDrag>(cx.listener(
+                move |this, event: &DragMoveEvent<JoinedPaneResizeDrag>, _window, cx| {
+                    let width = event.bounds.size.width;
+                    if width <= px(1.0) {
+                        return;
+                    }
+                    let ratio =
+                        ((event.event.position.x - event.bounds.left()) / width).clamp(0.18, 0.82);
+                    this.resize_joined_panes_by_tab(resize_tab_id, ratio, cx);
+                },
+            ));
+
+        if shared_terminal_background {
+            if let Some(background) = terminal_background_layer(&context.appearance_config) {
+                joined_container = joined_container.child(background);
+            }
+        }
+
         return content.child(
-            div()
-                .flex_1()
-                .h_full()
-                .flex()
-                .overflow_hidden()
+            joined_container
                 .child(
                     workspace_surface_pane(
                         context.clone(),
                         joined.primary_surface,
                         Some(joined.primary_id),
+                        shared_terminal_background,
                         cx,
                     )
                     .w(relative(ratio)),
                 )
                 .child(
                     div()
+                        .id("joined-pane-resize-handle")
                         .w(px(JOINED_TAB_DIVIDER_WIDTH))
                         .h_full()
-                        .bg(rgb(0x101012))
-                        .border_l_1()
-                        .border_r_1()
-                        .border_color(rgb(BORDER)),
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .cursor_col_resize()
+                        .on_drag(
+                            JoinedPaneResizeDrag,
+                            |_drag, _offset, _window, cx: &mut App| {
+                                cx.new(|_| JoinedPaneResizeDrag)
+                            },
+                        )
+                        .child(div().w(px(1.0)).h_full().bg(rgb(BORDER))),
                 )
                 .child(
                     workspace_surface_pane(
                         context,
                         joined.secondary_surface,
                         Some(joined.secondary_id),
+                        shared_terminal_background,
                         cx,
                     )
                     .w(relative(1.0 - ratio)),
@@ -81,18 +130,22 @@ pub(super) fn workspace_content(
         );
     }
 
-    content.child(workspace_surface_pane(context, active_surface, Some(active_tab_id), cx).flex_1())
+    content.child(
+        workspace_surface_pane(context, active_surface, Some(active_tab_id), false, cx).flex_1(),
+    )
 }
 
 pub(super) fn workspace_surface_pane(
     context: WorkspaceSurfaceContext,
     surface: WorkspaceSurface,
     tab_id: Option<WorkspaceTabId>,
+    shared_terminal_background: bool,
     cx: &mut Context<WorkspacePrototype>,
 ) -> gpui::Div {
     let WorkspaceSurfaceContext {
         stacker,
         editor,
+        file_editors,
         terminals,
         sketch,
         workspace_root,
@@ -102,7 +155,10 @@ pub(super) fn workspace_surface_pane(
         terminal_background_import_error,
     } = context;
 
-    let pane = div().h_full().overflow_hidden().bg(rgb(EDITOR_BG));
+    let mut pane = div().h_full().overflow_hidden();
+    if !(surface == WorkspaceSurface::Terminal && shared_terminal_background) {
+        pane = pane.bg(rgb(EDITOR_BG));
+    }
 
     let pane = if let Some(tab_id) = tab_id {
         pane.on_mouse_down(
@@ -131,19 +187,22 @@ pub(super) fn workspace_surface_pane(
                     this.focus_surface(WorkspaceSurface::Editor, window, cx);
                 }),
             )
-            .child(
-                div().size_full().p_4().bg(rgb(EDITOR_BG)).child(
-                    div()
-                        .size_full()
-                        .border_1()
-                        .border_color(rgb(BORDER))
-                        .bg(rgb(EDITOR_BG))
-                        .overflow_hidden()
-                        .child(editor),
-                ),
-            ),
+            .child({
+                let editor = tab_id
+                    .and_then(|tab_id| file_editors.get(&tab_id.0).cloned())
+                    .unwrap_or(editor);
+                div().size_full().overflow_hidden().child(editor)
+            }),
         WorkspaceSurface::Terminal => match terminal_for_pane(&terminals, tab_id) {
-            Some(terminal) => pane.child(div().size_full().overflow_hidden().child(terminal)),
+            Some(terminal) => {
+                let mut terminal_pane = div().relative().size_full().overflow_hidden();
+                if !shared_terminal_background {
+                    if let Some(background) = terminal_background_layer(&appearance_config) {
+                        terminal_pane = terminal_pane.child(background);
+                    }
+                }
+                pane.child(terminal_pane.child(terminal))
+            }
             None => pane.child(
                 div()
                     .size_full()

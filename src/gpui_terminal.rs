@@ -70,6 +70,14 @@ actions!(
     ]
 );
 
+pub(crate) fn terminal_background_layer(config: &Config) -> Option<gpui::Div> {
+    terminal_background_image_path(config).map(|path| terminal_background_image(path, config))
+}
+
+fn terminal_uses_background_image(config: &Config) -> bool {
+    terminal_background_image_path(config).is_some()
+}
+
 pub(crate) fn bind_terminal_keys(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("enter", Enter, None),
@@ -543,20 +551,20 @@ impl EntityInputHandler for TerminalSurface {
 
 impl Render for TerminalSurface {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let uses_background_image = terminal_uses_background_image(&self.config);
         let body = if self.session.is_some() {
             let mut terminal_body = div()
                 .relative()
                 .flex_1()
                 .w_full()
                 .overflow_hidden()
-                .bg(rgb(TERMINAL_BG))
                 .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
                 .on_mouse_move(cx.listener(Self::on_mouse_move))
                 .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
                 .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up));
 
-            if let Some(path) = terminal_background_image_path(&self.config) {
-                terminal_body = terminal_body.child(terminal_background_image(path, &self.config));
+            if !uses_background_image {
+                terminal_body = terminal_body.bg(rgb(TERMINAL_BG));
             }
 
             terminal_body.child(TerminalElement {
@@ -582,11 +590,10 @@ impl Render for TerminalSurface {
                 )
         };
 
-        div()
+        let mut root = div()
             .size_full()
             .flex()
             .flex_col()
-            .bg(rgb(TERMINAL_PANEL_BG))
             .text_color(rgb(TERMINAL_TEXT))
             .font_family("Berkeley Mono")
             .key_context("TerminalSurface")
@@ -618,13 +625,19 @@ impl Render for TerminalSurface {
             .on_action(cx.listener(Self::ctrl_k))
             .on_action(cx.listener(Self::ctrl_l))
             .on_action(cx.listener(Self::ctrl_u))
-            .on_action(cx.listener(Self::ctrl_w))
-            .child(terminal_header(
-                self.terminal_title(),
-                self.terminal_subtitle(),
-                self.status_message.clone(),
-            ))
-            .child(body)
+            .on_action(cx.listener(Self::ctrl_w));
+
+        if !uses_background_image {
+            root = root.bg(rgb(TERMINAL_PANEL_BG));
+        }
+
+        root.child(terminal_header(
+            self.terminal_title(),
+            self.terminal_subtitle(),
+            self.status_message.clone(),
+            uses_background_image,
+        ))
+        .child(body)
     }
 }
 
@@ -875,8 +888,9 @@ fn terminal_header(
     title: String,
     subtitle: String,
     status_message: Option<String>,
+    uses_background_image: bool,
 ) -> impl IntoElement {
-    div()
+    let mut header = div()
         .h(px(42.0))
         .w_full()
         .flex()
@@ -884,8 +898,15 @@ fn terminal_header(
         .justify_between()
         .px_3()
         .border_b_1()
-        .border_color(rgb(TERMINAL_BORDER))
-        .bg(rgb(0x121217))
+        .border_color(rgb(TERMINAL_BORDER));
+
+    header = if uses_background_image {
+        header.bg(rgba(rgba_u32([0x12, 0x12, 0x17], 0.74)))
+    } else {
+        header.bg(rgb(0x121217))
+    };
+
+    header
         .child(
             div()
                 .flex()

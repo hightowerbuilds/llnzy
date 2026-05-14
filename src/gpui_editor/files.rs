@@ -45,13 +45,12 @@ fn remap_path_after_move(path: &Path, moved: &[(PathBuf, PathBuf, bool)]) -> Opt
 
 impl EditorPrototype {
     #[cfg(feature = "gpui-workspace")]
-    pub(crate) fn open_path(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+    pub(crate) fn open_path(&mut self, path: PathBuf, cx: &mut Context<Self>) -> bool {
         if is_preview_image_path(&path) {
-            self.open_image_path(path, cx);
-            return;
+            return self.open_image_path(path, cx);
         }
 
-        match self.editor.open(path.clone()) {
+        let opened = match self.editor.open(path.clone()) {
             Ok(buffer_id) => {
                 self.image_preview_active = false;
                 refresh_active_syntax(&mut self.editor);
@@ -61,26 +60,85 @@ impl EditorPrototype {
                 self.open_buffer_with_lsp(buffer_id);
                 self.load_error = None;
                 self.status_message = Some(format!("Opened {}", path.display()));
+                true
             }
             Err(err) => {
                 self.load_error = Some(format!("{}: {err}", path.display()));
                 self.status_message = Some("Open failed".to_string());
+                false
             }
-        }
+        };
         cx.notify();
+        opened
     }
 
     #[cfg(feature = "gpui-workspace")]
-    pub(crate) fn active_path(&self) -> Option<PathBuf> {
-        if self.image_preview_active {
-            if let Some(preview) = &self.image_preview {
-                return Some(preview.path.clone());
-            }
+    pub(crate) fn activate_path_from_workspace(
+        &mut self,
+        path: PathBuf,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if is_preview_image_path(&path) {
+            return self.open_image_path(path, cx);
         }
 
-        self.editor
-            .active_buffer_view()
-            .and_then(|(_, buffer, _)| buffer.path().map(PathBuf::from))
+        let Some(buffer_id) = self.editor.id_for_path(&path) else {
+            return self.open_path(path, cx);
+        };
+        if !self.editor.switch_to_id(buffer_id) {
+            return false;
+        }
+        self.image_preview_active = false;
+        refresh_active_syntax(&mut self.editor);
+        self.editor_search.mark_dirty();
+        self.status_message = Some(format!("Focused {}", path.display()));
+        cx.notify();
+        true
+    }
+
+    #[cfg(feature = "gpui-workspace")]
+    pub(crate) fn close_path_from_workspace(
+        &mut self,
+        path: &Path,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if is_preview_image_path(path) {
+            if self
+                .image_preview
+                .as_ref()
+                .is_some_and(|preview| same_path(&preview.path, path))
+            {
+                self.close_image_preview(cx);
+            }
+            return true;
+        }
+
+        let Some(buffer_id) = self.editor.id_for_path(path) else {
+            return true;
+        };
+        let Some(index) = self.editor.index_for_id(buffer_id) else {
+            return true;
+        };
+        let Some(buffer) = self.editor.buffers.get(index) else {
+            return true;
+        };
+        if buffer.is_modified() {
+            self.status_message = Some(format!("Save {} before closing it.", buffer.file_name()));
+            cx.notify();
+            return false;
+        }
+
+        let label = buffer.file_name().to_string();
+        self.send_lsp_close_for_index(index);
+        if self.editor.close(index) {
+            self.remember_recently_closed_path(path);
+            self.clear_external_change_for_path(path);
+            refresh_active_syntax(&mut self.editor);
+            self.editor_search.mark_dirty();
+            self.status_message = Some(format!("Closed {label}"));
+            cx.notify();
+        }
+        true
     }
 
     #[cfg(feature = "gpui-workspace")]
@@ -230,54 +288,6 @@ impl EditorPrototype {
             }
         }
         cx.notify();
-    }
-
-    pub(super) fn activate_buffer_tab(&mut self, index: usize, cx: &mut Context<Self>) {
-        if index >= self.editor.buffers.len() {
-            return;
-        }
-        self.image_preview_active = false;
-        self.editor.switch_to(index);
-        refresh_active_syntax(&mut self.editor);
-        self.editor_search.mark_dirty();
-        self.status_message = self
-            .editor
-            .buffers
-            .get(index)
-            .map(|buffer| format!("Focused {}", buffer.file_name()));
-        cx.notify();
-    }
-
-    pub(super) fn close_buffer_tab(&mut self, index: usize, cx: &mut Context<Self>) {
-        let Some(buffer) = self.editor.buffers.get(index) else {
-            return;
-        };
-        if buffer.is_modified() {
-            self.status_message = Some(format!("Save {} before closing it.", buffer.file_name()));
-            cx.notify();
-            return;
-        }
-
-        let active_id = self.editor.active_buffer_id();
-        let closing_id = self.editor.buffer_id(index);
-        let label = buffer.file_name().to_string();
-        let closed_path = buffer.path().map(PathBuf::from);
-        self.send_lsp_close_for_index(index);
-        if self.editor.close(index) {
-            if let Some(path) = closed_path.as_deref() {
-                self.remember_recently_closed_path(path);
-                self.clear_external_change_for_path(path);
-            }
-            if closing_id != active_id {
-                if let Some(active_id) = active_id {
-                    self.editor.switch_to_id(active_id);
-                }
-            }
-            refresh_active_syntax(&mut self.editor);
-            self.editor_search.mark_dirty();
-            self.status_message = Some(format!("Closed {label}"));
-            cx.notify();
-        }
     }
 
     pub(super) fn close_other_buffer_tabs(&mut self, cx: &mut Context<Self>) {
@@ -519,16 +529,6 @@ impl EditorPrototype {
         remember_recently_closed_path(&mut self.recently_closed_paths, path.to_path_buf());
     }
 
-    pub(super) fn activate_image_preview(&mut self, cx: &mut Context<Self>) {
-        let Some(preview) = &self.image_preview else {
-            return;
-        };
-        self.image_preview_active = true;
-        self.lsp_panel = None;
-        self.status_message = Some(format!("Previewing {}", preview.path.display()));
-        cx.notify();
-    }
-
     pub(super) fn close_image_preview(&mut self, cx: &mut Context<Self>) {
         let Some(preview) = self.image_preview.take() else {
             return;
@@ -539,12 +539,12 @@ impl EditorPrototype {
         cx.notify();
     }
 
-    fn open_image_path(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+    fn open_image_path(&mut self, path: PathBuf, cx: &mut Context<Self>) -> bool {
         if !path.is_file() {
             self.load_error = Some(format!("{} is not a file", path.display()));
             self.status_message = Some("Open failed".to_string());
             cx.notify();
-            return;
+            return false;
         }
         let dimensions = image::image_dimensions(&path).ok();
         let file_size = fs::metadata(&path).ok().map(|metadata| metadata.len());
@@ -561,6 +561,7 @@ impl EditorPrototype {
         self.load_error = None;
         self.status_message = Some(format!("Previewing {}", path.display()));
         cx.notify();
+        true
     }
 
     pub(super) fn remember_disk_text_for_path(&mut self, path: &Path) {

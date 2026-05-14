@@ -2,8 +2,7 @@ use std::path::PathBuf;
 
 use gpui::prelude::*;
 use gpui::{
-    div, fill, img, point, px, rgba, size, Bounds, IntoElement, ObjectFit, PaintQuad, Pixels,
-    StyledImage,
+    div, fill, img, point, px, rgba, size, Bounds, ObjectFit, PaintQuad, Pixels, StyledImage,
 };
 
 use super::{CELL_WIDTH, LINE_HEIGHT, TERMINAL_PADDING};
@@ -28,7 +27,7 @@ pub(super) fn terminal_background_image_path(config: &Config) -> Option<PathBuf>
     })
 }
 
-pub(super) fn terminal_background_image(path: PathBuf, config: &Config) -> impl IntoElement {
+pub(super) fn terminal_background_image(path: PathBuf, config: &Config) -> gpui::Div {
     let dim_alpha =
         ((1.0 - config.effects.background_intensity.clamp(0.05, 1.0)) * 0.72).clamp(0.0, 0.72);
     div()

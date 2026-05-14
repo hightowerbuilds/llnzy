@@ -297,6 +297,7 @@ fn install_workspace_menu_bar(cx: &mut App) {
 struct WorkspacePrototype {
     stacker: Entity<StackerPrototype>,
     editor: Entity<EditorPrototype>,
+    file_editors: BTreeMap<u64, Entity<EditorPrototype>>,
     terminals: BTreeMap<u64, Entity<TerminalSurface>>,
     sketch: Entity<SketchSurface>,
     focus_handle: FocusHandle,
@@ -304,6 +305,7 @@ struct WorkspacePrototype {
     tab_manager: GpuiTabManager,
     tab_name_overrides: BTreeMap<u64, String>,
     tab_rename: Option<TabRenameState>,
+    tab_overflow_open: bool,
     sidebar_context_menu: Option<SidebarContextMenuState>,
     sidebar_rename: Option<SidebarRenameState>,
     active_tab_id: WorkspaceTabId,
@@ -346,6 +348,7 @@ impl WorkspacePrototype {
         Self {
             stacker: cx.new(StackerPrototype::embedded),
             editor: cx.new(EditorPrototype::new),
+            file_editors: BTreeMap::new(),
             terminals,
             sketch,
             focus_handle: cx.focus_handle(),
@@ -353,6 +356,7 @@ impl WorkspacePrototype {
             tab_manager: GpuiTabManager::default(),
             tab_name_overrides: BTreeMap::new(),
             tab_rename: None,
+            tab_overflow_open: false,
             sidebar_context_menu: None,
             sidebar_rename: None,
             active_tab_id: WorkspaceTabId(1),
@@ -389,9 +393,7 @@ impl WorkspacePrototype {
         self.tab_name_overrides
             .get(&tab.id.0)
             .cloned()
-            .unwrap_or_else(|| {
-                workspace_tab_label(tab.surface, self.selected_path.as_deref(), None)
-            })
+            .unwrap_or_else(|| workspace_tab_label(tab))
     }
 
     fn tab_choices(&self) -> Vec<GpuiTabChoice> {
@@ -407,6 +409,13 @@ impl WorkspacePrototype {
 
     fn tab_by_id(&self, tab_id: WorkspaceTabId) -> Option<&WorkspaceTab> {
         self.tabs.iter().find(|tab| tab.id == tab_id)
+    }
+
+    fn active_editor_entity(&self) -> Entity<EditorPrototype> {
+        self.file_editors
+            .get(&self.active_tab_id.0)
+            .cloned()
+            .unwrap_or_else(|| self.editor.clone())
     }
 
     fn joined_panes_for_active(&self) -> Option<JoinedWorkspacePanes> {
@@ -444,14 +453,25 @@ impl WorkspacePrototype {
 
     fn close_context_menus(&mut self, cx: &mut Context<Self>) {
         let had_tab_menu = self.tab_manager.context_menu().is_some();
+        let had_tab_overflow_menu = self.tab_overflow_open;
         let had_sidebar_menu = self.sidebar_context_menu.is_some() || self.sidebar_rename.is_some();
+        self.tab_manager.close_context_menu();
+        self.tab_overflow_open = false;
+        self.tab_rename = None;
+        self.sidebar_context_menu = None;
+        self.sidebar_rename = None;
+        if had_tab_menu || had_tab_overflow_menu || had_sidebar_menu {
+            cx.notify();
+        }
+    }
+
+    fn toggle_tab_overflow_menu(&mut self, cx: &mut Context<Self>) {
         self.tab_manager.close_context_menu();
         self.tab_rename = None;
         self.sidebar_context_menu = None;
         self.sidebar_rename = None;
-        if had_tab_menu || had_sidebar_menu {
-            cx.notify();
-        }
+        self.tab_overflow_open = !self.tab_overflow_open;
+        cx.notify();
     }
 
     fn open_tab_context_menu(
@@ -462,6 +482,7 @@ impl WorkspacePrototype {
         cx: &mut Context<Self>,
     ) {
         window.focus(&self.focus_handle);
+        self.tab_overflow_open = false;
         self.tab_rename = None;
         self.sidebar_context_menu = None;
         self.sidebar_rename = None;
@@ -629,6 +650,17 @@ impl WorkspacePrototype {
         }
     }
 
+    fn resize_joined_panes_by_tab(
+        &mut self,
+        tab_id: WorkspaceTabId,
+        ratio: f32,
+        cx: &mut Context<Self>,
+    ) {
+        if self.tab_manager.set_ratio_for_tab(tab_id.0, ratio) {
+            cx.notify();
+        }
+    }
+
     fn active_tab_menu_anchor(&self) -> WorkspaceTabMenuAnchor {
         let tabs = self
             .tabs
@@ -710,7 +742,11 @@ impl WorkspacePrototype {
             | WorkspaceSurface::Home
             | WorkspaceSurface::Appearances
             | WorkspaceSurface::Settings => {
-                window.focus(&self.editor.focus_handle(cx));
+                if surface == WorkspaceSurface::Editor {
+                    window.focus(&self.active_editor_entity().focus_handle(cx));
+                } else {
+                    window.focus(&self.editor.focus_handle(cx));
+                }
             }
             WorkspaceSurface::Terminal => {
                 if let Some(terminal) = self.terminals.get(&self.active_tab_id.0) {
@@ -729,9 +765,16 @@ impl WorkspacePrototype {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(tab) = self.tabs.iter().find(|tab| tab.id == tab_id) {
+        if let Some(tab) = self.tabs.iter().find(|tab| tab.id == tab_id).cloned() {
             self.active_tab_id = tab.id;
             self.tab_manager.set_active_tab(tab.id.0);
+            self.tab_overflow_open = false;
+            if let Some(path) = tab.file_path.clone() {
+                self.selected_path = Some(path.clone());
+                self.active_editor_entity().update(cx, |editor, cx| {
+                    editor.activate_path_from_workspace(path, cx)
+                });
+            }
             self.focus_surface(tab.surface, window, cx);
             cx.notify();
         }
@@ -743,6 +786,12 @@ impl WorkspacePrototype {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.active_surface() == surface {
+            self.focus_surface(surface, window, cx);
+            cx.notify();
+            return;
+        }
+
         if let Some(tab) = self.tabs.iter().find(|tab| tab.surface == surface) {
             self.active_tab_id = tab.id;
             self.tab_manager.set_active_tab(tab.id.0);
@@ -803,6 +852,22 @@ impl WorkspacePrototype {
         };
 
         let was_active = self.active_tab_id == tab_id;
+        if let Some(path) = self.tabs[index].file_path.clone() {
+            let closed = self.file_editors.get(&tab_id.0).map_or(true, |editor| {
+                editor.update(cx, |editor, cx| editor.close_path_from_workspace(&path, cx))
+            });
+            if !closed {
+                return;
+            }
+            self.file_editors.remove(&tab_id.0);
+            if self
+                .selected_path
+                .as_ref()
+                .is_some_and(|selected| crate::path_utils::same_path(selected, &path))
+            {
+                self.selected_path = None;
+            }
+        }
         if self.tabs[index].surface == WorkspaceSurface::Terminal {
             self.terminals.remove(&tab_id.0);
         }
@@ -828,7 +893,14 @@ impl WorkspacePrototype {
         if was_active {
             let next_index = index.min(self.tabs.len().saturating_sub(1));
             self.active_tab_id = self.tabs[next_index].id;
-            let surface = self.tabs[next_index].surface;
+            let tab = self.tabs[next_index].clone();
+            if let Some(path) = tab.file_path.clone() {
+                self.selected_path = Some(path.clone());
+                self.active_editor_entity().update(cx, |editor, cx| {
+                    editor.activate_path_from_workspace(path, cx)
+                });
+            }
+            let surface = tab.surface;
             self.tab_manager.set_active_tab(self.active_tab_id.0);
             self.focus_surface(surface, window, cx);
         }
@@ -849,6 +921,7 @@ impl Render for WorkspacePrototype {
         let tabs = self.tabs.clone();
         let joined_panes = self.joined_panes_for_active();
         let tab_context_menu = self.tab_manager.context_menu();
+        let tab_overflow_open = self.tab_overflow_open;
         let tab_name_overrides = self.tab_name_overrides.clone();
         let tab_rename = self.tab_rename.clone();
         let sidebar_context_menu = self.sidebar_context_menu.clone();
@@ -863,7 +936,6 @@ impl Render for WorkspacePrototype {
             .map(|root| collect_explorer_entries(root, &self.expanded_dirs))
             .unwrap_or_default();
         let selected_path = self.selected_path.clone();
-        let editor_active_path = self.editor.read(cx).active_path();
         let workspace_root = self.workspace_root.clone();
         let recent_projects = self.recent_projects.clone();
         let recent_projects_open = self.recent_projects_open;
@@ -892,6 +964,7 @@ impl Render for WorkspacePrototype {
                 WorkspaceSurfaceContext {
                     stacker: self.stacker.clone(),
                     editor: self.editor.clone(),
+                    file_editors: self.file_editors.clone(),
                     terminals: self.terminals.clone(),
                     sketch: self.sketch.clone(),
                     workspace_root,
@@ -968,10 +1041,9 @@ impl Render for WorkspacePrototype {
             .child(workspace_tab_bar(
                 tabs,
                 active_tab_id,
-                selected_path.clone(),
-                editor_active_path,
                 tab_name_overrides,
                 &self.tab_manager,
+                tab_overflow_open,
                 cx,
             ))
             .child(main)
@@ -982,6 +1054,14 @@ impl Render for WorkspacePrototype {
                     self.tab_choices(),
                     &self.tab_manager,
                     tab_rename,
+                    cx,
+                ))
+            })
+            .when(tab_overflow_open, |root| {
+                root.child(self::tabs::workspace_tab_overflow_menu(
+                    self.tabs.clone(),
+                    active_tab_id,
+                    &self.tab_manager,
                     cx,
                 ))
             })

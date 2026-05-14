@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, path::Path, path::PathBuf};
+use std::{collections::BTreeMap, path::PathBuf};
 
 use gpui::prelude::*;
 use gpui::{div, px, rgb, App, Context, MouseButton, MouseDownEvent, Render, Window};
@@ -28,11 +28,24 @@ pub(super) struct WorkspaceTabId(pub(super) u64);
 pub(super) struct WorkspaceTab {
     pub(super) id: WorkspaceTabId,
     pub(super) surface: WorkspaceSurface,
+    pub(super) file_path: Option<PathBuf>,
 }
 
 impl WorkspaceTab {
     pub(super) fn new(id: WorkspaceTabId, surface: WorkspaceSurface) -> Self {
-        Self { id, surface }
+        Self {
+            id,
+            surface,
+            file_path: None,
+        }
+    }
+
+    pub(super) fn file(id: WorkspaceTabId, path: PathBuf) -> Self {
+        Self {
+            id,
+            surface: WorkspaceSurface::Editor,
+            file_path: Some(path),
+        }
     }
 }
 
@@ -99,10 +112,9 @@ impl Render for WorkspaceTabDragPreview {
 pub(super) fn workspace_tab_bar(
     tabs: Vec<WorkspaceTab>,
     active_tab_id: WorkspaceTabId,
-    selected_path: Option<PathBuf>,
-    editor_active_path: Option<PathBuf>,
     tab_name_overrides: BTreeMap<u64, String>,
     tab_manager: &GpuiTabManager,
+    overflow_open: bool,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     let tab_items = tabs
@@ -112,18 +124,12 @@ pub(super) fn workspace_tab_bar(
             let label = tab_name_overrides
                 .get(&tab.id.0)
                 .cloned()
-                .unwrap_or_else(|| {
-                    workspace_tab_label(
-                        tab.surface,
-                        selected_path.as_deref(),
-                        editor_active_path.as_deref(),
-                    )
-                });
+                .unwrap_or_else(|| workspace_tab_label(&tab));
             (tab, label)
         })
         .collect::<Vec<_>>();
     let layouts = workspace_tab_layouts(&tab_items, active_tab_id);
-    let mut bar = div()
+    let bar = div()
         .h(px(TAB_BAR_HEIGHT))
         .w_full()
         .flex()
@@ -133,13 +139,22 @@ pub(super) fn workspace_tab_bar(
         .py_1()
         .border_b_1()
         .border_color(rgb(BORDER))
-        .bg(rgb(CHROME_BG));
+        .bg(rgb(CHROME_BG))
+        .overflow_hidden();
 
+    let mut tab_strip = div()
+        .flex_1()
+        .min_w(px(0.0))
+        .h_full()
+        .flex()
+        .items_center()
+        .gap_1()
+        .overflow_hidden();
     for (tab, label) in tab_items {
         let menu_anchor =
             workspace_tab_menu_anchor(tab.id, &tabs, active_tab_id, tab_manager, &layouts);
         let width = workspace_tab_width_for_label(&label, tab.id == active_tab_id);
-        bar = bar.child(workspace_tab(
+        tab_strip = tab_strip.child(workspace_tab(
             tab.clone(),
             active_tab_id,
             label,
@@ -150,9 +165,38 @@ pub(super) fn workspace_tab_bar(
         ));
     }
 
-    bar.child(
+    let overflow_button = div()
+        .h(px(28.0))
+        .min_w(px(52.0))
+        .flex_none()
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded_sm()
+        .border_1()
+        .border_color(rgb(if overflow_open { 0x325c44 } else { BORDER }))
+        .bg(rgb(if overflow_open { 0x102c20 } else { 0x141416 }))
+        .px_2()
+        .text_size(px(12.0))
+        .text_color(rgb(if overflow_open {
+            QUEUE_GREEN
+        } else {
+            MUTED_TEXT
+        }))
+        .cursor_pointer()
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|this, _: &MouseDownEvent, _window, cx| {
+                cx.stop_propagation();
+                this.toggle_tab_overflow_menu(cx);
+            }),
+        )
+        .child("Tabs");
+
+    bar.child(tab_strip).child(overflow_button).child(
         div()
             .ml_2()
+            .flex_none()
             .rounded_sm()
             .border_1()
             .border_color(rgb(0x325c44))
@@ -252,6 +296,7 @@ fn workspace_tab(
         .w(px(width))
         .min_w(px(TAB_MIN_WIDTH))
         .max_w(px(TAB_MAX_WIDTH))
+        .flex_none()
         .h(px(TAB_HEIGHT))
         .flex()
         .items_center()
@@ -328,18 +373,11 @@ fn workspace_tab(
         )
 }
 
-pub(super) fn workspace_tab_label(
-    surface: WorkspaceSurface,
-    selected_path: Option<&Path>,
-    editor_active_path: Option<&Path>,
-) -> String {
-    if surface == WorkspaceSurface::Editor {
-        return editor_active_path
-            .or(selected_path)
-            .map(project_display_name)
-            .unwrap_or_else(|| surface.title().to_string());
+pub(super) fn workspace_tab_label(tab: &WorkspaceTab) -> String {
+    if let Some(path) = tab.file_path.as_deref() {
+        return project_display_name(path);
     }
-    surface.title().to_string()
+    tab.surface.title().to_string()
 }
 
 fn workspace_tab_width_for_label(label: &str, active: bool) -> f32 {
@@ -551,6 +589,108 @@ pub(super) fn workspace_tab_context_menu(
     }
 
     menu_root
+}
+
+pub(super) fn workspace_tab_overflow_menu(
+    tabs: Vec<WorkspaceTab>,
+    active_tab_id: WorkspaceTabId,
+    tab_manager: &GpuiTabManager,
+    cx: &mut Context<WorkspacePrototype>,
+) -> impl IntoElement {
+    let mut panel = div()
+        .id("workspace-tab-overflow-menu")
+        .absolute()
+        .right(px(12.0))
+        .top(px(TAB_BAR_HEIGHT + 6.0))
+        .w(px(320.0))
+        .max_h(px(420.0))
+        .overflow_y_scroll()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .rounded_sm()
+        .border_1()
+        .border_color(rgb(0x454a56))
+        .bg(rgb(0x202229))
+        .p_1()
+        .text_size(px(13.0))
+        .shadow_lg()
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|_this, _: &MouseDownEvent, _window, cx| {
+                cx.stop_propagation();
+            }),
+        );
+
+    for tab in tabs {
+        let tab_id = tab.id;
+        let active = tab_id == active_tab_id;
+        let joined = tab_manager.is_joined(tab_id.0);
+        let label = workspace_tab_label(&tab);
+        let subtitle = tab
+            .file_path
+            .as_deref()
+            .and_then(|path| path.parent())
+            .map(project_display_name);
+        panel = panel.child(
+            div()
+                .w_full()
+                .min_h(px(34.0))
+                .flex()
+                .items_center()
+                .gap_2()
+                .rounded_sm()
+                .border_1()
+                .border_color(rgb(if active { 0x325c44 } else { 0x30323a }))
+                .bg(rgb(if active { 0x102c20 } else { 0x191b22 }))
+                .px_2()
+                .text_color(rgb(if active { ACTIVE_TEXT } else { SIDEBAR_TEXT }))
+                .cursor_pointer()
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _: &MouseDownEvent, window, cx| {
+                        cx.stop_propagation();
+                        this.activate_tab(tab_id, window, cx);
+                    }),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .overflow_hidden()
+                        .child(
+                            div()
+                                .overflow_hidden()
+                                .whitespace_nowrap()
+                                .text_size(px(13.0))
+                                .child(label),
+                        )
+                        .when_some(subtitle, |text, subtitle| {
+                            text.child(
+                                div()
+                                    .overflow_hidden()
+                                    .whitespace_nowrap()
+                                    .text_size(px(10.0))
+                                    .text_color(rgb(MUTED_TEXT))
+                                    .child(subtitle),
+                            )
+                        }),
+                )
+                .when(joined, |row| {
+                    row.child(
+                        div()
+                            .rounded_sm()
+                            .border_1()
+                            .border_color(rgb(0x325c44))
+                            .px_1()
+                            .text_size(px(10.0))
+                            .text_color(rgb(QUEUE_GREEN))
+                            .child("joined"),
+                    )
+                }),
+        );
+    }
+
+    panel
 }
 
 fn tab_menu_button(

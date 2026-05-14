@@ -11,7 +11,7 @@ use crate::editor::search::EditorSearch;
 use crate::editor::syntax::{group_color, HighlightGroup, HighlightSpan};
 use crate::editor::{BufferId, BufferView, EditorState, MarkdownViewMode};
 use crate::lsp::{DiagSeverity, LspManager};
-use crate::path_utils::{file_name_or_display, path_extension_matches, PREVIEW_IMAGE_EXTS};
+use crate::path_utils::{path_extension_matches, PREVIEW_IMAGE_EXTS};
 use crate::stacker::utf16::{char_index_to_utf16_index, utf16_index_to_char_index};
 use gpui::prelude::*;
 use gpui::{
@@ -367,22 +367,6 @@ impl EditorAppearance {
 }
 
 #[derive(Clone)]
-struct EditorBufferTabSnapshot {
-    index: usize,
-    title: String,
-    subtitle: Option<String>,
-    dirty: bool,
-    active: bool,
-}
-
-#[derive(Clone)]
-struct EditorImageTabSnapshot {
-    title: String,
-    subtitle: Option<String>,
-    active: bool,
-}
-
-#[derive(Clone)]
 struct EditorDiagnosticSnapshot {
     line: usize,
     col: usize,
@@ -580,16 +564,6 @@ impl EditorPrototype {
         }
         let image_preview = self.image_preview.clone();
         let image_preview_active = self.image_preview_active && image_preview.is_some();
-        let buffer_tabs = buffer_tab_snapshots(&self.editor, !image_preview_active);
-        let image_tab = image_preview
-            .as_ref()
-            .map(|preview| EditorImageTabSnapshot {
-                title: image_title(&preview.path),
-                subtitle: preview
-                    .dimensions
-                    .map(|(width, height)| format!("{width}x{height}")),
-                active: image_preview_active,
-            });
         let search_active = self.editor_search.active;
         let search_query = self.editor_search.query.clone();
         let search_replacement = self.editor_search.replacement.clone();
@@ -629,8 +603,6 @@ impl EditorPrototype {
                 total_lines: 0,
                 load_error: self.load_error.clone(),
                 status_message: self.status_message.clone(),
-                buffer_tabs,
-                image_tab,
                 image_preview: Some(EditorImagePreviewSnapshot {
                     path: preview.path,
                     dimensions: preview.dimensions,
@@ -734,8 +706,6 @@ impl EditorPrototype {
                 total_lines: line_count,
                 load_error: self.load_error.clone(),
                 status_message: self.status_message.clone(),
-                buffer_tabs,
-                image_tab,
                 image_preview: None,
                 search_active,
                 search_query,
@@ -792,8 +762,6 @@ impl EditorPrototype {
             total_lines: self.sample_text.lines().count().max(1),
             load_error: self.load_error.clone(),
             status_message: self.status_message.clone(),
-            buffer_tabs,
-            image_tab,
             image_preview: None,
             search_active,
             search_query,
@@ -1001,10 +969,6 @@ fn is_preview_image_path(path: &Path) -> bool {
     path_extension_matches(path, PREVIEW_IMAGE_EXTS)
 }
 
-fn image_title(path: &Path) -> String {
-    file_name_or_display(path).into_owned()
-}
-
 fn image_subtitle(preview: &EditorImagePreview) -> String {
     let kind = preview
         .path
@@ -1173,36 +1137,6 @@ fn refresh_active_syntax(editor: &mut EditorState) {
     editor.views[active].folded_ranges.clear();
 }
 
-fn buffer_tab_snapshots(
-    editor: &EditorState,
-    text_buffer_active: bool,
-) -> Vec<EditorBufferTabSnapshot> {
-    editor
-        .buffers
-        .iter()
-        .enumerate()
-        .map(|(index, buffer)| {
-            let title = buffer
-                .path()
-                .and_then(|path| path.file_name())
-                .map(|name| name.to_string_lossy().into_owned())
-                .unwrap_or_else(|| buffer.file_name().to_string());
-            let subtitle = buffer
-                .path()
-                .and_then(|path| path.parent())
-                .and_then(|parent| parent.file_name())
-                .map(|name| name.to_string_lossy().into_owned());
-            EditorBufferTabSnapshot {
-                index,
-                title,
-                subtitle,
-                dirty: buffer.is_modified(),
-                active: text_buffer_active && index == editor.active,
-            }
-        })
-        .collect()
-}
-
 fn sample_text() -> String {
     [
         "LLNZY GPUI editor",
@@ -1220,8 +1154,6 @@ struct EditorSnapshot {
     subtitle: String,
     language: String,
     lines: Vec<EditorLineSnapshot>,
-    buffer_tabs: Vec<EditorBufferTabSnapshot>,
-    image_tab: Option<EditorImageTabSnapshot>,
     image_preview: Option<EditorImagePreviewSnapshot>,
     first_line_number: usize,
     cursor: Option<Position>,
