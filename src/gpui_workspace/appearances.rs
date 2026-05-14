@@ -393,6 +393,7 @@ fn terminal_appearance_controls(
             terminal_background_import_error,
             cx,
         ))
+        .child(terminal_smoke_controls(&config, cx))
         .child(
             div()
                 .flex()
@@ -572,6 +573,98 @@ fn editor_appearance_controls(
                 .text_size(px(12.0))
                 .text_color(rgb(MUTED_TEXT))
                 .child("Syntax color editing and dirty-file editor tabs come with the next editor pass."),
+        )
+}
+
+// Curated palettes for shader-driven background effects. Each preset sets
+// the three palette stops the smoke shader (and future shaders) read from
+// `Config.effects.background_color{1,2,3}`. Picked to read well under
+// light terminal text without competing with it.
+const EFFECT_PALETTES: &[(&str, [u8; 3], [u8; 3], [u8; 3])] = &[
+    ("Mauve",  [0x10, 0x09, 0x14], [0x4d, 0x1f, 0x4f], [0xc5, 0x7a, 0xc8]),
+    ("Aqua",   [0x05, 0x10, 0x14], [0x1f, 0x44, 0x53], [0x6a, 0xd2, 0xe5]),
+    ("Ember",  [0x0e, 0x06, 0x04], [0x4c, 0x1c, 0x09], [0xe6, 0x84, 0x3c]),
+    ("Forest", [0x05, 0x0c, 0x07], [0x1c, 0x3a, 0x22], [0x7a, 0xc8, 0x82]),
+    ("Slate",  [0x09, 0x0c, 0x10], [0x24, 0x2a, 0x33], [0x9a, 0xa6, 0xb8]),
+];
+
+/// Smoke-specific controls: palette presets + intensity slider + live
+/// preview. Only contributes content when `Smoke` is the active background
+/// mode -- in any other mode it renders an empty div so the Terminal tab's
+/// row layout doesn't shift.
+fn terminal_smoke_controls(
+    config: &Config,
+    cx: &mut Context<WorkspacePrototype>,
+) -> impl IntoElement {
+    if config.effects.background != "smoke" {
+        return div();
+    }
+
+    let mut palette_row = div()
+        .flex()
+        .items_center()
+        .gap_2()
+        .child(control_label("Smoke Palette"));
+    for (label, c1, c2, c3) in EFFECT_PALETTES {
+        let label = (*label).to_string();
+        let active = config.effects.background_color == Some(*c1)
+            && config.effects.background_color2 == Some(*c2)
+            && config.effects.background_color3 == Some(*c3);
+        let c1 = *c1;
+        let c2 = *c2;
+        let c3 = *c3;
+        palette_row = palette_row.child(appearance_button(
+            label,
+            active,
+            cx,
+            move |this, cx| this.set_effect_palette(c1, c2, c3, cx),
+        ));
+    }
+
+    let c1 = config.effects.background_color.unwrap_or([0x10, 0x09, 0x14]);
+    let c2 = config.effects.background_color2.unwrap_or([0x4d, 0x1f, 0x4f]);
+    let c3 = config.effects.background_color3.unwrap_or([0xc5, 0x7a, 0xc8]);
+    let intensity_pct = (config.effects.background_intensity * 100.0).round() as i32;
+
+    let preview = div()
+        .w_full()
+        .h(px(160.0))
+        .border_1()
+        .border_color(rgb(BORDER))
+        .overflow_hidden()
+        .child(
+            crate::effects::EffectsElement::new()
+                .with_intensity(config.effects.background_intensity)
+                .with_palette(c1, c2, c3),
+        );
+
+    div()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .child(palette_row)
+        .child(metric_row(
+            "Smoke Intensity",
+            format!("{intensity_pct}%"),
+            cx,
+            |this, cx| this.adjust_effect_intensity(-0.05, cx),
+            |this, cx| this.adjust_effect_intensity(0.05, cx),
+        ))
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(control_label("Active"))
+                .child(color_strip([c1, c2, c3])),
+        )
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(control_label("Preview"))
+                .child(preview),
         )
 }
 
@@ -803,26 +896,91 @@ fn background_image_display_name(reference: &str) -> String {
         .unwrap_or_else(|| reference.to_string())
 }
 
-pub(super) fn settings_placeholder() -> impl IntoElement {
+pub(super) fn settings_surface(
+    show_explorer_button: bool,
+    cx: &mut Context<WorkspacePrototype>,
+) -> impl IntoElement {
     div()
         .flex_1()
         .h_full()
         .flex()
         .flex_col()
-        .items_center()
-        .justify_center()
         .bg(rgb(EDITOR_BG))
         .child(
             div()
-                .text_size(px(15.0))
+                .px_6()
+                .pt_8()
+                .pb_4()
+                .text_size(px(18.0))
                 .text_color(rgb(ACTIVE_TEXT))
                 .child("Settings"),
         )
         .child(
             div()
-                .mt_2()
-                .text_size(px(12.0))
+                .px_6()
+                .pb_3()
+                .text_size(px(11.0))
                 .text_color(rgb(MUTED_TEXT))
-                .child("The existing settings surface is still preserved on the current app path."),
+                .child("Footer"),
         )
+        .child(settings_section(vec![settings_toggle_row(
+            "Show Explorer button",
+            "Adds an Explorer entry to the footer nav bar next to Home.",
+            show_explorer_button,
+            cx,
+            |this, cx| this.toggle_show_explorer_button(cx),
+        )
+        .into_any_element()]))
+}
+
+fn settings_section(rows: Vec<gpui::AnyElement>) -> impl IntoElement {
+    let mut section = div()
+        .mx_6()
+        .mb_6()
+        .flex()
+        .flex_col()
+        .rounded_md()
+        .border_1()
+        .border_color(rgb(BORDER))
+        .bg(rgb(PANEL_BG))
+        .overflow_hidden();
+    for row in rows {
+        section = section.child(row);
+    }
+    section
+}
+
+fn settings_toggle_row(
+    title: &'static str,
+    description: &'static str,
+    active: bool,
+    cx: &mut Context<WorkspacePrototype>,
+    on_click: impl Fn(&mut WorkspacePrototype, &mut Context<WorkspacePrototype>) + 'static,
+) -> impl IntoElement {
+    div()
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap_4()
+        .px_4()
+        .py_3()
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(
+                    div()
+                        .text_size(px(13.0))
+                        .text_color(rgb(ACTIVE_TEXT))
+                        .child(title),
+                )
+                .child(
+                    div()
+                        .text_size(px(12.0))
+                        .text_color(rgb(MUTED_TEXT))
+                        .child(description),
+                ),
+        )
+        .child(effect_toggle_button("", active, cx, on_click))
 }

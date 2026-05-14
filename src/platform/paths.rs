@@ -89,6 +89,10 @@ impl PlatformPathSet {
         self.config_dir.join("recent_projects.json")
     }
 
+    pub fn preferences_file(&self) -> PathBuf {
+        self.config_dir.join("preferences.json")
+    }
+
     pub fn stacker_file(&self) -> PathBuf {
         self.config_dir.join("stacker.json")
     }

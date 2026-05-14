@@ -9,9 +9,10 @@ use super::{
 pub(super) fn workspace_footer(
     active_surface: WorkspaceSurface,
     queued_prompts: Vec<crate::stacker::queue::QueuedPrompt>,
+    show_explorer_button: bool,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
-    div()
+    let mut bar = div()
         .h(px(FOOTER_HEIGHT))
         .w_full()
         .flex()
@@ -27,14 +28,16 @@ pub(super) fn workspace_footer(
             WorkspaceSurface::Home,
             active_surface,
             cx,
-        ))
-        .child(footer_button(
+        ));
+    if show_explorer_button {
+        bar = bar.child(footer_button(
             "Explorer",
             WorkspaceSurface::Explorer,
             active_surface,
             cx,
-        ))
-        .child(footer_button(
+        ));
+    }
+    bar.child(footer_button(
             "Terminal",
             WorkspaceSurface::Terminal,
             active_surface,

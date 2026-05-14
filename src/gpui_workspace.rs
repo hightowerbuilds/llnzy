@@ -305,6 +305,13 @@ fn install_workspace_menu_bar(cx: &mut App) {
                 MenuItem::action("Join Tabs", MenuJoinTabs),
                 MenuItem::action("Swap Tabs", MenuSwapTabs),
                 MenuItem::action("Separate Tabs", MenuSeparateTabs),
+                MenuItem::submenu(Menu {
+                    name: "Partition".into(),
+                    items: vec![
+                        MenuItem::action("Partition Vertical", MenuPartitionVertical),
+                        MenuItem::action("Partition Horizontal", MenuPartitionHorizontal),
+                    ],
+                }),
                 MenuItem::separator(),
                 MenuItem::action("Home", MenuShowHome),
                 MenuItem::action("Terminal", MenuShowTerminal),
@@ -354,6 +361,7 @@ struct WorkspacePrototype {
     appearance_page: AppearancePage,
     terminal_background_import_error: Option<String>,
     palette: command_palette::CommandPaletteState,
+    preferences: crate::preferences::WorkspacePreferences,
 }
 
 impl WorkspacePrototype {
@@ -402,7 +410,14 @@ impl WorkspacePrototype {
             appearance_page: AppearancePage::Terminal,
             terminal_background_import_error: None,
             palette: command_palette::CommandPaletteState::default(),
+            preferences: crate::preferences::WorkspacePreferences::load(),
         }
+    }
+
+    pub(super) fn toggle_show_explorer_button(&mut self, cx: &mut Context<Self>) {
+        self.preferences.show_explorer_button = !self.preferences.show_explorer_button;
+        self.preferences.save();
+        cx.notify();
     }
 
     fn active_surface(&self) -> WorkspaceSurface {
@@ -1245,6 +1260,7 @@ impl Render for WorkspacePrototype {
                     appearance_config,
                     appearance_page,
                     terminal_background_import_error,
+                    show_explorer_button: self.preferences.show_explorer_button,
                 },
                 active_surface,
                 active_tab_id,
@@ -1333,7 +1349,12 @@ impl Render for WorkspacePrototype {
                 cx,
             ))
             .child(main)
-            .child(workspace_footer(active_surface, queued_prompts, cx))
+            .child(workspace_footer(
+                active_surface,
+                queued_prompts,
+                self.preferences.show_explorer_button,
+                cx,
+            ))
             .when_some(tab_context_menu, |root, menu| {
                 root.child(workspace_tab_context_menu(
                     menu,

@@ -11,11 +11,11 @@ use crate::{
     gpui_editor::EditorPrototype,
     gpui_sketch::SketchSurface,
     gpui_stacker::StackerPrototype,
-    gpui_terminal::{terminal_background_layer, TerminalSurface},
+    gpui_terminal::{terminal_background_layer, terminal_shader_effect_layer, TerminalSurface},
 };
 
 use super::{
-    appearances::{appearances_surface, settings_placeholder},
+    appearances::{appearances_surface, settings_surface},
     home::home_surface,
     sidebar::{collect_explorer_entries, explorer_tree_panel, ExplorerState},
     tabs::WorkspaceTabId,
@@ -37,6 +37,7 @@ pub(super) struct WorkspaceSurfaceContext {
     pub(super) appearance_config: Config,
     pub(super) appearance_page: AppearancePage,
     pub(super) terminal_background_import_error: Option<String>,
+    pub(super) show_explorer_button: bool,
 }
 
 struct JoinedPaneResizeDrag {
@@ -113,6 +114,11 @@ pub(super) fn workspace_content(
         if shared_terminal_background {
             if let Some(background) = terminal_background_layer(&context.appearance_config) {
                 joined_container = joined_container.child(background);
+            }
+            if let Some(shader_layer) =
+                terminal_shader_effect_layer(&context.appearance_config)
+            {
+                joined_container = joined_container.child(shader_layer);
             }
         }
 
@@ -211,6 +217,7 @@ pub(super) fn workspace_surface_pane(
         appearance_config,
         appearance_page,
         terminal_background_import_error,
+        show_explorer_button,
     } = context;
 
     let mut pane = div().h_full().overflow_hidden();
@@ -257,6 +264,10 @@ pub(super) fn workspace_surface_pane(
                 if !shared_terminal_background {
                     if let Some(background) = terminal_background_layer(&appearance_config) {
                         terminal_pane = terminal_pane.child(background);
+                    }
+                    if let Some(shader_layer) = terminal_shader_effect_layer(&appearance_config)
+                    {
+                        terminal_pane = terminal_pane.child(shader_layer);
                     }
                 }
                 pane.child(terminal_pane.child(terminal))
@@ -306,7 +317,7 @@ pub(super) fn workspace_surface_pane(
             cx,
         )),
         WorkspaceSurface::Home => pane.child(home_surface(workspace_root, recent_projects, cx)),
-        WorkspaceSurface::Settings => pane.child(settings_placeholder()),
+        WorkspaceSurface::Settings => pane.child(settings_surface(show_explorer_button, cx)),
     }
 }
 

@@ -208,6 +208,25 @@ impl WorkspacePrototype {
         self.apply_appearance_config(cx);
     }
 
+    pub(super) fn adjust_effect_intensity(&mut self, delta: f32, cx: &mut Context<Self>) {
+        self.appearance_config.effects.background_intensity =
+            (self.appearance_config.effects.background_intensity + delta).clamp(0.05, 1.0);
+        self.apply_appearance_config(cx);
+    }
+
+    pub(super) fn set_effect_palette(
+        &mut self,
+        c1: [u8; 3],
+        c2: [u8; 3],
+        c3: [u8; 3],
+        cx: &mut Context<Self>,
+    ) {
+        self.appearance_config.effects.background_color = Some(c1);
+        self.appearance_config.effects.background_color2 = Some(c2);
+        self.appearance_config.effects.background_color3 = Some(c3);
+        self.apply_appearance_config(cx);
+    }
+
     pub(super) fn toggle_time_of_day(&mut self, cx: &mut Context<Self>) {
         self.appearance_config.time_of_day_enabled = !self.appearance_config.time_of_day_enabled;
         cx.notify();

@@ -47,6 +47,24 @@ ulid = "1"
 sha2 = "0.10"
 gpui = { version = "=0.2.2", optional = true, features = ["macos-blade"] }
 
+# Custom WGSL shader pipeline behind GPUI's `Window::paint_surface` hook.
+# wgpu = renderer, naga = WGSL parse/validate, wgpu-hal = Metal texture
+# import from a CVPixelBuffer (the only macOS-public way to put per-pixel
+# shader content under GPUI's text). `core-video` and `metal` versions
+# match what gpui 0.2.2 itself pulls in, so the CVPixelBuffer / MTLTexture
+# types are the same instances GPUI's renderer will sample.
+[target.'cfg(target_os = "macos")'.dependencies]
+wgpu = { version = "=29.0.3", default-features = false, features = ["metal", "wgsl"] }
+wgpu-hal = { version = "=29.0.3", features = ["metal"] }
+naga = { version = "=29.0.3", features = ["wgsl-in"] }
+core-video = { version = "=0.4.3", features = ["metal"] }
+core-foundation = "=0.10"
+metal = "=0.29"
+# Blocking executor used to drive wgpu's async device/adapter init and the
+# per-frame staging-buffer map_async from EffectsHost without pulling a full
+# tokio runtime onto the render path.
+pollster = "=0.4"
+
 [[bin]]
 name = "gpui-stacker"
 path = "src/bin/gpui_stacker.rs"

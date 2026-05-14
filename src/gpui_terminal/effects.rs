@@ -94,7 +94,11 @@ pub(super) fn terminal_effect_overlay(
 
 fn terminal_background_effects(terminal_bounds: Bounds<Pixels>, config: &Config) -> Vec<PaintQuad> {
     let mode = config.effects.background.as_str();
-    if mode == "none" || mode == "image" {
+    // `smoke` is now driven by the WGSL pipeline via `paint_surface` -- the
+    // workspace mounts an `EffectsElement` at the joined-container level so
+    // two terminals see one continuous shader field. The nine-rectangle
+    // path here was retired in M2 to avoid double-rendering on top.
+    if mode == "none" || mode == "image" || mode == "smoke" {
         return Vec::new();
     }
 
@@ -115,27 +119,6 @@ fn terminal_background_effects(terminal_bounds: Bounds<Pixels>, config: &Config)
                     0.0,
                     width * 0.26,
                     height,
-                    color,
-                    alpha,
-                ));
-            }
-        }
-        "smoke" => {
-            for index in 0..9 {
-                let y = height * (index as f32 / 9.0);
-                let x = if index % 2 == 0 {
-                    -width * 0.10
-                } else {
-                    width * 0.06
-                };
-                let color = effect_palette_color(config, index);
-                let alpha = (0.035 + intensity * 0.07) * (0.55 + (index % 3) as f32 * 0.18);
-                quads.push(terminal_local_quad(
-                    terminal_bounds,
-                    x,
-                    y - height * 0.08,
-                    width * 1.04,
-                    height * 0.18,
                     color,
                     alpha,
                 ));

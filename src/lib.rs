@@ -2,6 +2,8 @@ pub mod async_guard;
 pub mod config;
 pub mod diagnostics;
 pub mod editor;
+#[cfg(feature = "gpui-workspace")]
+pub mod effects;
 pub mod error_log;
 pub mod explorer;
 pub mod external_command;
@@ -22,6 +24,7 @@ pub mod keybindings;
 pub mod lsp;
 pub mod path_utils;
 pub mod platform;
+pub mod preferences;
 pub mod pty;
 pub mod session;
 pub mod sidebar_move;

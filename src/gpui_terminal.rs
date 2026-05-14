@@ -98,8 +98,38 @@ pub(crate) fn terminal_background_layer(config: &Config) -> Option<gpui::Div> {
     terminal_background_image_path(config).map(|path| terminal_background_image(path, config))
 }
 
+/// Workspace-wide shader-driven effect layer. Returns `Some` only when the
+/// active background mode is a shader effect (currently only `"smoke"`).
+/// Pulls intensity + palette from the config so the live preview in the
+/// Appearances panel and the actual workspace render share one source of
+/// truth. The element is wrapped in a full-bleed `Div` so two joined
+/// terminal panes see one continuous shader field when this layer is
+/// mounted at the shared-container level.
+pub(crate) fn terminal_shader_effect_layer(config: &Config) -> Option<gpui::Div> {
+    if config.effects.background != "smoke" || !config.effects.enabled {
+        return None;
+    }
+    let c1 = config.effects.background_color.unwrap_or([0x10, 0x09, 0x14]);
+    let c2 = config.effects.background_color2.unwrap_or([0x4d, 0x1f, 0x4f]);
+    let c3 = config.effects.background_color3.unwrap_or([0xc5, 0x7a, 0xc8]);
+    Some(
+        div().absolute().size_full().overflow_hidden().child(
+            crate::effects::EffectsElement::new()
+                .with_intensity(config.effects.background_intensity)
+                .with_palette(c1, c2, c3),
+        ),
+    )
+}
+
 fn terminal_uses_background_image(config: &Config) -> bool {
     terminal_background_image_path(config).is_some()
+}
+
+/// True when the active background mode is a shader-driven effect. In that
+/// case the terminal must NOT paint its opaque body fill, otherwise the
+/// fill covers the shader layer mounted by `terminal_shader_effect_layer`.
+fn terminal_uses_shader_effect(config: &Config) -> bool {
+    config.effects.enabled && config.effects.background == "smoke"
 }
 
 pub(crate) fn bind_terminal_keys(cx: &mut App) {
@@ -652,6 +682,7 @@ impl EntityInputHandler for TerminalSurface {
 impl Render for TerminalSurface {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let uses_background_image = terminal_uses_background_image(&self.config);
+        let uses_shader_effect = terminal_uses_shader_effect(&self.config);
         let body = if self.session.is_some() {
             let mut terminal_body = div()
                 .relative()
@@ -663,7 +694,7 @@ impl Render for TerminalSurface {
                 .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
                 .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up));
 
-            if !uses_background_image {
+            if !uses_background_image && !uses_shader_effect {
                 terminal_body = terminal_body.bg(rgb(TERMINAL_BG));
             }
 
@@ -732,7 +763,7 @@ impl Render for TerminalSurface {
             .on_action(cx.listener(Self::ctrl_u))
             .on_action(cx.listener(Self::ctrl_w));
 
-        if !uses_background_image {
+        if !uses_background_image && !uses_shader_effect {
             root = root.bg(rgb(TERMINAL_PANEL_BG));
         }
 
