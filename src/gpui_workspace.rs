@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, collections::BTreeSet, path::PathBuf};
+use std::{collections::BTreeMap, path::PathBuf};
 
 use gpui::prelude::*;
 use gpui::{
@@ -9,6 +9,7 @@ use gpui::{
 
 mod appearance_actions;
 mod appearances;
+mod command_palette;
 mod footer;
 mod home;
 mod menu_actions;
@@ -27,9 +28,8 @@ use crate::gpui_terminal::{bind_terminal_keys, TerminalSurface};
 use self::footer::{load_workspace_queue, workspace_footer};
 use self::panes::{workspace_content, WorkspaceSurfaceContext};
 use self::sidebar::{
-    collect_explorer_entries, initial_expanded_dirs, sidebar_bumper, workspace_sidebar,
-    workspace_sidebar_context_menu, SidebarContextMenuState, SidebarRenameState,
-    WorkspaceSidebarContext,
+    collect_explorer_entries, sidebar_bumper, workspace_sidebar, workspace_sidebar_context_menu,
+    ExplorerState, SidebarContextMenuState, SidebarRenameState, WorkspaceSidebarContext,
 };
 use self::tabs::{
     reorder_workspace_tab_block, workspace_tab_bar, workspace_tab_context_menu,
@@ -54,6 +54,7 @@ actions!(
         MenuActivateTab7,
         MenuActivateTab8,
         MenuActivateTab9,
+        MenuShowCommandPalette,
         MenuJoinTabs,
         MenuSeparateTabs,
         MenuSwapTabs,
@@ -132,6 +133,7 @@ enum WorkspaceSurface {
     Stacker,
     Editor,
     Terminal,
+    Explorer,
     Sketch,
     Appearances,
     Settings,
@@ -144,6 +146,7 @@ impl WorkspaceSurface {
             WorkspaceSurface::Stacker => "Stacker",
             WorkspaceSurface::Editor => "Editor",
             WorkspaceSurface::Terminal => "Terminal",
+            WorkspaceSurface::Explorer => "Explorer",
             WorkspaceSurface::Sketch => "Sketch Pad",
             WorkspaceSurface::Appearances => "Appearances",
             WorkspaceSurface::Settings => "Settings",
@@ -203,6 +206,10 @@ pub fn run_workspace_prototype() {
             KeyBinding::new("cmd-7", MenuActivateTab7, None),
             KeyBinding::new("cmd-8", MenuActivateTab8, None),
             KeyBinding::new("cmd-9", MenuActivateTab9, None),
+            // Cmd+Shift+P opens the command palette. While the palette is
+            // visible, normal key events are routed into its query buffer
+            // via `on_workspace_key_down` before the action system sees them.
+            KeyBinding::new("cmd-shift-p", MenuShowCommandPalette, None),
         ]);
 
         let bounds = Bounds::centered(None, size(px(1320.0), px(820.0)), cx);
@@ -331,17 +338,17 @@ struct WorkspacePrototype {
     active_tab_id: WorkspaceTabId,
     next_tab_id: u64,
     workspace_root: Option<PathBuf>,
-    expanded_dirs: BTreeSet<PathBuf>,
-    selected_path: Option<PathBuf>,
+    sidebar_explorer: ExplorerState,
+    explorers: BTreeMap<u64, ExplorerState>,
     recent_projects: Vec<PathBuf>,
     recent_projects_open: bool,
     sidebar_visible: bool,
     sidebar_width: f32,
     last_sidebar_width: f32,
-    explorer_status: Option<String>,
     appearance_config: Config,
     appearance_page: AppearancePage,
     terminal_background_import_error: Option<String>,
+    palette: command_palette::CommandPaletteState,
 }
 
 impl WorkspacePrototype {
@@ -353,10 +360,7 @@ impl WorkspacePrototype {
             WorkspaceTab::new(WorkspaceTabId(3), WorkspaceSurface::Terminal),
             WorkspaceTab::new(WorkspaceTabId(4), WorkspaceSurface::Sketch),
         ];
-        let expanded_dirs = workspace_root
-            .as_ref()
-            .map(|root| initial_expanded_dirs(root))
-            .unwrap_or_default();
+        let sidebar_explorer = ExplorerState::for_root(workspace_root.as_deref());
         let sketch = cx.new(SketchSurface::new);
         sketch.update(cx, |sketch, _cx| {
             sketch.set_workspace_root(workspace_root.clone());
@@ -382,17 +386,17 @@ impl WorkspacePrototype {
             active_tab_id: WorkspaceTabId(1),
             next_tab_id: 5,
             workspace_root,
-            expanded_dirs,
-            selected_path: None,
+            sidebar_explorer,
+            explorers: BTreeMap::new(),
             recent_projects: crate::explorer::load_recent_projects(),
             recent_projects_open: false,
             sidebar_visible: true,
             sidebar_width: SIDEBAR_DEFAULT_WIDTH,
             last_sidebar_width: SIDEBAR_DEFAULT_WIDTH,
-            explorer_status: None,
             appearance_config: Config::default(),
             appearance_page: AppearancePage::Terminal,
             terminal_background_import_error: None,
+            palette: command_palette::CommandPaletteState::default(),
         }
     }
 
@@ -436,6 +440,15 @@ impl WorkspacePrototype {
             .get(&self.active_tab_id.0)
             .cloned()
             .unwrap_or_else(|| self.editor.clone())
+    }
+
+    fn active_explorer_state_mut(&mut self) -> &mut ExplorerState {
+        if self.active_surface() == WorkspaceSurface::Explorer
+            && self.explorers.contains_key(&self.active_tab_id.0)
+        {
+            return self.explorers.get_mut(&self.active_tab_id.0).unwrap();
+        }
+        &mut self.sidebar_explorer
     }
 
     fn joined_panes_for_active(&self) -> Option<JoinedWorkspacePanes> {
@@ -561,9 +574,14 @@ impl WorkspacePrototype {
     fn on_workspace_key_down(
         &mut self,
         event: &KeyDownEvent,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.palette.open {
+            self.on_palette_key_down(event, window, cx);
+            return;
+        }
+
         if self.sidebar_rename.is_some() {
             self.on_sidebar_rename_key_down(event, cx);
             return;
@@ -613,6 +631,99 @@ impl WorkspacePrototype {
                         cx.notify();
                     }
                 }
+            }
+        }
+    }
+
+    fn open_command_palette(&mut self, cx: &mut Context<Self>) {
+        self.close_context_menus(cx);
+        self.palette.reset();
+        self.palette.open = true;
+        cx.notify();
+    }
+
+    fn close_command_palette(&mut self, cx: &mut Context<Self>) {
+        if self.palette.open {
+            self.palette.reset();
+            cx.notify();
+        }
+    }
+
+    pub(super) fn invoke_palette_at(
+        &mut self,
+        display_idx: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let entries = command_palette::palette_entries();
+        let visible = command_palette::filter_entries(&entries, &self.palette.query);
+        let Some(&entry_idx) = visible.get(display_idx) else {
+            return;
+        };
+        let action = (entries[entry_idx].build_action)();
+        self.palette.reset();
+        cx.notify();
+        // Defer dispatch so the palette overlay is gone before the action
+        // runs (otherwise an action that toggles UI would race with the
+        // open palette).
+        window.dispatch_action(action, cx);
+    }
+
+    fn on_palette_key_down(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        cx.stop_propagation();
+        let key = event.keystroke.key.as_str();
+        let modifiers = event.keystroke.modifiers;
+        // Cmd+Shift+P while open: toggle closed.
+        if modifiers.platform && modifiers.shift && key == "p" {
+            self.close_command_palette(cx);
+            return;
+        }
+        match key {
+            "escape" => {
+                self.close_command_palette(cx);
+            }
+            "enter" => {
+                let display_idx = self.palette.selected;
+                self.invoke_palette_at(display_idx, window, cx);
+            }
+            "up" => {
+                if self.palette.selected > 0 {
+                    self.palette.selected -= 1;
+                    cx.notify();
+                }
+            }
+            "down" => {
+                let entries = command_palette::palette_entries();
+                let visible_count =
+                    command_palette::filter_entries(&entries, &self.palette.query).len();
+                if visible_count > 0 && self.palette.selected + 1 < visible_count {
+                    self.palette.selected += 1;
+                    cx.notify();
+                }
+            }
+            "backspace" => {
+                self.palette.query.pop();
+                self.palette.selected = 0;
+                cx.notify();
+            }
+            _ => {
+                if modifiers.control || modifiers.alt || modifiers.platform || modifiers.function {
+                    return;
+                }
+                let Some(text) = event.keystroke.key_char.as_deref() else {
+                    return;
+                };
+                if text.chars().any(char::is_control) {
+                    return;
+                }
+                self.palette.query.push_str(text);
+                self.palette.selected = 0;
+                cx.notify();
             }
         }
     }
@@ -775,6 +886,7 @@ impl WorkspacePrototype {
                     window.focus(&self.focus_handle);
                 }
             }
+            WorkspaceSurface::Explorer => window.focus(&self.focus_handle),
             WorkspaceSurface::Sketch => window.focus(&self.sketch.focus_handle(cx)),
         }
     }
@@ -790,7 +902,7 @@ impl WorkspacePrototype {
             self.tab_manager.set_active_tab(tab.id.0);
             self.tab_overflow_open = false;
             if let Some(path) = tab.file_path.clone() {
-                self.selected_path = Some(path.clone());
+                self.sidebar_explorer.selected_path = Some(path.clone());
                 self.active_editor_entity().update(cx, |editor, cx| {
                     editor.activate_path_from_workspace(path, cx)
                 });
@@ -853,6 +965,34 @@ impl WorkspacePrototype {
         cx.notify();
     }
 
+    fn open_new_explorer_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.explorers.is_empty() {
+            let parked_id = WorkspaceTabId(self.next_tab_id);
+            self.next_tab_id += 1;
+            self.tabs
+                .push(WorkspaceTab::new(parked_id, WorkspaceSurface::Explorer));
+            self.explorers
+                .insert(parked_id.0, self.sidebar_explorer.clone());
+            if self.sidebar_visible {
+                self.last_sidebar_width = self.sidebar_width;
+            }
+            self.sidebar_visible = false;
+        }
+
+        let fresh_id = WorkspaceTabId(self.next_tab_id);
+        self.next_tab_id += 1;
+        self.tabs
+            .push(WorkspaceTab::new(fresh_id, WorkspaceSurface::Explorer));
+        self.explorers.insert(
+            fresh_id.0,
+            ExplorerState::for_root(self.workspace_root.as_deref()),
+        );
+        self.active_tab_id = fresh_id;
+        self.tab_manager.set_active_tab(fresh_id.0);
+        self.focus_surface(WorkspaceSurface::Explorer, window, cx);
+        cx.notify();
+    }
+
     fn open_footer_surface(
         &mut self,
         surface: WorkspaceSurface,
@@ -861,6 +1001,8 @@ impl WorkspacePrototype {
     ) {
         if surface == WorkspaceSurface::Terminal {
             self.open_new_terminal_tab(window, cx);
+        } else if surface == WorkspaceSurface::Explorer {
+            self.open_new_explorer_tab(window, cx);
         } else {
             self.open_or_activate_surface(surface, window, cx);
         }
@@ -881,15 +1023,28 @@ impl WorkspacePrototype {
             }
             self.file_editors.remove(&tab_id.0);
             if self
+                .sidebar_explorer
                 .selected_path
                 .as_ref()
                 .is_some_and(|selected| crate::path_utils::same_path(selected, &path))
             {
-                self.selected_path = None;
+                self.sidebar_explorer.selected_path = None;
             }
         }
         if self.tabs[index].surface == WorkspaceSurface::Terminal {
             self.terminals.remove(&tab_id.0);
+        }
+        if self.tabs[index].surface == WorkspaceSurface::Explorer {
+            let removed = self.explorers.remove(&tab_id.0);
+            if self.explorers.is_empty() {
+                if let Some(state) = removed {
+                    self.sidebar_explorer = state;
+                }
+                self.sidebar_visible = true;
+                self.sidebar_width = self
+                    .last_sidebar_width
+                    .clamp(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH);
+            }
         }
         self.tabs.remove(index);
         self.tab_name_overrides.remove(&tab_id.0);
@@ -915,7 +1070,7 @@ impl WorkspacePrototype {
             self.active_tab_id = self.tabs[next_index].id;
             let tab = self.tabs[next_index].clone();
             if let Some(path) = tab.file_path.clone() {
-                self.selected_path = Some(path.clone());
+                self.sidebar_explorer.selected_path = Some(path.clone());
                 self.active_editor_entity().update(cx, |editor, cx| {
                     editor.activate_path_from_workspace(path, cx)
                 });
@@ -953,15 +1108,15 @@ impl Render for WorkspacePrototype {
         let explorer_entries = self
             .workspace_root
             .as_ref()
-            .map(|root| collect_explorer_entries(root, &self.expanded_dirs))
+            .map(|root| collect_explorer_entries(root, &self.sidebar_explorer.expanded_dirs))
             .unwrap_or_default();
-        let selected_path = self.selected_path.clone();
+        let selected_path = self.sidebar_explorer.selected_path.clone();
         let workspace_root = self.workspace_root.clone();
         let recent_projects = self.recent_projects.clone();
         let recent_projects_open = self.recent_projects_open;
         let sidebar_width = self.sidebar_width;
         let sidebar_visible = self.sidebar_visible;
-        let explorer_status = self.explorer_status.clone();
+        let explorer_status = self.sidebar_explorer.status.clone();
 
         let mut main = div().flex_1().flex().overflow_hidden();
         if sidebar_visible {
@@ -989,6 +1144,7 @@ impl Render for WorkspacePrototype {
                     sketch: self.sketch.clone(),
                     workspace_root,
                     recent_projects,
+                    explorers: self.explorers.clone(),
                     appearance_config,
                     appearance_page,
                     terminal_background_import_error,
@@ -1028,6 +1184,7 @@ impl Render for WorkspacePrototype {
             .on_action(cx.listener(Self::menu_activate_tab_7))
             .on_action(cx.listener(Self::menu_activate_tab_8))
             .on_action(cx.listener(Self::menu_activate_tab_9))
+            .on_action(cx.listener(Self::menu_show_command_palette))
             .on_action(cx.listener(Self::menu_join_tabs))
             .on_action(cx.listener(Self::menu_separate_tabs))
             .on_action(cx.listener(Self::menu_swap_tabs))
@@ -1099,6 +1256,16 @@ impl Render for WorkspacePrototype {
                     menu,
                     self.workspace_root.clone(),
                     sidebar_rename,
+                    cx,
+                ))
+            })
+            .when(self.palette.open, |root| {
+                let entries = command_palette::palette_entries();
+                let visible = command_palette::filter_entries(&entries, &self.palette.query);
+                root.child(command_palette::render_command_palette(
+                    &self.palette,
+                    &entries,
+                    &visible,
                     cx,
                 ))
             })

@@ -33,6 +33,23 @@ pub(super) struct ExplorerEntry {
     expanded: bool,
 }
 
+#[derive(Clone, Debug, Default)]
+pub(super) struct ExplorerState {
+    pub(super) expanded_dirs: BTreeSet<PathBuf>,
+    pub(super) selected_path: Option<PathBuf>,
+    pub(super) status: Option<String>,
+}
+
+impl ExplorerState {
+    pub(super) fn for_root(root: Option<&Path>) -> Self {
+        Self {
+            expanded_dirs: root.map(initial_expanded_dirs).unwrap_or_default(),
+            selected_path: None,
+            status: None,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(super) struct WorkspaceSidebarContext {
     pub(super) workspace_root: Option<PathBuf>,
@@ -219,38 +236,15 @@ pub(super) fn workspace_sidebar(
             cx,
         ));
 
-    let mut tree = div()
-        .id("workspace-sidebar-tree")
-        .flex_1()
-        .flex()
-        .flex_col()
-        .overflow_y_scroll()
-        .scrollbar_width(px(8.0))
-        .py_1();
-    if !has_project {
-        tree = tree.child(
-            div()
-                .p_3()
-                .text_size(px(12.0))
-                .text_color(rgb(MUTED_TEXT))
-                .child("Open a project to show its files."),
-        );
-    } else if entries.is_empty() {
-        tree = tree.child(
-            div()
-                .p_3()
-                .text_size(px(12.0))
-                .text_color(rgb(MUTED_TEXT))
-                .child("No readable project files."),
-        );
-    } else {
-        for entry in entries {
-            let selected = selected_path.as_ref() == Some(&entry.path);
-            tree = tree.child(sidebar_tree_row(entry, selected, cx));
-        }
-    }
-
-    sidebar = sidebar.child(tree).child(
+    sidebar = sidebar
+        .child(explorer_tree_panel(
+            "workspace-sidebar-tree",
+            entries,
+            selected_path,
+            has_project,
+            cx,
+        ))
+        .child(
         div()
             .h(px(28.0))
             .px_2()
@@ -263,6 +257,46 @@ pub(super) fn workspace_sidebar(
             .child(explorer_status.unwrap_or_else(|| format!("{}px", sidebar_width.round()))),
     );
     sidebar
+}
+
+pub(super) fn explorer_tree_panel(
+    id: impl Into<gpui::ElementId>,
+    entries: Vec<ExplorerEntry>,
+    selected_path: Option<PathBuf>,
+    has_project: bool,
+    cx: &mut Context<WorkspacePrototype>,
+) -> impl IntoElement {
+    let mut tree = div()
+        .id(id)
+        .flex_1()
+        .flex()
+        .flex_col()
+        .overflow_y_scroll()
+        .scrollbar_width(px(8.0))
+        .py_1();
+    if !has_project {
+        return tree.child(
+            div()
+                .p_3()
+                .text_size(px(12.0))
+                .text_color(rgb(MUTED_TEXT))
+                .child("Open a project to show its files."),
+        );
+    }
+    if entries.is_empty() {
+        return tree.child(
+            div()
+                .p_3()
+                .text_size(px(12.0))
+                .text_color(rgb(MUTED_TEXT))
+                .child("No readable project files."),
+        );
+    }
+    for entry in entries {
+        let selected = selected_path.as_ref() == Some(&entry.path);
+        tree = tree.child(sidebar_tree_row(entry, selected, cx));
+    }
+    tree
 }
 
 pub(super) fn workspace_sidebar_context_menu(

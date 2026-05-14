@@ -17,6 +17,7 @@ use crate::{
 use super::{
     appearances::{appearances_surface, settings_placeholder},
     home::home_surface,
+    sidebar::{collect_explorer_entries, explorer_tree_panel, ExplorerState},
     tabs::WorkspaceTabId,
     AppearancePage, JoinedWorkspacePanes, WorkspacePrototype, WorkspaceSurface, BORDER, EDITOR_BG,
     JOINED_TAB_DIVIDER_WIDTH, PANEL_BG,
@@ -31,6 +32,7 @@ pub(super) struct WorkspaceSurfaceContext {
     pub(super) sketch: Entity<SketchSurface>,
     pub(super) workspace_root: Option<PathBuf>,
     pub(super) recent_projects: Vec<PathBuf>,
+    pub(super) explorers: BTreeMap<u64, ExplorerState>,
     pub(super) appearance_config: Config,
     pub(super) appearance_page: AppearancePage,
     pub(super) terminal_background_import_error: Option<String>,
@@ -150,6 +152,7 @@ pub(super) fn workspace_surface_pane(
         sketch,
         workspace_root,
         recent_projects,
+        explorers,
         appearance_config,
         appearance_page,
         terminal_background_import_error,
@@ -214,6 +217,32 @@ pub(super) fn workspace_surface_pane(
                     .child("Terminal session unavailable"),
             ),
         },
+        WorkspaceSurface::Explorer => {
+            let state = tab_id
+                .as_ref()
+                .and_then(|id| explorers.get(&id.0).cloned())
+                .unwrap_or_default();
+            let has_project = workspace_root.is_some();
+            let entries = workspace_root
+                .as_ref()
+                .map(|root| collect_explorer_entries(root, &state.expanded_dirs))
+                .unwrap_or_default();
+            let panel_id = ("workspace-explorer-tab-tree", tab_id.map(|id| id.0).unwrap_or(0));
+            pane.child(
+                div()
+                    .size_full()
+                    .flex()
+                    .flex_col()
+                    .bg(rgb(PANEL_BG))
+                    .child(explorer_tree_panel(
+                        panel_id,
+                        entries,
+                        state.selected_path.clone(),
+                        has_project,
+                        cx,
+                    )),
+            )
+        }
         WorkspaceSurface::Sketch => pane.child(sketch),
         WorkspaceSurface::Appearances => pane.child(appearances_surface(
             appearance_config,

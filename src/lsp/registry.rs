@@ -75,13 +75,32 @@ pub fn builtin_servers() -> Vec<ServerConfig> {
 }
 
 /// Check whether a server command is available on PATH.
+///
+/// Cached: `which` shell-outs are not free (each spawn forks/execs and
+/// reads PATH), and `LspManager::ensure_server_for_language` calls this
+/// once per language the editor encounters. Caching is per-process and
+/// per-command. A user installing a server mid-session would need to
+/// restart the app to pick it up; an acceptable tradeoff since spawn
+/// would just fail at exec time anyway if a cached "available" command
+/// were later removed.
 pub fn is_available(command: &str) -> bool {
-    std::process::Command::new("which")
+    use std::collections::HashMap;
+    use std::sync::{LazyLock, Mutex};
+
+    static CACHE: LazyLock<Mutex<HashMap<String, bool>>> =
+        LazyLock::new(|| Mutex::new(HashMap::new()));
+
+    if let Some(&cached) = CACHE.lock().unwrap().get(command) {
+        return cached;
+    }
+    let result = std::process::Command::new("which")
         .arg(command)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()
-        .is_ok_and(|s| s.success())
+        .is_ok_and(|s| s.success());
+    CACHE.lock().unwrap().insert(command.to_string(), result);
+    result
 }
 
 /// Find the server config for a language, if the server is installed.

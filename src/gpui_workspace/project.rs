@@ -43,8 +43,9 @@ impl WorkspacePrototype {
     }
 
     pub(super) fn toggle_explorer_dir(&mut self, path: PathBuf, cx: &mut Context<Self>) {
-        if !self.expanded_dirs.remove(&path) {
-            self.expanded_dirs.insert(path);
+        let state = self.active_explorer_state_mut();
+        if !state.expanded_dirs.remove(&path) {
+            state.expanded_dirs.insert(path);
         }
         cx.notify();
     }
@@ -55,7 +56,7 @@ impl WorkspacePrototype {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.selected_path = Some(path.clone());
+        self.active_explorer_state_mut().selected_path = Some(path.clone());
         if let Some(tab_id) = self
             .tabs
             .iter()
@@ -259,7 +260,7 @@ impl WorkspacePrototype {
         let source = rename.path;
         let new_name = rename.text.trim();
         if let Err(message) = validate_sidebar_entry_name(new_name) {
-            self.explorer_status = Some(message);
+            self.sidebar_explorer.status = Some(message);
             self.sidebar_rename = Some(SidebarRenameState {
                 path: source,
                 text: new_name.to_string(),
@@ -269,7 +270,7 @@ impl WorkspacePrototype {
             return;
         }
         let Some(parent) = source.parent().map(Path::to_path_buf) else {
-            self.explorer_status = Some("Cannot rename project root".to_string());
+            self.sidebar_explorer.status = Some("Cannot rename project root".to_string());
             cx.notify();
             return;
         };
@@ -279,19 +280,19 @@ impl WorkspacePrototype {
             return;
         }
         if destination.exists() {
-            self.explorer_status = Some(format!("{new_name} already exists"));
+            self.sidebar_explorer.status = Some(format!("{new_name} already exists"));
             cx.notify();
             return;
         }
         let is_dir = source.is_dir();
         let moved_sources = vec![(source.clone(), is_dir)];
         if let Some(message) = self.modified_open_editor_path_for_move(&moved_sources, cx) {
-            self.explorer_status = Some(message);
+            self.sidebar_explorer.status = Some(message);
             cx.notify();
             return;
         }
         if let Err(error) = fs::rename(&source, &destination) {
-            self.explorer_status = Some(format!("Rename failed: {error}"));
+            self.sidebar_explorer.status = Some(format!("Rename failed: {error}"));
             cx.notify();
             return;
         }
@@ -304,9 +305,10 @@ impl WorkspacePrototype {
             }],
             cx,
         );
-        self.expanded_dirs.insert(parent);
+        self.sidebar_explorer.expanded_dirs.insert(parent);
         self.sidebar_context_menu = None;
-        self.explorer_status = Some(format!("Renamed to {}", display_path_name(&destination)));
+        self.sidebar_explorer.status =
+            Some(format!("Renamed to {}", display_path_name(&destination)));
         cx.notify();
     }
 
@@ -318,14 +320,16 @@ impl WorkspacePrototype {
     ) {
         let text = if relative {
             let Some(root) = self.workspace_root.as_ref() else {
-                self.explorer_status = Some("No project root for relative path".to_string());
+                self.sidebar_explorer.status =
+                    Some("No project root for relative path".to_string());
                 cx.notify();
                 return;
             };
             match path.strip_prefix(root) {
                 Ok(relative_path) => relative_path.display().to_string(),
                 Err(_) => {
-                    self.explorer_status = Some("Path is not inside the open project".to_string());
+                    self.sidebar_explorer.status =
+                        Some("Path is not inside the open project".to_string());
                     cx.notify();
                     return;
                 }
@@ -335,7 +339,7 @@ impl WorkspacePrototype {
         };
         cx.write_to_clipboard(ClipboardItem::new_string(text));
         self.sidebar_context_menu = None;
-        self.explorer_status = Some(if relative {
+        self.sidebar_explorer.status = Some(if relative {
             "Copied relative path".to_string()
         } else {
             "Copied path".to_string()
@@ -363,7 +367,7 @@ impl WorkspacePrototype {
         let is_dir = path.is_dir();
         let moved_sources = vec![(path.clone(), is_dir)];
         if let Some(message) = self.modified_open_editor_path_for_move(&moved_sources, cx) {
-            self.explorer_status = Some(message.replace("moving", "deleting"));
+            self.sidebar_explorer.status = Some(message.replace("moving", "deleting"));
             cx.notify();
             return;
         }
@@ -383,17 +387,23 @@ impl WorkspacePrototype {
             fs::remove_file(&path)
         };
         if let Err(error) = result {
-            self.explorer_status = Some(format!("Delete failed: {error}"));
+            self.sidebar_explorer.status = Some(format!("Delete failed: {error}"));
             cx.notify();
             return;
         }
 
-        self.expanded_dirs
+        self.sidebar_explorer
+            .expanded_dirs
             .retain(|dir| !same_path(dir, &path) && !(is_dir && path_contains(&path, dir)));
-        if self.selected_path.as_ref().is_some_and(|selected| {
-            same_path(selected, &path) || (is_dir && path_contains(&path, selected))
-        }) {
-            self.selected_path = None;
+        if self
+            .sidebar_explorer
+            .selected_path
+            .as_ref()
+            .is_some_and(|selected| {
+                same_path(selected, &path) || (is_dir && path_contains(&path, selected))
+            })
+        {
+            self.sidebar_explorer.selected_path = None;
         }
         let mut removed_tab_ids = Vec::new();
         self.tabs.retain(|tab| {
@@ -422,7 +432,7 @@ impl WorkspacePrototype {
         }
         self.sidebar_context_menu = None;
         self.sidebar_rename = None;
-        self.explorer_status = Some(format!("Deleted {}", display_path_name(&path)));
+        self.sidebar_explorer.status = Some(format!("Deleted {}", display_path_name(&path)));
         cx.notify();
     }
 
@@ -451,7 +461,7 @@ impl WorkspacePrototype {
         let plan = match plan_sidebar_move(&request) {
             Ok(plan) => plan,
             Err(message) => {
-                self.explorer_status = Some(message);
+                self.sidebar_explorer.status = Some(message);
                 cx.notify();
                 return;
             }
@@ -463,23 +473,25 @@ impl WorkspacePrototype {
             .map(|item| (item.source.clone(), item.is_dir))
             .collect::<Vec<_>>();
         if let Some(message) = self.modified_open_editor_path_for_move(&moved_sources, cx) {
-            self.explorer_status = Some(message);
+            self.sidebar_explorer.status = Some(message);
             cx.notify();
             return;
         }
 
         for item in &plan.items {
             if let Err(error) = fs::rename(&item.source, &item.destination) {
-                self.explorer_status = Some(format!("Move failed: {error}"));
+                self.sidebar_explorer.status = Some(format!("Move failed: {error}"));
                 cx.notify();
                 return;
             }
         }
 
-        self.expanded_dirs.insert(plan.destination_folder.clone());
+        self.sidebar_explorer
+            .expanded_dirs
+            .insert(plan.destination_folder.clone());
         self.remap_after_explorer_move(&plan.items, cx);
         let moved_count = plan.len();
-        self.explorer_status = Some(if moved_count == 1 {
+        self.sidebar_explorer.status = Some(if moved_count == 1 {
             "Moved item".to_string()
         } else {
             format!("Moved {moved_count} items")
@@ -492,17 +504,22 @@ impl WorkspacePrototype {
         moved: &[SidebarMovePlanItem],
         cx: &mut Context<Self>,
     ) {
-        let expanded_dirs = self.expanded_dirs.iter().cloned().collect::<Vec<_>>();
+        let expanded_dirs = self
+            .sidebar_explorer
+            .expanded_dirs
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>();
         for expanded_dir in expanded_dirs {
             if let Some(remapped) = remap_path_after_explorer_move(&expanded_dir, moved) {
-                self.expanded_dirs.remove(&expanded_dir);
-                self.expanded_dirs.insert(remapped);
+                self.sidebar_explorer.expanded_dirs.remove(&expanded_dir);
+                self.sidebar_explorer.expanded_dirs.insert(remapped);
             }
         }
 
-        if let Some(selected_path) = self.selected_path.clone() {
+        if let Some(selected_path) = self.sidebar_explorer.selected_path.clone() {
             if let Some(remapped) = remap_path_after_explorer_move(&selected_path, moved) {
-                self.selected_path = Some(remapped);
+                self.sidebar_explorer.selected_path = Some(remapped);
             }
         }
 
@@ -556,12 +573,13 @@ impl WorkspacePrototype {
         self.sketch.update(cx, |sketch, _cx| {
             sketch.set_workspace_root(Some(path.clone()))
         });
-        self.expanded_dirs = initial_expanded_dirs(&path);
-        self.selected_path = None;
+        self.sidebar_explorer.expanded_dirs = initial_expanded_dirs(&path);
+        self.sidebar_explorer.selected_path = None;
+        self.close_explorer_tabs();
         self.close_editor_file_tab();
         self.sidebar_visible = true;
         self.recent_projects_open = false;
-        self.explorer_status = None;
+        self.sidebar_explorer.status = None;
         cx.notify();
     }
 
@@ -569,13 +587,20 @@ impl WorkspacePrototype {
         self.workspace_root = None;
         self.sketch
             .update(cx, |sketch, _cx| sketch.set_workspace_root(None));
-        self.expanded_dirs.clear();
-        self.selected_path = None;
+        self.sidebar_explorer.expanded_dirs.clear();
+        self.sidebar_explorer.selected_path = None;
+        self.close_explorer_tabs();
         self.close_editor_file_tab();
         self.sidebar_visible = true;
         self.recent_projects_open = false;
-        self.explorer_status = None;
+        self.sidebar_explorer.status = None;
         cx.notify();
+    }
+
+    fn close_explorer_tabs(&mut self) {
+        self.tabs
+            .retain(|tab| tab.surface != WorkspaceSurface::Explorer);
+        self.explorers.clear();
     }
 
     pub(super) fn close_editor_file_tab(&mut self) {

@@ -9,11 +9,12 @@ use super::{
     MenuCloseTab, MenuCopy, MenuEditorCheckDisk, MenuEditorCloseOthers, MenuEditorCloseSaved,
     MenuEditorReopenClosed, MenuFind, MenuJoinTabs, MenuLspCodeActions, MenuLspCompletion,
     MenuLspDefinition, MenuLspFormat, MenuLspHover, MenuLspReferences, MenuLspRename,
-    MenuLspSignatureHelp, MenuLspSymbols, MenuMarkdownCycle, MenuMarkdownPreview, MenuMarkdownSource,
-    MenuMarkdownSplit, MenuNewTab, MenuNextTab, MenuOpenProject, MenuPaste, MenuPreviousTab,
-    MenuRedo, MenuSave, MenuSelectAll, MenuSeparateTabs, MenuShowAppearances, MenuShowEditor,
-    MenuShowHome, MenuShowSketch, MenuShowStacker, MenuShowTerminal, MenuSwapTabs, MenuToggleSidebar,
-    MenuUndo, MenuZoomIn, MenuZoomOut, MenuZoomReset, WorkspacePrototype, WorkspaceSurface,
+    MenuLspSignatureHelp, MenuLspSymbols, MenuMarkdownCycle, MenuMarkdownPreview,
+    MenuMarkdownSource, MenuMarkdownSplit, MenuNewTab, MenuNextTab, MenuOpenProject, MenuPaste,
+    MenuPreviousTab, MenuRedo, MenuSave, MenuSelectAll, MenuSeparateTabs, MenuShowAppearances,
+    MenuShowCommandPalette, MenuShowEditor, MenuShowHome, MenuShowSketch, MenuShowStacker,
+    MenuShowTerminal, MenuSwapTabs, MenuToggleSidebar, MenuUndo, MenuZoomIn, MenuZoomOut,
+    MenuZoomReset, WorkspacePrototype, WorkspaceSurface,
 };
 
 impl WorkspacePrototype {
@@ -90,12 +91,7 @@ impl WorkspacePrototype {
 
     /// Activate the tab at the given 0-based position. No-op if there is
     /// no tab at that position.
-    fn activate_tab_at_index(
-        &mut self,
-        index: usize,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn activate_tab_at_index(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(tab) = self.tabs.get(index) {
             let id = tab.id;
             self.activate_tab(id, window, cx);
@@ -181,6 +177,19 @@ impl WorkspacePrototype {
         cx: &mut Context<Self>,
     ) {
         self.activate_tab_at_index(8, window, cx);
+    }
+
+    pub(super) fn menu_show_command_palette(
+        &mut self,
+        _: &MenuShowCommandPalette,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.palette.open {
+            self.close_command_palette(cx);
+        } else {
+            self.open_command_palette(cx);
+        }
     }
 
     pub(super) fn menu_join_tabs(
