@@ -99,26 +99,43 @@ pub(crate) fn terminal_background_layer(config: &Config) -> Option<gpui::Div> {
 }
 
 /// Workspace-wide shader-driven effect layer. Returns `Some` only when the
-/// active background mode is a shader effect (currently only `"smoke"`).
+/// active background mode is a shader effect (smoke / fire / aurora).
 /// Pulls intensity + palette from the config so the live preview in the
 /// Appearances panel and the actual workspace render share one source of
 /// truth. The element is wrapped in a full-bleed `Div` so two joined
 /// terminal panes see one continuous shader field when this layer is
 /// mounted at the shared-container level.
 pub(crate) fn terminal_shader_effect_layer(config: &Config) -> Option<gpui::Div> {
-    if config.effects.background != "smoke" || !config.effects.enabled {
+    if !config.effects.enabled {
         return None;
     }
-    let c1 = config.effects.background_color.unwrap_or([0x10, 0x09, 0x14]);
-    let c2 = config.effects.background_color2.unwrap_or([0x4d, 0x1f, 0x4f]);
-    let c3 = config.effects.background_color3.unwrap_or([0xc5, 0x7a, 0xc8]);
+    let kind = crate::effects::EffectKind::from_background_mode(&config.effects.background)?;
+    let (default_c1, default_c2, default_c3) = default_palette_for(kind);
+    let c1 = config.effects.background_color.unwrap_or(default_c1);
+    let c2 = config.effects.background_color2.unwrap_or(default_c2);
+    let c3 = config.effects.background_color3.unwrap_or(default_c3);
     Some(
         div().absolute().size_full().overflow_hidden().child(
             crate::effects::EffectsElement::new()
+                .with_kind(kind)
                 .with_intensity(config.effects.background_intensity)
                 .with_palette(c1, c2, c3),
         ),
     )
+}
+
+/// Default palette stops for a shader effect when the user hasn't picked
+/// one explicitly. Mirrors the curated presets exposed in the Terminal
+/// appearance tab.
+pub(crate) fn default_palette_for(
+    kind: crate::effects::EffectKind,
+) -> ([u8; 3], [u8; 3], [u8; 3]) {
+    use crate::effects::EffectKind;
+    match kind {
+        EffectKind::Smoke => ([0x10, 0x09, 0x14], [0x4d, 0x1f, 0x4f], [0xc5, 0x7a, 0xc8]),
+        EffectKind::Fire => ([0x12, 0x04, 0x02], [0xff, 0x55, 0x18], [0xff, 0xd6, 0x6b]),
+        EffectKind::Aurora => ([0x08, 0x0e, 0x26], [0x2e, 0xdc, 0x96], [0xc8, 0x5a, 0xe6]),
+    }
 }
 
 fn terminal_uses_background_image(config: &Config) -> bool {
@@ -129,7 +146,8 @@ fn terminal_uses_background_image(config: &Config) -> bool {
 /// case the terminal must NOT paint its opaque body fill, otherwise the
 /// fill covers the shader layer mounted by `terminal_shader_effect_layer`.
 fn terminal_uses_shader_effect(config: &Config) -> bool {
-    config.effects.enabled && config.effects.background == "smoke"
+    config.effects.enabled
+        && crate::effects::EffectKind::from_background_mode(&config.effects.background).is_some()
 }
 
 pub(crate) fn bind_terminal_keys(cx: &mut App) {

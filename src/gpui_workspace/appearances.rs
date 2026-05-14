@@ -376,6 +376,12 @@ fn terminal_appearance_controls(
                     |this, cx| this.set_background_mode("smoke", cx),
                 ))
                 .child(appearance_button(
+                    "Fire".to_string(),
+                    config.effects.background == "fire",
+                    cx,
+                    |this, cx| this.set_background_mode("fire", cx),
+                ))
+                .child(appearance_button(
                     "Aurora".to_string(),
                     config.effects.background == "aurora",
                     cx,
@@ -577,10 +583,11 @@ fn editor_appearance_controls(
 }
 
 // Curated palettes for shader-driven background effects. Each preset sets
-// the three palette stops the smoke shader (and future shaders) read from
-// `Config.effects.background_color{1,2,3}`. Picked to read well under
-// light terminal text without competing with it.
-const EFFECT_PALETTES: &[(&str, [u8; 3], [u8; 3], [u8; 3])] = &[
+// the three palette stops the active shader reads from
+// `Config.effects.background_color{1,2,3}`. The list shown to the user is
+// filtered per effect (`shader_palettes_for_mode`) so each effect surfaces
+// palettes that suit it.
+const SMOKE_PALETTES: &[(&str, [u8; 3], [u8; 3], [u8; 3])] = &[
     ("Mauve",  [0x10, 0x09, 0x14], [0x4d, 0x1f, 0x4f], [0xc5, 0x7a, 0xc8]),
     ("Aqua",   [0x05, 0x10, 0x14], [0x1f, 0x44, 0x53], [0x6a, 0xd2, 0xe5]),
     ("Ember",  [0x0e, 0x06, 0x04], [0x4c, 0x1c, 0x09], [0xe6, 0x84, 0x3c]),
@@ -588,24 +595,66 @@ const EFFECT_PALETTES: &[(&str, [u8; 3], [u8; 3], [u8; 3])] = &[
     ("Slate",  [0x09, 0x0c, 0x10], [0x24, 0x2a, 0x33], [0x9a, 0xa6, 0xb8]),
 ];
 
-/// Smoke-specific controls: palette presets + intensity slider + live
-/// preview. Only contributes content when `Smoke` is the active background
-/// mode -- in any other mode it renders an empty div so the Terminal tab's
-/// row layout doesn't shift.
+const FIRE_PALETTES: &[(&str, [u8; 3], [u8; 3], [u8; 3])] = &[
+    ("Hearth",  [0x12, 0x04, 0x02], [0xff, 0x55, 0x18], [0xff, 0xd6, 0x6b]),
+    ("Bonfire", [0x08, 0x02, 0x01], [0xd6, 0x3a, 0x0e], [0xff, 0xb0, 0x42]),
+    ("Forge",   [0x10, 0x05, 0x02], [0xff, 0x84, 0x1a], [0xff, 0xf0, 0xb0]),
+    ("Ember",   [0x0e, 0x06, 0x04], [0x4c, 0x1c, 0x09], [0xe6, 0x84, 0x3c]),
+];
+
+const AURORA_PALETTES: &[(&str, [u8; 3], [u8; 3], [u8; 3])] = &[
+    ("Aurora",  [0x08, 0x0e, 0x26], [0x2e, 0xdc, 0x96], [0xc8, 0x5a, 0xe6]),
+    ("Boreal",  [0x04, 0x0a, 0x18], [0x18, 0xc0, 0xb4], [0x6a, 0x84, 0xff]),
+    ("Solar",   [0x12, 0x06, 0x20], [0xff, 0xa0, 0x4a], [0xff, 0x5a, 0xc8]),
+    ("Glacial", [0x05, 0x0c, 0x14], [0x4a, 0xa0, 0xff], [0xc8, 0xf0, 0xff]),
+];
+
+fn shader_palettes_for_mode(mode: &str) -> &'static [(&'static str, [u8; 3], [u8; 3], [u8; 3])] {
+    match mode {
+        "fire" => FIRE_PALETTES,
+        "aurora" => AURORA_PALETTES,
+        _ => SMOKE_PALETTES,
+    }
+}
+
+fn shader_palette_label(mode: &str) -> &'static str {
+    match mode {
+        "fire" => "Fire Palette",
+        "aurora" => "Aurora Palette",
+        _ => "Smoke Palette",
+    }
+}
+
+fn shader_intensity_label(mode: &str) -> &'static str {
+    match mode {
+        "fire" => "Fire Intensity",
+        "aurora" => "Aurora Intensity",
+        _ => "Smoke Intensity",
+    }
+}
+
+/// Per-effect controls: palette presets + intensity slider + live preview.
+/// Shown for any shader-driven background mode (smoke / fire / aurora);
+/// renders an empty div otherwise so the Terminal tab's row layout doesn't
+/// shift when None or Image is selected.
 fn terminal_smoke_controls(
     config: &Config,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
-    if config.effects.background != "smoke" {
-        return div();
-    }
+    let mode = config.effects.background.as_str();
+    let kind = match crate::effects::EffectKind::from_background_mode(mode) {
+        Some(k) => k,
+        None => return div(),
+    };
+
+    let palettes = shader_palettes_for_mode(mode);
 
     let mut palette_row = div()
         .flex()
         .items_center()
         .gap_2()
-        .child(control_label("Smoke Palette"));
-    for (label, c1, c2, c3) in EFFECT_PALETTES {
+        .child(control_label(shader_palette_label(mode)));
+    for (label, c1, c2, c3) in palettes {
         let label = (*label).to_string();
         let active = config.effects.background_color == Some(*c1)
             && config.effects.background_color2 == Some(*c2)
@@ -621,9 +670,10 @@ fn terminal_smoke_controls(
         ));
     }
 
-    let c1 = config.effects.background_color.unwrap_or([0x10, 0x09, 0x14]);
-    let c2 = config.effects.background_color2.unwrap_or([0x4d, 0x1f, 0x4f]);
-    let c3 = config.effects.background_color3.unwrap_or([0xc5, 0x7a, 0xc8]);
+    let (default_c1, default_c2, default_c3) = crate::gpui_terminal::default_palette_for(kind);
+    let c1 = config.effects.background_color.unwrap_or(default_c1);
+    let c2 = config.effects.background_color2.unwrap_or(default_c2);
+    let c3 = config.effects.background_color3.unwrap_or(default_c3);
     let intensity_pct = (config.effects.background_intensity * 100.0).round() as i32;
 
     let preview = div()
@@ -634,6 +684,7 @@ fn terminal_smoke_controls(
         .overflow_hidden()
         .child(
             crate::effects::EffectsElement::new()
+                .with_kind(kind)
                 .with_intensity(config.effects.background_intensity)
                 .with_palette(c1, c2, c3),
         );
@@ -644,7 +695,7 @@ fn terminal_smoke_controls(
         .gap_2()
         .child(palette_row)
         .child(metric_row(
-            "Smoke Intensity",
+            shader_intensity_label(mode),
             format!("{intensity_pct}%"),
             cx,
             |this, cx| this.adjust_effect_intensity(-0.05, cx),

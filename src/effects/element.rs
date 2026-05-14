@@ -13,17 +13,25 @@ use gpui::{
     Style, Window,
 };
 
-use super::host::{app_time_seconds, EffectParams, EffectsHost};
+use super::host::{app_time_seconds, EffectKind, EffectParams, EffectsHost};
 
 pub struct EffectsElement {
+    kind: EffectKind,
     params: EffectParams,
 }
 
 impl EffectsElement {
     pub fn new() -> Self {
         Self {
+            kind: EffectKind::Smoke,
             params: EffectParams::default(),
         }
+    }
+
+    /// Select which shader to render. Defaults to `EffectKind::Smoke`.
+    pub fn with_kind(mut self, kind: EffectKind) -> Self {
+        self.kind = kind;
+        self
     }
 
     /// Override the intensity slider value. Defaults to `EffectParams::default`.
@@ -112,8 +120,10 @@ impl Element for EffectsElement {
         let pixel_width = (f32::from(bounds.size.width) * scale).round().max(1.0) as u32;
         let pixel_height = (f32::from(bounds.size.height) * scale).round().max(1.0) as u32;
 
+        let kind = self.kind;
+        let params = self.params;
         let frame = EffectsHost::with_shared(|host| {
-            host.render_frame(app_time_seconds(), pixel_width, pixel_height, self.params)
+            host.render_frame(kind, app_time_seconds(), pixel_width, pixel_height, params)
         });
         if let Some(buffer) = frame {
             window.paint_surface(bounds, buffer);

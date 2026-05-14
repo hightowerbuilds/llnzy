@@ -21,4 +21,4 @@ mod host;
 #[cfg(target_os = "macos")]
 pub use element::EffectsElement;
 #[cfg(target_os = "macos")]
-pub use host::{EffectParams, EffectsHost};
+pub use host::{EffectKind, EffectParams, EffectsHost};

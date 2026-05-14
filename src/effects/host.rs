@@ -88,17 +88,50 @@ impl Default for EffectParams {
     }
 }
 
+/// Which built-in effect shader to render. All three share the same
+/// `Uniforms` layout (and therefore the same bind group + uniform buffer);
+/// only the shader module + render pipeline differ per kind.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum EffectKind {
+    Smoke,
+    Fire,
+    Aurora,
+}
+
+impl EffectKind {
+    fn pipeline_index(self) -> usize {
+        match self {
+            EffectKind::Smoke => 0,
+            EffectKind::Fire => 1,
+            EffectKind::Aurora => 2,
+        }
+    }
+
+    /// Maps `Config.effects.background` (a string) to a shader kind. None
+    /// for any mode that isn't a shader effect (image / none / unknown).
+    pub fn from_background_mode(mode: &str) -> Option<Self> {
+        match mode {
+            "smoke" => Some(EffectKind::Smoke),
+            "fire" => Some(EffectKind::Fire),
+            "aurora" => Some(EffectKind::Aurora),
+            _ => None,
+        }
+    }
+}
+
 /// Owns options passed into every CVPixelBuffer alloc and the wgpu device
-/// state for the render pipeline. Both are built once in `EffectsHost::new`
-/// so the per-frame path only does the per-frame work (uniform write,
-/// encode, submit, map, copy).
+/// state for the render pipelines. Built once in `EffectsHost::new` so the
+/// per-frame path only does the per-frame work (uniform write, encode,
+/// submit, map, copy).
 pub struct EffectsHost {
     pixel_buffer_attrs: CFDictionary<CFString, CFType>,
     _instance: wgpu::Instance,
     _adapter: wgpu::Adapter,
     device: wgpu::Device,
     queue: wgpu::Queue,
-    pipeline: wgpu::RenderPipeline,
+    /// One render pipeline per `EffectKind`, indexed by `EffectKind::pipeline_index`.
+    /// All pipelines share the same bind group layout + uniform buffer.
+    pipelines: [wgpu::RenderPipeline; 3],
     uniform_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
 }
@@ -148,13 +181,6 @@ impl EffectsHost {
             mapped_at_creation: false,
         });
 
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("effects-host-smoke"),
-            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
-                "shaders/smoke.wgsl"
-            ))),
-        });
-
         let bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("effects-host-bgl"),
@@ -185,39 +211,24 @@ impl EffectsHost {
             immediate_size: 0,
         });
 
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("effects-host-pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
-                buffers: &[],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            },
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                unclipped_depth: false,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: RENDER_TEXTURE_FORMAT,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
+        let smoke_pipeline = build_effect_pipeline(
+            &device,
+            &pipeline_layout,
+            "smoke",
+            include_str!("shaders/smoke.wgsl"),
+        );
+        let fire_pipeline = build_effect_pipeline(
+            &device,
+            &pipeline_layout,
+            "fire",
+            include_str!("shaders/fire.wgsl"),
+        );
+        let aurora_pipeline = build_effect_pipeline(
+            &device,
+            &pipeline_layout,
+            "aurora",
+            include_str!("shaders/aurora.wgsl"),
+        );
 
         Self {
             pixel_buffer_attrs: build_pixel_buffer_attrs(),
@@ -225,7 +236,7 @@ impl EffectsHost {
             _adapter: adapter,
             device,
             queue,
-            pipeline,
+            pipelines: [smoke_pipeline, fire_pipeline, aurora_pipeline],
             uniform_buffer,
             bind_group,
         }
@@ -241,6 +252,7 @@ impl EffectsHost {
     /// crash.
     pub fn render_frame(
         &self,
+        kind: EffectKind,
         time: f32,
         width: u32,
         height: u32,
@@ -320,7 +332,7 @@ impl EffectsHost {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            pass.set_pipeline(&self.pipeline);
+            pass.set_pipeline(&self.pipelines[kind.pipeline_index()]);
             pass.set_bind_group(0, &self.bind_group, &[]);
             // 3 vertices, 1 instance: a single fullscreen triangle, vertex
             // positions come from `@builtin(vertex_index)` in the shader.
@@ -448,6 +460,54 @@ impl EffectsHost {
 /// Used as the `time` uniform for every shader frame.
 pub fn app_time_seconds() -> f32 {
     APP_START.get_or_init(Instant::now).elapsed().as_secs_f32()
+}
+
+/// Build a render pipeline for one effect shader. All effects share the
+/// same `pipeline_layout` (and therefore the same bind group + uniforms);
+/// only the shader module + the final `RenderPipeline` are per-effect.
+fn build_effect_pipeline(
+    device: &wgpu::Device,
+    pipeline_layout: &wgpu::PipelineLayout,
+    label: &str,
+    wgsl: &'static str,
+) -> wgpu::RenderPipeline {
+    let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some(&format!("effects-host-shader-{label}")),
+        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(wgsl)),
+    });
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some(&format!("effects-host-pipeline-{label}")),
+        layout: Some(pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: &module,
+            entry_point: Some("vs_main"),
+            buffers: &[],
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        },
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            strip_index_format: None,
+            front_face: wgpu::FrontFace::Ccw,
+            cull_mode: None,
+            unclipped_depth: false,
+            polygon_mode: wgpu::PolygonMode::Fill,
+            conservative: false,
+        },
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        fragment: Some(wgpu::FragmentState {
+            module: &module,
+            entry_point: Some("fs_main"),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: RENDER_TEXTURE_FORMAT,
+                blend: None,
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+        }),
+        multiview_mask: None,
+        cache: None,
+    })
 }
 
 /// Build the CFDictionary of pixel-buffer creation attributes: IOSurface

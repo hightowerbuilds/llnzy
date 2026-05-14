@@ -94,11 +94,12 @@ pub(super) fn terminal_effect_overlay(
 
 fn terminal_background_effects(terminal_bounds: Bounds<Pixels>, config: &Config) -> Vec<PaintQuad> {
     let mode = config.effects.background.as_str();
-    // `smoke` is now driven by the WGSL pipeline via `paint_surface` -- the
-    // workspace mounts an `EffectsElement` at the joined-container level so
-    // two terminals see one continuous shader field. The nine-rectangle
-    // path here was retired in M2 to avoid double-rendering on top.
-    if mode == "none" || mode == "image" || mode == "smoke" {
+    // `smoke`, `fire`, and `aurora` are driven by the WGSL pipeline via
+    // `paint_surface` -- the workspace mounts an `EffectsElement` at the
+    // joined-container level so two terminals see one continuous shader
+    // field. The rectangle path here was retired in M2/M3 to avoid double-
+    // rendering on top.
+    if matches!(mode, "none" | "image" | "smoke" | "fire" | "aurora") {
         return Vec::new();
     }
 
@@ -108,22 +109,6 @@ fn terminal_background_effects(terminal_bounds: Bounds<Pixels>, config: &Config)
     let mut quads = Vec::new();
 
     match mode {
-        "aurora" => {
-            for index in 0..6 {
-                let x = width * (-0.08 + index as f32 * 0.18);
-                let color = effect_palette_color(config, index);
-                let alpha = (0.045 + intensity * 0.09) * (1.0 - index as f32 * 0.055);
-                quads.push(terminal_local_quad(
-                    terminal_bounds,
-                    x,
-                    0.0,
-                    width * 0.26,
-                    height,
-                    color,
-                    alpha,
-                ));
-            }
-        }
         _ => {
             quads.push(terminal_local_quad(
                 terminal_bounds,
