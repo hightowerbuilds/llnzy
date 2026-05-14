@@ -823,8 +823,12 @@ impl EditorPrototype {
 
         match action {
             GpuiLspPanelAction::None => {}
-            GpuiLspPanelAction::Complete { text } => {
-                self.replace_selection_or_range(cx, None, &text);
+            GpuiLspPanelAction::Complete { text, snippet } => {
+                if snippet {
+                    self.insert_snippet_completion(cx, &text);
+                } else {
+                    self.replace_selection_or_range(cx, None, &text);
+                }
                 self.status_message = Some("Completion inserted".to_string());
             }
             GpuiLspPanelAction::GoTo { path, line, col } => {

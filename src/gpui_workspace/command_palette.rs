@@ -1,3 +1,5 @@
+use std::path::{Path, PathBuf};
+
 use gpui::{div, prelude::*, px, rgb, rgba, Action, Context, IntoElement, SharedString};
 
 use crate::text_utils::fuzzy_match_case_insensitive_ascii;
@@ -14,12 +16,26 @@ use super::{
     MenuToggleSidebar, MenuUndo, MenuZoomIn, MenuZoomOut, MenuZoomReset, WorkspacePrototype,
 };
 
+/// What kind of list the palette is currently showing.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum PaletteMode {
+    #[default]
+    Commands,
+    Files,
+}
+
 /// Visual + behavioral state for the command palette overlay.
 #[derive(Clone, Debug, Default)]
 pub(super) struct CommandPaletteState {
     pub(super) open: bool,
     pub(super) query: String,
     pub(super) selected: usize,
+    pub(super) mode: PaletteMode,
+    /// Files indexed when the finder was opened. Empty in Commands mode.
+    pub(super) files: Vec<PathBuf>,
+    /// Project root the `files` list is relative to. None outside Files mode
+    /// or when no project is open.
+    pub(super) project_root: Option<PathBuf>,
 }
 
 impl CommandPaletteState {
@@ -27,6 +43,9 @@ impl CommandPaletteState {
         self.open = false;
         self.query.clear();
         self.selected = 0;
+        self.mode = PaletteMode::Commands;
+        self.files.clear();
+        self.project_root = None;
     }
 }
 
@@ -312,6 +331,96 @@ pub(super) fn filter_entries(entries: &[CommandEntry], query: &str) -> Vec<usize
         .collect()
 }
 
+/// Cap on how many project files the file-finder will index. Mirrors the
+/// limit in `editor::project_search`.
+pub(super) const FILE_FINDER_MAX: usize = 5000;
+
+const FILE_FINDER_IGNORED_DIRS: &[&str] = &[
+    ".git",
+    "node_modules",
+    "target",
+    "__pycache__",
+    "venv",
+    ".venv",
+    "dist",
+    "build",
+    ".next",
+    ".cache",
+];
+
+/// Walk `root` and collect file paths, skipping common dependency and build
+/// directories. Stops at `FILE_FINDER_MAX` to keep palette open instant.
+pub(super) fn collect_project_files(root: &Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(meta) = entry.metadata() else {
+                continue;
+            };
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            if meta.is_dir() {
+                if name_str.starts_with('.') {
+                    continue;
+                }
+                if FILE_FINDER_IGNORED_DIRS.contains(&name_str.as_ref()) {
+                    continue;
+                }
+                stack.push(path);
+            } else if meta.is_file() {
+                files.push(path);
+                if files.len() >= FILE_FINDER_MAX {
+                    return files;
+                }
+            }
+        }
+    }
+    files
+}
+
+/// Filter file paths by fuzzy-matching against `query` on the path's display
+/// string relative to `root`. Empty query returns all paths. Results are
+/// sorted by (display length, then alphabetical) so shorter / closer-to-root
+/// matches win.
+pub(super) fn filter_files(files: &[PathBuf], root: &Path, query: &str) -> Vec<usize> {
+    let trimmed = query.trim();
+    let mut matches: Vec<(usize, String)> = if trimmed.is_empty() {
+        files
+            .iter()
+            .enumerate()
+            .map(|(idx, path)| (idx, file_display(path, root)))
+            .collect()
+    } else {
+        let lower: String = trimmed.to_ascii_lowercase();
+        files
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, path)| {
+                let display = file_display(path, root);
+                if fuzzy_match_case_insensitive_ascii(&lower, &display) {
+                    Some((idx, display))
+                } else {
+                    None
+                }
+            })
+            .collect()
+    };
+    matches.sort_by(|a, b| a.1.len().cmp(&b.1.len()).then_with(|| a.1.cmp(&b.1)));
+    matches.into_iter().map(|(idx, _)| idx).collect()
+}
+
+pub(super) fn file_display(path: &Path, root: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .into_owned()
+}
+
 const PALETTE_BG: u32 = 0x1d1f25;
 const PALETTE_BORDER: u32 = 0x3a3f4a;
 const PALETTE_INPUT_BG: u32 = 0x14161a;
@@ -326,6 +435,54 @@ const PALETTE_WIDTH: f32 = 540.0;
 const PALETTE_TOP_OFFSET: f32 = 96.0;
 const PALETTE_LIST_MAX_HEIGHT: f32 = 360.0;
 const PALETTE_ROW_HEIGHT: f32 = 30.0;
+const PALETTE_FILE_ROW_LIMIT: usize = 200;
+
+/// A single row to render: the visible label plus an optional muted hint
+/// (shortcut for commands, parent directory for files).
+struct PaletteRow {
+    label: String,
+    hint: Option<String>,
+}
+
+fn command_rows(entries: &[CommandEntry], visible: &[usize]) -> Vec<PaletteRow> {
+    visible
+        .iter()
+        .map(|&idx| {
+            let entry = &entries[idx];
+            PaletteRow {
+                label: entry.label.to_string(),
+                hint: entry.shortcut.map(|s| s.to_string()),
+            }
+        })
+        .collect()
+}
+
+fn file_rows(files: &[PathBuf], root: &Path, visible: &[usize]) -> Vec<PaletteRow> {
+    visible
+        .iter()
+        .take(PALETTE_FILE_ROW_LIMIT)
+        .map(|&idx| {
+            let path = &files[idx];
+            let file_name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| file_display(path, root));
+            let parent = path.parent().and_then(|parent| {
+                let rel = parent.strip_prefix(root).unwrap_or(parent);
+                let display = rel.to_string_lossy().into_owned();
+                if display.is_empty() {
+                    None
+                } else {
+                    Some(display)
+                }
+            });
+            PaletteRow {
+                label: file_name,
+                hint: parent,
+            }
+        })
+        .collect()
+}
 
 pub(super) fn render_command_palette(
     state: &CommandPaletteState,
@@ -333,8 +490,31 @@ pub(super) fn render_command_palette(
     visible: &[usize],
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
+    let (rows, placeholder, empty_message) = match state.mode {
+        PaletteMode::Commands => (
+            command_rows(entries, visible),
+            "Type a command…",
+            "No matching commands",
+        ),
+        PaletteMode::Files => {
+            let root = state
+                .project_root
+                .clone()
+                .unwrap_or_else(|| PathBuf::from(""));
+            (
+                file_rows(&state.files, &root, visible),
+                "Open file…",
+                if state.files.is_empty() {
+                    "No project open"
+                } else {
+                    "No matching files"
+                },
+            )
+        }
+    };
+
     let query: SharedString = if state.query.is_empty() {
-        "Type a command…".to_string().into()
+        placeholder.to_string().into()
     } else {
         state.query.clone().into()
     };
@@ -351,25 +531,24 @@ pub(super) fn render_command_palette(
         .max_h(px(PALETTE_LIST_MAX_HEIGHT))
         .overflow_hidden();
 
-    if visible.is_empty() {
+    if rows.is_empty() {
         list = list.child(
             div()
                 .px_3()
                 .py_2()
                 .text_size(px(12.0))
                 .text_color(rgb(PALETTE_PLACEHOLDER))
-                .child("No matching commands"),
+                .child(empty_message),
         );
     } else {
-        for (display_idx, &entry_idx) in visible.iter().enumerate() {
-            let entry = &entries[entry_idx];
+        for (display_idx, row) in rows.into_iter().enumerate() {
             let selected = display_idx == state.selected;
             let bg = if selected {
                 PALETTE_ROW_SELECTED_BG
             } else {
                 PALETTE_BG
             };
-            let row = div()
+            let row_el = div()
                 .id(("palette-row", display_idx))
                 .flex()
                 .items_center()
@@ -390,17 +569,17 @@ pub(super) fn render_command_palette(
                     div()
                         .text_size(px(13.0))
                         .text_color(rgb(PALETTE_LABEL))
-                        .child(SharedString::from(entry.label)),
+                        .child(SharedString::from(row.label)),
                 )
-                .when_some(entry.shortcut, |row, shortcut| {
-                    row.child(
+                .when_some(row.hint, |row_el, hint| {
+                    row_el.child(
                         div()
                             .text_size(px(11.0))
                             .text_color(rgb(PALETTE_SHORTCUT))
-                            .child(SharedString::from(shortcut)),
+                            .child(SharedString::from(hint)),
                     )
                 });
-            list = list.child(row);
+            list = list.child(row_el);
         }
     }
 
@@ -453,4 +632,35 @@ pub(super) fn render_command_palette(
 fn rgba_u32(rgb: u32, alpha: f32) -> u32 {
     let alpha_byte = (alpha.clamp(0.0, 1.0) * 255.0) as u32;
     (rgb << 8) | alpha_byte
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn filter_files_ranks_shorter_paths_first() {
+        let root = PathBuf::from("/root");
+        let files = vec![
+            PathBuf::from("/root/a/b/c/main.rs"),
+            PathBuf::from("/root/main.rs"),
+            PathBuf::from("/root/a/main.rs"),
+        ];
+        let visible = filter_files(&files, &root, "main");
+        assert_eq!(visible.len(), 3);
+        assert_eq!(files[visible[0]], PathBuf::from("/root/main.rs"));
+        assert_eq!(files[visible[1]], PathBuf::from("/root/a/main.rs"));
+        assert_eq!(files[visible[2]], PathBuf::from("/root/a/b/c/main.rs"));
+    }
+
+    #[test]
+    fn filter_files_drops_non_matching_paths() {
+        let root = PathBuf::from("/root");
+        let files = vec![
+            PathBuf::from("/root/main.rs"),
+            PathBuf::from("/root/README.md"),
+        ];
+        let visible = filter_files(&files, &root, "xyz");
+        assert!(visible.is_empty());
+    }
 }

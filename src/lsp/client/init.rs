@@ -32,7 +32,7 @@ pub(super) fn initialize_params(
                 }),
                 completion: Some(CompletionClientCapabilities {
                     completion_item: Some(CompletionItemCapability {
-                        snippet_support: Some(false),
+                        snippet_support: Some(true),
                         ..Default::default()
                     }),
                     ..Default::default()

@@ -448,10 +448,15 @@ impl EntityInputHandler for EditorPrototype {
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<std::ops::Range<usize>> {
-        None
+        let (start, end) = self.marked_range?;
+        let start_utf16 = self.utf16_for_position(start)?;
+        let end_utf16 = self.utf16_for_position(end)?;
+        Some(start_utf16..end_utf16)
     }
 
-    fn unmark_text(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {}
+    fn unmark_text(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
+        self.marked_range = None;
+    }
 
     fn replace_text_in_range(
         &mut self,
@@ -460,24 +465,81 @@ impl EntityInputHandler for EditorPrototype {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let range = range_utf16.and_then(|range| {
+        let explicit_range = range_utf16.and_then(|range| {
             Some((
                 self.position_for_utf16(range.start)?,
                 self.position_for_utf16(range.end)?,
             ))
         });
-        self.replace_selection_or_range(cx, range, new_text);
+        // When the OS commits a composition it sends `replace_text_in_range`
+        // with `range_utf16 = None`. The intended target is the active
+        // marked range, not the cursor position.
+        let target = explicit_range.or(self.marked_range);
+        self.replace_selection_or_range(cx, target, new_text);
+        // `edit_active` already cleared `marked_range`; this is a no-op but
+        // makes the commit-clears-composition contract explicit.
+        self.marked_range = None;
     }
 
     fn replace_and_mark_text_in_range(
         &mut self,
         range_utf16: Option<std::ops::Range<usize>>,
         new_text: &str,
-        _new_selected_range_utf16: Option<std::ops::Range<usize>>,
-        window: &mut Window,
+        new_selected_range_utf16: Option<std::ops::Range<usize>>,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.replace_text_in_range(range_utf16, new_text, window, cx);
+        let explicit_range = range_utf16.and_then(|range| {
+            Some((
+                self.position_for_utf16(range.start)?,
+                self.position_for_utf16(range.end)?,
+            ))
+        });
+        // Composition target: explicit range, else previous marked range,
+        // else the active selection (handled inside the edit closure).
+        let target = explicit_range.or(self.marked_range);
+        let start = match target {
+            Some((start, _)) => start,
+            None => {
+                let Some((_, _, view)) = self.editor.active_buffer_view() else {
+                    return;
+                };
+                view.cursor
+                    .selection()
+                    .map(|(s, _)| s)
+                    .unwrap_or(view.cursor.pos)
+            }
+        };
+
+        // Cursor offset inside `new_text`. AppKit's `selectedRange` parameter
+        // for `setMarkedText` is in UTF-16 of the inserted text; default to
+        // the end of the marked text when absent.
+        let new_text_char_count = new_text.chars().count();
+        let cursor_chars = new_selected_range_utf16
+            .as_ref()
+            .map(|range| utf16_index_to_char_index(new_text, range.end))
+            .unwrap_or(new_text_char_count)
+            .min(new_text_char_count);
+
+        self.edit_active(cx, |buffer, view| {
+            let (s, e) = target
+                .or_else(|| view.cursor.selection())
+                .unwrap_or((view.cursor.pos, view.cursor.pos));
+            buffer.replace(s, e, new_text);
+            let cursor_prefix: String = new_text.chars().take(cursor_chars).collect();
+            view.cursor.pos = buffer.compute_end_pos_pub(s, &cursor_prefix);
+            view.cursor.clear_selection();
+            view.cursor.desired_col = None;
+        });
+
+        // Reinstate the marked range after `edit_active` cleared it. Empty
+        // text means the composition was cancelled.
+        self.marked_range = if new_text.is_empty() {
+            None
+        } else {
+            let end = compute_text_end_pos(start, new_text);
+            Some((start, end))
+        };
     }
 
     fn bounds_for_range(
@@ -586,6 +648,23 @@ impl Element for EditorInputElement {
             input.last_text_bounds = Some(bounds);
         });
     }
+}
+
+/// Pure position arithmetic mirroring `Buffer::compute_end_pos_pub` but
+/// usable without an owning buffer reference. Used by the IME path to
+/// determine the marked-range end after a composition replace.
+fn compute_text_end_pos(start: Position, text: &str) -> Position {
+    let mut line = start.line;
+    let mut col = start.col;
+    for ch in text.chars() {
+        if ch == '\n' {
+            line += 1;
+            col = 0;
+        } else {
+            col += 1;
+        }
+    }
+    Position::new(line, col)
 }
 
 fn build_measured_layout(
@@ -877,6 +956,29 @@ mod tests {
         );
         assert!(drag_scroll_delta_for_local_x(px(60.0), px(500.0), &appearance) < 0);
         assert!(drag_scroll_delta_for_local_x(px(500.0), px(500.0), &appearance) > 0);
+    }
+
+    #[test]
+    fn compute_text_end_pos_handles_single_line() {
+        let end = compute_text_end_pos(Position::new(3, 4), "hello");
+        assert_eq!(end, Position::new(3, 9));
+    }
+
+    #[test]
+    fn compute_text_end_pos_handles_newlines() {
+        let end = compute_text_end_pos(Position::new(2, 5), "ab\ncd\ne");
+        assert_eq!(end, Position::new(4, 1));
+    }
+
+    #[test]
+    fn compute_text_end_pos_handles_cjk() {
+        // A wide character occupies a single buffer column even though its
+        // glyph spans two terminal cells; marked-range math counts buffer
+        // columns, not display cells.
+        let end = compute_text_end_pos(Position::new(0, 0), "に");
+        assert_eq!(end, Position::new(0, 1));
+        let end = compute_text_end_pos(Position::new(0, 0), "にほん");
+        assert_eq!(end, Position::new(0, 3));
     }
 
     #[test]

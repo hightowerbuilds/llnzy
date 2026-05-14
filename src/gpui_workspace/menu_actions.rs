@@ -10,9 +10,11 @@ use super::{
     MenuEditorReopenClosed, MenuFind, MenuJoinTabs, MenuLspCodeActions, MenuLspCompletion,
     MenuLspDefinition, MenuLspFormat, MenuLspHover, MenuLspReferences, MenuLspRename,
     MenuLspSignatureHelp, MenuLspSymbols, MenuMarkdownCycle, MenuMarkdownPreview,
-    MenuMarkdownSource, MenuMarkdownSplit, MenuNewTab, MenuNextTab, MenuOpenProject, MenuPaste,
-    MenuPreviousTab, MenuRedo, MenuSave, MenuSelectAll, MenuSeparateTabs, MenuShowAppearances,
-    MenuShowCommandPalette, MenuShowEditor, MenuShowHome, MenuShowSketch, MenuShowStacker,
+    MenuMarkdownSource, MenuMarkdownSplit, MenuNewTab, MenuNextTab, MenuOpenProject,
+    MenuPartitionHorizontal, MenuPartitionVertical, MenuPaste, MenuPreviousTab, MenuRedo, MenuSave,
+    MenuSelectAll, MenuSeparateTabs, MenuShowAppearances,
+    MenuShowCommandPalette, MenuShowEditor, MenuShowFileFinder, MenuShowHome, MenuShowSketch,
+    MenuShowStacker,
     MenuShowTerminal, MenuSwapTabs, MenuToggleSidebar, MenuUndo, MenuZoomIn, MenuZoomOut,
     MenuZoomReset, WorkspacePrototype, WorkspaceSurface,
 };
@@ -192,6 +194,19 @@ impl WorkspacePrototype {
         }
     }
 
+    pub(super) fn menu_show_file_finder(
+        &mut self,
+        _: &MenuShowFileFinder,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.palette.open {
+            self.close_command_palette(cx);
+        } else {
+            self.open_file_finder(cx);
+        }
+    }
+
     pub(super) fn menu_join_tabs(
         &mut self,
         _: &MenuJoinTabs,
@@ -210,6 +225,32 @@ impl WorkspacePrototype {
         cx: &mut Context<Self>,
     ) {
         self.separate_tab_by_id(self.active_tab_id, cx);
+    }
+
+    pub(super) fn menu_partition_vertical(
+        &mut self,
+        _: &MenuPartitionVertical,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.partition_active_with_new_terminal(
+            crate::tab_groups::PartitionAxis::Vertical,
+            window,
+            cx,
+        );
+    }
+
+    pub(super) fn menu_partition_horizontal(
+        &mut self,
+        _: &MenuPartitionHorizontal,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.partition_active_with_new_terminal(
+            crate::tab_groups::PartitionAxis::Horizontal,
+            window,
+            cx,
+        );
     }
 
     pub(super) fn menu_swap_tabs(

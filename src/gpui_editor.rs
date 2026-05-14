@@ -206,6 +206,11 @@ pub(crate) struct EditorPrototype {
     cursor_blink_anchor: Instant,
     cursor_blink_visible: bool,
     show_chrome: bool,
+    /// Region of the active buffer currently held as IME composition /
+    /// dictation preview. `None` outside an active composition. Set by
+    /// `replace_and_mark_text_in_range`, cleared by `unmark_text` or any
+    /// non-IME mutation routed through `edit_active`.
+    marked_range: Option<(Position, Position)>,
 }
 
 #[derive(Clone)]
@@ -543,6 +548,7 @@ impl EditorPrototype {
             cursor_blink_anchor: Instant::now(),
             cursor_blink_visible: true,
             show_chrome,
+            marked_range: None,
         };
         this.open_all_file_backed_buffers_with_lsp();
         this
@@ -859,6 +865,11 @@ impl EditorPrototype {
                 self.queue_lsp_change_for_buffer_id(buffer_id, buffer_edit);
             }
             self.lsp_panel = None;
+            // Any mutation routed through edit_active invalidates positions
+            // tracked by an in-flight IME composition. IME paths that intend
+            // to keep the composition alive re-set marked_range after the
+            // edit returns.
+            self.marked_range = None;
         }
         self.wake_cursor_blink();
         cx.notify();

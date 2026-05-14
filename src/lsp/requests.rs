@@ -343,6 +343,7 @@ async fn async_completion(
                 detail: i.detail,
                 insert_text: i.insert_text,
                 kind: i.kind,
+                insert_text_format: i.insert_text_format,
             })
             .collect(),
         lsp_types::CompletionResponse::List(list) => list
@@ -353,6 +354,7 @@ async fn async_completion(
                 detail: i.detail,
                 insert_text: i.insert_text,
                 kind: i.kind,
+                insert_text_format: i.insert_text_format,
             })
             .collect(),
     }

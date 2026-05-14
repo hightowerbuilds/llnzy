@@ -55,9 +55,12 @@ actions!(
         MenuActivateTab8,
         MenuActivateTab9,
         MenuShowCommandPalette,
+        MenuShowFileFinder,
         MenuJoinTabs,
         MenuSeparateTabs,
         MenuSwapTabs,
+        MenuPartitionVertical,
+        MenuPartitionHorizontal,
         MenuSave,
         MenuOpenProject,
         MenuCloseProject,
@@ -180,6 +183,7 @@ struct JoinedWorkspacePanes {
     secondary_id: WorkspaceTabId,
     secondary_surface: WorkspaceSurface,
     ratio: f32,
+    axis: crate::tab_groups::PartitionAxis,
 }
 
 pub fn run_workspace_prototype() {
@@ -210,6 +214,7 @@ pub fn run_workspace_prototype() {
             // visible, normal key events are routed into its query buffer
             // via `on_workspace_key_down` before the action system sees them.
             KeyBinding::new("cmd-shift-p", MenuShowCommandPalette, None),
+            KeyBinding::new("cmd-p", MenuShowFileFinder, None),
         ]);
 
         let bounds = Bounds::centered(None, size(px(1320.0), px(820.0)), cx);
@@ -465,6 +470,7 @@ impl WorkspacePrototype {
             secondary_id,
             secondary_surface,
             ratio: joined.ratio,
+            axis: joined.axis,
         })
     }
 
@@ -642,10 +648,37 @@ impl WorkspacePrototype {
         cx.notify();
     }
 
+    pub(super) fn open_file_finder(&mut self, cx: &mut Context<Self>) {
+        self.close_context_menus(cx);
+        self.palette.reset();
+        self.palette.open = true;
+        self.palette.mode = command_palette::PaletteMode::Files;
+        if let Some(root) = self.workspace_root.clone() {
+            self.palette.files = command_palette::collect_project_files(&root);
+            self.palette.project_root = Some(root);
+        }
+        cx.notify();
+    }
+
     fn close_command_palette(&mut self, cx: &mut Context<Self>) {
         if self.palette.open {
             self.palette.reset();
             cx.notify();
+        }
+    }
+
+    fn visible_palette_count(&self) -> usize {
+        match self.palette.mode {
+            command_palette::PaletteMode::Commands => {
+                let entries = command_palette::palette_entries();
+                command_palette::filter_entries(&entries, &self.palette.query).len()
+            }
+            command_palette::PaletteMode::Files => {
+                let Some(root) = self.palette.project_root.as_ref() else {
+                    return 0;
+                };
+                command_palette::filter_files(&self.palette.files, root, &self.palette.query).len()
+            }
         }
     }
 
@@ -655,18 +688,36 @@ impl WorkspacePrototype {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let entries = command_palette::palette_entries();
-        let visible = command_palette::filter_entries(&entries, &self.palette.query);
-        let Some(&entry_idx) = visible.get(display_idx) else {
-            return;
-        };
-        let action = (entries[entry_idx].build_action)();
-        self.palette.reset();
-        cx.notify();
-        // Defer dispatch so the palette overlay is gone before the action
-        // runs (otherwise an action that toggles UI would race with the
-        // open palette).
-        window.dispatch_action(action, cx);
+        match self.palette.mode {
+            command_palette::PaletteMode::Commands => {
+                let entries = command_palette::palette_entries();
+                let visible = command_palette::filter_entries(&entries, &self.palette.query);
+                let Some(&entry_idx) = visible.get(display_idx) else {
+                    return;
+                };
+                let action = (entries[entry_idx].build_action)();
+                self.palette.reset();
+                cx.notify();
+                // Defer dispatch so the palette overlay is gone before the
+                // action runs (otherwise an action that toggles UI would
+                // race with the open palette).
+                window.dispatch_action(action, cx);
+            }
+            command_palette::PaletteMode::Files => {
+                let Some(root) = self.palette.project_root.clone() else {
+                    return;
+                };
+                let visible =
+                    command_palette::filter_files(&self.palette.files, &root, &self.palette.query);
+                let Some(&file_idx) = visible.get(display_idx) else {
+                    return;
+                };
+                let path = self.palette.files[file_idx].clone();
+                self.palette.reset();
+                cx.notify();
+                self.open_sidebar_file(path, window, cx);
+            }
+        }
     }
 
     fn on_palette_key_down(
@@ -680,6 +731,11 @@ impl WorkspacePrototype {
         let modifiers = event.keystroke.modifiers;
         // Cmd+Shift+P while open: toggle closed.
         if modifiers.platform && modifiers.shift && key == "p" {
+            self.close_command_palette(cx);
+            return;
+        }
+        // Cmd+P while open: toggle closed (matches the file-finder binding).
+        if modifiers.platform && !modifiers.shift && key == "p" {
             self.close_command_palette(cx);
             return;
         }
@@ -698,9 +754,7 @@ impl WorkspacePrototype {
                 }
             }
             "down" => {
-                let entries = command_palette::palette_entries();
-                let visible_count =
-                    command_palette::filter_entries(&entries, &self.palette.query).len();
+                let visible_count = self.visible_palette_count();
                 if visible_count > 0 && self.palette.selected + 1 < visible_count {
                     self.palette.selected += 1;
                     cx.notify();
@@ -965,6 +1019,49 @@ impl WorkspacePrototype {
         cx.notify();
     }
 
+    /// Split the active shelf in two and fill the new region with a fresh
+    /// terminal. The active tab becomes the `primary` (kept focused) and the
+    /// new terminal becomes the `secondary`. The `axis` determines the
+    /// orientation of the divider: vertical = side-by-side, horizontal =
+    /// stacked top/bottom. No-ops when the active tab is already inside a
+    /// partition (separate first).
+    pub(super) fn partition_active_with_new_terminal(
+        &mut self,
+        axis: crate::tab_groups::PartitionAxis,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let primary_id = self.active_tab_id;
+        if self.tab_manager.is_joined(primary_id.0) {
+            return;
+        }
+        let secondary_id = WorkspaceTabId(self.next_tab_id);
+        self.next_tab_id += 1;
+        self.tabs
+            .push(WorkspaceTab::new(secondary_id, WorkspaceSurface::Terminal));
+        let terminal = self.new_terminal_surface(cx);
+        self.terminals.insert(secondary_id.0, terminal);
+
+        let joined =
+            self.tab_manager
+                .join_pair_with_axis(primary_id.0, secondary_id.0, axis);
+        if !joined {
+            // Roll back the freshly allocated terminal if the pairing failed
+            // (defensive — `join_pair_with_axis` only refuses if primary ==
+            // secondary, which can't happen here).
+            self.tabs.retain(|tab| tab.id != secondary_id);
+            self.terminals.remove(&secondary_id.0);
+            return;
+        }
+
+        self.active_tab_id = primary_id;
+        self.tab_manager.set_active_tab(primary_id.0);
+        if let Some(active_surface) = self.tab_by_id(primary_id).map(|tab| tab.surface) {
+            self.focus_surface(active_surface, window, cx);
+        }
+        cx.notify();
+    }
+
     fn open_new_explorer_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.explorers.is_empty() {
             let parked_id = WorkspaceTabId(self.next_tab_id);
@@ -1185,8 +1282,11 @@ impl Render for WorkspacePrototype {
             .on_action(cx.listener(Self::menu_activate_tab_8))
             .on_action(cx.listener(Self::menu_activate_tab_9))
             .on_action(cx.listener(Self::menu_show_command_palette))
+            .on_action(cx.listener(Self::menu_show_file_finder))
             .on_action(cx.listener(Self::menu_join_tabs))
             .on_action(cx.listener(Self::menu_separate_tabs))
+            .on_action(cx.listener(Self::menu_partition_vertical))
+            .on_action(cx.listener(Self::menu_partition_horizontal))
             .on_action(cx.listener(Self::menu_swap_tabs))
             .on_action(cx.listener(Self::menu_open_project))
             .on_action(cx.listener(Self::menu_close_project))
@@ -1261,7 +1361,23 @@ impl Render for WorkspacePrototype {
             })
             .when(self.palette.open, |root| {
                 let entries = command_palette::palette_entries();
-                let visible = command_palette::filter_entries(&entries, &self.palette.query);
+                let visible = match self.palette.mode {
+                    command_palette::PaletteMode::Commands => {
+                        command_palette::filter_entries(&entries, &self.palette.query)
+                    }
+                    command_palette::PaletteMode::Files => self
+                        .palette
+                        .project_root
+                        .as_ref()
+                        .map(|root| {
+                            command_palette::filter_files(
+                                &self.palette.files,
+                                root,
+                                &self.palette.query,
+                            )
+                        })
+                        .unwrap_or_default(),
+                };
                 root.child(command_palette::render_command_palette(
                     &self.palette,
                     &entries,

@@ -9,6 +9,19 @@ impl TabGroupId {
     }
 }
 
+/// Orientation of a partition (split) between two tabs.
+///
+/// `Vertical` means a vertical divider line between two side-by-side shelves
+/// (left / right). `Horizontal` means a horizontal divider line between two
+/// stacked shelves (top / bottom). The naming matches the visible divider,
+/// which is the user-facing reference point.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum PartitionAxis {
+    #[default]
+    Vertical,
+    Horizontal,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct TabGroup {
     pub id: TabGroupId,
@@ -16,19 +29,21 @@ pub struct TabGroup {
     pub secondary: TabId,
     pub active: TabId,
     pub ratio: f32,
+    pub axis: PartitionAxis,
 }
 
 impl TabGroup {
     pub const MIN_RATIO: f32 = 0.18;
     pub const MAX_RATIO: f32 = 0.82;
 
-    pub fn new(id: TabGroupId, primary: TabId, secondary: TabId) -> Self {
+    pub fn new(id: TabGroupId, primary: TabId, secondary: TabId, axis: PartitionAxis) -> Self {
         Self {
             id,
             primary,
             secondary,
             active: primary,
             ratio: 0.5,
+            axis,
         }
     }
 
@@ -72,13 +87,22 @@ impl TabGroupState {
     }
 
     pub fn join_pair(&mut self, primary: TabId, secondary: TabId) -> Option<TabGroupId> {
+        self.join_pair_with_axis(primary, secondary, PartitionAxis::default())
+    }
+
+    pub fn join_pair_with_axis(
+        &mut self,
+        primary: TabId,
+        secondary: TabId,
+        axis: PartitionAxis,
+    ) -> Option<TabGroupId> {
         if primary == secondary {
             return None;
         }
         self.remove_tab(primary);
         self.remove_tab(secondary);
         let id = self.alloc_group_id();
-        self.groups.push(TabGroup::new(id, primary, secondary));
+        self.groups.push(TabGroup::new(id, primary, secondary, axis));
         Some(id)
     }
 
@@ -287,6 +311,38 @@ mod tests {
         let group = groups.group_for_tab(1).unwrap();
         assert_eq!(group.primary, 2);
         assert_eq!(group.secondary, 1);
+    }
+
+    #[test]
+    fn join_pair_defaults_to_vertical_axis() {
+        let mut groups = TabGroupState::default();
+        groups.join_pair(1, 2).unwrap();
+        assert_eq!(groups.group_for_tab(1).unwrap().axis, PartitionAxis::Vertical);
+    }
+
+    #[test]
+    fn join_pair_with_axis_records_the_axis() {
+        let mut groups = TabGroupState::default();
+        groups
+            .join_pair_with_axis(1, 2, PartitionAxis::Horizontal)
+            .unwrap();
+        assert_eq!(
+            groups.group_for_tab(1).unwrap().axis,
+            PartitionAxis::Horizontal
+        );
+    }
+
+    #[test]
+    fn swap_tabs_preserves_axis() {
+        let mut groups = TabGroupState::default();
+        groups
+            .join_pair_with_axis(1, 2, PartitionAxis::Horizontal)
+            .unwrap();
+        assert!(groups.swap_tabs_for_tab(1));
+        assert_eq!(
+            groups.group_for_tab(1).unwrap().axis,
+            PartitionAxis::Horizontal
+        );
     }
 
     #[test]

@@ -1,3 +1,3 @@
 mod model;
 
-pub use model::{TabGroup, TabGroupId, TabGroupState, TabId};
+pub use model::{PartitionAxis, TabGroup, TabGroupId, TabGroupState, TabId};

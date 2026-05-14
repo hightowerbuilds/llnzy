@@ -24,9 +24,10 @@ fi
 
 APP_ID="${APP_ID:-com.hightowerbuilds.llnzy}"
 EXECUTABLE_NAME="${EXECUTABLE_NAME:-llnzy}"
-DISPLAY_NAME="${DISPLAY_NAME:-LLNZY}"
+DISPLAY_NAME="${DISPLAY_NAME:-llnzy}"
 ICON_RESOURCE="${ICON_RESOURCE:-llnzy.icns}"
 MACOS_MIN_VERSION="${MACOS_MIN_VERSION:-13.0}"
+CODESIGN_IDENTITY="${CODESIGN_IDENTITY:--}"
 VERSION="$(awk -F '"' '/^version =/ { print $2; exit }' Cargo.toml)"
 
 PROFILE="debug"
@@ -85,6 +86,10 @@ chmod 0755 "$RESOURCES/install-cli.sh" "$RESOURCES/uninstall-cli.sh"
 /usr/libexec/PlistBuddy -c "Set :CFBundleExecutable $EXECUTABLE_NAME" "$CONTENTS/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleIconFile ${ICON_RESOURCE%.*}" "$CONTENTS/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :LSMinimumSystemVersion $MACOS_MIN_VERSION" "$CONTENTS/Info.plist"
+
+if [ -n "$CODESIGN_IDENTITY" ]; then
+    codesign --force --deep --sign "$CODESIGN_IDENTITY" "$APP"
+fi
 
 echo "Built $APP ($PROFILE)"
 echo "Run with: open $APP"
@@ -153,8 +158,8 @@ if [ "$BUILD_DMG" -eq 1 ]; then
     else
         ditto "$APP" "$DMG_ROOT/$DISPLAY_NAME.app"
         ln -s /Applications "$DMG_ROOT/Applications"
-        write_cli_command "$DMG_ROOT/Install LLNZY CLI.command" "install-cli.sh"
-        write_cli_command "$DMG_ROOT/Uninstall LLNZY CLI.command" "uninstall-cli.sh"
+        write_cli_command "$DMG_ROOT/Install $DISPLAY_NAME CLI.command" "install-cli.sh"
+        write_cli_command "$DMG_ROOT/Uninstall $DISPLAY_NAME CLI.command" "uninstall-cli.sh"
     fi
 
     hdiutil create \

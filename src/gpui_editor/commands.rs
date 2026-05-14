@@ -443,6 +443,47 @@ impl EditorPrototype {
             view.cursor.desired_col = None;
         });
     }
+
+    pub(super) fn insert_snippet_completion(&mut self, cx: &mut Context<Self>, template: &str) {
+        use crate::editor::snippet::{insert_snippet, parse_snippet};
+
+        let filename = self
+            .editor
+            .active_buffer_view()
+            .map(|(_, buffer, _)| buffer.file_name().to_string())
+            .unwrap_or_default();
+        let clipboard = cx
+            .read_from_clipboard()
+            .and_then(|item| item.text())
+            .unwrap_or_default();
+        let snippet = parse_snippet(template, &filename, &clipboard);
+
+        self.edit_active(cx, |buffer, view| {
+            let (start, end) = view
+                .cursor
+                .selection()
+                .unwrap_or((view.cursor.pos, view.cursor.pos));
+            if start != end {
+                buffer.replace(start, end, "");
+            }
+            let active = insert_snippet(buffer, start, &snippet);
+            let (cursor_pos, selection_anchor) = match active {
+                Some(active) => {
+                    let (line, col, end_col) = active.stops[0];
+                    let anchor = if end_col != col {
+                        Some(Position::new(line, col))
+                    } else {
+                        None
+                    };
+                    (Position::new(line, end_col), anchor)
+                }
+                None => (buffer.compute_end_pos_pub(start, &snippet.text), None),
+            };
+            view.cursor.pos = cursor_pos;
+            view.cursor.anchor = selection_anchor;
+            view.cursor.desired_col = None;
+        });
+    }
 }
 
 fn set_cursor_position(view: &mut BufferView, position: Position, extend: bool) {

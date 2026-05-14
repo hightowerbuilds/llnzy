@@ -161,12 +161,14 @@ fn lsp_panel_helpers_keep_items_compact() {
                 detail: Some("fn()".into()),
                 insert_text: Some("render()".into()),
                 kind: None,
+                insert_text_format: None,
             },
             CompletionItem {
                 label: "ignored".into(),
                 detail: None,
                 insert_text: None,
                 kind: None,
+                insert_text_format: None,
             },
         ],
         1,
@@ -180,7 +182,7 @@ fn lsp_panel_helpers_keep_items_compact() {
     );
     assert!(matches!(
         &completions[0].action,
-        GpuiLspPanelAction::Complete { text } if text == "render()"
+        GpuiLspPanelAction::Complete { text, snippet: false } if text == "render()"
     ));
 
     let references = references_panel_items(
@@ -237,6 +239,7 @@ fn lsp_panel_selects_first_actionable_item() {
                 label: "Action".into(),
                 action: GpuiLspPanelAction::Complete {
                     text: "done".into(),
+                    snippet: false,
                 },
             },
         ],
@@ -252,6 +255,25 @@ fn snippet_insert_text_is_sanitized_for_plain_insert() {
         "println!(\"value\");"
     );
     assert_eq!(sanitize_lsp_insert_text("$1name"), "name");
+}
+
+#[test]
+fn snippet_format_completions_preserve_template_for_expansion() {
+    let completions = completion_panel_items(
+        vec![CompletionItem {
+            label: "println".into(),
+            detail: None,
+            insert_text: Some("println!(\"${1:value}\");$0".into()),
+            kind: None,
+            insert_text_format: Some(lsp_types::InsertTextFormat::SNIPPET),
+        }],
+        1,
+    );
+    assert!(matches!(
+        &completions[0].action,
+        GpuiLspPanelAction::Complete { text, snippet: true }
+            if text == "println!(\"${1:value}\");$0"
+    ));
 }
 
 #[test]

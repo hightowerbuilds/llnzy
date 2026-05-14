@@ -1,4 +1,4 @@
-use crate::tab_groups::{TabGroupState, TabId};
+use crate::tab_groups::{PartitionAxis, TabGroupState, TabId};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct GpuiTabChoice {
@@ -12,6 +12,7 @@ pub(crate) struct GpuiJoinedTabs {
     pub primary: TabId,
     pub secondary: TabId,
     pub ratio: f32,
+    pub axis: PartitionAxis,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -87,6 +88,7 @@ impl GpuiTabManager {
             primary: group.primary,
             secondary: group.secondary,
             ratio: group.ratio,
+            axis: group.axis,
         })
     }
 
@@ -99,7 +101,19 @@ impl GpuiTabManager {
     }
 
     pub fn join_pair(&mut self, primary: TabId, secondary: TabId) -> bool {
-        let joined = self.groups.join_pair(primary, secondary).is_some();
+        self.join_pair_with_axis(primary, secondary, PartitionAxis::default())
+    }
+
+    pub fn join_pair_with_axis(
+        &mut self,
+        primary: TabId,
+        secondary: TabId,
+        axis: PartitionAxis,
+    ) -> bool {
+        let joined = self
+            .groups
+            .join_pair_with_axis(primary, secondary, axis)
+            .is_some();
         if joined {
             self.groups.set_active_tab(primary);
             self.close_context_menu();

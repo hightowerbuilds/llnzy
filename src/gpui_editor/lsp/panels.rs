@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use lsp_types::InsertTextFormat;
+
 use crate::editor::buffer::Position;
 use crate::lsp::{
     CodeAction, CompletionItem, ReferenceLocation, SignatureInfo, SymbolInfo, WorkspaceEdits,
@@ -39,7 +41,7 @@ impl GpuiLspPanelItem {
 #[derive(Clone)]
 pub(in crate::gpui_editor) enum GpuiLspPanelAction {
     None,
-    Complete { text: String },
+    Complete { text: String, snippet: bool },
     GoTo { path: PathBuf, line: u32, col: u32 },
     ApplyWorkspaceEdit { edits: WorkspaceEdits },
 }
@@ -101,7 +103,7 @@ pub(super) fn completion_panel_items(
         .into_iter()
         .take(limit)
         .map(|item| {
-            let insert_text = completion_insert_text(&item);
+            let (insert_text, snippet) = completion_insert_text(&item);
             let mut parts = vec![item.label.clone()];
             if let Some(kind) = item.kind {
                 parts.push(format!("{kind:?}"));
@@ -112,19 +114,26 @@ pub(super) fn completion_panel_items(
             let label = truncate_panel_text(parts.join("  "), 140);
             GpuiLspPanelItem {
                 label,
-                action: GpuiLspPanelAction::Complete { text: insert_text },
+                action: GpuiLspPanelAction::Complete {
+                    text: insert_text,
+                    snippet,
+                },
             }
         })
         .collect()
 }
 
-fn completion_insert_text(item: &CompletionItem) -> String {
+fn completion_insert_text(item: &CompletionItem) -> (String, bool) {
     let text = item
         .insert_text
         .as_deref()
         .filter(|text| !text.is_empty())
         .unwrap_or(&item.label);
-    sanitize_lsp_insert_text(text)
+    if matches!(item.insert_text_format, Some(InsertTextFormat::SNIPPET)) {
+        (text.to_string(), true)
+    } else {
+        (sanitize_lsp_insert_text(text), false)
+    }
 }
 
 pub(super) fn sanitize_lsp_insert_text(text: &str) -> String {

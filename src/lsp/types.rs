@@ -81,6 +81,7 @@ pub struct CompletionItem {
     pub detail: Option<String>,
     pub insert_text: Option<String>,
     pub kind: Option<lsp_types::CompletionItemKind>,
+    pub insert_text_format: Option<lsp_types::InsertTextFormat>,
 }
 
 /// A diagnostic with position and severity.
