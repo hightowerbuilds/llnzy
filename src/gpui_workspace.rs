@@ -45,6 +45,15 @@ actions!(
         MenuCloseTab,
         MenuNextTab,
         MenuPreviousTab,
+        MenuActivateTab1,
+        MenuActivateTab2,
+        MenuActivateTab3,
+        MenuActivateTab4,
+        MenuActivateTab5,
+        MenuActivateTab6,
+        MenuActivateTab7,
+        MenuActivateTab8,
+        MenuActivateTab9,
         MenuJoinTabs,
         MenuSeparateTabs,
         MenuSwapTabs,
@@ -183,6 +192,17 @@ pub fn run_workspace_prototype() {
             KeyBinding::new("cmd-w", MenuCloseTab, None),
             KeyBinding::new("cmd-]", MenuNextTab, None),
             KeyBinding::new("cmd-[", MenuPreviousTab, None),
+            // Cmd+1..Cmd+9: activate the Nth tab by position. If the index
+            // is out of range (fewer tabs than N) the action is a no-op.
+            KeyBinding::new("cmd-1", MenuActivateTab1, None),
+            KeyBinding::new("cmd-2", MenuActivateTab2, None),
+            KeyBinding::new("cmd-3", MenuActivateTab3, None),
+            KeyBinding::new("cmd-4", MenuActivateTab4, None),
+            KeyBinding::new("cmd-5", MenuActivateTab5, None),
+            KeyBinding::new("cmd-6", MenuActivateTab6, None),
+            KeyBinding::new("cmd-7", MenuActivateTab7, None),
+            KeyBinding::new("cmd-8", MenuActivateTab8, None),
+            KeyBinding::new("cmd-9", MenuActivateTab9, None),
         ]);
 
         let bounds = Bounds::centered(None, size(px(1320.0), px(820.0)), cx);
@@ -999,6 +1019,15 @@ impl Render for WorkspacePrototype {
             .on_action(cx.listener(Self::menu_close_tab))
             .on_action(cx.listener(Self::menu_next_tab))
             .on_action(cx.listener(Self::menu_previous_tab))
+            .on_action(cx.listener(Self::menu_activate_tab_1))
+            .on_action(cx.listener(Self::menu_activate_tab_2))
+            .on_action(cx.listener(Self::menu_activate_tab_3))
+            .on_action(cx.listener(Self::menu_activate_tab_4))
+            .on_action(cx.listener(Self::menu_activate_tab_5))
+            .on_action(cx.listener(Self::menu_activate_tab_6))
+            .on_action(cx.listener(Self::menu_activate_tab_7))
+            .on_action(cx.listener(Self::menu_activate_tab_8))
+            .on_action(cx.listener(Self::menu_activate_tab_9))
             .on_action(cx.listener(Self::menu_join_tabs))
             .on_action(cx.listener(Self::menu_separate_tabs))
             .on_action(cx.listener(Self::menu_swap_tabs))

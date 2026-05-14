@@ -130,6 +130,10 @@ pub(crate) fn bind_terminal_keys(cx: &mut App) {
         KeyBinding::new("ctrl-k", CtrlK, None),
         KeyBinding::new("ctrl-l", CtrlL, None),
         KeyBinding::new("ctrl-u", CtrlU, None),
+        // macOS convention: Cmd+Backspace deletes from the cursor to the
+        // start of the line, the same line-kill behavior Ctrl-U triggers in
+        // every readline-style shell.
+        KeyBinding::new("cmd-backspace", CtrlU, None),
         KeyBinding::new("ctrl-w", CtrlW, None),
     ]);
 }

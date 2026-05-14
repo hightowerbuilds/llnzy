@@ -4,15 +4,16 @@ use crate::config::Config;
 use crate::editor::MarkdownViewMode;
 
 use super::{
-    MenuCloseProject, MenuCloseTab, MenuCopy, MenuEditorCheckDisk, MenuEditorCloseOthers,
-    MenuEditorCloseSaved, MenuEditorReopenClosed, MenuFind, MenuJoinTabs, MenuLspCodeActions,
-    MenuLspCompletion, MenuLspDefinition, MenuLspFormat, MenuLspHover, MenuLspReferences,
-    MenuLspRename, MenuLspSignatureHelp, MenuLspSymbols, MenuMarkdownCycle, MenuMarkdownPreview,
-    MenuMarkdownSource, MenuMarkdownSplit, MenuNewTab, MenuNextTab, MenuOpenProject, MenuPaste,
-    MenuPreviousTab, MenuRedo, MenuSave, MenuSelectAll, MenuSeparateTabs, MenuShowAppearances,
-    MenuShowEditor, MenuShowHome, MenuShowSketch, MenuShowStacker, MenuShowTerminal, MenuSwapTabs,
-    MenuToggleSidebar, MenuUndo, MenuZoomIn, MenuZoomOut, MenuZoomReset, WorkspacePrototype,
-    WorkspaceSurface,
+    MenuActivateTab1, MenuActivateTab2, MenuActivateTab3, MenuActivateTab4, MenuActivateTab5,
+    MenuActivateTab6, MenuActivateTab7, MenuActivateTab8, MenuActivateTab9, MenuCloseProject,
+    MenuCloseTab, MenuCopy, MenuEditorCheckDisk, MenuEditorCloseOthers, MenuEditorCloseSaved,
+    MenuEditorReopenClosed, MenuFind, MenuJoinTabs, MenuLspCodeActions, MenuLspCompletion,
+    MenuLspDefinition, MenuLspFormat, MenuLspHover, MenuLspReferences, MenuLspRename,
+    MenuLspSignatureHelp, MenuLspSymbols, MenuMarkdownCycle, MenuMarkdownPreview, MenuMarkdownSource,
+    MenuMarkdownSplit, MenuNewTab, MenuNextTab, MenuOpenProject, MenuPaste, MenuPreviousTab,
+    MenuRedo, MenuSave, MenuSelectAll, MenuSeparateTabs, MenuShowAppearances, MenuShowEditor,
+    MenuShowHome, MenuShowSketch, MenuShowStacker, MenuShowTerminal, MenuSwapTabs, MenuToggleSidebar,
+    MenuUndo, MenuZoomIn, MenuZoomOut, MenuZoomReset, WorkspacePrototype, WorkspaceSurface,
 };
 
 impl WorkspacePrototype {
@@ -85,6 +86,101 @@ impl WorkspacePrototype {
         cx: &mut Context<Self>,
     ) {
         self.activate_relative_tab(-1, window, cx);
+    }
+
+    /// Activate the tab at the given 0-based position. No-op if there is
+    /// no tab at that position.
+    fn activate_tab_at_index(
+        &mut self,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(tab) = self.tabs.get(index) {
+            let id = tab.id;
+            self.activate_tab(id, window, cx);
+        }
+    }
+
+    pub(super) fn menu_activate_tab_1(
+        &mut self,
+        _: &MenuActivateTab1,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.activate_tab_at_index(0, window, cx);
+    }
+
+    pub(super) fn menu_activate_tab_2(
+        &mut self,
+        _: &MenuActivateTab2,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.activate_tab_at_index(1, window, cx);
+    }
+
+    pub(super) fn menu_activate_tab_3(
+        &mut self,
+        _: &MenuActivateTab3,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.activate_tab_at_index(2, window, cx);
+    }
+
+    pub(super) fn menu_activate_tab_4(
+        &mut self,
+        _: &MenuActivateTab4,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.activate_tab_at_index(3, window, cx);
+    }
+
+    pub(super) fn menu_activate_tab_5(
+        &mut self,
+        _: &MenuActivateTab5,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.activate_tab_at_index(4, window, cx);
+    }
+
+    pub(super) fn menu_activate_tab_6(
+        &mut self,
+        _: &MenuActivateTab6,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.activate_tab_at_index(5, window, cx);
+    }
+
+    pub(super) fn menu_activate_tab_7(
+        &mut self,
+        _: &MenuActivateTab7,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.activate_tab_at_index(6, window, cx);
+    }
+
+    pub(super) fn menu_activate_tab_8(
+        &mut self,
+        _: &MenuActivateTab8,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.activate_tab_at_index(7, window, cx);
+    }
+
+    pub(super) fn menu_activate_tab_9(
+        &mut self,
+        _: &MenuActivateTab9,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.activate_tab_at_index(8, window, cx);
     }
 
     pub(super) fn menu_join_tabs(
