@@ -12,9 +12,9 @@ use gpui::prelude::*;
 use gpui::{
     actions, div, fill, point, px, relative, rgb, rgba, size, App, Bounds, ClipboardItem,
     ContentMask, Context, DispatchPhase, Element, ElementId, ElementInputHandler, Entity,
-    EntityInputHandler, FocusHandle, Focusable, Font, GlobalElementId, KeyBinding, LayoutId,
-    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point, Render,
-    ScrollWheelEvent, ShapedLine, SharedString, Style, TextRun, UTF16Selection, Window,
+    EntityInputHandler, FocusHandle, Focusable, Font, FutureExt, GlobalElementId, KeyBinding,
+    LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point,
+    Render, ScrollWheelEvent, ShapedLine, SharedString, Style, TextRun, UTF16Selection, Window,
 };
 
 use crate::config::{Config, CursorStyle};
@@ -34,7 +34,11 @@ const DEFAULT_ROWS: u16 = 30;
 const FALLBACK_CELL_WIDTH: f32 = 9.0;
 const FALLBACK_LINE_HEIGHT: f32 = 20.0;
 const TERMINAL_PADDING: f32 = 12.0;
-const POLL_INTERVAL_MS: u64 = 16;
+/// Slow fallback used by the event-driven render task only as a safety net
+/// for missed wakeups (session restart races, etc). The PTY reader thread
+/// pulses a `Notify` on every read, so under normal operation the task
+/// sleeps until real data arrives instead of waking at 60 Hz.
+const IDLE_FALLBACK_MS: u64 = 500;
 
 /// Cell geometry computed from the actual font and font size, replacing the
 /// previous hardcoded `CELL_WIDTH = 9.0` / `LINE_HEIGHT = 20.0` pair. The font
@@ -155,7 +159,7 @@ impl TerminalSurface {
             is_selecting: false,
             status_message: None,
         };
-        start_poll_task(cx);
+        start_event_task(cx);
         surface
     }
 
@@ -780,9 +784,10 @@ impl Element for TerminalElement {
                 ) {
                     let mut buf = [0u8; 4];
                     let text: SharedString = glyph.ch.encode_utf8(&mut buf).to_string().into();
-                    let shaped = window
-                        .text_system()
-                        .shape_line(text, font_size, &[glyph.run], None);
+                    let shaped =
+                        window
+                            .text_system()
+                            .shape_line(text, font_size, &[glyph.run], None);
                     lines.push(TerminalPaintLine {
                         line: shaped,
                         row,
@@ -900,8 +905,7 @@ impl Element for TerminalElement {
 
             for paint_line in prepaint.lines.drain(..) {
                 let origin = point(
-                    bounds.left()
-                        + px(TERMINAL_PADDING + paint_line.col as f32 * metrics.advance),
+                    bounds.left() + px(TERMINAL_PADDING + paint_line.col as f32 * metrics.advance),
                     bounds.top()
                         + px(TERMINAL_PADDING + paint_line.row as f32 * metrics.line_height),
                 );
@@ -979,15 +983,46 @@ fn terminal_header(
         )
 }
 
-fn start_poll_task(cx: &mut Context<TerminalSurface>) {
+/// Event-driven PTY render loop. The task awaits a wakeup notifier pulsed
+/// by the PTY reader thread on every read, draining `process_output` only
+/// when there is genuine output. A slow fallback timer covers session
+/// restart races (the current wakeup handle may switch when the user
+/// presses Cmd-R) and gives us a heartbeat for child-exit detection.
+fn start_event_task(cx: &mut Context<TerminalSurface>) {
     cx.spawn(
         |surface: gpui::WeakEntity<TerminalSurface>, cx: &mut gpui::AsyncApp| {
             let mut cx = cx.clone();
             async move {
                 loop {
-                    cx.background_executor()
-                        .timer(Duration::from_millis(POLL_INTERVAL_MS))
+                    let wakeup = match surface.update(&mut cx, |surface, _cx| {
+                        surface
+                            .session
+                            .as_ref()
+                            .map(|session| session.wakeup_handle())
+                    }) {
+                        Ok(Some(handle)) => handle,
+                        Ok(None) => {
+                            // Launch failed or session not yet present. Sleep
+                            // and re-check; the user can still get a new
+                            // session via Cmd-R restart.
+                            cx.background_executor()
+                                .timer(Duration::from_millis(IDLE_FALLBACK_MS))
+                                .await;
+                            continue;
+                        }
+                        Err(_) => break, // surface dropped
+                    };
+
+                    // Wait for the PTY reader to signal data. If the wakeup
+                    // is never pulsed (session was replaced after we
+                    // captured the handle) the timeout pops and we re-fetch
+                    // the live handle on the next iteration.
+                    let executor = cx.background_executor();
+                    let _ = wakeup
+                        .notified()
+                        .with_timeout(Duration::from_millis(IDLE_FALLBACK_MS), executor)
                         .await;
+
                     let Ok(()) = surface.update(&mut cx, |surface, cx| {
                         if surface.process_output() {
                             cx.notify();

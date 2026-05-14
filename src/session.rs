@@ -100,6 +100,12 @@ impl Session {
         self.pty.resize(cols, rows);
     }
 
+    /// Wakeup notifier for the underlying PTY reader. The terminal surface
+    /// awaits this so its render task sleeps when the shell is idle.
+    pub fn wakeup_handle(&self) -> std::sync::Arc<tokio::sync::Notify> {
+        self.pty.wakeup_handle()
+    }
+
     /// Display name: custom name > title > "shell"
     pub fn display_name(&self) -> &str {
         if let Some(name) = &self.custom_name {

@@ -1,6 +1,8 @@
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use std::io::{self, Read, Write};
 use std::sync::mpsc;
+use std::sync::Arc;
+use tokio::sync::Notify;
 
 use crate::platform::shell::ShellProfile;
 use crate::platform::terminal_host::TerminalLaunchSpec;
@@ -21,6 +23,11 @@ pub struct Pty {
     process_id: Option<u32>,
     write_tx: mpsc::Sender<Vec<u8>>,
     output_rx: mpsc::Receiver<Vec<u8>>,
+    /// Signalled by the reader thread whenever a read completes (data
+    /// arrived, EOF, or error). The GPUI render task awaits this notifier
+    /// so the UI thread sleeps when the shell is idle instead of polling
+    /// `try_read` at 60 Hz.
+    wakeup: Arc<Notify>,
     /// Set to true once the reader channel disconnects (child exited).
     dead: bool,
 }
@@ -68,18 +75,33 @@ impl Pty {
         let (read_tx, read_rx) = mpsc::channel();
         let (write_tx, write_rx) = mpsc::channel::<Vec<u8>>();
 
-        // Spawn a dedicated thread for reading PTY output
+        let wakeup = Arc::new(Notify::new());
+        let wakeup_reader = wakeup.clone();
+
+        // Spawn a dedicated thread for reading PTY output. After every read
+        // (data arrived, EOF, or error) the wakeup notifier is pulsed so the
+        // GPUI render task can drain the channel without polling. The notify
+        // is always called in the loop, even on the error/EOF paths, so the
+        // task wakes up to observe the disconnect.
         std::thread::spawn(move || {
             let mut buf = [0u8; 65536];
             loop {
                 match reader.read(&mut buf) {
-                    Ok(0) => break,
+                    Ok(0) => {
+                        wakeup_reader.notify_one();
+                        break;
+                    }
                     Ok(n) => {
                         if read_tx.send(buf[..n].to_vec()).is_err() {
+                            wakeup_reader.notify_one();
                             break;
                         }
+                        wakeup_reader.notify_one();
                     }
-                    Err(_) => break,
+                    Err(_) => {
+                        wakeup_reader.notify_one();
+                        break;
+                    }
                 }
             }
         });
@@ -102,8 +124,16 @@ impl Pty {
             process_id,
             write_tx,
             output_rx: read_rx,
+            wakeup,
             dead: false,
         })
+    }
+
+    /// Returns a clone of the wakeup notifier. The GPUI render task awaits
+    /// `Notify::notified` on this handle; the reader thread pulses it after
+    /// every PTY read, so the task only wakes when there is genuine work.
+    pub fn wakeup_handle(&self) -> Arc<Notify> {
+        self.wakeup.clone()
     }
 
     /// Non-blocking read of PTY output.
