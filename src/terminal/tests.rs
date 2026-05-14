@@ -334,3 +334,17 @@ fn resolve_fg_bg_inverse_swaps() {
     assert_eq!(fg, config.colors.background);
     assert_eq!(bg, config.colors.foreground);
 }
+
+#[test]
+fn wide_char_occupies_two_cells_with_spacer_flag() {
+    let mut term = Terminal::new(10, 2);
+    // U+4E2D is a fullwidth CJK character. alacritty stores it in column 0
+    // and marks column 1 as a WIDE_CHAR_SPACER so terminal rows do not drift.
+    term.process("中A".as_bytes());
+
+    assert_eq!(term.cell_char(0, 0), '中');
+    assert!(term.cell_flags(0, 0).contains(Flags::WIDE_CHAR));
+    assert!(term.cell_flags(0, 1).contains(Flags::WIDE_CHAR_SPACER));
+    // The trailing ASCII glyph lands at column 2, not column 1.
+    assert_eq!(term.cell_char(0, 2), 'A');
+}

@@ -5,7 +5,7 @@ use gpui::{
     div, fill, img, point, px, rgba, size, Bounds, ObjectFit, PaintQuad, Pixels, StyledImage,
 };
 
-use super::{CELL_WIDTH, LINE_HEIGHT, TERMINAL_PADDING};
+use super::{CellMetrics, TERMINAL_PADDING};
 use crate::config::{BackgroundImageFit, Config};
 
 pub(super) fn terminal_render_config(config: &Config) -> Config {
@@ -189,14 +189,15 @@ pub(super) fn terminal_cursor_effects(
     row: usize,
     col: usize,
     config: &Config,
+    metrics: CellMetrics,
 ) -> Vec<PaintQuad> {
     if !config.effects.enabled {
         return Vec::new();
     }
 
     let mut quads = Vec::new();
-    let x = TERMINAL_PADDING + col as f32 * CELL_WIDTH;
-    let y = TERMINAL_PADDING + row as f32 * LINE_HEIGHT;
+    let x = TERMINAL_PADDING + col as f32 * metrics.advance;
+    let y = TERMINAL_PADDING + row as f32 * metrics.line_height;
     let cursor_color = config.cursor_color();
 
     if config.effects.cursor_glow || config.effects.bloom_enabled {
@@ -213,8 +214,8 @@ pub(super) fn terminal_cursor_effects(
                 terminal_bounds,
                 x - pad,
                 y - pad,
-                CELL_WIDTH + pad * 2.0,
-                LINE_HEIGHT + pad * 2.0,
+                metrics.advance + pad * 2.0,
+                metrics.line_height + pad * 2.0,
                 cursor_color,
                 alpha,
             ));
@@ -225,10 +226,10 @@ pub(super) fn terminal_cursor_effects(
         for index in 1..=3 {
             quads.push(terminal_local_quad(
                 terminal_bounds,
-                x - CELL_WIDTH * index as f32,
+                x - metrics.advance * index as f32,
                 y,
-                CELL_WIDTH,
-                LINE_HEIGHT,
+                metrics.advance,
+                metrics.line_height,
                 cursor_color,
                 0.12 / index as f32,
             ));

@@ -12,47 +12,74 @@ struct TerminalTextStyle {
     italic: bool,
 }
 
+/// One glyph + its grid column. The terminal renders these per-cell instead
+/// of handing whole rows to `shape_text`, because alacritty's grid is
+/// strictly column-aligned and any per-glyph drift inside a multi-character
+/// `shape_text` call (ligatures, kerning, fallback metrics, subpixel
+/// rounding) compounds across the row and breaks cursor placement, selection
+/// rectangles, click hit-testing, and ASCII/TUI box drawing.
+pub(super) struct TerminalCellGlyph {
+    pub(super) col: usize,
+    pub(super) ch: char,
+    pub(super) run: TextRun,
+}
+
 pub(super) fn terminal_font(config: &Config, mut base_font: Font) -> Font {
     if let Some(font_family) = &config.font_family {
         base_font.family = font_family.clone().into();
     }
+    // Programming ligatures (`=>`, `->`, `!=`, `==`, etc.) collapse multiple
+    // characters into a single glyph whose advance does not equal the sum of
+    // per-cell advances. Terminal grids rely on every column being the same
+    // width, so ligatures break cursor positioning, selection rectangles,
+    // and click-to-grid hit testing the moment any ligaturable sequence
+    // appears in the output. Disable `calt` for both rendering and metric
+    // measurement.
+    base_font.features = gpui::FontFeatures::disable_ligatures();
     base_font
 }
 
-pub(super) fn terminal_row_runs(
+/// Collect every visible glyph in `row` along with its grid column. Empty
+/// (space) cells with the default style are omitted: backgrounds are painted
+/// separately via `Terminal::background_rects`, so an empty cell does not
+/// need a glyph at all. Wide-character spacer cells are also skipped because
+/// the preceding cell holds the wide glyph and its natural advance carries
+/// it across the spacer column.
+pub(super) fn terminal_row_glyphs(
     session: &Session,
     config: &Config,
     row: usize,
     cols: usize,
     block_cursor: Option<(usize, usize)>,
     base_font: &Font,
-) -> (String, Vec<TextRun>) {
-    let mut text = String::new();
-    let mut runs = Vec::new();
-    let mut current_style: Option<TerminalTextStyle> = None;
-    let mut current_len = 0;
+) -> Vec<TerminalCellGlyph> {
+    let mut glyphs = Vec::new();
 
     for col in 0..cols {
-        let style = terminal_cell_text_style(session, config, row, col, block_cursor);
-        let c = display_cell_char(session.terminal.cell_char(row, col));
-        let byte_len = c.len_utf8();
-
-        if current_style == Some(style) || current_style.is_none() {
-            current_style = Some(style);
-            current_len += byte_len;
-        } else if let Some(previous_style) = current_style.replace(style) {
-            runs.push(text_run(previous_style, current_len, base_font));
-            current_len = byte_len;
+        let flags = session.terminal.cell_flags(row, col);
+        if flags.contains(Flags::WIDE_CHAR_SPACER)
+            || flags.contains(Flags::LEADING_WIDE_CHAR_SPACER)
+        {
+            continue;
         }
 
-        text.push(c);
+        let raw = session.terminal.cell_char(row, col);
+        let is_cursor_cell = block_cursor == Some((row, col));
+        let style = terminal_cell_text_style(session, config, row, col, block_cursor);
+
+        // Skip invisible cells: blank glyph, default foreground, no decoration.
+        // The block cursor still needs a rendered glyph (it inverts the fg) so
+        // we keep cells underneath the cursor even when they hold a space.
+        if !is_cursor_cell && (raw == ' ' || raw == '\0') {
+            continue;
+        }
+
+        let ch = display_cell_char(raw);
+        let run = text_run(style, ch.len_utf8(), base_font);
+        glyphs.push(TerminalCellGlyph { col, ch, run });
     }
 
-    if let Some(style) = current_style {
-        runs.push(text_run(style, current_len, base_font));
-    }
-
-    (text, runs)
+    glyphs
 }
 
 fn terminal_cell_text_style(

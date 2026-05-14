@@ -7,14 +7,14 @@ use self::effects::{
     rgba_u32, terminal_background_image, terminal_background_image_path, terminal_cursor_effects,
     terminal_effect_overlay, terminal_effect_underlay, terminal_rect_quad, terminal_render_config,
 };
-use self::text::{terminal_font, terminal_paste_payload, terminal_row_runs};
+use self::text::{terminal_font, terminal_paste_payload, terminal_row_glyphs};
 use gpui::prelude::*;
 use gpui::{
     actions, div, fill, point, px, relative, rgb, rgba, size, App, Bounds, ClipboardItem,
     ContentMask, Context, DispatchPhase, Element, ElementId, ElementInputHandler, Entity,
-    EntityInputHandler, FocusHandle, Focusable, GlobalElementId, KeyBinding, LayoutId, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point, Render,
-    ScrollWheelEvent, SharedString, Style, TextAlign, UTF16Selection, Window, WrappedLine,
+    EntityInputHandler, FocusHandle, Focusable, Font, GlobalElementId, KeyBinding, LayoutId,
+    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point, Render,
+    ScrollWheelEvent, ShapedLine, SharedString, Style, TextRun, UTF16Selection, Window,
 };
 
 use crate::config::{Config, CursorStyle};
@@ -31,10 +31,29 @@ const TERMINAL_SELECTION: u32 = 0x38bdf860;
 
 const DEFAULT_COLS: u16 = 100;
 const DEFAULT_ROWS: u16 = 30;
-const CELL_WIDTH: f32 = 9.0;
-const LINE_HEIGHT: f32 = 20.0;
+const FALLBACK_CELL_WIDTH: f32 = 9.0;
+const FALLBACK_LINE_HEIGHT: f32 = 20.0;
 const TERMINAL_PADDING: f32 = 12.0;
 const POLL_INTERVAL_MS: u64 = 16;
+
+/// Cell geometry computed from the actual font and font size, replacing the
+/// previous hardcoded `CELL_WIDTH = 9.0` / `LINE_HEIGHT = 20.0` pair. The font
+/// advance comes from `TextSystem::em_advance`; the line height comes from the
+/// configured `terminal.line_height` multiplier applied to the font size.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct CellMetrics {
+    pub(super) advance: f32,
+    pub(super) line_height: f32,
+}
+
+impl CellMetrics {
+    fn fallback() -> Self {
+        Self {
+            advance: FALLBACK_CELL_WIDTH,
+            line_height: FALLBACK_LINE_HEIGHT,
+        }
+    }
+}
 
 actions!(
     terminal_gpui,
@@ -117,6 +136,7 @@ pub(crate) struct TerminalSurface {
     session: Option<Session>,
     launch_error: Option<String>,
     last_bounds: Option<Bounds<Pixels>>,
+    last_metrics: CellMetrics,
     is_selecting: bool,
     status_message: Option<String>,
 }
@@ -131,6 +151,7 @@ impl TerminalSurface {
             session,
             launch_error,
             last_bounds: None,
+            last_metrics: CellMetrics::fallback(),
             is_selecting: false,
             status_message: None,
         };
@@ -160,9 +181,15 @@ impl TerminalSurface {
         changed
     }
 
-    fn resize_for_bounds(&mut self, bounds: Bounds<Pixels>, cx: &mut Context<Self>) {
+    fn resize_for_bounds(
+        &mut self,
+        bounds: Bounds<Pixels>,
+        metrics: CellMetrics,
+        cx: &mut Context<Self>,
+    ) {
         self.last_bounds = Some(bounds);
-        let (cols, rows) = terminal_grid_size(bounds);
+        self.last_metrics = metrics;
+        let (cols, rows) = terminal_grid_size(bounds, metrics);
         let Some(session) = &mut self.session else {
             return;
         };
@@ -240,8 +267,9 @@ impl TerminalSurface {
         let (cols, rows) = session.terminal.size();
         let local_x = point.x - bounds.left() - px(TERMINAL_PADDING);
         let local_y = point.y - bounds.top() - px(TERMINAL_PADDING);
-        let col = (local_x / px(CELL_WIDTH)).floor().max(0.0) as usize;
-        let row = (local_y / px(LINE_HEIGHT)).floor().max(0.0) as usize;
+        let metrics = self.last_metrics;
+        let col = (local_x / px(metrics.advance)).floor().max(0.0) as usize;
+        let row = (local_y / px(metrics.line_height)).floor().max(0.0) as usize;
         Some((
             row.min(rows.saturating_sub(1)),
             col.min(cols.saturating_sub(1)),
@@ -530,12 +558,13 @@ impl EntityInputHandler for TerminalSurface {
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
+        let metrics = self.last_metrics;
         Some(Bounds::new(
             point(
                 bounds.left() + px(TERMINAL_PADDING),
                 bounds.top() + px(TERMINAL_PADDING),
             ),
-            size(px(CELL_WIDTH), px(LINE_HEIGHT)),
+            size(px(metrics.advance), px(metrics.line_height)),
         ))
     }
 
@@ -595,7 +624,12 @@ impl Render for TerminalSurface {
             .flex()
             .flex_col()
             .text_color(rgb(TERMINAL_TEXT))
-            .font_family("Berkeley Mono")
+            // Menlo ships with every macOS install. Berkeley Mono (the prior
+            // default) is commercial and not present on most systems, so its
+            // family name resolved through fallback to a proportional system
+            // font, producing visible drift in cell-aligned rendering. Users
+            // can still override via `terminal.font_family` in config.
+            .font_family("Menlo")
             .key_context("TerminalSurface")
             .track_focus(&self.focus_handle(cx))
             .on_action(cx.listener(Self::enter))
@@ -654,11 +688,13 @@ struct TerminalPrepaintState {
     cursor_effects: Vec<PaintQuad>,
     cursor: Option<PaintQuad>,
     effect_overlay: Vec<PaintQuad>,
+    metrics: CellMetrics,
 }
 
 struct TerminalPaintLine {
-    line: WrappedLine,
+    line: ShapedLine,
     row: usize,
+    col: usize,
 }
 
 impl IntoElement for TerminalElement {
@@ -708,6 +744,7 @@ impl Element for TerminalElement {
         let style = window.text_style();
         let font_size = px(terminal_config.font_size);
         let base_font = terminal_font(&terminal_config, style.font());
+        let metrics = compute_cell_metrics(window, &base_font, font_size, &terminal_config);
         let mut backgrounds = Vec::new();
         let mut decorations = Vec::new();
         let mut lines = Vec::new();
@@ -726,30 +763,42 @@ impl Element for TerminalElement {
                 None
             };
 
+            // Per-cell shaping. Each glyph is shaped independently and stored
+            // with its grid column so paint can anchor it at exactly
+            // `col * advance`. Handing whole rows to `shape_text` lets
+            // GPUI's proportional layout drift cells out of grid alignment
+            // even with monospace fonts, which breaks cursor placement,
+            // selection rectangles, ASCII art, and TUI box drawing.
             for row in 0..rows {
-                let (text, runs) = terminal_row_runs(
+                for glyph in terminal_row_glyphs(
                     session,
                     &terminal_config,
                     row,
                     cols,
                     block_cursor,
                     &base_font,
-                );
-                let display_text: SharedString = text.into();
-                if let Ok(mut shaped) =
-                    window
+                ) {
+                    let mut buf = [0u8; 4];
+                    let text: SharedString = glyph.ch.encode_utf8(&mut buf).to_string().into();
+                    let shaped = window
                         .text_system()
-                        .shape_text(display_text, font_size, &runs, None, None)
-                {
-                    if let Some(line) = shaped.pop() {
-                        lines.push(TerminalPaintLine { line, row });
-                    }
+                        .shape_line(text, font_size, &[glyph.run], None);
+                    lines.push(TerminalPaintLine {
+                        line: shaped,
+                        row,
+                        col: glyph.col,
+                    });
                 }
             }
 
             selection = session
                 .terminal
-                .selection_rects(CELL_WIDTH, LINE_HEIGHT, [0x38, 0xbd, 0xf8], 0.35)
+                .selection_rects(
+                    metrics.advance,
+                    metrics.line_height,
+                    [0x38, 0xbd, 0xf8],
+                    0.35,
+                )
                 .into_iter()
                 .map(|(x, y, w, h, _)| {
                     fill(
@@ -767,32 +816,34 @@ impl Element for TerminalElement {
 
             if let Some((row, col)) = session.terminal.cursor_point() {
                 if is_focused {
-                    cursor_effects = terminal_cursor_effects(bounds, row, col, &terminal_config);
-                    cursor = Some(cursor_quad(bounds, row, col, &terminal_config));
+                    cursor_effects =
+                        terminal_cursor_effects(bounds, row, col, &terminal_config, metrics);
+                    cursor = Some(cursor_quad(bounds, row, col, &terminal_config, metrics));
                 }
             }
 
             backgrounds = session
                 .terminal
-                .background_rects(&terminal_config, CELL_WIDTH, LINE_HEIGHT)
+                .background_rects(&terminal_config, metrics.advance, metrics.line_height)
                 .into_iter()
                 .map(|rect| terminal_rect_quad(bounds, rect))
                 .collect();
 
             decorations = session
                 .terminal
-                .decoration_rects(&terminal_config, CELL_WIDTH, LINE_HEIGHT)
+                .decoration_rects(&terminal_config, metrics.advance, metrics.line_height)
                 .into_iter()
                 .chain(
                     session
                         .terminal
-                        .url_decoration_rects(CELL_WIDTH, LINE_HEIGHT),
+                        .url_decoration_rects(metrics.advance, metrics.line_height),
                 )
                 .map(|rect| terminal_rect_quad(bounds, rect))
                 .collect();
         }
 
         TerminalPrepaintState {
+            metrics,
             effect_underlay,
             backgrounds,
             decorations,
@@ -821,8 +872,9 @@ impl Element for TerminalElement {
             cx,
         );
 
+        let metrics = prepaint.metrics;
         self.surface.update(cx, |surface, cx| {
-            surface.resize_for_bounds(bounds, cx);
+            surface.resize_for_bounds(bounds, metrics, cx);
         });
 
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
@@ -848,19 +900,14 @@ impl Element for TerminalElement {
 
             for paint_line in prepaint.lines.drain(..) {
                 let origin = point(
-                    bounds.left() + px(TERMINAL_PADDING),
-                    bounds.top() + px(TERMINAL_PADDING + paint_line.row as f32 * LINE_HEIGHT),
+                    bounds.left()
+                        + px(TERMINAL_PADDING + paint_line.col as f32 * metrics.advance),
+                    bounds.top()
+                        + px(TERMINAL_PADDING + paint_line.row as f32 * metrics.line_height),
                 );
                 paint_line
                     .line
-                    .paint(
-                        origin,
-                        px(LINE_HEIGHT),
-                        TextAlign::Left,
-                        Some(bounds),
-                        window,
-                        cx,
-                    )
+                    .paint(origin, px(metrics.line_height), window, cx)
                     .ok();
             }
 
@@ -874,10 +921,11 @@ impl Element for TerminalElement {
         });
 
         let surface = self.surface.clone();
+        let scroll_line_height = px(metrics.line_height);
         window.on_mouse_event(move |event: &ScrollWheelEvent, phase, _window, cx| {
             if phase == DispatchPhase::Bubble && bounds.contains(&event.position) {
-                let delta = event.delta.pixel_delta(px(LINE_HEIGHT));
-                let lines = (delta.y / px(LINE_HEIGHT)).round() as i32;
+                let delta = event.delta.pixel_delta(scroll_line_height);
+                let lines = (delta.y / scroll_line_height).round() as i32;
                 surface.update(cx, |surface, cx| surface.scroll_by(lines, cx));
             }
         });
@@ -961,14 +1009,14 @@ fn launch_session(config: &Config, cwd: Option<&str>) -> (Option<Session>, Optio
     }
 }
 
-fn terminal_grid_size(bounds: Bounds<Pixels>) -> (u16, u16) {
-    let width = (bounds.size.width - px(TERMINAL_PADDING * 2.0)).max(px(CELL_WIDTH));
-    let height = (bounds.size.height - px(TERMINAL_PADDING * 2.0)).max(px(LINE_HEIGHT));
-    let cols = (width / px(CELL_WIDTH))
+fn terminal_grid_size(bounds: Bounds<Pixels>, metrics: CellMetrics) -> (u16, u16) {
+    let width = (bounds.size.width - px(TERMINAL_PADDING * 2.0)).max(px(metrics.advance));
+    let height = (bounds.size.height - px(TERMINAL_PADDING * 2.0)).max(px(metrics.line_height));
+    let cols = (width / px(metrics.advance))
         .floor()
         .max(1.0)
         .min(u16::MAX as f32) as u16;
-    let rows = (height / px(LINE_HEIGHT))
+    let rows = (height / px(metrics.line_height))
         .floor()
         .max(1.0)
         .min(u16::MAX as f32) as u16;
@@ -980,13 +1028,14 @@ fn cursor_quad(
     row: usize,
     col: usize,
     config: &Config,
+    metrics: CellMetrics,
 ) -> PaintQuad {
-    let x = TERMINAL_PADDING + col as f32 * CELL_WIDTH;
-    let y = TERMINAL_PADDING + row as f32 * LINE_HEIGHT;
+    let x = TERMINAL_PADDING + col as f32 * metrics.advance;
+    let y = TERMINAL_PADDING + row as f32 * metrics.line_height;
     let (cursor_x, cursor_y, cursor_w, cursor_h) = match config.cursor_style {
-        CursorStyle::Block => (x, y, CELL_WIDTH, LINE_HEIGHT),
-        CursorStyle::Beam => (x, y, 2.0, LINE_HEIGHT),
-        CursorStyle::Underline => (x, y + LINE_HEIGHT - 2.0, CELL_WIDTH, 2.0),
+        CursorStyle::Block => (x, y, metrics.advance, metrics.line_height),
+        CursorStyle::Beam => (x, y, 2.0, metrics.line_height),
+        CursorStyle::Underline => (x, y + metrics.line_height - 2.0, metrics.advance, 2.0),
     };
 
     fill(
@@ -999,4 +1048,59 @@ fn cursor_quad(
         ),
         rgba(rgba_u32(config.cursor_color(), 1.0)),
     )
+}
+
+/// Compute the per-frame cell geometry from the actual terminal font and the
+/// configured line-height multiplier. Advance width is measured by shaping the
+/// probe character `M` through the same `TextSystem::shape_line` path that
+/// renders the actual terminal rows, so the metric matches the rendered
+/// glyph width even when font resolution falls back (e.g. Berkeley Mono is
+/// not installed and the renderer drops to a system monospace). Line height
+/// is `font_size * terminal.line_height`, matching the existing config
+/// semantics. Falls back to the legacy 9.0/20.0 pair if shaping fails.
+fn compute_cell_metrics(
+    window: &Window,
+    base_font: &Font,
+    font_size: Pixels,
+    config: &Config,
+) -> CellMetrics {
+    let advance = measure_cell_advance(window, base_font, font_size);
+    let line_height_multiplier = config.line_height.max(1.0);
+    let line_height = (f32::from(font_size) * line_height_multiplier).max(1.0);
+    CellMetrics {
+        advance,
+        line_height,
+    }
+}
+
+fn measure_cell_advance(window: &Window, base_font: &Font, font_size: Pixels) -> f32 {
+    // Shape a multi-character probe through the same pipeline that paints
+    // terminal rows, then divide by the probe length. This averages out any
+    // per-glyph offset (kerning, hinting) and matches the per-cell advance
+    // that `shape_text` will use for actual content. Ligatures are disabled
+    // on the probe font so contextual alternates cannot compress the probe
+    // string into a shorter measured width than the real, mostly
+    // non-ligaturable content rendered by terminal output.
+    const PROBE: &str = "MMMMMMMMMM";
+    let mut probe_font = base_font.clone();
+    probe_font.features = gpui::FontFeatures::disable_ligatures();
+    let probe_string: SharedString = PROBE.into();
+    let run = TextRun {
+        len: probe_string.len(),
+        font: probe_font,
+        color: gpui::black(),
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    };
+    let shaped = window
+        .text_system()
+        .shape_line(probe_string, font_size, &[run], None);
+    let total_width = f32::from(shaped.width);
+    let per_char = total_width / PROBE.len() as f32;
+    if per_char > 0.0 {
+        per_char
+    } else {
+        FALLBACK_CELL_WIDTH
+    }
 }
