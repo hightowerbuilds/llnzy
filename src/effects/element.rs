@@ -43,11 +43,7 @@ impl EffectsElement {
     /// Override the three palette stops. Each is RGB (sRGB byte triple); the
     /// `[3]` slot is uniform padding only (the shader ignores it).
     pub fn with_palette(mut self, c1: [u8; 3], c2: [u8; 3], c3: [u8; 3]) -> Self {
-        self.params.palette = [
-            srgb8_to_vec4(c1),
-            srgb8_to_vec4(c2),
-            srgb8_to_vec4(c3),
-        ];
+        self.params.palette = [srgb8_to_vec4(c1), srgb8_to_vec4(c2), srgb8_to_vec4(c3)];
         self
     }
 }

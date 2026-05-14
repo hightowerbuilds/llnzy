@@ -388,6 +388,18 @@ fn terminal_appearance_controls(
                     |this, cx| this.set_background_mode("aurora", cx),
                 ))
                 .child(appearance_button(
+                    "Trees".to_string(),
+                    config.effects.background == "trees",
+                    cx,
+                    |this, cx| this.set_background_mode("trees", cx),
+                ))
+                .child(appearance_button(
+                    "Rain".to_string(),
+                    config.effects.background == "rain",
+                    cx,
+                    |this, cx| this.set_background_mode("rain", cx),
+                ))
+                .child(appearance_button(
                     "Image".to_string(),
                     config.effects.background == "image",
                     cx,
@@ -587,32 +599,156 @@ fn editor_appearance_controls(
 // `Config.effects.background_color{1,2,3}`. The list shown to the user is
 // filtered per effect (`shader_palettes_for_mode`) so each effect surfaces
 // palettes that suit it.
-const SMOKE_PALETTES: &[(&str, [u8; 3], [u8; 3], [u8; 3])] = &[
-    ("Mauve",  [0x10, 0x09, 0x14], [0x4d, 0x1f, 0x4f], [0xc5, 0x7a, 0xc8]),
-    ("Aqua",   [0x05, 0x10, 0x14], [0x1f, 0x44, 0x53], [0x6a, 0xd2, 0xe5]),
-    ("Ember",  [0x0e, 0x06, 0x04], [0x4c, 0x1c, 0x09], [0xe6, 0x84, 0x3c]),
-    ("Forest", [0x05, 0x0c, 0x07], [0x1c, 0x3a, 0x22], [0x7a, 0xc8, 0x82]),
-    ("Slate",  [0x09, 0x0c, 0x10], [0x24, 0x2a, 0x33], [0x9a, 0xa6, 0xb8]),
+type ColorStop = [u8; 3];
+type ShaderPalette = (&'static str, ColorStop, ColorStop, ColorStop);
+
+const SMOKE_PALETTES: &[ShaderPalette] = &[
+    (
+        "Mauve",
+        [0x10, 0x09, 0x14],
+        [0x4d, 0x1f, 0x4f],
+        [0xc5, 0x7a, 0xc8],
+    ),
+    (
+        "Aqua",
+        [0x05, 0x10, 0x14],
+        [0x1f, 0x44, 0x53],
+        [0x6a, 0xd2, 0xe5],
+    ),
+    (
+        "Ember",
+        [0x0e, 0x06, 0x04],
+        [0x4c, 0x1c, 0x09],
+        [0xe6, 0x84, 0x3c],
+    ),
+    (
+        "Forest",
+        [0x05, 0x0c, 0x07],
+        [0x1c, 0x3a, 0x22],
+        [0x7a, 0xc8, 0x82],
+    ),
+    (
+        "Slate",
+        [0x09, 0x0c, 0x10],
+        [0x24, 0x2a, 0x33],
+        [0x9a, 0xa6, 0xb8],
+    ),
 ];
 
-const FIRE_PALETTES: &[(&str, [u8; 3], [u8; 3], [u8; 3])] = &[
-    ("Hearth",  [0x12, 0x04, 0x02], [0xff, 0x55, 0x18], [0xff, 0xd6, 0x6b]),
-    ("Bonfire", [0x08, 0x02, 0x01], [0xd6, 0x3a, 0x0e], [0xff, 0xb0, 0x42]),
-    ("Forge",   [0x10, 0x05, 0x02], [0xff, 0x84, 0x1a], [0xff, 0xf0, 0xb0]),
-    ("Ember",   [0x0e, 0x06, 0x04], [0x4c, 0x1c, 0x09], [0xe6, 0x84, 0x3c]),
+const FIRE_PALETTES: &[ShaderPalette] = &[
+    (
+        "Hearth",
+        [0x12, 0x04, 0x02],
+        [0xff, 0x55, 0x18],
+        [0xff, 0xd6, 0x6b],
+    ),
+    (
+        "Bonfire",
+        [0x08, 0x02, 0x01],
+        [0xd6, 0x3a, 0x0e],
+        [0xff, 0xb0, 0x42],
+    ),
+    (
+        "Forge",
+        [0x10, 0x05, 0x02],
+        [0xff, 0x84, 0x1a],
+        [0xff, 0xf0, 0xb0],
+    ),
+    (
+        "Ember",
+        [0x0e, 0x06, 0x04],
+        [0x4c, 0x1c, 0x09],
+        [0xe6, 0x84, 0x3c],
+    ),
 ];
 
-const AURORA_PALETTES: &[(&str, [u8; 3], [u8; 3], [u8; 3])] = &[
-    ("Aurora",  [0x08, 0x0e, 0x26], [0x2e, 0xdc, 0x96], [0xc8, 0x5a, 0xe6]),
-    ("Boreal",  [0x04, 0x0a, 0x18], [0x18, 0xc0, 0xb4], [0x6a, 0x84, 0xff]),
-    ("Solar",   [0x12, 0x06, 0x20], [0xff, 0xa0, 0x4a], [0xff, 0x5a, 0xc8]),
-    ("Glacial", [0x05, 0x0c, 0x14], [0x4a, 0xa0, 0xff], [0xc8, 0xf0, 0xff]),
+const AURORA_PALETTES: &[ShaderPalette] = &[
+    (
+        "Aurora",
+        [0x08, 0x0e, 0x26],
+        [0x2e, 0xdc, 0x96],
+        [0xc8, 0x5a, 0xe6],
+    ),
+    (
+        "Boreal",
+        [0x04, 0x0a, 0x18],
+        [0x18, 0xc0, 0xb4],
+        [0x6a, 0x84, 0xff],
+    ),
+    (
+        "Solar",
+        [0x12, 0x06, 0x20],
+        [0xff, 0xa0, 0x4a],
+        [0xff, 0x5a, 0xc8],
+    ),
+    (
+        "Glacial",
+        [0x05, 0x0c, 0x14],
+        [0x4a, 0xa0, 0xff],
+        [0xc8, 0xf0, 0xff],
+    ),
 ];
 
-fn shader_palettes_for_mode(mode: &str) -> &'static [(&'static str, [u8; 3], [u8; 3], [u8; 3])] {
+const TREES_PALETTES: &[ShaderPalette] = &[
+    (
+        "Canopy",
+        [0x0a, 0x16, 0x0e],
+        [0x3a, 0x78, 0x34],
+        [0xd0, 0xe8, 0x96],
+    ),
+    (
+        "Mossy",
+        [0x08, 0x12, 0x0e],
+        [0x2e, 0x60, 0x46],
+        [0xa8, 0xc8, 0x8c],
+    ),
+    (
+        "Autumnal",
+        [0x14, 0x0c, 0x08],
+        [0x96, 0x46, 0x1c],
+        [0xf0, 0xbe, 0x5a],
+    ),
+    (
+        "Twilight",
+        [0x06, 0x0a, 0x12],
+        [0x28, 0x3c, 0x5a],
+        [0xaa, 0xb4, 0xdc],
+    ),
+];
+
+const RAIN_PALETTES: &[ShaderPalette] = &[
+    (
+        "Storm",
+        [0x08, 0x0e, 0x18],
+        [0x2e, 0x46, 0x60],
+        [0xbe, 0xd7, 0xf0],
+    ),
+    (
+        "Twilight",
+        [0x1c, 0x14, 0x2e],
+        [0x58, 0x48, 0x78],
+        [0xdc, 0xcd, 0xeb],
+    ),
+    (
+        "Overcast",
+        [0x18, 0x1c, 0x20],
+        [0x5a, 0x62, 0x6c],
+        [0xd7, 0xde, 0xe6],
+    ),
+    (
+        "Neon Rain",
+        [0x0a, 0x08, 0x18],
+        [0x3c, 0x1e, 0x6e],
+        [0xff, 0x5a, 0xdc],
+    ),
+];
+
+fn shader_palettes_for_mode(mode: &str) -> &'static [ShaderPalette] {
     match mode {
         "fire" => FIRE_PALETTES,
         "aurora" => AURORA_PALETTES,
+        "trees" => TREES_PALETTES,
+        "rain" => RAIN_PALETTES,
         _ => SMOKE_PALETTES,
     }
 }
@@ -621,6 +757,8 @@ fn shader_palette_label(mode: &str) -> &'static str {
     match mode {
         "fire" => "Fire Palette",
         "aurora" => "Aurora Palette",
+        "trees" => "Canopy Palette",
+        "rain" => "Rain Palette",
         _ => "Smoke Palette",
     }
 }
@@ -629,6 +767,8 @@ fn shader_intensity_label(mode: &str) -> &'static str {
     match mode {
         "fire" => "Fire Intensity",
         "aurora" => "Aurora Intensity",
+        "trees" => "Canopy Intensity",
+        "rain" => "Rain Intensity",
         _ => "Smoke Intensity",
     }
 }
@@ -662,12 +802,9 @@ fn terminal_smoke_controls(
         let c1 = *c1;
         let c2 = *c2;
         let c3 = *c3;
-        palette_row = palette_row.child(appearance_button(
-            label,
-            active,
-            cx,
-            move |this, cx| this.set_effect_palette(c1, c2, c3, cx),
-        ));
+        palette_row = palette_row.child(appearance_button(label, active, cx, move |this, cx| {
+            this.set_effect_palette(c1, c2, c3, cx)
+        }));
     }
 
     let (default_c1, default_c2, default_c3) = crate::gpui_terminal::default_palette_for(kind);

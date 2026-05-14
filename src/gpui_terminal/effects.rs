@@ -99,30 +99,25 @@ fn terminal_background_effects(terminal_bounds: Bounds<Pixels>, config: &Config)
     // joined-container level so two terminals see one continuous shader
     // field. The rectangle path here was retired in M2/M3 to avoid double-
     // rendering on top.
-    if matches!(mode, "none" | "image" | "smoke" | "fire" | "aurora") {
+    if matches!(
+        mode,
+        "none" | "image" | "smoke" | "fire" | "aurora" | "trees" | "rain"
+    ) {
         return Vec::new();
     }
 
     let intensity = config.effects.background_intensity.clamp(0.0, 1.0);
     let width = terminal_bounds.size.width / px(1.0);
     let height = terminal_bounds.size.height / px(1.0);
-    let mut quads = Vec::new();
-
-    match mode {
-        _ => {
-            quads.push(terminal_local_quad(
-                terminal_bounds,
-                0.0,
-                0.0,
-                width,
-                height,
-                effect_palette_color(config, 0),
-                0.05 + intensity * 0.12,
-            ));
-        }
-    }
-
-    quads
+    vec![terminal_local_quad(
+        terminal_bounds,
+        0.0,
+        0.0,
+        width,
+        height,
+        effect_palette_color(config, 0),
+        0.05 + intensity * 0.12,
+    )]
 }
 
 fn terminal_particle_effects(terminal_bounds: Bounds<Pixels>, config: &Config) -> Vec<PaintQuad> {

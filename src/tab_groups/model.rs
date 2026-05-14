@@ -102,7 +102,8 @@ impl TabGroupState {
         self.remove_tab(primary);
         self.remove_tab(secondary);
         let id = self.alloc_group_id();
-        self.groups.push(TabGroup::new(id, primary, secondary, axis));
+        self.groups
+            .push(TabGroup::new(id, primary, secondary, axis));
         Some(id)
     }
 
@@ -317,7 +318,10 @@ mod tests {
     fn join_pair_defaults_to_vertical_axis() {
         let mut groups = TabGroupState::default();
         groups.join_pair(1, 2).unwrap();
-        assert_eq!(groups.group_for_tab(1).unwrap().axis, PartitionAxis::Vertical);
+        assert_eq!(
+            groups.group_for_tab(1).unwrap().axis,
+            PartitionAxis::Vertical
+        );
     }
 
     #[test]

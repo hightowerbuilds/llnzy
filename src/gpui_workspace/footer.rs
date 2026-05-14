@@ -38,37 +38,37 @@ pub(super) fn workspace_footer(
         ));
     }
     bar.child(footer_button(
-            "Terminal",
-            WorkspaceSurface::Terminal,
-            active_surface,
-            cx,
-        ))
-        .child(footer_button(
-            "Stacker",
-            WorkspaceSurface::Stacker,
-            active_surface,
-            cx,
-        ))
-        .child(footer_button(
-            "Sketch",
-            WorkspaceSurface::Sketch,
-            active_surface,
-            cx,
-        ))
-        .child(footer_button(
-            "Appearances",
-            WorkspaceSurface::Appearances,
-            active_surface,
-            cx,
-        ))
-        .child(footer_button(
-            "Settings",
-            WorkspaceSurface::Settings,
-            active_surface,
-            cx,
-        ))
-        .child(div().flex_1())
-        .child(footer_queue_tray(active_surface, queued_prompts, cx))
+        "Terminal",
+        WorkspaceSurface::Terminal,
+        active_surface,
+        cx,
+    ))
+    .child(footer_button(
+        "Stacker",
+        WorkspaceSurface::Stacker,
+        active_surface,
+        cx,
+    ))
+    .child(footer_button(
+        "Sketch",
+        WorkspaceSurface::Sketch,
+        active_surface,
+        cx,
+    ))
+    .child(footer_button(
+        "Appearances",
+        WorkspaceSurface::Appearances,
+        active_surface,
+        cx,
+    ))
+    .child(footer_button(
+        "Settings",
+        WorkspaceSurface::Settings,
+        active_surface,
+        cx,
+    ))
+    .child(div().flex_1())
+    .child(footer_queue_tray(active_surface, queued_prompts, cx))
 }
 
 fn footer_queue_tray(

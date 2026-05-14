@@ -1057,9 +1057,9 @@ impl WorkspacePrototype {
         let terminal = self.new_terminal_surface(cx);
         self.terminals.insert(secondary_id.0, terminal);
 
-        let joined =
-            self.tab_manager
-                .join_pair_with_axis(primary_id.0, secondary_id.0, axis);
+        let joined = self
+            .tab_manager
+            .join_pair_with_axis(primary_id.0, secondary_id.0, axis);
         if !joined {
             // Roll back the freshly allocated terminal if the pairing failed
             // (defensive — `join_pair_with_axis` only refuses if primary ==
@@ -1127,7 +1127,7 @@ impl WorkspacePrototype {
 
         let was_active = self.active_tab_id == tab_id;
         if let Some(path) = self.tabs[index].file_path.clone() {
-            let closed = self.file_editors.get(&tab_id.0).map_or(true, |editor| {
+            let closed = self.file_editors.get(&tab_id.0).is_none_or(|editor| {
                 editor.update(cx, |editor, cx| editor.close_path_from_workspace(&path, cx))
             });
             if !closed {

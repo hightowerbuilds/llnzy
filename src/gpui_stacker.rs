@@ -190,7 +190,7 @@ impl StackerPrototype {
 
         let should_replace_editor = previous_active_text
             .as_ref()
-            .map_or(true, |text| editor_text == *text);
+            .is_none_or(|text| editor_text == *text);
         if should_replace_editor {
             let text = self
                 .active_prompt

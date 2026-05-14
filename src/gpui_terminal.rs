@@ -7,7 +7,10 @@ use self::effects::{
     rgba_u32, terminal_background_image, terminal_background_image_path, terminal_cursor_effects,
     terminal_effect_overlay, terminal_effect_underlay, terminal_rect_quad, terminal_render_config,
 };
-use self::text::{terminal_font, terminal_paste_payload, terminal_row_flow, terminal_row_glyphs};
+use self::text::{
+    terminal_font, terminal_paste_payload, terminal_row_flow, terminal_row_glyphs,
+    TerminalRowFlowContext,
+};
 use gpui::prelude::*;
 use gpui::{
     actions, div, fill, point, px, relative, rgb, rgba, size, App, Bounds, ClipboardItem,
@@ -127,14 +130,14 @@ pub(crate) fn terminal_shader_effect_layer(config: &Config) -> Option<gpui::Div>
 /// Default palette stops for a shader effect when the user hasn't picked
 /// one explicitly. Mirrors the curated presets exposed in the Terminal
 /// appearance tab.
-pub(crate) fn default_palette_for(
-    kind: crate::effects::EffectKind,
-) -> ([u8; 3], [u8; 3], [u8; 3]) {
+pub(crate) fn default_palette_for(kind: crate::effects::EffectKind) -> ([u8; 3], [u8; 3], [u8; 3]) {
     use crate::effects::EffectKind;
     match kind {
         EffectKind::Smoke => ([0x10, 0x09, 0x14], [0x4d, 0x1f, 0x4f], [0xc5, 0x7a, 0xc8]),
         EffectKind::Fire => ([0x12, 0x04, 0x02], [0xff, 0x55, 0x18], [0xff, 0xd6, 0x6b]),
         EffectKind::Aurora => ([0x08, 0x0e, 0x26], [0x2e, 0xdc, 0x96], [0xc8, 0x5a, 0xe6]),
+        EffectKind::Trees => ([0x0a, 0x16, 0x0e], [0x3a, 0x78, 0x34], [0xd0, 0xe8, 0x96]),
+        EffectKind::Rain => ([0x08, 0x0e, 0x18], [0x2e, 0x46, 0x60], [0xbe, 0xd7, 0xf0]),
     }
 }
 
@@ -340,8 +343,7 @@ impl TerminalSurface {
         let row = (local_y / px(metrics.line_height)).floor().max(0.0) as usize;
         let row = row.min(rows.saturating_sub(1));
 
-        let col = if let Some(offsets) =
-            self.last_row_offsets.as_ref().and_then(|all| all.get(row))
+        let col = if let Some(offsets) = self.last_row_offsets.as_ref().and_then(|all| all.get(row))
         {
             col_for_local_x(offsets, f32::from(local_x.max(px(0.0))))
         } else {
@@ -579,7 +581,8 @@ impl EntityInputHandler for TerminalSurface {
             actual_range.replace(range.start..range.start);
             return Some(String::new());
         }
-        let preedit_utf16_len = char_index_to_utf16_index(&self.ime_preedit, self.ime_preedit.chars().count());
+        let preedit_utf16_len =
+            char_index_to_utf16_index(&self.ime_preedit, self.ime_preedit.chars().count());
         let start = range.start.min(preedit_utf16_len);
         let end = range.end.min(preedit_utf16_len);
         actual_range.replace(start..end);
@@ -622,7 +625,8 @@ impl EntityInputHandler for TerminalSurface {
         if self.ime_preedit.is_empty() {
             None
         } else {
-            let end = char_index_to_utf16_index(&self.ime_preedit, self.ime_preedit.chars().count());
+            let end =
+                char_index_to_utf16_index(&self.ime_preedit, self.ime_preedit.chars().count());
             Some(0..end)
         }
     }
@@ -990,18 +994,18 @@ impl Element for TerminalElement {
                     // glyphs use their natural advance widths. Per-row column
                     // offset tables drive cursor placement, selection rects,
                     // backgrounds, decorations, and click hit-testing.
+                    let row_flow_context = TerminalRowFlowContext {
+                        session,
+                        config: &terminal_config,
+                        cols,
+                        block_cursor,
+                        base_font: &base_font,
+                        font_size,
+                        window,
+                    };
                     let mut all_offsets: Vec<Vec<f32>> = Vec::with_capacity(rows);
                     for row in 0..rows {
-                        let layout = terminal_row_flow(
-                            session,
-                            &terminal_config,
-                            row,
-                            cols,
-                            block_cursor,
-                            &base_font,
-                            font_size,
-                            window,
-                        );
+                        let layout = terminal_row_flow(row, &row_flow_context);
                         lines.push(TerminalPaintLine {
                             line: layout.shaped,
                             row,
@@ -1010,22 +1014,21 @@ impl Element for TerminalElement {
                         all_offsets.push(layout.col_offsets);
                     }
 
-                    selection =
-                        display_mode_selection_rects(session, &all_offsets, metrics)
-                            .into_iter()
-                            .map(|(x, y, w, h, _)| {
-                                fill(
-                                    Bounds::new(
-                                        point(
-                                            bounds.left() + px(TERMINAL_PADDING + x),
-                                            bounds.top() + px(TERMINAL_PADDING + y),
-                                        ),
-                                        size(px(w), px(h)),
+                    selection = display_mode_selection_rects(session, &all_offsets, metrics)
+                        .into_iter()
+                        .map(|(x, y, w, h, _)| {
+                            fill(
+                                Bounds::new(
+                                    point(
+                                        bounds.left() + px(TERMINAL_PADDING + x),
+                                        bounds.top() + px(TERMINAL_PADDING + y),
                                     ),
-                                    rgba(TERMINAL_SELECTION),
-                                )
-                            })
-                            .collect();
+                                    size(px(w), px(h)),
+                                ),
+                                rgba(TERMINAL_SELECTION),
+                            )
+                        })
+                        .collect();
 
                     if let Some((row, col)) = session.terminal.cursor_point() {
                         if is_focused {
@@ -1047,17 +1050,25 @@ impl Element for TerminalElement {
                         }
                     }
 
-                    backgrounds =
-                        display_mode_background_rects(session, &terminal_config, &all_offsets, metrics)
-                            .into_iter()
-                            .map(|rect| terminal_rect_quad(bounds, rect))
-                            .collect();
+                    backgrounds = display_mode_background_rects(
+                        session,
+                        &terminal_config,
+                        &all_offsets,
+                        metrics,
+                    )
+                    .into_iter()
+                    .map(|rect| terminal_rect_quad(bounds, rect))
+                    .collect();
 
-                    decorations =
-                        display_mode_decoration_rects(session, &terminal_config, &all_offsets, metrics)
-                            .into_iter()
-                            .map(|rect| terminal_rect_quad(bounds, rect))
-                            .collect();
+                    decorations = display_mode_decoration_rects(
+                        session,
+                        &terminal_config,
+                        &all_offsets,
+                        metrics,
+                    )
+                    .into_iter()
+                    .map(|rect| terminal_rect_quad(bounds, rect))
+                    .collect();
 
                     row_offsets_cache = Some(all_offsets);
                 }
@@ -1292,7 +1303,10 @@ fn cursor_quad(
     // `metrics.advance` whenever the offset table is missing (Monospace
     // mode, or before the first paint).
     let (x, cell_width) = if let Some(offsets) = row_offsets {
-        let start = offsets.get(col).copied().unwrap_or(col as f32 * metrics.advance);
+        let start = offsets
+            .get(col)
+            .copied()
+            .unwrap_or(col as f32 * metrics.advance);
         let next = offsets
             .get(col + 1)
             .copied()

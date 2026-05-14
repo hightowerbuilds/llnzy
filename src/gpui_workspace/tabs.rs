@@ -398,17 +398,14 @@ pub(super) fn reorder_workspace_tab_block(
     let Some(target_index) = tabs.iter().position(|tab| tab.id == target_id) else {
         return false;
     };
-    let Some(first_block_index) = tabs
-        .iter()
-        .position(|tab| block_ids.iter().any(|id| *id == tab.id))
-    else {
+    let Some(first_block_index) = tabs.iter().position(|tab| block_ids.contains(&tab.id)) else {
         return false;
     };
 
     let mut moving = Vec::new();
     let mut remaining = Vec::with_capacity(tabs.len());
     for tab in tabs.drain(..) {
-        if block_ids.iter().any(|id| *id == tab.id) {
+        if block_ids.contains(&tab.id) {
             moving.push(tab);
         } else {
             remaining.push(tab);

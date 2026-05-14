@@ -12,11 +12,10 @@ use super::{
     MenuLspSignatureHelp, MenuLspSymbols, MenuMarkdownCycle, MenuMarkdownPreview,
     MenuMarkdownSource, MenuMarkdownSplit, MenuNewTab, MenuNextTab, MenuOpenProject,
     MenuPartitionHorizontal, MenuPartitionVertical, MenuPaste, MenuPreviousTab, MenuRedo, MenuSave,
-    MenuSelectAll, MenuSeparateTabs, MenuShowAppearances,
-    MenuShowCommandPalette, MenuShowEditor, MenuShowFileFinder, MenuShowHome, MenuShowSketch,
-    MenuShowStacker,
-    MenuShowTerminal, MenuSwapTabs, MenuToggleSidebar, MenuUndo, MenuZoomIn, MenuZoomOut,
-    MenuZoomReset, WorkspacePrototype, WorkspaceSurface,
+    MenuSelectAll, MenuSeparateTabs, MenuShowAppearances, MenuShowCommandPalette, MenuShowEditor,
+    MenuShowFileFinder, MenuShowHome, MenuShowSketch, MenuShowStacker, MenuShowTerminal,
+    MenuSwapTabs, MenuToggleSidebar, MenuUndo, MenuZoomIn, MenuZoomOut, MenuZoomReset,
+    WorkspacePrototype, WorkspaceSurface,
 };
 
 impl WorkspacePrototype {

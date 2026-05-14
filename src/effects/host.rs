@@ -80,15 +80,30 @@ impl Default for EffectParams {
         Self {
             intensity: 0.45,
             palette: [
-                [0x10 as f32 / 255.0, 0x09 as f32 / 255.0, 0x14 as f32 / 255.0, 0.0],
-                [0x4d as f32 / 255.0, 0x1f as f32 / 255.0, 0x4f as f32 / 255.0, 0.0],
-                [0xc5 as f32 / 255.0, 0x7a as f32 / 255.0, 0xc8 as f32 / 255.0, 0.0],
+                [
+                    0x10 as f32 / 255.0,
+                    0x09 as f32 / 255.0,
+                    0x14 as f32 / 255.0,
+                    0.0,
+                ],
+                [
+                    0x4d as f32 / 255.0,
+                    0x1f as f32 / 255.0,
+                    0x4f as f32 / 255.0,
+                    0.0,
+                ],
+                [
+                    0xc5 as f32 / 255.0,
+                    0x7a as f32 / 255.0,
+                    0xc8 as f32 / 255.0,
+                    0.0,
+                ],
             ],
         }
     }
 }
 
-/// Which built-in effect shader to render. All three share the same
+/// Which built-in effect shader to render. All variants share the same
 /// `Uniforms` layout (and therefore the same bind group + uniform buffer);
 /// only the shader module + render pipeline differ per kind.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -96,6 +111,8 @@ pub enum EffectKind {
     Smoke,
     Fire,
     Aurora,
+    Trees,
+    Rain,
 }
 
 impl EffectKind {
@@ -104,6 +121,8 @@ impl EffectKind {
             EffectKind::Smoke => 0,
             EffectKind::Fire => 1,
             EffectKind::Aurora => 2,
+            EffectKind::Trees => 3,
+            EffectKind::Rain => 4,
         }
     }
 
@@ -114,6 +133,8 @@ impl EffectKind {
             "smoke" => Some(EffectKind::Smoke),
             "fire" => Some(EffectKind::Fire),
             "aurora" => Some(EffectKind::Aurora),
+            "trees" => Some(EffectKind::Trees),
+            "rain" => Some(EffectKind::Rain),
             _ => None,
         }
     }
@@ -131,7 +152,7 @@ pub struct EffectsHost {
     queue: wgpu::Queue,
     /// One render pipeline per `EffectKind`, indexed by `EffectKind::pipeline_index`.
     /// All pipelines share the same bind group layout + uniform buffer.
-    pipelines: [wgpu::RenderPipeline; 3],
+    pipelines: [wgpu::RenderPipeline; 5],
     uniform_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
 }
@@ -181,20 +202,19 @@ impl EffectsHost {
             mapped_at_creation: false,
         });
 
-        let bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("effects-host-bgl"),
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
-            });
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("effects-host-bgl"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("effects-host-bg"),
@@ -229,6 +249,18 @@ impl EffectsHost {
             "aurora",
             include_str!("shaders/aurora.wgsl"),
         );
+        let canopy_pipeline = build_effect_pipeline(
+            &device,
+            &pipeline_layout,
+            "canopy",
+            include_str!("shaders/canopy.wgsl"),
+        );
+        let rain_pipeline = build_effect_pipeline(
+            &device,
+            &pipeline_layout,
+            "rain",
+            include_str!("shaders/rain.wgsl"),
+        );
 
         Self {
             pixel_buffer_attrs: build_pixel_buffer_attrs(),
@@ -236,7 +268,13 @@ impl EffectsHost {
             _adapter: adapter,
             device,
             queue,
-            pipelines: [smoke_pipeline, fire_pipeline, aurora_pipeline],
+            pipelines: [
+                smoke_pipeline,
+                fire_pipeline,
+                aurora_pipeline,
+                canopy_pipeline,
+                rain_pipeline,
+            ],
             uniform_buffer,
             bind_group,
         }
@@ -258,8 +296,8 @@ impl EffectsHost {
         height: u32,
         params: EffectParams,
     ) -> Option<CVPixelBuffer> {
-        let width_u = ((width.max(2) + 1) & !1) as u32;
-        let height_u = ((height.max(2) + 1) & !1) as u32;
+        let width_u = (width.max(2) + 1) & !1;
+        let height_u = (height.max(2) + 1) & !1;
         let width = width_u as usize;
         let height = height_u as usize;
 
@@ -411,12 +449,14 @@ impl EffectsHost {
                 rgba_to_nv12(
                     &view,
                     padded_bytes_per_row as usize,
-                    y_base,
-                    y_stride,
-                    cbcr_base,
-                    cbcr_stride,
-                    width,
-                    height,
+                    Nv12Planes {
+                        y_base,
+                        y_stride,
+                        cbcr_base,
+                        cbcr_stride,
+                        width,
+                        height,
+                    },
                 );
             }
         }
@@ -433,10 +473,10 @@ impl Default for EffectsHost {
     }
 }
 
-/// Thread-local singleton. `CFDictionary` inside `EffectsHost` is `!Sync`,
-/// so we can't use `static OnceLock`. GPUI's render path lives on the main
-/// thread, so a thread-local is the right shape -- one EffectsHost per
-/// render thread, reused across every paint of every EffectsElement.
+// Thread-local singleton. `CFDictionary` inside `EffectsHost` is `!Sync`,
+// so we can't use `static OnceLock`. GPUI's render path lives on the main
+// thread, so a thread-local is the right shape: one EffectsHost per render
+// thread, reused across every paint of every EffectsElement.
 thread_local! {
     static SHARED_HOST: OnceCell<EffectsHost> = const { OnceCell::new() };
 }
@@ -518,8 +558,7 @@ fn build_pixel_buffer_attrs() -> CFDictionary<CFString, CFType> {
     let io_surface_props = CFDictionary::<CFString, CFType>::from_CFType_pairs(&[]);
     let io_surface_key =
         unsafe { CFString::wrap_under_get_rule(kCVPixelBufferIOSurfacePropertiesKey) };
-    let metal_key =
-        unsafe { CFString::wrap_under_get_rule(kCVPixelBufferMetalCompatibilityKey) };
+    let metal_key = unsafe { CFString::wrap_under_get_rule(kCVPixelBufferMetalCompatibilityKey) };
     CFDictionary::from_CFType_pairs(&[
         (io_surface_key, io_surface_props.as_CFType()),
         (metal_key, CFBoolean::true_value().as_CFType()),
@@ -535,21 +574,21 @@ fn build_pixel_buffer_attrs() -> CFDictionary<CFString, CFType> {
 /// SAFETY: caller must hold the CVPixelBuffer's base-address lock and pass
 /// the buffer's actual `*_stride` (which can exceed the natural row width
 /// due to plane alignment).
-unsafe fn rgba_to_nv12(
-    rgba: &[u8],
-    padded_row_stride: usize,
+struct Nv12Planes {
     y_base: *mut u8,
     y_stride: usize,
     cbcr_base: *mut u8,
     cbcr_stride: usize,
     width: usize,
     height: usize,
-) {
+}
+
+unsafe fn rgba_to_nv12(rgba: &[u8], padded_row_stride: usize, planes: Nv12Planes) {
     // Y plane: one byte per source pixel.
-    for y in 0..height {
-        let src_row = &rgba[y * padded_row_stride..y * padded_row_stride + width * 4];
-        let dst_row = y_base.add(y * y_stride);
-        for x in 0..width {
+    for y in 0..planes.height {
+        let src_row = &rgba[y * padded_row_stride..y * padded_row_stride + planes.width * 4];
+        let dst_row = planes.y_base.add(y * planes.y_stride);
+        for x in 0..planes.width {
             let r = src_row[x * 4] as f32 / 255.0;
             let g = src_row[x * 4 + 1] as f32 / 255.0;
             let b = src_row[x * 4 + 2] as f32 / 255.0;
@@ -560,12 +599,12 @@ unsafe fn rgba_to_nv12(
     // CbCr plane: half resolution in both axes. For each chroma macropixel,
     // sample RGB at the top-left of the corresponding 2x2 source block (a
     // box filter is fine -- the test pattern is constant colour anyway).
-    let cb_w = width / 2;
-    let cb_h = height / 2;
+    let cb_w = planes.width / 2;
+    let cb_h = planes.height / 2;
     for cy in 0..cb_h {
         let sy = cy * 2;
-        let src_row = &rgba[sy * padded_row_stride..sy * padded_row_stride + width * 4];
-        let dst_row = cbcr_base.add(cy * cbcr_stride);
+        let src_row = &rgba[sy * padded_row_stride..sy * padded_row_stride + planes.width * 4];
+        let dst_row = planes.cbcr_base.add(cy * planes.cbcr_stride);
         for cx in 0..cb_w {
             let sx = cx * 2;
             let r = src_row[sx * 4] as f32 / 255.0;
@@ -595,7 +634,7 @@ fn rgb_to_cbcr(r: f32, g: f32, b: f32) -> (u8, u8) {
 }
 
 fn align_up(value: u32, alignment: u32) -> u32 {
-    ((value + alignment - 1) / alignment) * alignment
+    value.div_ceil(alignment) * alignment
 }
 
 /// Cast a `&[f32; 16]` to the `&[u8]` that `Queue::write_buffer` wants. We

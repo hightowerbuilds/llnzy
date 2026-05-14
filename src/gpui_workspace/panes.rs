@@ -83,8 +83,8 @@ pub(super) fn workspace_content(
             .flex()
             .overflow_hidden();
         joined_container = match axis {
-            PartitionAxis::Vertical => joined_container.on_drag_move::<JoinedPaneResizeDrag>(
-                cx.listener(
+            PartitionAxis::Vertical => {
+                joined_container.on_drag_move::<JoinedPaneResizeDrag>(cx.listener(
                     move |this, event: &DragMoveEvent<JoinedPaneResizeDrag>, _window, cx| {
                         let width = event.bounds.size.width;
                         if width <= px(1.0) {
@@ -94,10 +94,11 @@ pub(super) fn workspace_content(
                             .clamp(0.18, 0.82);
                         this.resize_joined_panes_by_tab(resize_tab_id, ratio, cx);
                     },
-                ),
-            ),
-            PartitionAxis::Horizontal => joined_container.flex_col().on_drag_move::<JoinedPaneResizeDrag>(
-                cx.listener(
+                ))
+            }
+            PartitionAxis::Horizontal => joined_container
+                .flex_col()
+                .on_drag_move::<JoinedPaneResizeDrag>(cx.listener(
                     move |this, event: &DragMoveEvent<JoinedPaneResizeDrag>, _window, cx| {
                         let height = event.bounds.size.height;
                         if height <= px(1.0) {
@@ -107,17 +108,14 @@ pub(super) fn workspace_content(
                             .clamp(0.18, 0.82);
                         this.resize_joined_panes_by_tab(resize_tab_id, ratio, cx);
                     },
-                ),
-            ),
+                )),
         };
 
         if shared_terminal_background {
             if let Some(background) = terminal_background_layer(&context.appearance_config) {
                 joined_container = joined_container.child(background);
             }
-            if let Some(shader_layer) =
-                terminal_shader_effect_layer(&context.appearance_config)
-            {
+            if let Some(shader_layer) = terminal_shader_effect_layer(&context.appearance_config) {
                 joined_container = joined_container.child(shader_layer);
             }
         }
@@ -265,8 +263,7 @@ pub(super) fn workspace_surface_pane(
                     if let Some(background) = terminal_background_layer(&appearance_config) {
                         terminal_pane = terminal_pane.child(background);
                     }
-                    if let Some(shader_layer) = terminal_shader_effect_layer(&appearance_config)
-                    {
+                    if let Some(shader_layer) = terminal_shader_effect_layer(&appearance_config) {
                         terminal_pane = terminal_pane.child(shader_layer);
                     }
                 }
@@ -293,21 +290,19 @@ pub(super) fn workspace_surface_pane(
                 .as_ref()
                 .map(|root| collect_explorer_entries(root, &state.expanded_dirs))
                 .unwrap_or_default();
-            let panel_id = ("workspace-explorer-tab-tree", tab_id.map(|id| id.0).unwrap_or(0));
-            pane.child(
-                div()
-                    .size_full()
-                    .flex()
-                    .flex_col()
-                    .bg(rgb(PANEL_BG))
-                    .child(explorer_tree_panel(
-                        panel_id,
-                        entries,
-                        state.selected_path.clone(),
-                        has_project,
-                        cx,
-                    )),
-            )
+            let panel_id = (
+                "workspace-explorer-tab-tree",
+                tab_id.map(|id| id.0).unwrap_or(0),
+            );
+            pane.child(div().size_full().flex().flex_col().bg(rgb(PANEL_BG)).child(
+                explorer_tree_panel(
+                    panel_id,
+                    entries,
+                    state.selected_path.clone(),
+                    has_project,
+                    cx,
+                ),
+            ))
         }
         WorkspaceSurface::Sketch => pane.child(sketch),
         WorkspaceSurface::Appearances => pane.child(appearances_surface(

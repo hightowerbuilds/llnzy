@@ -245,17 +245,17 @@ pub(super) fn workspace_sidebar(
             cx,
         ))
         .child(
-        div()
-            .h(px(28.0))
-            .px_2()
-            .flex()
-            .items_center()
-            .border_t_1()
-            .border_color(rgb(0x343743))
-            .text_size(px(11.0))
-            .text_color(rgb(MUTED_TEXT))
-            .child(explorer_status.unwrap_or_else(|| format!("{}px", sidebar_width.round()))),
-    );
+            div()
+                .h(px(28.0))
+                .px_2()
+                .flex()
+                .items_center()
+                .border_t_1()
+                .border_color(rgb(0x343743))
+                .text_size(px(11.0))
+                .text_color(rgb(MUTED_TEXT))
+                .child(explorer_status.unwrap_or_else(|| format!("{}px", sidebar_width.round()))),
+        );
     sidebar
 }
 
@@ -456,7 +456,9 @@ pub(super) fn workspace_sidebar_context_menu(
 
             let destinations = workspace_root
                 .as_ref()
-                .map(|root| collect_sidebar_move_destinations(root, &[menu.path.clone()]))
+                .map(|root| {
+                    collect_sidebar_move_destinations(root, std::slice::from_ref(&menu.path))
+                })
                 .unwrap_or_default();
             let mut list = div()
                 .id(("workspace-sidebar-move-list", explorer_row_id(&menu.path)))
@@ -687,8 +689,7 @@ fn sidebar_tree_row(
                         context_path.clone(),
                         context_name.clone(),
                         is_dir,
-                        event.position.x / px(1.0),
-                        event.position.y / px(1.0),
+                        (event.position.x / px(1.0), event.position.y / px(1.0)),
                         window,
                         cx,
                     );

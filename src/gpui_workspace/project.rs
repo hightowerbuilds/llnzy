@@ -145,8 +145,7 @@ impl WorkspacePrototype {
         path: PathBuf,
         name: String,
         is_dir: bool,
-        x: f32,
-        y: f32,
+        position: (f32, f32),
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -159,8 +158,8 @@ impl WorkspacePrototype {
             path,
             name,
             is_dir,
-            x,
-            y,
+            x: position.0,
+            y: position.1,
             view: SidebarContextMenuView::Main,
         });
         cx.notify();
@@ -394,7 +393,7 @@ impl WorkspacePrototype {
 
         self.sidebar_explorer
             .expanded_dirs
-            .retain(|dir| !same_path(dir, &path) && !(is_dir && path_contains(&path, dir)));
+            .retain(|dir| !(same_path(dir, &path) || is_dir && path_contains(&path, dir)));
         if self
             .sidebar_explorer
             .selected_path

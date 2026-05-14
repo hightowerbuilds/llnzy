@@ -156,16 +156,25 @@ pub(super) struct RowLayout {
     pub(super) col_offsets: Vec<f32>,
 }
 
-pub(super) fn terminal_row_flow(
-    session: &Session,
-    config: &Config,
-    row: usize,
-    cols: usize,
-    block_cursor: Option<(usize, usize)>,
-    base_font: &Font,
-    font_size: Pixels,
-    window: &Window,
-) -> RowLayout {
+pub(super) struct TerminalRowFlowContext<'a> {
+    pub(super) session: &'a Session,
+    pub(super) config: &'a Config,
+    pub(super) cols: usize,
+    pub(super) block_cursor: Option<(usize, usize)>,
+    pub(super) base_font: &'a Font,
+    pub(super) font_size: Pixels,
+    pub(super) window: &'a Window,
+}
+
+pub(super) fn terminal_row_flow(row: usize, context: &TerminalRowFlowContext<'_>) -> RowLayout {
+    let session = context.session;
+    let config = context.config;
+    let cols = context.cols;
+    let block_cursor = context.block_cursor;
+    let base_font = context.base_font;
+    let font_size = context.font_size;
+    let window = context.window;
+
     let mut row_text = String::new();
     let mut byte_index_at_col: Vec<usize> = Vec::with_capacity(cols + 1);
     let mut cell_styles: Vec<(usize, TerminalTextStyle)> = Vec::new();
