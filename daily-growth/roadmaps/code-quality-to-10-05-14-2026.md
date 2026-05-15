@@ -578,7 +578,36 @@ Known status:
 
 - `cargo check --no-default-features` is intentionally unsupported for the current binary shape and is documented as such.
 - Manual GPUI and visual workflow checks are deferred to the final smoke-test list, per the working agreement for this roadmap.
-- The next active phase is the 8/10 architecture pass: shrink high-change UI/controller surfaces and make more behavior testable without GPUI.
+- The 8/10 architecture pass extracted Stacker rendering, Stacker refresh planning, Stacker CLI argument parsing, and terminal render geometry into focused modules.
+- The 9/10 durability pass added packaging metadata/bundle validation, release-mode performance budgets, text/UTF-16 invariant tests, and a diagnostics report export backend.
+- The 10/10 sustainability pass added current architecture, operations, performance, quality-policy, ADR, and manual-smoke-test docs under `docs/`.
+
+Completed architecture and durability work:
+
+- `src/gpui_stacker/render.rs` now owns Stacker view construction.
+- `src/stacker/sync.rs` now owns pure prompt refresh planning with focused tests.
+- `src/stacker/cli/args.rs` now owns Stacker CLI argument parsing.
+- `src/gpui_terminal/render.rs` now owns terminal render geometry and display-mode helper logic.
+- `assets/packaging.env`, `assets/Info.plist`, `bundle.sh`, and CI are locked together by packaging metadata tests and a release bundle build.
+- `tests/performance_budgets.rs` provides release-mode budgets for editor large insertion, Rust syntax parsing, and terminal output throughput.
+- Unicode/UTF-16 and editor buffer position/undo/redo invariants have broader corpus coverage.
+- `src/diagnostics.rs` can render and write a diagnostics report containing version, platform/path context, and recent runtime log entries.
+- Remaining `unsafe` sites now carry explicit safety context.
+
+Current active docs:
+
+- `docs/development.md`: local gate and current doc index.
+- `docs/architecture.md`: source ownership map.
+- `docs/quality-policy.md`: branch, test, error, and dependency policy.
+- `docs/performance.md`: release performance budget command and baselines.
+- `docs/operations.md`: diagnostics, release readiness, and operational loop.
+- `docs/manual-smoke-tests.md`: deferred human-in-the-loop smoke checklist.
+- `docs/adrs/`: accepted architecture decisions for platform support, editor positions, terminal/PTY boundaries, and GPUI render boundaries.
+
+Remaining manual completion:
+
+- Run the checklist in `docs/manual-smoke-tests.md` after the automated gate is green.
+- Wire a visible UI/menu action to `export_diagnostics_report` if diagnostics export should be user-facing rather than backend-only.
 
 ### 7/10 Gate
 
