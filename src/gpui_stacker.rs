@@ -61,20 +61,27 @@ pub fn run_stacker_prototype() {
         cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
 
         let bounds = Bounds::centered(None, size(px(1040.0), px(720.0)), cx);
-        let window = cx
-            .open_window(
-                WindowOptions {
-                    window_bounds: Some(WindowBounds::Windowed(bounds)),
-                    ..Default::default()
-                },
-                |_, cx| cx.new(StackerPrototype::new),
-            )
-            .unwrap();
-        window
-            .update(cx, |view, window, cx| {
-                window.focus(&view.editor.focus_handle(cx));
-            })
-            .unwrap();
+        let window = match cx.open_window(
+            WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(bounds)),
+                ..Default::default()
+            },
+            |_, cx| cx.new(StackerPrototype::new),
+        ) {
+            Ok(window) => window,
+            Err(error) => {
+                eprintln!("failed to open stacker window: {error:?}");
+                cx.quit();
+                return;
+            }
+        };
+        if let Err(error) = window.update(cx, |view, window, cx| {
+            window.focus(&view.editor.focus_handle(cx));
+        }) {
+            eprintln!("failed to focus stacker window: {error:?}");
+            cx.quit();
+            return;
+        }
         cx.on_action(|_: &Quit, cx| cx.quit());
         cx.activate(true);
     });
@@ -989,22 +996,24 @@ impl Element for StackerTextElement {
             ElementInputHandler::new(bounds, self.input.clone()),
             cx,
         );
-        let layout = prepaint.layout.take().unwrap();
+        let Some(layout) = prepaint.layout.take() else {
+            return;
+        };
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
             for selection in prepaint.selection.drain(..) {
                 window.paint_quad(selection);
             }
             for line in &layout.lines {
-                line.line
-                    .paint(
-                        layout.line_origin(bounds, line),
-                        layout.line_height,
-                        TextAlign::Left,
-                        Some(bounds),
-                        window,
-                        cx,
-                    )
-                    .unwrap();
+                if let Err(error) = line.line.paint(
+                    layout.line_origin(bounds, line),
+                    layout.line_height,
+                    TextAlign::Left,
+                    Some(bounds),
+                    window,
+                    cx,
+                ) {
+                    eprintln!("failed to paint stacker text line: {error:?}");
+                }
             }
             if focus_handle.is_focused(window) {
                 if let Some(cursor) = prepaint.cursor.take() {
