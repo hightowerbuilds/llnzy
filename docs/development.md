@@ -52,6 +52,12 @@ Use `docs/architecture.md` as the current module ownership map. Historical
 roadmaps are useful context, but they are not the source of truth for where new
 code belongs.
 
+## Performance Budgets
+
+Use `docs/performance.md` for the current release-mode performance budget
+command and policy. These checks are separate from the normal local gate because
+desktop timing is noisier than pure correctness tests.
+
 ## Expected Working Tree
 
 Generated build output, screenshots, local assistant/tool directories, and
