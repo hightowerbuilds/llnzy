@@ -17,6 +17,27 @@ These commands are intentionally the same checks enforced by CI:
 - all clippy warnings are treated as errors;
 - every target and enabled feature must compile and test cleanly.
 
+## Supported Cargo Shapes
+
+The supported build shapes are:
+
+```sh
+cargo check
+cargo check --all-features
+cargo test --lib
+cargo test --all-targets --all-features
+```
+
+`cargo check --no-default-features` is not currently a supported shape. The
+default `llnzy` binary starts the GPUI workspace, while that workspace module is
+behind the `gpui-workspace` default feature. If LLNZY later needs a headless
+library-only profile, add an explicit headless binary or gate `src/main.rs`
+before treating no-default-features as supported.
+
+On macOS, the default and all-features shapes also compile the Metal-backed
+shader/effects dependencies declared under the macOS target section in
+`Cargo.toml`.
+
 ## Current Platform
 
 The enforced CI baseline runs on `macos-latest`. That matches the current app
