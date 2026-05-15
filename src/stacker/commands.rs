@@ -44,84 +44,123 @@ pub enum StackerEditorCommand {
     Redo,
 }
 
+const fn stacker_command_descriptor_value(id: StackerCommandId) -> StackerCommandDescriptor {
+    match id {
+        StackerCommandId::Bold => StackerCommandDescriptor {
+            id,
+            name: "Stacker: Bold",
+            toolbar_label: "B",
+            keybinding: "Cmd+B",
+            tooltip: "Bold selected text",
+        },
+        StackerCommandId::UnorderedList => StackerCommandDescriptor {
+            id,
+            name: "Stacker: Unordered List",
+            toolbar_label: "•",
+            keybinding: "",
+            tooltip: "Make unordered list",
+        },
+        StackerCommandId::OrderedList => StackerCommandDescriptor {
+            id,
+            name: "Stacker: Numbered List",
+            toolbar_label: "1.",
+            keybinding: "",
+            tooltip: "Make numbered list",
+        },
+        StackerCommandId::Heading1 => StackerCommandDescriptor {
+            id,
+            name: "Stacker: Heading",
+            toolbar_label: "H1",
+            keybinding: "",
+            tooltip: "Make heading",
+        },
+        StackerCommandId::Blockquote => StackerCommandDescriptor {
+            id,
+            name: "Stacker: Quote",
+            toolbar_label: ">",
+            keybinding: "",
+            tooltip: "Make quote",
+        },
+        StackerCommandId::InlineCode => StackerCommandDescriptor {
+            id,
+            name: "Stacker: Inline Code",
+            toolbar_label: "`",
+            keybinding: "Cmd+`",
+            tooltip: "Inline code",
+        },
+        StackerCommandId::CodeBlock => StackerCommandDescriptor {
+            id,
+            name: "Stacker: Code Block",
+            toolbar_label: "```",
+            keybinding: "",
+            tooltip: "Code block",
+        },
+        StackerCommandId::ChecklistItem => StackerCommandDescriptor {
+            id,
+            name: "Stacker: Checklist Item",
+            toolbar_label: "[ ]",
+            keybinding: "",
+            tooltip: "Checklist item",
+        },
+        StackerCommandId::Clear => StackerCommandDescriptor {
+            id,
+            name: "Stacker: Clear Draft",
+            toolbar_label: "Clear",
+            keybinding: "",
+            tooltip: "Clear the current draft",
+        },
+        StackerCommandId::Undo => StackerCommandDescriptor {
+            id,
+            name: "Stacker: Undo",
+            toolbar_label: "Undo",
+            keybinding: "Cmd+Z",
+            tooltip: "Undo Stacker edit",
+        },
+        StackerCommandId::Redo => StackerCommandDescriptor {
+            id,
+            name: "Stacker: Redo",
+            toolbar_label: "Redo",
+            keybinding: "Cmd+Shift+Z",
+            tooltip: "Redo Stacker edit",
+        },
+    }
+}
+
+const STACKER_COMMAND_BOLD: StackerCommandDescriptor =
+    stacker_command_descriptor_value(StackerCommandId::Bold);
+const STACKER_COMMAND_UNORDERED_LIST: StackerCommandDescriptor =
+    stacker_command_descriptor_value(StackerCommandId::UnorderedList);
+const STACKER_COMMAND_ORDERED_LIST: StackerCommandDescriptor =
+    stacker_command_descriptor_value(StackerCommandId::OrderedList);
+const STACKER_COMMAND_HEADING1: StackerCommandDescriptor =
+    stacker_command_descriptor_value(StackerCommandId::Heading1);
+const STACKER_COMMAND_BLOCKQUOTE: StackerCommandDescriptor =
+    stacker_command_descriptor_value(StackerCommandId::Blockquote);
+const STACKER_COMMAND_INLINE_CODE: StackerCommandDescriptor =
+    stacker_command_descriptor_value(StackerCommandId::InlineCode);
+const STACKER_COMMAND_CODE_BLOCK: StackerCommandDescriptor =
+    stacker_command_descriptor_value(StackerCommandId::CodeBlock);
+const STACKER_COMMAND_CHECKLIST_ITEM: StackerCommandDescriptor =
+    stacker_command_descriptor_value(StackerCommandId::ChecklistItem);
+const STACKER_COMMAND_CLEAR: StackerCommandDescriptor =
+    stacker_command_descriptor_value(StackerCommandId::Clear);
+const STACKER_COMMAND_UNDO: StackerCommandDescriptor =
+    stacker_command_descriptor_value(StackerCommandId::Undo);
+const STACKER_COMMAND_REDO: StackerCommandDescriptor =
+    stacker_command_descriptor_value(StackerCommandId::Redo);
+
 pub const STACKER_COMMANDS: &[StackerCommandDescriptor] = &[
-    StackerCommandDescriptor {
-        id: StackerCommandId::Bold,
-        name: "Stacker: Bold",
-        toolbar_label: "B",
-        keybinding: "Cmd+B",
-        tooltip: "Bold selected text",
-    },
-    StackerCommandDescriptor {
-        id: StackerCommandId::UnorderedList,
-        name: "Stacker: Unordered List",
-        toolbar_label: "•",
-        keybinding: "",
-        tooltip: "Make unordered list",
-    },
-    StackerCommandDescriptor {
-        id: StackerCommandId::OrderedList,
-        name: "Stacker: Numbered List",
-        toolbar_label: "1.",
-        keybinding: "",
-        tooltip: "Make numbered list",
-    },
-    StackerCommandDescriptor {
-        id: StackerCommandId::Heading1,
-        name: "Stacker: Heading",
-        toolbar_label: "H1",
-        keybinding: "",
-        tooltip: "Make heading",
-    },
-    StackerCommandDescriptor {
-        id: StackerCommandId::Blockquote,
-        name: "Stacker: Quote",
-        toolbar_label: ">",
-        keybinding: "",
-        tooltip: "Make quote",
-    },
-    StackerCommandDescriptor {
-        id: StackerCommandId::InlineCode,
-        name: "Stacker: Inline Code",
-        toolbar_label: "`",
-        keybinding: "Cmd+`",
-        tooltip: "Inline code",
-    },
-    StackerCommandDescriptor {
-        id: StackerCommandId::CodeBlock,
-        name: "Stacker: Code Block",
-        toolbar_label: "```",
-        keybinding: "",
-        tooltip: "Code block",
-    },
-    StackerCommandDescriptor {
-        id: StackerCommandId::ChecklistItem,
-        name: "Stacker: Checklist Item",
-        toolbar_label: "[ ]",
-        keybinding: "",
-        tooltip: "Checklist item",
-    },
-    StackerCommandDescriptor {
-        id: StackerCommandId::Clear,
-        name: "Stacker: Clear Draft",
-        toolbar_label: "Clear",
-        keybinding: "",
-        tooltip: "Clear the current draft",
-    },
-    StackerCommandDescriptor {
-        id: StackerCommandId::Undo,
-        name: "Stacker: Undo",
-        toolbar_label: "Undo",
-        keybinding: "Cmd+Z",
-        tooltip: "Undo Stacker edit",
-    },
-    StackerCommandDescriptor {
-        id: StackerCommandId::Redo,
-        name: "Stacker: Redo",
-        toolbar_label: "Redo",
-        keybinding: "Cmd+Shift+Z",
-        tooltip: "Redo Stacker edit",
-    },
+    STACKER_COMMAND_BOLD,
+    STACKER_COMMAND_UNORDERED_LIST,
+    STACKER_COMMAND_ORDERED_LIST,
+    STACKER_COMMAND_HEADING1,
+    STACKER_COMMAND_BLOCKQUOTE,
+    STACKER_COMMAND_INLINE_CODE,
+    STACKER_COMMAND_CODE_BLOCK,
+    STACKER_COMMAND_CHECKLIST_ITEM,
+    STACKER_COMMAND_CLEAR,
+    STACKER_COMMAND_UNDO,
+    STACKER_COMMAND_REDO,
 ];
 
 pub fn stacker_command_registry() -> &'static [StackerCommandDescriptor] {
@@ -129,10 +168,19 @@ pub fn stacker_command_registry() -> &'static [StackerCommandDescriptor] {
 }
 
 pub fn stacker_command_descriptor(id: StackerCommandId) -> &'static StackerCommandDescriptor {
-    STACKER_COMMANDS
-        .iter()
-        .find(|command| command.id == id)
-        .expect("registered Stacker command")
+    match id {
+        StackerCommandId::Bold => &STACKER_COMMAND_BOLD,
+        StackerCommandId::UnorderedList => &STACKER_COMMAND_UNORDERED_LIST,
+        StackerCommandId::OrderedList => &STACKER_COMMAND_ORDERED_LIST,
+        StackerCommandId::Heading1 => &STACKER_COMMAND_HEADING1,
+        StackerCommandId::Blockquote => &STACKER_COMMAND_BLOCKQUOTE,
+        StackerCommandId::InlineCode => &STACKER_COMMAND_INLINE_CODE,
+        StackerCommandId::CodeBlock => &STACKER_COMMAND_CODE_BLOCK,
+        StackerCommandId::ChecklistItem => &STACKER_COMMAND_CHECKLIST_ITEM,
+        StackerCommandId::Clear => &STACKER_COMMAND_CLEAR,
+        StackerCommandId::Undo => &STACKER_COMMAND_UNDO,
+        StackerCommandId::Redo => &STACKER_COMMAND_REDO,
+    }
 }
 
 pub fn stacker_editor_command(id: StackerCommandId) -> StackerEditorCommand {
@@ -486,9 +534,25 @@ mod tests {
 
     #[test]
     fn registry_maps_ids_to_editor_commands() {
-        assert!(stacker_command_registry()
-            .iter()
-            .any(|command| command.id == StackerCommandId::Bold));
+        let ids = [
+            StackerCommandId::Bold,
+            StackerCommandId::UnorderedList,
+            StackerCommandId::OrderedList,
+            StackerCommandId::Heading1,
+            StackerCommandId::Blockquote,
+            StackerCommandId::InlineCode,
+            StackerCommandId::CodeBlock,
+            StackerCommandId::ChecklistItem,
+            StackerCommandId::Clear,
+            StackerCommandId::Undo,
+            StackerCommandId::Redo,
+        ];
+        let registry = stacker_command_registry();
+
+        assert_eq!(registry.len(), ids.len());
+        for id in ids {
+            assert!(registry.contains(stacker_command_descriptor(id)));
+        }
         assert_eq!(
             stacker_editor_command(StackerCommandId::Heading1),
             StackerEditorCommand::Heading(1)
