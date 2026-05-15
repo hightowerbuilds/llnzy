@@ -561,6 +561,9 @@ fn build_effect_pipeline(
 /// wrapped as an MTLTexture without extra copies).
 fn build_pixel_buffer_attrs() -> CFDictionary<CFString, CFType> {
     let io_surface_props = CFDictionary::<CFString, CFType>::from_CFType_pairs(&[]);
+    // SAFETY: these CoreVideo constants are process-lifetime CFString
+    // singletons. `wrap_under_get_rule` is correct because ownership remains
+    // with CoreVideo and the wrapper must not release the constants.
     let io_surface_key =
         unsafe { CFString::wrap_under_get_rule(kCVPixelBufferIOSurfacePropertiesKey) };
     let metal_key = unsafe { CFString::wrap_under_get_rule(kCVPixelBufferMetalCompatibilityKey) };

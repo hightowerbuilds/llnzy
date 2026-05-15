@@ -80,6 +80,9 @@ fn local_hour() -> f32 {
         .as_secs() as libc::time_t;
     let mut local = std::mem::MaybeUninit::<libc::tm>::uninit();
     let local = unsafe {
+        // SAFETY: `local` points to valid, writable storage for one `libc::tm`
+        // and `now` lives for the duration of the `localtime_r` call. A null
+        // return is handled before reading the initialized value.
         if libc::localtime_r(&now, local.as_mut_ptr()).is_null() {
             return utc_hour_from_unix_secs(now as u64);
         }

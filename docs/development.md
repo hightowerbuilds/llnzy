@@ -52,6 +52,9 @@ Use `docs/architecture.md` as the current module ownership map. Historical
 roadmaps are useful context, but they are not the source of truth for where new
 code belongs.
 
+Use `docs/quality-policy.md` for the current branch quality bar, test pyramid,
+error policy, and dependency review policy.
+
 ## Performance Budgets
 
 Use `docs/performance.md` for the current release-mode performance budget
@@ -62,6 +65,11 @@ desktop timing is noisier than pure correctness tests.
 
 Use `docs/operations.md` for diagnostics locations, report-export behavior, and
 the release-readiness command set.
+
+## Manual Smoke Tests
+
+Use `docs/manual-smoke-tests.md` for the deferred human-in-the-loop checks that
+complete the roadmap after the automated gate is green.
 
 ## Expected Working Tree
 

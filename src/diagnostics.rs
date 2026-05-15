@@ -25,13 +25,21 @@ pub fn write_diagnostic(
 }
 
 pub fn export_diagnostics_report(log: Option<&ErrorLog>) -> std::io::Result<PathBuf> {
-    let report = render_diagnostics_report(log);
     let path = diagnostics_path(DIAGNOSTICS_REPORT_FILENAME);
+    write_diagnostics_report_to(&path, log)?;
+    Ok(path)
+}
+
+pub fn write_diagnostics_report_to(
+    path: impl AsRef<Path>,
+    log: Option<&ErrorLog>,
+) -> std::io::Result<()> {
+    let path = path.as_ref();
+    let report = render_diagnostics_report(log);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(&path, report)?;
-    Ok(path)
+    std::fs::write(path, report)
 }
 
 pub fn render_diagnostics_report(log: Option<&ErrorLog>) -> String {
@@ -107,5 +115,19 @@ mod tests {
         let report = render_diagnostics_report(None);
 
         assert!(report.contains("runtime_log: unavailable"));
+    }
+
+    #[test]
+    fn diagnostics_report_writer_creates_parent_directory() {
+        let root =
+            std::env::temp_dir().join(format!("llnzy-diagnostics-report-{}", std::process::id()));
+        let path = root.join("nested").join(DIAGNOSTICS_REPORT_FILENAME);
+
+        write_diagnostics_report_to(&path, None).unwrap();
+
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(written.contains("LLNZY Diagnostics Report"));
+
+        let _ = std::fs::remove_dir_all(root);
     }
 }

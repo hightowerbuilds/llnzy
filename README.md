@@ -32,6 +32,13 @@ To build an installer package that also installs the `llnzy` CLI into `/usr/loca
 
 Requires Rust 1.75+. macOS is the active release target.
 
+## Development Docs
+
+- `docs/development.md` defines the local quality gate.
+- `docs/architecture.md` maps source ownership.
+- `docs/quality-policy.md` defines the branch, test, error, and dependency bar.
+- `docs/manual-smoke-tests.md` lists the deferred human smoke checks.
+
 ## Features
 
 **Terminal** -- ANSI/VT emulation via alacritty_terminal and portable-pty. Supports true color, scrollback, selection/copy/paste, bracketed paste, app cursor mode, title/CWD events, session restart, shell exit reporting, background images, and cursor effects.

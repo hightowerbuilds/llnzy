@@ -17,6 +17,10 @@ fn main() {
 
     #[cfg(unix)]
     unsafe {
+        // SAFETY: Installing SIG_IGN for SIGPIPE is a process-wide Unix signal
+        // disposition change. The handler does not dereference pointers or call
+        // into Rust; it asks libc to ignore SIGPIPE so closed pipe writes report
+        // normal I/O errors instead of terminating the app.
         libc::signal(libc::SIGPIPE, libc::SIG_IGN);
     }
 
