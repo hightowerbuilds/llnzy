@@ -46,6 +46,12 @@ surface, including GPUI and the macOS effects pipeline.
 If a future change claims cross-platform support, add the matching CI job before
 calling the platform supported.
 
+## Current Architecture Map
+
+Use `docs/architecture.md` as the current module ownership map. Historical
+roadmaps are useful context, but they are not the source of truth for where new
+code belongs.
+
 ## Expected Working Tree
 
 Generated build output, screenshots, local assistant/tool directories, and
