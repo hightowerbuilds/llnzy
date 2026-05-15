@@ -16,6 +16,7 @@ use crate::stacker::{
     queue::{self, QueuedPrompt},
     save_stacker_queue,
     session::StackerSession,
+    sync::plan_prompt_refresh,
     utf16::{char_index_to_utf16_index, utf16_index_to_char_index},
     StackerPrompt,
 };
@@ -170,42 +171,25 @@ impl StackerPrototype {
     }
 
     fn refresh_external_prompt_state(&mut self, cx: &mut Context<Self>) -> bool {
-        let mut next_queue = load_stacker_queue();
-        queue::sanitize_prompt_queue(&mut next_queue);
+        let next_queue = load_stacker_queue();
         let next_prompts = load_saved_prompts();
-        if next_prompts == self.prompts && next_queue == self.queued_prompts {
-            return false;
-        }
-
-        let previous_active = self.active_prompt;
-        let previous_active_id = previous_active
-            .and_then(|index| self.prompts.get(index))
-            .and_then(|prompt| prompt.id.clone());
-        let previous_active_text = previous_active
-            .and_then(|index| self.prompts.get(index))
-            .map(|prompt| prompt.text.clone());
         let editor_text = self.editor.read(cx).session.text().to_string();
+        let Some(plan) = plan_prompt_refresh(
+            &self.prompts,
+            &self.queued_prompts,
+            self.active_prompt,
+            &editor_text,
+            next_prompts,
+            next_queue,
+        ) else {
+            return false;
+        };
 
-        self.prompts = next_prompts;
-        self.queued_prompts = next_queue;
-        self.active_prompt = previous_active_id
-            .as_deref()
-            .and_then(|id| {
-                self.prompts
-                    .iter()
-                    .position(|prompt| prompt.id.as_deref() == Some(id))
-            })
-            .or_else(|| (!self.prompts.is_empty()).then_some(0));
+        self.prompts = plan.prompts;
+        self.queued_prompts = plan.queued_prompts;
+        self.active_prompt = plan.active_prompt;
 
-        let should_replace_editor = previous_active_text
-            .as_ref()
-            .is_none_or(|text| editor_text == *text);
-        if should_replace_editor {
-            let text = self
-                .active_prompt
-                .and_then(|index| self.prompts.get(index))
-                .map(|prompt| prompt.text.clone())
-                .unwrap_or_default();
+        if let Some(text) = plan.editor_text {
             self.editor.update(cx, |editor, cx| {
                 editor.session.set_text(text);
                 cx.notify();

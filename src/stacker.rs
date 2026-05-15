@@ -11,6 +11,7 @@ pub mod input;
 pub mod queue;
 pub mod session;
 pub mod storage;
+pub mod sync;
 #[cfg(target_os = "macos")]
 pub mod utf16;
 
