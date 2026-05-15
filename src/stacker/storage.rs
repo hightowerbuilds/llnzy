@@ -6,7 +6,6 @@
 //! `$config/prompts/.tmp/` first and then `rename` into place.
 
 use std::ffi::OsString;
-use std::fmt::Write as FmtWrite;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -112,9 +111,15 @@ pub fn body_hash(body: &str) -> String {
     let mut out = String::with_capacity(7 + digest.len() * 2);
     out.push_str("sha256:");
     for byte in digest.iter() {
-        write!(&mut out, "{byte:02x}").expect("string writes never fail");
+        push_hex_byte(&mut out, *byte);
     }
     out
+}
+
+fn push_hex_byte(out: &mut String, byte: u8) {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    out.push(HEX[(byte >> 4) as usize] as char);
+    out.push(HEX[(byte & 0x0f) as usize] as char);
 }
 
 pub fn read(path: &Path) -> Result<PromptRecord, StorageError> {
@@ -427,30 +432,39 @@ fn serialize_record(record: &PromptRecord) -> String {
     let fm = &record.frontmatter;
     let mut out = String::new();
     out.push_str(FRONTMATTER_DELIM);
-    writeln!(out, "id: {}", fm.id).unwrap();
-    writeln!(out, "state: {}", fm.state.as_str()).unwrap();
-    writeln!(out, "label: {}", quote(&fm.label)).unwrap();
-    writeln!(out, "category: {}", quote(&fm.category)).unwrap();
-    writeln!(out, "created: {}", fm.created).unwrap();
+    push_frontmatter_line(&mut out, "id", &fm.id);
+    push_frontmatter_line(&mut out, "state", fm.state.as_str());
+    push_frontmatter_line(&mut out, "label", &quote(&fm.label));
+    push_frontmatter_line(&mut out, "category", &quote(&fm.category));
+    push_frontmatter_line(&mut out, "created", &fm.created);
     if let Some(value) = fm.source_agent.as_deref() {
-        writeln!(out, "source_agent: {}", quote(value)).unwrap();
+        push_frontmatter_line(&mut out, "source_agent", &quote(value));
     }
     if let Some(value) = fm.session_id.as_deref() {
-        writeln!(out, "session_id: {}", quote(value)).unwrap();
+        push_frontmatter_line(&mut out, "session_id", &quote(value));
     }
     if let Some(value) = fm.workspace.as_deref() {
-        writeln!(out, "workspace: {}", quote(value)).unwrap();
+        push_frontmatter_line(&mut out, "workspace", &quote(value));
     }
     if !fm.related_files.is_empty() {
         out.push_str("related_files:\n");
         for path in &fm.related_files {
-            writeln!(out, "  - {path}").unwrap();
+            out.push_str("  - ");
+            out.push_str(path);
+            out.push('\n');
         }
     }
-    writeln!(out, "body_hash: {}", quote(&fm.body_hash)).unwrap();
+    push_frontmatter_line(&mut out, "body_hash", &quote(&fm.body_hash));
     out.push_str("---\n");
     out.push_str(&record.body);
     out
+}
+
+fn push_frontmatter_line(out: &mut String, key: &str, value: &str) {
+    out.push_str(key);
+    out.push_str(": ");
+    out.push_str(value);
+    out.push('\n');
 }
 
 fn quote(value: &str) -> String {
