@@ -9,7 +9,10 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+// `Eq` is intentionally NOT derived: `terminal_background_intensity` is an
+// `Option<f32>` and `f32` is not Eq. PartialEq is enough for the tests
+// that round-trip these structs.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct WorkspacePreferences {
     /// When true, the Explorer button appears in the footer nav bar.
     /// Defaults to false — users opt-in from Settings.
@@ -28,6 +31,29 @@ pub struct WorkspacePreferences {
     /// so the preferences module doesn't depend on the config enum.
     #[serde(default)]
     pub terminal_background_image_fit: String,
+
+    /// Three RGB stops for the active shader palette as `[[u8; 3]; 3]`.
+    /// `None` means "use the active effect kind's default palette" — so
+    /// switching kinds still picks the kind-appropriate defaults until the
+    /// user explicitly chooses an override.
+    #[serde(default)]
+    pub terminal_palette: Option<[[u8; 3]; 3]>,
+
+    /// 0.0..=1.0 shader intensity (Smoke Intensity / Fire Intensity / etc.
+    /// depending on active kind). `None` means "use the EffectParams
+    /// default" so a fresh user sees the picked defaults.
+    #[serde(default)]
+    pub terminal_background_intensity: Option<f32>,
+
+    /// Terminal font family. `None` means "use the system default".
+    #[serde(default)]
+    pub terminal_font_family: Option<String>,
+
+    /// Persisted terminal text layout mode: "monospace" (strict grid) or
+    /// "display" (proportional flow). Empty / missing string means
+    /// "use TerminalLayoutMode::default()".
+    #[serde(default)]
+    pub terminal_layout: String,
 }
 
 impl WorkspacePreferences {
@@ -99,6 +125,10 @@ mod tests {
             show_explorer_button: true,
             terminal_background_image: Some("forest.png".to_string()),
             terminal_background_image_fit: "fit".to_string(),
+            terminal_palette: Some([[16, 9, 20], [77, 31, 79], [197, 122, 200]]),
+            terminal_background_intensity: Some(0.42),
+            terminal_font_family: Some("Menlo".to_string()),
+            terminal_layout: "display".to_string(),
         };
         prefs.save_to(&path).unwrap();
 
@@ -119,6 +149,10 @@ mod tests {
         assert!(loaded.show_explorer_button);
         assert!(loaded.terminal_background_image.is_none());
         assert!(loaded.terminal_background_image_fit.is_empty());
+        assert!(loaded.terminal_palette.is_none());
+        assert!(loaded.terminal_background_intensity.is_none());
+        assert!(loaded.terminal_font_family.is_none());
+        assert!(loaded.terminal_layout.is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

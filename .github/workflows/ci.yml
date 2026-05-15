@@ -49,6 +49,33 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --all-targets --all-features
 
+  linux-check:
+    # Non-blocking smoke check that the platform-independent library
+    # modules (editor, stacker, config, lsp, terminal model, error log,
+    # etc.) still cross-compile on Linux. The GUI binary depends on
+    # gpui's macos-blade backend and the macOS-only Metal effects stack,
+    # so we deliberately scope this to `cargo check --lib
+    # --no-default-features` — that skips every gpui-gated module
+    # without trying to link the workspace binary. Promote to a required
+    # check once it has been consistently green.
+    name: Linux Check (lib, no default features)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # `rfd` pulls in gtk-sys / glib-sys via its build scripts even
+      # when the calling code is feature-gated out, and `notify` uses
+      # inotify (already in the kernel headers shipped with ubuntu).
+      # Install GTK 3 dev headers so the rfd build scripts find
+      # pkg-config metadata; everything else is already present on
+      # `ubuntu-latest`.
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev
+      - run: cargo check --lib --no-default-features
+
   build-release:
     name: Build Release Bundle
     runs-on: macos-latest

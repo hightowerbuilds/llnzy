@@ -151,6 +151,27 @@ fn appearance_config_from_preferences(
     ) {
         config.effects.background_image_fit = fit;
     }
+    // Layer the rest of the persisted appearance state on top of the
+    // config-file defaults. Each field stays None / empty unless the
+    // user has explicitly chosen an override.
+    if let Some([c1, c2, c3]) = preferences.terminal_palette {
+        config.effects.background_color = Some(c1);
+        config.effects.background_color2 = Some(c2);
+        config.effects.background_color3 = Some(c3);
+    }
+    if let Some(intensity) = preferences.terminal_background_intensity {
+        config.effects.background_intensity = intensity.clamp(0.05, 1.0);
+    }
+    if let Some(family) = preferences.terminal_font_family.as_deref() {
+        if !family.is_empty() {
+            config.font_family = Some(family.to_string());
+        }
+    }
+    if let Some(layout) = crate::config::TerminalLayoutMode::parse(
+        preferences.terminal_layout.as_str(),
+    ) {
+        config.terminal_layout = layout;
+    }
     config
 }
 

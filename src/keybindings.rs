@@ -1,10 +1,12 @@
 use std::ops::{BitOr, BitOrAssign};
 
-/// Editor keybinding preset.
+/// Editor keybinding preset. Vim is intentionally absent — vim users run
+/// vim in the integrated terminal rather than re-implementing modal
+/// editing inside the GUI editor. Legacy `keybinding_preset = "vim"`
+/// values in `config.toml` parse as VsCode for backwards compatibility.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum KeybindingPreset {
     VsCode,
-    Vim,
     Emacs,
 }
 
@@ -12,28 +14,18 @@ impl KeybindingPreset {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::VsCode => "vscode",
-            Self::Vim => "vim",
             Self::Emacs => "emacs",
         }
     }
 
     pub fn parse(s: &str) -> Self {
         match s.to_lowercase().as_str() {
-            "vim" => Self::Vim,
             "emacs" => Self::Emacs,
             _ => Self::VsCode,
         }
     }
 
-    pub const ALL: [Self; 3] = [Self::VsCode, Self::Vim, Self::Emacs];
-}
-
-/// Vim mode state for the editor.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum VimMode {
-    Normal,
-    Insert,
-    Visual,
+    pub const ALL: [Self; 2] = [Self::VsCode, Self::Emacs];
 }
 
 /// Keyboard modifiers for parsed LLNZY keybindings.

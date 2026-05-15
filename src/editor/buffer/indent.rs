@@ -74,6 +74,54 @@ pub(super) fn leading_whitespace_len(line: &str) -> usize {
 }
 
 impl Buffer {
+    /// Apply resolved `.editorconfig` settings to this buffer. Replaces the
+    /// detected `indent_style` and stashes save-time policy fields. Settings
+    /// the editorconfig did not specify (`None`) leave existing values alone.
+    pub fn apply_editorconfig(&mut self, settings: &crate::editor::editorconfig::ResolvedSettings) {
+        use crate::editor::editorconfig::IndentStyle as EcIndent;
+
+        let style = settings.indent_style;
+        let width = settings.effective_indent_width();
+        match (style, width) {
+            (Some(EcIndent::Tab), _) => {
+                self.indent_style = IndentStyle::Tabs;
+            }
+            (Some(EcIndent::Space), Some(n)) => {
+                let n = n.clamp(1, 8) as u8;
+                self.indent_style = IndentStyle::Spaces(n);
+            }
+            (Some(EcIndent::Space), None) => {
+                // Keep whatever width was detected; just force spaces.
+                let width = match self.indent_style {
+                    IndentStyle::Spaces(n) => n,
+                    IndentStyle::Tabs => 4,
+                };
+                self.indent_style = IndentStyle::Spaces(width);
+            }
+            (None, Some(n)) => {
+                // No indent_style but a width was given — interpret as spaces.
+                let n = n.clamp(1, 8) as u8;
+                self.indent_style = IndentStyle::Spaces(n);
+            }
+            (None, None) => {}
+        }
+
+        if let Some(v) = settings.insert_final_newline {
+            self.insert_final_newline = Some(v);
+        }
+        if let Some(v) = settings.trim_trailing_whitespace {
+            self.trim_trailing_whitespace = Some(v);
+        }
+        if let Some(v) = settings.end_of_line {
+            self.eol_override = Some(v);
+        }
+        if let Some(v) = settings.charset {
+            self.charset_override = Some(v);
+        }
+    }
+}
+
+impl Buffer {
     /// Indent a range of lines by one level.
     pub fn indent_lines(&mut self, start_line: usize, end_line: usize) {
         let indent = self.indent_style.as_str().to_string();

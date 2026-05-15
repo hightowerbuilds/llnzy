@@ -42,6 +42,24 @@ pub struct Buffer {
     /// What kind of content this buffer holds. Drives tree-sitter, LSP,
     /// rendering, and font decisions outside the buffer itself.
     pub(super) kind: BufferKind,
+    /// Save-time policy sourced from `.editorconfig`. `None` means "no
+    /// opinion, leave the existing behavior alone".
+    ///
+    /// TODO: Wire these into the save path:
+    ///   - `insert_final_newline = Some(true)` should append `\n` if missing.
+    ///   - `insert_final_newline = Some(false)` should strip a trailing `\n`.
+    ///   - `trim_trailing_whitespace = Some(true)` should strip trailing
+    ///     `[ \t]+` from each line on save.
+    ///   - `eol_override` should override `line_ending` for the next save.
+    ///   - `charset_override` requires real encoding plumbing (the buffer
+    ///     currently assumes UTF-8 via `fs::read_to_string`); recorded but
+    ///     not applied.
+    ///
+    /// All four fields are intentionally inert today — see `Buffer::save`.
+    pub insert_final_newline: Option<bool>,
+    pub trim_trailing_whitespace: Option<bool>,
+    pub eol_override: Option<crate::editor::editorconfig::EndOfLine>,
+    pub charset_override: Option<crate::editor::editorconfig::Charset>,
 }
 
 pub(super) fn content_hash(rope: &Rope) -> u64 {
@@ -80,6 +98,10 @@ impl Buffer {
             last_edit: None,
             indent_style: IndentStyle::default(),
             kind,
+            insert_final_newline: None,
+            trim_trailing_whitespace: None,
+            eol_override: None,
+            charset_override: None,
         }
     }
 

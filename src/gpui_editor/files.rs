@@ -499,7 +499,12 @@ impl EditorPrototype {
     }
 
     fn reload_buffer_from_disk(&mut self, index: usize, path: &Path) -> Result<(), String> {
-        let buffer = Buffer::from_file(path)?;
+        let mut buffer = Buffer::from_file(path)?;
+        // Re-apply `.editorconfig` on reload so changes to the cascade
+        // (e.g. user added a `.editorconfig` while the file was open) take
+        // effect after an explicit reload.
+        let settings = crate::editor::editorconfig::resolve_for(path);
+        buffer.apply_editorconfig(&settings);
         let lang_id = self.editor.syntax.detect_language(path);
         self.editor.buffers[index] = buffer;
         if let Some(view) = self.editor.views.get_mut(index) {

@@ -1,5 +1,6 @@
 pub mod buffer;
 pub mod cursor;
+pub mod editorconfig;
 pub mod git_gutter;
 pub mod history;
 pub mod perf;
@@ -19,8 +20,6 @@ use buffer::Buffer;
 use cursor::EditorCursor;
 use syntax::{FoldRange, SyntaxEngine};
 use tree_sitter::{InputEdit, Point, Tree};
-
-use crate::keybindings::VimMode;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct BufferId(u64);
@@ -56,11 +55,6 @@ pub struct BufferView {
     pub folded_ranges: Vec<FoldRange>,
     pub pending_key_chord: Option<EditorKeyChord>,
     pub git_gutter: Option<git_gutter::GitGutter>,
-    /// Vim mode state. `Some(mode)` when Vim keybinding preset is active;
-    /// `None` when using VS Code or Emacs presets.
-    pub vim_mode: Option<VimMode>,
-    /// Pending Vim command buffer for multi-key sequences (e.g. "dd", "gg", "yy").
-    pub vim_pending: Option<char>,
     /// Markdown source/preview state for markdown buffers.
     pub markdown_mode: MarkdownViewMode,
 }
@@ -107,8 +101,6 @@ impl Default for BufferView {
             folded_ranges: Vec::new(),
             pending_key_chord: None,
             git_gutter: None,
-            vim_mode: None,
-            vim_pending: None,
             markdown_mode: MarkdownViewMode::Source,
         }
     }
@@ -134,8 +126,6 @@ impl Clone for BufferView {
             folded_ranges: self.folded_ranges.clone(),
             pending_key_chord: self.pending_key_chord,
             git_gutter: None, // Git gutter reloaded on open
-            vim_mode: self.vim_mode,
-            vim_pending: self.vim_pending,
             markdown_mode: self.markdown_mode,
         }
     }
@@ -220,7 +210,14 @@ impl EditorState {
             return Ok(self.buffer_ids[idx]);
         }
 
-        let buf = Buffer::from_file(&path)?;
+        let mut buf = Buffer::from_file(&path)?;
+        // `.editorconfig` cascade overrides the auto-detected indent style
+        // and records on-save policies. Applied once at open time; if the
+        // user edits an upstream `.editorconfig` while the file is open they
+        // need to reopen to pick up changes (consistent with the spec's
+        // intent — these are file-load settings).
+        let settings = editorconfig::resolve_for(&path);
+        buf.apply_editorconfig(&settings);
         let lang_id = self.syntax.detect_language(&path);
         let tree_dirty = lang_id.is_some();
         let git_gutter = git_gutter::GitGutter::load(&path);

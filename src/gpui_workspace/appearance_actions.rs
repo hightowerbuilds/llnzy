@@ -59,7 +59,9 @@ impl WorkspacePrototype {
         family: Option<String>,
         cx: &mut Context<Self>,
     ) {
-        self.appearance_config.font_family = family;
+        self.appearance_config.font_family = family.clone();
+        self.preferences.terminal_font_family = family;
+        self.preferences.save();
         self.apply_appearance_config(cx);
     }
 
@@ -69,6 +71,7 @@ impl WorkspacePrototype {
         cx: &mut Context<Self>,
     ) {
         self.appearance_config.terminal_layout = mode;
+        self.preferences.terminal_layout = mode.as_str().to_string();
         // If the active font doesn't belong to the new mode's font list,
         // clear it so the picker below isn't showing a selection from a
         // hidden row. Display fonts are explicit; anything else is treated
@@ -80,7 +83,9 @@ impl WorkspacePrototype {
         };
         if !belongs {
             self.appearance_config.font_family = None;
+            self.preferences.terminal_font_family = None;
         }
+        self.preferences.save();
         self.apply_appearance_config(cx);
     }
 
@@ -275,8 +280,10 @@ impl WorkspacePrototype {
     }
 
     pub(super) fn adjust_effect_intensity(&mut self, delta: f32, cx: &mut Context<Self>) {
-        self.appearance_config.effects.background_intensity =
-            (self.appearance_config.effects.background_intensity + delta).clamp(0.05, 1.0);
+        let next = (self.appearance_config.effects.background_intensity + delta).clamp(0.05, 1.0);
+        self.appearance_config.effects.background_intensity = next;
+        self.preferences.terminal_background_intensity = Some(next);
+        self.preferences.save();
         self.apply_appearance_config(cx);
     }
 
@@ -290,6 +297,8 @@ impl WorkspacePrototype {
         self.appearance_config.effects.background_color = Some(c1);
         self.appearance_config.effects.background_color2 = Some(c2);
         self.appearance_config.effects.background_color3 = Some(c3);
+        self.preferences.terminal_palette = Some([c1, c2, c3]);
+        self.preferences.save();
         self.apply_appearance_config(cx);
     }
 

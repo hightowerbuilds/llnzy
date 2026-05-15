@@ -1,12 +1,16 @@
 # llnzy
 
-A native GPUI developer workspace built from scratch in Rust.
+A native GPU terminal emulator in Rust, with a coding workbench built around it.
 
 ![llnzy](llnzy.jpg)
 
 ## What it does
 
-llnzy is a single native GPUI app that combines a terminal, a code editor, a project sidebar, a drawing canvas, an appearances surface, and a prompt manager. It runs your shell, edits your code with tree-sitter and LSP support when language servers are installed, opens project folders, and lets you tune the workspace presentation.
+llnzy is a terminal emulator first. The terminal is the headline surface: a GPU-rendered ANSI/VT emulator running your shell, with the rest of the app organized to support the work you do around it.
+
+The other surfaces orbit the terminal. The code editor handles source files adjacent to the shell session. The project sidebar scopes the workspace to whatever directory the terminal is operating on. Stacker manages prompts you hand off to agents and CLIs running inside the terminal. Appearances, Tabs, Settings, and the Error Log exist to keep that loop tunable and observable.
+
+Vim mode was removed on purpose: if you want vim, run it in the terminal.
 
 ## Status
 
@@ -41,21 +45,21 @@ Requires Rust 1.75+. macOS is the active release target.
 
 ## Features
 
-**Terminal** -- ANSI/VT emulation via alacritty_terminal and portable-pty. Supports true color, scrollback, selection/copy/paste, bracketed paste, app cursor mode, title/CWD events, session restart, shell exit reporting, background images, and cursor effects.
+**Terminal** -- The primary surface. ANSI/VT emulation via alacritty_terminal and portable-pty. Supports true color, scrollback, selection/copy/paste, bracketed paste, app cursor mode, title/CWD events, session restart, shell exit reporting, background images, and cursor effects.
 
-**Code Editor** -- Rope-backed editing with undo/redo, tree-sitter syntax highlighting for Rust, JavaScript, TypeScript, TSX, Python, Go, C, JSON, HTML, CSS, and Bash. LSP integration covers diagnostics, hover, completions, go-to-definition, find references, signature help, rename, code actions, formatting, inlay hints, code lens, document symbols, and workspace symbols when the matching language server is available on PATH. Find, go-to-line, selection movement, line movement, duplicate/delete line, comment toggle, save, recently closed files, and git gutter indicators are included.
+**Code Editor** -- Edits source files alongside the terminal session. Rope-backed editing with undo/redo, tree-sitter syntax highlighting for Rust, JavaScript, TypeScript, TSX, Python, Go, C, JSON, HTML, CSS, and Bash. LSP integration covers diagnostics, hover, completions, go-to-definition, find references, signature help, rename, code actions, formatting, inlay hints, code lens, document symbols, and workspace symbols when the matching language server is available on PATH. Find, go-to-line, selection movement, line movement, duplicate/delete line, comment toggle, save, recently closed files, and git gutter indicators are included.
 
-**Project Sidebar** -- Open a project folder, browse files, open files in the GPUI editor, drag files/folders into folders, resize or hide the sidebar, and reopen recent projects.
+**Project Sidebar** -- Scopes the workspace to the directory the terminal is operating on. Open a project folder, browse files, open files in the GPUI editor, drag files/folders into folders, resize or hide the sidebar, and reopen recent projects.
 
-**Sketch** -- Drawing canvas with marker, rectangle, symbol, image, and text tools. Supports selection, moving/resizing, undo/redo, save, export, and saved appearance settings.
-
-**Stacker** -- Prompt queue manager. Save, edit, delete, categorize, search, queue, and copy prompts. Optional prompt bar above the footer for quick access. Agents and scripts can manage saved prompts with `llnzy stacker add/save/list/edit/delete` while the app owns the prompt store. CLI reference: `docs/stacker-cli.md`.
+**Stacker** -- Prompt queue for work you hand off to agents and CLIs running in the terminal. Save, edit, delete, categorize, search, queue, and copy prompts. Optional prompt bar above the footer for quick access. Agents and scripts can manage saved prompts with `llnzy stacker add/save/list/edit/delete` while the app owns the prompt store. CLI reference: `docs/stacker-cli.md`.
 
 **Appearances** -- Apply built-in themes, tune terminal/editor/sketch colors, import terminal background images, and adjust cursor presentation.
 
 **Tabs** -- Home, Stacker, Terminal, Sketch, Editor, Appearances, and Settings surfaces can be opened from the workspace menus. Tabs can be joined, separated, swapped, renamed, and closed.
 
 **Themes** -- Built-in presets plus persistent background image management through the GPUI appearances workflow.
+
+**Sketch** -- A side surface. Drawing canvas with marker, rectangle, symbol, image, and text tools. Supports selection, moving/resizing, undo/redo, save, export, and saved appearance settings. Not part of the core coding loop; it exists if you want it.
 
 ## Keyboard Shortcuts
 
@@ -99,7 +103,7 @@ crt_enabled = true
 tab_size = 4
 insert_spaces = true
 word_wrap = false
-keybinding_preset = "vscode"  # or "vim" or "emacs"
+keybinding_preset = "vscode"  # or "emacs"
 ```
 
 ## Tech
@@ -109,7 +113,7 @@ keybinding_preset = "vscode"  # or "vim" or "emacs"
 | App UI | GPUI 0.2.2 |
 | Terminal | alacritty_terminal 0.26 |
 | PTY | portable-pty 0.8 |
-| Syntax | tree-sitter 0.26 (11 grammars) |
+| Syntax | tree-sitter 0.26 (10 grammars) |
 | LSP | lsp-types 0.97 + tokio |
 | File watching | notify 7 |
 | Config | serde + toml |

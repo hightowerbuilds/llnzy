@@ -60,6 +60,10 @@ impl Buffer {
             last_edit: None,
             indent_style,
             kind: BufferKind::Code,
+            insert_final_newline: None,
+            trim_trailing_whitespace: None,
+            eol_override: None,
+            charset_override: None,
         })
     }
 

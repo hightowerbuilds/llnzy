@@ -200,7 +200,7 @@ Configure code editor behavior. Language-specific overrides use the tree-sitter 
 | `visible_whitespace` | boolean | `false` | Render visible markers for spaces and tabs. |
 | `font_size` | float | terminal font minus `2.0` | Code editor font size. |
 | `sidebar_font_size` | float | `14.0` | Font size for the sidebar file tree text. Clamped to 8.0-24.0. |
-| `keybinding_preset` | string | `"vscode"` | Editor keybinding preset: `"vscode"`, `"vim"`, or `"emacs"`. |
+| `keybinding_preset` | string | `"vscode"` | Editor keybinding preset: `"vscode"` or `"emacs"`. Legacy `"vim"` values parse as VsCode; run vim in the integrated terminal instead. |
 
 ```toml
 [editor]

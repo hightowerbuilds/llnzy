@@ -28,6 +28,23 @@ pub enum TerminalLayoutMode {
     Display,
 }
 
+impl TerminalLayoutMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Monospace => "monospace",
+            Self::Display => "display",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "monospace" | "mono" => Some(Self::Monospace),
+            "display" | "proportional" => Some(Self::Display),
+            _ => None,
+        }
+    }
+}
+
 /// The 16 ANSI colors plus fg/bg/cursor/selection.
 #[derive(Clone, Debug)]
 pub struct ColorScheme {
