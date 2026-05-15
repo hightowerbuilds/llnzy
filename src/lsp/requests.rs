@@ -66,7 +66,8 @@ impl LspManager {
         let transport = client.transport().clone();
         let uri = client.doc_uri(path)?;
         let (tx, rx) = oneshot::channel();
-        self.runtime.spawn(async move {
+        let runtime = self.runtime.as_ref()?;
+        runtime.spawn(async move {
             let result = f(transport, uri).await;
             let _ = tx.send(result);
         });
@@ -88,7 +89,8 @@ impl LspManager {
         }
         let transport = client.transport().clone();
         let (tx, rx) = oneshot::channel();
-        self.runtime.spawn(async move {
+        let runtime = self.runtime.as_ref()?;
+        runtime.spawn(async move {
             let result = f(transport).await;
             let _ = tx.send(result);
         });

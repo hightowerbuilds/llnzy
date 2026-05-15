@@ -19,7 +19,8 @@ use super::types::FileDiagnostic;
 
 /// Manages all LSP clients and provides a synchronous interface for the editor.
 pub struct LspManager {
-    pub(super) runtime: Runtime,
+    pub(super) runtime: Option<Runtime>,
+    runtime_unavailable_reason: Option<String>,
     pub(super) clients: FxHashMap<&'static str, LspClient>,
     pub(super) starting: FxHashMap<&'static str, oneshot::Receiver<Result<LspClient, String>>>,
     pub(super) health_checks: FxHashMap<&'static str, oneshot::Receiver<bool>>,
@@ -54,9 +55,25 @@ impl LspManager {
     }
 
     pub fn new_with_notifier(notifier: LspNotifier) -> Self {
-        let runtime = Runtime::new().expect("failed to create tokio runtime");
+        let (runtime, runtime_unavailable_reason) = match Runtime::new() {
+            Ok(runtime) => (Some(runtime), None),
+            Err(error) => {
+                let reason = format!("failed to create tokio runtime: {error}");
+                log::warn!("LSP unavailable: {reason}");
+                (None, Some(reason))
+            }
+        };
+        Self::from_runtime(notifier, runtime, runtime_unavailable_reason)
+    }
+
+    fn from_runtime(
+        notifier: LspNotifier,
+        runtime: Option<Runtime>,
+        runtime_unavailable_reason: Option<String>,
+    ) -> Self {
         LspManager {
             runtime,
+            runtime_unavailable_reason,
             clients: FxHashMap::default(),
             starting: FxHashMap::default(),
             health_checks: FxHashMap::default(),
@@ -70,6 +87,11 @@ impl LspManager {
         }
     }
 
+    #[cfg(test)]
+    fn unavailable_for_test(reason: impl Into<String>) -> Self {
+        Self::from_runtime(LspNotifier::noop(), None, Some(reason.into()))
+    }
+
     pub fn set_root(&mut self, path: PathBuf) {
         if add_workspace_root(&mut self.workspace_roots, path) {
             self.sync_workspace_folders_with_clients();
@@ -78,6 +100,12 @@ impl LspManager {
 
     /// Ensure a language server is running for the given language.
     pub fn ensure_server(&mut self, lang_id: &'static str) -> LspEnsureStatus {
+        if let Some(reason) = self.runtime_unavailable_reason.clone() {
+            self.pending_open_docs.remove(lang_id);
+            self.unavailable.insert(lang_id, reason);
+            return LspEnsureStatus::Unavailable;
+        }
+
         self.poll_starting_servers();
 
         if let Some(client) = self.clients.get(lang_id) {
@@ -120,12 +148,17 @@ impl LspManager {
         };
 
         log::info!("Starting LSP {} for {}", config.command, lang_id);
+        let Some(runtime) = self.runtime.as_ref() else {
+            self.unavailable
+                .insert(lang_id, "LSP runtime unavailable".to_string());
+            return LspEnsureStatus::Unavailable;
+        };
         let workspace_roots = self.workspace_roots.clone();
         let notifier = self.notifier.clone();
         let completion_notifier = self.notifier.clone();
         let (tx, rx) = oneshot::channel();
 
-        self.runtime.spawn(async move {
+        runtime.spawn(async move {
             let result = async {
                 let mut client = LspClient::new_with_notifier(
                     lang_id,
@@ -376,7 +409,16 @@ impl LspManager {
         notification: LspNotification,
         label: &'static str,
     ) {
-        self.runtime.spawn(async move {
+        let Some(runtime) = self.runtime.as_ref() else {
+            let reason = self
+                .runtime_unavailable_reason
+                .as_deref()
+                .unwrap_or("LSP runtime unavailable");
+            log::warn!("{label} skipped: {reason}");
+            return;
+        };
+
+        runtime.spawn(async move {
             if let Err(e) = transport
                 .notify(notification.method, notification.params)
                 .await
@@ -459,7 +501,11 @@ impl LspManager {
         let text = text.to_string();
         // Note: version tracking still happens synchronously in did_change().
         // This just sends the notification without blocking.
-        self.runtime.spawn(async move {
+        let Some(runtime) = self.runtime.as_ref() else {
+            return;
+        };
+
+        runtime.spawn(async move {
             let params = lsp_types::DidChangeTextDocumentParams {
                 text_document: lsp_types::VersionedTextDocumentIdentifier { uri, version: 0 },
                 content_changes: vec![lsp_types::TextDocumentContentChangeEvent {
@@ -496,7 +542,10 @@ impl LspManager {
             let transport = client.transport().clone();
             let notifier = self.notifier.clone();
             let (tx, rx) = oneshot::channel();
-            self.runtime.spawn(async move {
+            let Some(runtime) = self.runtime.as_ref() else {
+                return;
+            };
+            runtime.spawn(async move {
                 let is_dead = transport
                     .notify("$/alive", serde_json::json!({}))
                     .await
@@ -558,6 +607,14 @@ impl LspManager {
                 unavailable_reason: Some(reason.clone()),
             };
         }
+        if let Some(reason) = &self.runtime_unavailable_reason {
+            return LspLifecycleStatus {
+                state: LspLifecycleState::Unavailable,
+                server_name: None,
+                pending_open_docs,
+                unavailable_reason: Some(reason.clone()),
+            };
+        }
         match self.clients.get(lang_id) {
             Some(client) => match client.state {
                 client::ClientState::Starting => LspLifecycleStatus {
@@ -601,14 +658,21 @@ impl LspManager {
     }
 
     pub fn unavailable_reason(&self, lang_id: &str) -> Option<&str> {
-        self.unavailable.get(lang_id).map(String::as_str)
+        self.unavailable
+            .get(lang_id)
+            .map(String::as_str)
+            .or(self.runtime_unavailable_reason.as_deref())
     }
 
     pub fn shutdown_all(&mut self) {
+        let Some(runtime) = self.runtime.as_ref() else {
+            self.clients.clear();
+            return;
+        };
         let keys: Vec<&'static str> = self.clients.keys().copied().collect();
         for lang_id in keys {
             if let Some(mut client) = self.clients.remove(lang_id) {
-                self.runtime.block_on(async {
+                runtime.block_on(async {
                     let _ = client.shutdown().await;
                 });
             }
@@ -811,6 +875,21 @@ mod tests {
         assert_eq!(
             manager.lifecycle_status("rust").state,
             LspLifecycleState::Idle
+        );
+    }
+
+    #[test]
+    fn unavailable_runtime_reports_lsp_unavailable_without_panicking() {
+        let mut manager = LspManager::unavailable_for_test("runtime init failed");
+
+        assert_eq!(manager.ensure_server("rust"), LspEnsureStatus::Unavailable);
+        assert_eq!(
+            manager.unavailable_reason("rust"),
+            Some("runtime init failed")
+        );
+        assert_eq!(
+            manager.lifecycle_status("rust").state,
+            LspLifecycleState::Unavailable
         );
     }
 }
