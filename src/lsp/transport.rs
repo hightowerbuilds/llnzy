@@ -75,8 +75,18 @@ impl Transport {
             .kill_on_drop(true)
             .spawn()?;
 
-        let stdin = child.stdin.take().expect("stdin should be piped");
-        let stdout = child.stdout.take().expect("stdout should be piped");
+        let stdin = child.stdin.take().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "language server stdin was not piped",
+            )
+        })?;
+        let stdout = child.stdout.take().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "language server stdout was not piped",
+            )
+        })?;
         let stderr = child.stderr.take();
 
         let writer = Arc::new(Mutex::new(stdin));
