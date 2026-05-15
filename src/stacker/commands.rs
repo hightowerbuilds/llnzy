@@ -7,9 +7,12 @@ use super::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StackerCommandId {
     Bold,
+    Italic,
     UnorderedList,
     OrderedList,
     Heading1,
+    Heading2,
+    Heading3,
     Blockquote,
     InlineCode,
     CodeBlock,
@@ -31,6 +34,7 @@ pub struct StackerCommandDescriptor {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StackerEditorCommand {
     Bold,
+    Italic,
     UnorderedList,
     OrderedList,
     Heading(u8),
@@ -53,6 +57,13 @@ const fn stacker_command_descriptor_value(id: StackerCommandId) -> StackerComman
             keybinding: "Cmd+B",
             tooltip: "Bold selected text",
         },
+        StackerCommandId::Italic => StackerCommandDescriptor {
+            id,
+            name: "Stacker: Italic",
+            toolbar_label: "I",
+            keybinding: "Cmd+I",
+            tooltip: "Italicize selected text",
+        },
         StackerCommandId::UnorderedList => StackerCommandDescriptor {
             id,
             name: "Stacker: Unordered List",
@@ -69,10 +80,24 @@ const fn stacker_command_descriptor_value(id: StackerCommandId) -> StackerComman
         },
         StackerCommandId::Heading1 => StackerCommandDescriptor {
             id,
-            name: "Stacker: Heading",
+            name: "Stacker: Heading 1",
             toolbar_label: "H1",
             keybinding: "",
-            tooltip: "Make heading",
+            tooltip: "Make H1 heading",
+        },
+        StackerCommandId::Heading2 => StackerCommandDescriptor {
+            id,
+            name: "Stacker: Heading 2",
+            toolbar_label: "H2",
+            keybinding: "",
+            tooltip: "Make H2 heading",
+        },
+        StackerCommandId::Heading3 => StackerCommandDescriptor {
+            id,
+            name: "Stacker: Heading 3",
+            toolbar_label: "H3",
+            keybinding: "",
+            tooltip: "Make H3 heading",
         },
         StackerCommandId::Blockquote => StackerCommandDescriptor {
             id,
@@ -128,12 +153,18 @@ const fn stacker_command_descriptor_value(id: StackerCommandId) -> StackerComman
 
 const STACKER_COMMAND_BOLD: StackerCommandDescriptor =
     stacker_command_descriptor_value(StackerCommandId::Bold);
+const STACKER_COMMAND_ITALIC: StackerCommandDescriptor =
+    stacker_command_descriptor_value(StackerCommandId::Italic);
 const STACKER_COMMAND_UNORDERED_LIST: StackerCommandDescriptor =
     stacker_command_descriptor_value(StackerCommandId::UnorderedList);
 const STACKER_COMMAND_ORDERED_LIST: StackerCommandDescriptor =
     stacker_command_descriptor_value(StackerCommandId::OrderedList);
 const STACKER_COMMAND_HEADING1: StackerCommandDescriptor =
     stacker_command_descriptor_value(StackerCommandId::Heading1);
+const STACKER_COMMAND_HEADING2: StackerCommandDescriptor =
+    stacker_command_descriptor_value(StackerCommandId::Heading2);
+const STACKER_COMMAND_HEADING3: StackerCommandDescriptor =
+    stacker_command_descriptor_value(StackerCommandId::Heading3);
 const STACKER_COMMAND_BLOCKQUOTE: StackerCommandDescriptor =
     stacker_command_descriptor_value(StackerCommandId::Blockquote);
 const STACKER_COMMAND_INLINE_CODE: StackerCommandDescriptor =
@@ -151,9 +182,12 @@ const STACKER_COMMAND_REDO: StackerCommandDescriptor =
 
 pub const STACKER_COMMANDS: &[StackerCommandDescriptor] = &[
     STACKER_COMMAND_BOLD,
+    STACKER_COMMAND_ITALIC,
     STACKER_COMMAND_UNORDERED_LIST,
     STACKER_COMMAND_ORDERED_LIST,
     STACKER_COMMAND_HEADING1,
+    STACKER_COMMAND_HEADING2,
+    STACKER_COMMAND_HEADING3,
     STACKER_COMMAND_BLOCKQUOTE,
     STACKER_COMMAND_INLINE_CODE,
     STACKER_COMMAND_CODE_BLOCK,
@@ -170,9 +204,12 @@ pub fn stacker_command_registry() -> &'static [StackerCommandDescriptor] {
 pub fn stacker_command_descriptor(id: StackerCommandId) -> &'static StackerCommandDescriptor {
     match id {
         StackerCommandId::Bold => &STACKER_COMMAND_BOLD,
+        StackerCommandId::Italic => &STACKER_COMMAND_ITALIC,
         StackerCommandId::UnorderedList => &STACKER_COMMAND_UNORDERED_LIST,
         StackerCommandId::OrderedList => &STACKER_COMMAND_ORDERED_LIST,
         StackerCommandId::Heading1 => &STACKER_COMMAND_HEADING1,
+        StackerCommandId::Heading2 => &STACKER_COMMAND_HEADING2,
+        StackerCommandId::Heading3 => &STACKER_COMMAND_HEADING3,
         StackerCommandId::Blockquote => &STACKER_COMMAND_BLOCKQUOTE,
         StackerCommandId::InlineCode => &STACKER_COMMAND_INLINE_CODE,
         StackerCommandId::CodeBlock => &STACKER_COMMAND_CODE_BLOCK,
@@ -186,9 +223,12 @@ pub fn stacker_command_descriptor(id: StackerCommandId) -> &'static StackerComma
 pub fn stacker_editor_command(id: StackerCommandId) -> StackerEditorCommand {
     match id {
         StackerCommandId::Bold => StackerEditorCommand::Bold,
+        StackerCommandId::Italic => StackerEditorCommand::Italic,
         StackerCommandId::UnorderedList => StackerEditorCommand::UnorderedList,
         StackerCommandId::OrderedList => StackerEditorCommand::OrderedList,
         StackerCommandId::Heading1 => StackerEditorCommand::Heading(1),
+        StackerCommandId::Heading2 => StackerEditorCommand::Heading(2),
+        StackerCommandId::Heading3 => StackerEditorCommand::Heading(3),
         StackerCommandId::Blockquote => StackerEditorCommand::Blockquote,
         StackerCommandId::InlineCode => StackerEditorCommand::InlineCode,
         StackerCommandId::CodeBlock => StackerEditorCommand::CodeBlock,
@@ -219,6 +259,7 @@ pub fn execute_stacker_command_at(
 ) -> StackerCommandOutcome {
     match command {
         StackerEditorCommand::Bold => wrap_selection(editor, selection, "**", "**"),
+        StackerEditorCommand::Italic => wrap_selection(editor, selection, "*", "*"),
         StackerEditorCommand::InlineCode => wrap_selection(editor, selection, "`", "`"),
         StackerEditorCommand::CodeBlock => wrap_selection(editor, selection, "```\n", "\n```"),
         StackerEditorCommand::UnorderedList => {
@@ -536,9 +577,12 @@ mod tests {
     fn registry_maps_ids_to_editor_commands() {
         let ids = [
             StackerCommandId::Bold,
+            StackerCommandId::Italic,
             StackerCommandId::UnorderedList,
             StackerCommandId::OrderedList,
             StackerCommandId::Heading1,
+            StackerCommandId::Heading2,
+            StackerCommandId::Heading3,
             StackerCommandId::Blockquote,
             StackerCommandId::InlineCode,
             StackerCommandId::CodeBlock,
@@ -556,6 +600,14 @@ mod tests {
         assert_eq!(
             stacker_editor_command(StackerCommandId::Heading1),
             StackerEditorCommand::Heading(1)
+        );
+        assert_eq!(
+            stacker_editor_command(StackerCommandId::Heading2),
+            StackerEditorCommand::Heading(2)
+        );
+        assert_eq!(
+            stacker_editor_command(StackerCommandId::Heading3),
+            StackerEditorCommand::Heading(3)
         );
     }
 }

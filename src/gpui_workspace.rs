@@ -263,7 +263,19 @@ pub fn run_workspace_prototype() {
             cx.quit();
             return;
         }
-        cx.on_action(|_: &Quit, cx| cx.quit());
+        // Capture the window handle (Copy) so the Quit action can reach
+        // the workspace entity and persist pending Stacker drafts before
+        // the app tears down. Save errors are logged but never block the
+        // quit — the user pressed Cmd+Q and wants to leave.
+        let window_for_quit = window;
+        cx.on_action(move |_: &Quit, cx| {
+            if let Err(error) = window_for_quit.update(cx, |view, _window, cx| {
+                view.save_drafts_before_quit(cx);
+            }) {
+                log::error!("failed to save drafts before quit: {error:?}");
+            }
+            cx.quit();
+        });
         cx.activate(true);
     });
 }
@@ -458,6 +470,14 @@ impl WorkspacePrototype {
     pub(super) fn toggle_error_log_expanded(&mut self, cx: &mut Context<Self>) {
         self.error_log_expanded = !self.error_log_expanded;
         cx.notify();
+    }
+
+    /// Best-effort save of any in-flight Stacker draft. Invoked from the
+    /// app-level Quit handler before `cx.quit()` so closing the app
+    /// (Cmd+Q, menu Quit, or window close) doesn't drop pending work.
+    pub(crate) fn save_drafts_before_quit(&mut self, cx: &mut Context<Self>) {
+        self.stacker
+            .update(cx, |stacker, cx| stacker.save_active_prompt(cx));
     }
 
     /// Copy the full diagnostics report (system context + every captured
@@ -1209,6 +1229,15 @@ impl WorkspacePrototype {
             {
                 self.sidebar_explorer.selected_path = None;
             }
+        }
+        // Persist the Stacker draft when the user closes its tab. The
+        // Stacker entity itself stays alive across tab open/close cycles
+        // (it's a workspace-level singleton), but the user's mental model
+        // is "closing the tab = closing the work" — so we save here so
+        // nothing is lost between sessions.
+        if self.tabs[index].surface == WorkspaceSurface::Stacker {
+            self.stacker
+                .update(cx, |stacker, cx| stacker.save_active_prompt(cx));
         }
         if self.tabs[index].surface == WorkspaceSurface::Terminal {
             self.terminals.remove(&tab_id.0);

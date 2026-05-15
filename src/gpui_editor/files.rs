@@ -60,6 +60,14 @@ impl EditorPrototype {
                 self.open_buffer_with_lsp(buffer_id);
                 self.load_error = None;
                 self.status_message = Some(format!("Opened {}", path.display()));
+                // Markdown files default to the rendered Preview view so the
+                // user sees the formatted blog-style output first; switching
+                // to Source for editing is one click on the inline toggle.
+                if super::is_markdown_path(&path) {
+                    if let Some((_buffer, view)) = self.editor.active_buf_view() {
+                        view.markdown_mode = crate::editor::MarkdownViewMode::Preview;
+                    }
+                }
                 true
             }
             Err(err) => {

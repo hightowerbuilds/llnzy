@@ -1,5 +1,6 @@
 use std::{
     fs,
+    panic::{catch_unwind, AssertUnwindSafe},
     path::{Path, PathBuf},
 };
 
@@ -707,25 +708,23 @@ impl WorkspacePrototype {
     }
 
     pub(super) fn pick_open_project(&mut self, cx: &mut Context<Self>) {
-        cx.spawn(
-            |workspace: gpui::WeakEntity<WorkspacePrototype>, cx: &mut gpui::AsyncApp| {
-                let mut cx = cx.clone();
-                async move {
-                    let Some(folder) = rfd::AsyncFileDialog::new()
-                        .set_title("Open Project Folder")
-                        .pick_folder()
-                        .await
-                    else {
-                        return;
-                    };
-                    let path = folder.path().to_path_buf();
-                    let _ = workspace.update(&mut cx, |workspace, cx| {
-                        workspace.open_project(path, cx);
-                    });
-                }
-            },
-        )
-        .detach();
+        let selection = catch_unwind(AssertUnwindSafe(|| {
+            rfd::FileDialog::new()
+                .set_title("Open Project Folder")
+                .pick_folder()
+        }));
+
+        match selection {
+            Ok(Some(path)) => self.open_project(path, cx),
+            Ok(None) => {}
+            Err(_) => {
+                let message = "Open Project dialog failed. Choose a recent project instead.";
+                crate::error_log::global().error(message);
+                self.sidebar_explorer.status = Some(message.to_string());
+                self.recent_projects_open = true;
+                cx.notify();
+            }
+        }
     }
 
     pub(super) fn open_project(&mut self, path: PathBuf, cx: &mut Context<Self>) {

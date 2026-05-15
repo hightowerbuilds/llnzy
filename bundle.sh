@@ -64,10 +64,21 @@ else
 fi
 
 APP="target/llnzy.app"
-CONTENTS="$APP/Contents"
+APP_STAGING="target/llnzy.app.staging"
+APP_PREVIOUS="target/llnzy.app.previous"
+APP_SWAP_IN_PROGRESS=0
+CONTENTS="$APP_STAGING/Contents"
 RESOURCES="$CONTENTS/Resources"
 
-rm -rf "$APP"
+cleanup_bundle_build() {
+    rm -rf "$APP_STAGING"
+    if [ "$APP_SWAP_IN_PROGRESS" -eq 1 ] && [ -d "$APP_PREVIOUS" ] && [ ! -d "$APP" ]; then
+        mv "$APP_PREVIOUS" "$APP"
+    fi
+}
+trap cleanup_bundle_build EXIT
+
+rm -rf "$APP_STAGING" "$APP_PREVIOUS"
 mkdir -p "$CONTENTS/MacOS"
 mkdir -p "$RESOURCES"
 
@@ -88,8 +99,22 @@ chmod 0755 "$RESOURCES/install-cli.sh" "$RESOURCES/uninstall-cli.sh"
 /usr/libexec/PlistBuddy -c "Set :LSMinimumSystemVersion $MACOS_MIN_VERSION" "$CONTENTS/Info.plist"
 
 if [ -n "$CODESIGN_IDENTITY" ]; then
-    codesign --force --deep --sign "$CODESIGN_IDENTITY" "$APP"
+    codesign --force --deep --sign "$CODESIGN_IDENTITY" "$APP_STAGING"
 fi
+
+if [ ! -x "$CONTENTS/MacOS/$EXECUTABLE_NAME" ]; then
+    echo "Bundle executable missing: $CONTENTS/MacOS/$EXECUTABLE_NAME" >&2
+    exit 1
+fi
+
+APP_SWAP_IN_PROGRESS=1
+if [ -d "$APP" ]; then
+    mv "$APP" "$APP_PREVIOUS"
+fi
+mv "$APP_STAGING" "$APP"
+APP_SWAP_IN_PROGRESS=0
+rm -rf "$APP_PREVIOUS"
+trap - EXIT
 
 echo "Built $APP ($PROFILE)"
 echo "Run with: open $APP"

@@ -145,7 +145,7 @@ impl Default for EditorConfig {
         Self {
             tab_size: 4,
             insert_spaces: true,
-            rulers: vec![80, 120],
+            rulers: Vec::new(),
             word_wrap: false,
             visible_whitespace: false,
             font_size: None,

@@ -165,6 +165,22 @@ mod tests {
         }
     }
 
+    #[test]
+    fn bundle_script_publishes_only_after_executable_exists() {
+        assert!(
+            BUNDLE_SCRIPT.contains("APP_STAGING=\"target/llnzy.app.staging\""),
+            "bundle.sh should build into a staging bundle before publishing target/llnzy.app"
+        );
+        assert!(
+            BUNDLE_SCRIPT.contains("if [ ! -x \"$CONTENTS/MacOS/$EXECUTABLE_NAME\" ]; then"),
+            "bundle.sh should verify the app executable before publishing"
+        );
+        assert!(
+            BUNDLE_SCRIPT.contains("mv \"$APP_STAGING\" \"$APP\""),
+            "bundle.sh should publish the completed staging bundle"
+        );
+    }
+
     fn assert_plist_string(key: &str, expected: &str) {
         let expected_entry = format!("    <key>{key}</key>\n    <string>{expected}</string>");
         assert!(

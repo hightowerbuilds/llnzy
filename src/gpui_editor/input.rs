@@ -202,11 +202,12 @@ impl EditorPrototype {
         if let Some(position) = self.position_for_point(point) {
             if event.click_count >= 3 {
                 let visible_cols = self.visible_col_limit();
+                let visible_lines = self.visible_line_limit();
                 if let Some((buffer, view)) = self.active_buffer_and_view() {
                     view.cursor.pos = position;
                     view.cursor.select_line(buffer);
                     view.cursor.desired_col = None;
-                    reveal_cursor(view, buffer.line_count(), visible_cols);
+                    reveal_cursor(view, buffer.line_count(), visible_cols, visible_lines);
                 }
                 self.is_selecting = false;
                 self.wake_cursor_blink();
@@ -216,11 +217,12 @@ impl EditorPrototype {
 
             if event.click_count == 2 {
                 let visible_cols = self.visible_col_limit();
+                let visible_lines = self.visible_line_limit();
                 if let Some((buffer, view)) = self.active_buffer_and_view() {
                     view.cursor.pos = position;
                     view.cursor.select_word(buffer);
                     view.cursor.desired_col = None;
-                    reveal_cursor(view, buffer.line_count(), visible_cols);
+                    reveal_cursor(view, buffer.line_count(), visible_cols, visible_lines);
                 }
                 self.is_selecting = false;
                 self.wake_cursor_blink();
@@ -284,12 +286,13 @@ impl EditorPrototype {
 
         if let Some((position, scrolled)) = self.drag_position_for_point(point) {
             let visible_cols = self.visible_col_limit();
+            let visible_lines = self.visible_line_limit();
             let changed = if let Some((buffer, view)) = self.active_buffer_and_view() {
                 let changed = view.cursor.pos != position || scrolled;
                 view.cursor.start_selection();
                 view.cursor.pos = position;
                 view.cursor.desired_col = None;
-                reveal_cursor(view, buffer.line_count(), visible_cols);
+                reveal_cursor(view, buffer.line_count(), visible_cols, visible_lines);
                 changed
             } else {
                 false
@@ -353,7 +356,7 @@ impl EditorPrototype {
         }
 
         let row = editor_row_for_local_y(local_point.y, &appearance)
-            .min(VISIBLE_LINE_LIMIT.saturating_sub(1));
+            .min(self.visible_line_limit().saturating_sub(1));
         let line = (view.scroll_line + row).min(buffer.line_count().saturating_sub(1));
         let col = if local_point.x <= appearance.line_number_width {
             0
@@ -371,15 +374,17 @@ impl EditorPrototype {
         if delta == 0 {
             return false;
         }
+        let visible_lines = self.visible_line_limit();
         if let Some((buffer, view)) = self.active_buffer_and_view() {
             let old_scroll_line = view.scroll_line;
-            scroll_view_by_lines(view, buffer.line_count(), delta);
+            scroll_view_by_lines(view, buffer.line_count(), visible_lines, delta);
             view.scroll_line != old_scroll_line
         } else {
             let old_scroll_line = self.sample_scroll_line;
             self.sample_scroll_line = scroll_line_by_delta(
                 self.sample_scroll_line,
                 self.sample_text.lines().count().max(1),
+                visible_lines,
                 delta,
             );
             self.sample_scroll_line != old_scroll_line
@@ -617,14 +622,28 @@ impl Element for EditorInputElement {
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
-        let layout = {
+        let (appearance, layout) = {
             let input = self.input.read(cx);
             let appearance = input.active_appearance();
-            build_measured_layout(&input.editor, &appearance, window)
+            let layout = build_measured_layout(&input.editor, &appearance, bounds, window);
+            (appearance, layout)
         };
+        let next_viewport = (
+            visible_col_limit_for_bounds(bounds, &appearance),
+            visible_line_limit_for_bounds(bounds, &appearance),
+        );
         self.input.update(cx, |input, _cx| {
+            let previous_viewport = input.last_text_bounds.map(|previous_bounds| {
+                (
+                    visible_col_limit_for_bounds(previous_bounds, &appearance),
+                    visible_line_limit_for_bounds(previous_bounds, &appearance),
+                )
+            });
             input.last_text_bounds = Some(bounds);
             input.last_text_layout = layout;
+            if previous_viewport != Some(next_viewport) {
+                _cx.notify();
+            }
         });
     }
 
@@ -670,12 +689,14 @@ fn compute_text_end_pos(start: Position, text: &str) -> Position {
 fn build_measured_layout(
     editor: &EditorState,
     appearance: &EditorAppearance,
+    bounds: Bounds<gpui::Pixels>,
     window: &mut Window,
 ) -> Option<EditorMeasuredLayout> {
     let (_, buffer, view) = editor.active_buffer_view()?;
     let line_count = buffer.line_count();
     let first_line = view.scroll_line.min(line_count.saturating_sub(1));
-    let visible_end = line_count.min(first_line + VISIBLE_LINE_LIMIT);
+    let visible_lines = visible_line_limit_for_bounds(bounds, appearance);
+    let visible_end = line_count.min(first_line + visible_lines);
     let editor_font = font(appearance.font_family.clone());
     let lines = (first_line..visible_end)
         .map(|line_idx| {
@@ -788,6 +809,15 @@ pub(super) fn visible_col_limit_for_bounds(
         .max(1.0) as usize
 }
 
+pub(super) fn visible_line_limit_for_bounds(
+    bounds: Bounds<gpui::Pixels>,
+    appearance: &EditorAppearance,
+) -> usize {
+    let available =
+        (bounds.size.height - appearance.vertical_padding * 2.0).max(appearance.line_height);
+    ((available / appearance.line_height).ceil().max(1.0) as usize).saturating_add(1)
+}
+
 fn local_editor_point(
     bounds: Bounds<gpui::Pixels>,
     point: gpui::Point<gpui::Pixels>,
@@ -871,12 +901,17 @@ fn drag_scroll_delta_for_local_x(
     }
 }
 
-pub(super) fn reveal_cursor(view: &mut BufferView, line_count: usize, visible_cols: usize) {
+pub(super) fn reveal_cursor(
+    view: &mut BufferView,
+    line_count: usize,
+    visible_cols: usize,
+    visible_lines: usize,
+) {
     let cursor_line = view.cursor.pos.line.min(line_count.saturating_sub(1));
     if cursor_line < view.scroll_line {
         view.scroll_line = cursor_line;
-    } else if cursor_line >= view.scroll_line + VISIBLE_LINE_LIMIT {
-        view.scroll_line = cursor_line.saturating_sub(VISIBLE_LINE_LIMIT - 1);
+    } else if cursor_line >= view.scroll_line + visible_lines.max(1) {
+        view.scroll_line = cursor_line.saturating_sub(visible_lines.max(1) - 1);
     }
 
     let visible_cols = visible_cols.max(1);
@@ -888,8 +923,13 @@ pub(super) fn reveal_cursor(view: &mut BufferView, line_count: usize, visible_co
     }
 }
 
-fn scroll_view_by_lines(view: &mut BufferView, line_count: usize, delta: isize) {
-    view.scroll_line = scroll_line_by_delta(view.scroll_line, line_count, delta);
+fn scroll_view_by_lines(
+    view: &mut BufferView,
+    line_count: usize,
+    visible_lines: usize,
+    delta: isize,
+) {
+    view.scroll_line = scroll_line_by_delta(view.scroll_line, line_count, visible_lines, delta);
 }
 
 fn scroll_view_by_columns(
@@ -902,8 +942,13 @@ fn scroll_view_by_columns(
     view.scroll_col = scroll_col_by_delta(view.scroll_col, max_line_len, visible_cols, delta);
 }
 
-fn scroll_line_by_delta(current: usize, line_count: usize, delta: isize) -> usize {
-    let max_scroll = line_count.saturating_sub(VISIBLE_LINE_LIMIT);
+fn scroll_line_by_delta(
+    current: usize,
+    line_count: usize,
+    visible_lines: usize,
+    delta: isize,
+) -> usize {
+    let max_scroll = line_count.saturating_sub(visible_lines.max(1));
     if delta < 0 {
         current.saturating_sub(delta.unsigned_abs()).min(max_scroll)
     } else {
@@ -996,7 +1041,7 @@ mod tests {
         view.scroll_col = 20;
         view.cursor.pos = Position::new(15, 30);
 
-        reveal_cursor(&mut view, 100, 80);
+        reveal_cursor(&mut view, 100, 80, 32);
 
         assert_eq!(view.scroll_line, 10);
         assert_eq!(view.scroll_col, 20);
@@ -1009,13 +1054,24 @@ mod tests {
         view.scroll_col = 20;
         view.cursor.pos = Position::new(100, 150);
 
-        reveal_cursor(&mut view, 200, 80);
+        reveal_cursor(&mut view, 200, 80, 32);
 
-        assert_eq!(
-            view.scroll_line,
-            100usize.saturating_sub(VISIBLE_LINE_LIMIT - 1)
-        );
+        assert_eq!(view.scroll_line, 100usize.saturating_sub(32 - 1));
         assert_eq!(view.scroll_col, 71);
+    }
+
+    #[test]
+    fn visible_line_limit_scales_with_bounds() {
+        let appearance = test_appearance();
+
+        let short = Bounds::new(gpui::point(px(0.0), px(0.0)), size(px(800.0), px(240.0)));
+        let tall = Bounds::new(gpui::point(px(0.0), px(0.0)), size(px(800.0), px(900.0)));
+
+        assert!(visible_line_limit_for_bounds(tall, &appearance) > 32);
+        assert!(
+            visible_line_limit_for_bounds(short, &appearance)
+                < visible_line_limit_for_bounds(tall, &appearance)
+        );
     }
 
     fn test_appearance() -> EditorAppearance {

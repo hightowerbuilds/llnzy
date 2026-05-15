@@ -39,7 +39,8 @@ use commands::{
 };
 use files::{initial_path, read_normalized_file_text};
 use input::{
-    reveal_cursor, visible_col_limit_for_bounds, EditorInputElement, EditorMeasuredLayout,
+    reveal_cursor, visible_col_limit_for_bounds, visible_line_limit_for_bounds, EditorInputElement,
+    EditorMeasuredLayout,
 };
 use line_render::{skip_chars, EditorSearchLineMatch};
 use lsp::*;
@@ -433,9 +434,10 @@ impl EditorPrototype {
             return;
         }
         let visible_cols = self.visible_col_limit();
+        let visible_lines = self.visible_line_limit();
         if let Some((buffer, view)) = self.active_buffer_and_view() {
             view.cursor.select_all(buffer);
-            reveal_cursor(view, buffer.line_count(), visible_cols);
+            reveal_cursor(view, buffer.line_count(), visible_cols, visible_lines);
             cx.notify();
         }
     }
@@ -669,8 +671,9 @@ impl EditorPrototype {
                 );
                 panel
             });
+            let visible_lines = self.visible_line_limit();
             let visible_start = view.scroll_line.min(line_count.saturating_sub(1));
-            let visible_end = line_count.min(visible_start + VISIBLE_LINE_LIMIT);
+            let visible_end = line_count.min(visible_start + visible_lines);
             let highlight_spans = match (view.lang_id, view.tree.as_ref()) {
                 (Some(lang_id), Some(tree)) => self.editor.syntax.highlights_for_range(
                     lang_id,
@@ -756,7 +759,7 @@ impl EditorPrototype {
                 .sample_text
                 .lines()
                 .skip(self.sample_scroll_line)
-                .take(VISIBLE_LINE_LIMIT)
+                .take(self.visible_line_limit())
                 .enumerate()
                 .map(|(idx, line)| EditorLineSnapshot {
                     number: self.sample_scroll_line + idx + 1,
@@ -838,6 +841,7 @@ impl EditorPrototype {
         edit: impl FnOnce(&mut crate::editor::buffer::Buffer, &mut BufferView),
     ) {
         let visible_cols = self.visible_col_limit();
+        let visible_lines = self.visible_line_limit();
         let active = self.editor.active;
         if active >= self.editor.buffers.len() || active >= self.editor.views.len() {
             return;
@@ -851,7 +855,7 @@ impl EditorPrototype {
             let view = &mut self.editor.views[active];
             edit(buffer, view);
             view.cursor.clamp(buffer);
-            reveal_cursor(view, buffer.line_count(), visible_cols);
+            reveal_cursor(view, buffer.line_count(), visible_cols, visible_lines);
         }
 
         let buffer_edit = self.editor.buffers[active].take_last_edit();
@@ -886,6 +890,13 @@ impl EditorPrototype {
         self.last_text_bounds
             .map(|bounds| visible_col_limit_for_bounds(bounds, &appearance))
             .unwrap_or(DEFAULT_VISIBLE_COL_LIMIT)
+    }
+
+    fn visible_line_limit(&self) -> usize {
+        let appearance = self.active_appearance();
+        self.last_text_bounds
+            .map(|bounds| visible_line_limit_for_bounds(bounds, &appearance))
+            .unwrap_or(VISIBLE_LINE_LIMIT)
     }
 
     fn wake_cursor_blink(&mut self) {
@@ -971,7 +982,7 @@ fn language_label(view: &BufferView) -> String {
     view.lang_id.unwrap_or("plain text").to_string()
 }
 
-fn is_markdown_path(path: &std::path::Path) -> bool {
+pub(super) fn is_markdown_path(path: &std::path::Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
         .is_some_and(|extension| {
@@ -1239,7 +1250,10 @@ const EDITOR_BORDER: u32 = 0x34343c;
 const EDITOR_TEXT_FG: u32 = 0xe8e8ee;
 const EDITOR_MUTED_FG: u32 = 0x9a9aa7;
 const EDITOR_DIM_FG: u32 = 0x70707d;
-const VISIBLE_LINE_LIMIT: usize = 32;
+// Used before GPUI has reported real text bounds for the embedded editor.
+// Keep this high enough that the first paint inside the workspace does not
+// leave a short 30-line editor floating above an otherwise empty pane.
+const VISIBLE_LINE_LIMIT: usize = 160;
 const EDITOR_VERTICAL_PADDING: gpui::Pixels = px(12.0);
 const DEFAULT_VISIBLE_COL_LIMIT: usize = 96;
 const RECENTLY_CLOSED_LIMIT: usize = 16;

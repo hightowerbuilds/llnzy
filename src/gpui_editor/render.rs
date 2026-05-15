@@ -165,13 +165,31 @@ fn editor_body(
         return image_preview_body(preview, &snapshot.appearance);
     }
 
-    match (snapshot.markdown, snapshot.markdown_mode) {
-        (true, MarkdownViewMode::Preview) => div()
+    if !snapshot.markdown {
+        return editor_source_body(snapshot, input, cx);
+    }
+
+    let mode = snapshot.markdown_mode;
+    // Wrap every markdown body in a flex_col container so flex_1 on the
+    // inner body element resolves into "fill the remaining height".
+    // For Source, this also guarantees the editor source body takes the
+    // pane's full size regardless of where else the flex chain breaks.
+    let body = match mode {
+        MarkdownViewMode::Preview => div()
             .flex_1()
             .w_full()
+            .flex()
+            .flex_col()
             .overflow_hidden()
             .child(markdown_preview_body(snapshot)),
-        (true, MarkdownViewMode::Split) => div()
+        MarkdownViewMode::Source => div()
+            .flex_1()
+            .w_full()
+            .flex()
+            .flex_col()
+            .overflow_hidden()
+            .child(editor_source_body(snapshot, input, cx)),
+        MarkdownViewMode::Split => div()
             .flex_1()
             .w_full()
             .flex()
@@ -182,11 +200,15 @@ fn editor_body(
                 div()
                     .w(relative(0.5))
                     .h_full()
+                    .flex()
+                    .flex_col()
                     .overflow_hidden()
                     .child(markdown_preview_body(snapshot)),
             ),
-        _ => editor_source_body(snapshot, input, cx),
-    }
+    };
+
+    body.relative()
+        .child(markdown_mode_toggle(mode, snapshot, cx))
 }
 
 fn editor_source_body(
@@ -213,7 +235,13 @@ fn editor_source_body(
                 &snapshot.appearance,
             ))
         });
-    let ruler_layer = editor_ruler_layer(&snapshot.appearance, snapshot.scroll_col);
+    // Rulers mark code-style column boundaries. They are opt-in so the
+    // default workspace editor does not show stray vertical divider lines.
+    let ruler_layer = if snapshot.markdown {
+        div()
+    } else {
+        editor_ruler_layer(&snapshot.appearance, snapshot.scroll_col)
+    };
     let input_layer = div()
         .absolute()
         .top_0()
@@ -325,22 +353,38 @@ fn markdown_preview_body(snapshot: &EditorSnapshot) -> impl IntoElement {
         }]
     });
 
-    let content = blocks.into_iter().fold(
-        div().flex().flex_col().gap_2().px_5().py_4(),
+    // Left-aligned column with comfortable line length and generous
+    // bottom padding so the last paragraph scrolls clear of the pane edge.
+    let column = blocks.into_iter().fold(
+        div()
+            .flex()
+            .flex_col()
+            .gap_4()
+            .w_full()
+            .max_w(px(820.0))
+            .pl_8()
+            .pr_4()
+            .pt_8()
+            .pb_24()
+            .font_family("Atkinson Hyperlegible"),
         |column, block| column.child(markdown_preview_block(block, &snapshot.appearance)),
     );
 
-    div()
-        .id("markdown-preview")
-        .relative()
-        .flex_1()
-        .w_full()
-        .h_full()
-        .overflow_y_scroll()
-        .track_scroll(&snapshot.markdown_preview_scroll)
-        .scrollbar_width(px(8.0))
-        .bg(snapshot.appearance.background_color())
-        .child(content)
+    // Outer relative wrapper + absolute scroll child gives the scroll
+    // container a defined bounded height regardless of flex quirks.
+    div().relative().flex_1().w_full().overflow_hidden().child(
+        div()
+            .id("markdown-preview")
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full()
+            .overflow_y_scroll()
+            .track_scroll(&snapshot.markdown_preview_scroll)
+            .scrollbar_width(px(10.0))
+            .bg(snapshot.appearance.background_color())
+            .child(column),
+    )
 }
 
 fn markdown_preview_block(
@@ -349,57 +393,127 @@ fn markdown_preview_block(
 ) -> impl IntoElement {
     match block.kind {
         MarkdownPreviewBlockKind::Heading(level) => {
-            let size = match level {
-                1 => 26.0,
-                2 => 21.0,
-                3 => 18.0,
-                _ => 15.0,
+            let (size, top_pad) = match level {
+                1 => (32.0, 4.0),
+                2 => (24.0, 4.0),
+                3 => (19.0, 2.0),
+                _ => (16.0, 0.0),
             };
             div()
                 .w_full()
+                .pt(px(top_pad))
                 .text_size(px(size))
+                .line_height(px(size * 1.3))
                 .font_weight(gpui::FontWeight::BOLD)
                 .text_color(appearance.foreground_color())
                 .child(block.text)
         }
         MarkdownPreviewBlockKind::Paragraph => div()
             .w_full()
-            .text_size(px(14.0))
-            .line_height(px(22.0))
+            .text_size(px(16.0))
+            .line_height(px(26.0))
             .text_color(appearance.foreground_color())
             .child(block.text),
         MarkdownPreviewBlockKind::Bullet => div()
             .w_full()
             .flex()
-            .gap_2()
-            .text_size(px(14.0))
-            .line_height(px(22.0))
+            .gap_3()
+            .text_size(px(16.0))
+            .line_height(px(26.0))
             .text_color(appearance.foreground_color())
-            .child(div().text_color(appearance.muted_color()).child("•"))
+            .child(
+                div()
+                    .w(px(16.0))
+                    .text_color(appearance.muted_color())
+                    .child("•"),
+            )
             .child(div().flex_1().child(block.text)),
         MarkdownPreviewBlockKind::Quote => div()
             .w_full()
-            .border_l_1()
+            .border_l_2()
             .border_color(appearance.muted_color())
-            .pl_3()
-            .text_size(px(14.0))
-            .line_height(px(22.0))
+            .pl_4()
+            .py_1()
+            .text_size(px(16.0))
+            .line_height(px(26.0))
             .text_color(appearance.muted_color())
             .child(block.text),
         MarkdownPreviewBlockKind::Code => div()
             .w_full()
-            .rounded_sm()
+            .rounded_md()
             .border_1()
             .border_color(rgb(EDITOR_BORDER))
             .bg(rgb(0x10131a))
-            .px_3()
-            .py_2()
-            .font_family("Berkeley Mono")
-            .text_size(px(12.0))
-            .line_height(px(18.0))
+            .px_4()
+            .py_3()
+            .font_family("Menlo")
+            .text_size(px(13.0))
+            .line_height(px(20.0))
             .text_color(appearance.foreground_color())
             .child(block.text),
     }
+}
+
+/// Toggle pill that flips between Source (editable) and Preview (read-only).
+/// Rendered as an absolute-positioned overlay in the top-right corner of
+/// the body so it doesn't consume layout space — the body keeps its full
+/// height and any internal scroll continues to work as before.
+fn markdown_mode_toggle(
+    mode: MarkdownViewMode,
+    _snapshot: &EditorSnapshot,
+    cx: &mut Context<EditorPrototype>,
+) -> impl IntoElement {
+    div()
+        .absolute()
+        .top(px(8.0))
+        .right(px(12.0))
+        .flex()
+        .gap_1()
+        .child(markdown_mode_button(
+            "Preview",
+            mode == MarkdownViewMode::Preview,
+            MarkdownViewMode::Preview,
+            cx,
+        ))
+        .child(markdown_mode_button(
+            "Source",
+            mode == MarkdownViewMode::Source,
+            MarkdownViewMode::Source,
+            cx,
+        ))
+}
+
+fn markdown_mode_button(
+    label: &'static str,
+    active: bool,
+    target: MarkdownViewMode,
+    cx: &mut Context<EditorPrototype>,
+) -> impl IntoElement {
+    let (bg, border, fg) = if active {
+        (0x214966u32, 0x4d8fbfu32, 0xe1e6eeu32)
+    } else {
+        (0x242632u32, 0x3a3f4bu32, 0x9aa3b3u32)
+    };
+    div()
+        .h(px(26.0))
+        .px_3()
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded_sm()
+        .border_1()
+        .border_color(rgb(border))
+        .bg(rgb(bg))
+        .text_size(px(12.0))
+        .text_color(rgb(fg))
+        .cursor_pointer()
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, _: &MouseDownEvent, _window, cx| {
+                this.set_markdown_mode_from_workspace(target, cx);
+            }),
+        )
+        .child(label)
 }
 
 fn editor_ruler_layer(appearance: &EditorAppearance, scroll_col: usize) -> gpui::Div {

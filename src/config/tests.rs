@@ -96,6 +96,7 @@ fn default_config_values_match_existing_defaults() {
     assert_eq!(config.scroll_lines, 3);
     assert!(!config.terminal.copy_on_select);
     assert_eq!(config.editor.line_height, 1.38);
+    assert!(config.editor.rulers.is_empty());
     assert!(config.editor.show_line_numbers);
     assert!(config.editor.highlight_current_line);
 }

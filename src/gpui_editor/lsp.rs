@@ -853,6 +853,7 @@ impl EditorPrototype {
                     let line = line as usize;
                     let col = col as usize;
                     let visible_cols = self.visible_col_limit();
+                    let visible_lines = self.visible_line_limit();
                     if let Some(buffer) = self.editor.buffers.get(index) {
                         let line_count = buffer.line_count();
                         let target_line = line.min(line_count.saturating_sub(1));
@@ -862,7 +863,7 @@ impl EditorPrototype {
                             view.cursor.pos = target;
                             view.cursor.clear_selection();
                             view.cursor.desired_col = None;
-                            reveal_cursor(view, line_count, visible_cols);
+                            reveal_cursor(view, line_count, visible_cols, visible_lines);
                         }
                     }
                 }

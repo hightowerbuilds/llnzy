@@ -395,7 +395,7 @@ impl EditorPrototype {
 
     fn page_up_impl(&mut self, extend: bool, cx: &mut Context<Self>) {
         if self.editor.is_empty() {
-            self.scroll_by_lines(-(VISIBLE_LINE_LIMIT as isize), cx);
+            self.scroll_by_lines(-(self.visible_line_limit() as isize), cx);
             return;
         }
         self.dispatch_editor_command(
@@ -416,7 +416,7 @@ impl EditorPrototype {
             cx,
         );
         if self.editor.is_empty() {
-            self.scroll_by_lines(VISIBLE_LINE_LIMIT as isize, cx);
+            self.scroll_by_lines(self.visible_line_limit() as isize, cx);
         }
     }
 

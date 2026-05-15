@@ -5,7 +5,7 @@ use crate::editor::BufferView;
 use gpui::{ClipboardItem, Context};
 
 use super::input::reveal_cursor;
-use super::{EditorPrototype, VISIBLE_LINE_LIMIT};
+use super::EditorPrototype;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum EditorCommand {
@@ -112,6 +112,7 @@ impl EditorPrototype {
 
     fn move_cursor(&mut self, motion: EditorMotion, extend: bool, cx: &mut Context<Self>) {
         let visible_cols = self.visible_col_limit();
+        let visible_lines = self.visible_line_limit();
         let moved = if let Some((buffer, view)) = self.active_buffer_and_view() {
             match motion {
                 EditorMotion::Left => view.cursor.move_left(buffer, extend),
@@ -130,16 +131,13 @@ impl EditorPrototype {
                 }
                 EditorMotion::DocumentStart => view.cursor.move_to_start(extend),
                 EditorMotion::DocumentEnd => view.cursor.move_to_end(buffer, extend),
-                EditorMotion::PageUp => {
-                    view.cursor.move_page_up(buffer, VISIBLE_LINE_LIMIT, extend)
-                }
+                EditorMotion::PageUp => view.cursor.move_page_up(buffer, visible_lines, extend),
                 EditorMotion::PageDown => {
-                    view.cursor
-                        .move_page_down(buffer, VISIBLE_LINE_LIMIT, extend);
+                    view.cursor.move_page_down(buffer, visible_lines, extend);
                 }
             }
             view.cursor.clamp(buffer);
-            reveal_cursor(view, buffer.line_count(), visible_cols);
+            reveal_cursor(view, buffer.line_count(), visible_cols, visible_lines);
             true
         } else {
             false
@@ -241,13 +239,14 @@ impl EditorPrototype {
 
     fn select_target(&mut self, target: EditorSelectTarget, cx: &mut Context<Self>) {
         let visible_cols = self.visible_col_limit();
+        let visible_lines = self.visible_line_limit();
         let selected = if let Some((buffer, view)) = self.active_buffer_and_view() {
             match target {
                 EditorSelectTarget::All => view.cursor.select_all(buffer),
                 EditorSelectTarget::Word => view.cursor.select_word(buffer),
                 EditorSelectTarget::Line => view.cursor.select_line(buffer),
             }
-            reveal_cursor(view, buffer.line_count(), visible_cols);
+            reveal_cursor(view, buffer.line_count(), visible_cols, visible_lines);
             true
         } else {
             false

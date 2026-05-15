@@ -195,7 +195,7 @@ Configure code editor behavior. Language-specific overrides use the tree-sitter 
 |---|---|---|---|
 | `tab_size` | integer | `4` | Number of columns per indentation level. |
 | `insert_spaces` | boolean | `true` | Use spaces for indentation when pressing Tab. |
-| `rulers` | integer array | `[80, 120]` | Column ruler positions to draw in the editor. |
+| `rulers` | integer array | `[]` | Optional column ruler positions to draw in the editor. |
 | `word_wrap` | boolean | `false` | Stores the preferred wrap mode and shows it in editor status. |
 | `visible_whitespace` | boolean | `false` | Render visible markers for spaces and tabs. |
 | `font_size` | float | terminal font minus `2.0` | Code editor font size. |

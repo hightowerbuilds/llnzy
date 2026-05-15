@@ -113,8 +113,18 @@ pub(crate) struct StackerPrototype {
     editor: Entity<StackerTextInput>,
     prompts: Vec<StackerPrompt>,
     queued_prompts: Vec<QueuedPrompt>,
+    /// Which saved prompt (if any) the editor is currently editing. `None`
+    /// means the editor is a fresh blank draft; Save will create a new
+    /// prompt rather than overwrite an existing one.
     active_prompt: Option<usize>,
     show_chrome: bool,
+    /// Index of the prompt the delete-confirmation modal is open for, or
+    /// `None` when no modal is showing.
+    pending_delete: Option<usize>,
+    /// Fraction of the workbench height occupied by the prompt list.
+    /// The editor takes the remainder. Dragging the divider between them
+    /// updates this; clamped to a sensible range so neither pane collapses.
+    prompt_list_ratio: f32,
 }
 
 impl StackerPrototype {
@@ -131,20 +141,142 @@ impl StackerPrototype {
         let prompts = load_saved_prompts();
         let mut queued_prompts = load_stacker_queue();
         queue::sanitize_prompt_queue(&mut queued_prompts);
-        let initial_text = prompts
-            .first()
-            .map(|prompt| prompt.text.clone())
-            .unwrap_or_else(|| "Draft a prompt with GPUI-native text input.".to_string());
-        let active_prompt = (!prompts.is_empty()).then_some(0);
-        let editor = cx.new(|cx| StackerTextInput::new(cx, initial_text));
+        // Open Stacker on a blank draft. The saved-prompt list on the left
+        // is the entry point for editing existing prompts; the editor
+        // starts empty so a fresh prompt is always one click away.
+        let editor = cx.new(|cx| StackerTextInput::new(cx, String::new()));
         start_prompt_refresh_task(cx);
         Self {
             editor,
             prompts,
             queued_prompts,
-            active_prompt,
+            active_prompt: None,
             show_chrome,
+            pending_delete: None,
+            prompt_list_ratio: 0.34,
         }
+    }
+
+    /// Update the prompt-list / editor split ratio. Called by the drag
+    /// handle in the divider. The clamp keeps either side from collapsing
+    /// completely below a usable size.
+    pub(crate) fn set_prompt_list_ratio(&mut self, ratio: f32, cx: &mut Context<Self>) {
+        let clamped = ratio.clamp(0.12, 0.85);
+        if (clamped - self.prompt_list_ratio).abs() > f32::EPSILON {
+            self.prompt_list_ratio = clamped;
+            cx.notify();
+        }
+    }
+
+    /// Dispatch a formatting command (heading / list / etc.) to the active
+    /// prompt editor. The toolbar buttons call this; the underlying
+    /// `execute_stacker_command` already routes through the session for
+    /// undo/redo coherence.
+    pub(crate) fn run_stacker_command(
+        &mut self,
+        id: crate::stacker::commands::StackerCommandId,
+        cx: &mut Context<Self>,
+    ) {
+        let editor_command = crate::stacker::commands::stacker_editor_command(id);
+        self.editor.update(cx, |input, cx| {
+            crate::stacker::commands::execute_stacker_command(
+                &mut input.session,
+                editor_command,
+            );
+            input.session.set_selection(input.session.selection());
+            cx.notify();
+        });
+        cx.notify();
+    }
+
+    /// Persist the current draft to disk. When a saved prompt is active,
+    /// updates it in place; otherwise creates a new prompt and selects it.
+    /// No-op when the editor is empty.
+    pub(crate) fn save_active_prompt(&mut self, cx: &mut Context<Self>) {
+        let current_text = self.editor.read(cx).session.text().trim().to_string();
+        if current_text.is_empty() {
+            return;
+        }
+
+        let previous = self.prompts.clone();
+        match self.active_prompt {
+            Some(index) if index < self.prompts.len() => {
+                if !crate::stacker::apply_prompt_edit(&mut self.prompts, index, &current_text) {
+                    return;
+                }
+            }
+            _ => {
+                let Some(prompt) = crate::stacker::new_prompt(&current_text, "") else {
+                    return;
+                };
+                self.prompts.push(prompt);
+                self.active_prompt = Some(self.prompts.len() - 1);
+            }
+        }
+
+        crate::stacker::persist_prompt_library(&mut self.prompts, &previous);
+        cx.notify();
+    }
+
+    /// Open the delete-confirmation modal for the prompt at `index`.
+    pub(crate) fn request_delete_prompt(&mut self, index: usize, cx: &mut Context<Self>) {
+        if index < self.prompts.len() {
+            self.pending_delete = Some(index);
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn cancel_delete_prompt(&mut self, cx: &mut Context<Self>) {
+        if self.pending_delete.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    /// Confirm the pending delete: remove the prompt from the library,
+    /// persist, and reset the editor to a blank draft if the deleted
+    /// prompt was active.
+    pub(crate) fn confirm_delete_prompt(&mut self, cx: &mut Context<Self>) {
+        let Some(index) = self.pending_delete.take() else {
+            return;
+        };
+        if index >= self.prompts.len() {
+            cx.notify();
+            return;
+        }
+
+        let previous = self.prompts.clone();
+        let was_active = self.active_prompt == Some(index);
+        self.prompts.remove(index);
+
+        // Shift the active index if needed so it keeps pointing at the
+        // same prompt by identity (or clears if the active one was the
+        // one removed).
+        self.active_prompt = match self.active_prompt {
+            Some(active) if active == index => None,
+            Some(active) if active > index => Some(active - 1),
+            other => other,
+        };
+
+        crate::stacker::persist_prompt_library(&mut self.prompts, &previous);
+
+        if was_active {
+            self.editor.update(cx, |input, cx| {
+                input.session.set_text(String::new());
+                cx.notify();
+            });
+        }
+        cx.notify();
+    }
+
+    /// Adjust the prompt editor's text size. Bounded so the toolbar can't
+    /// shrink past readability or stretch past line-height sanity.
+    pub(crate) fn adjust_stacker_font_size(&mut self, delta: f32, cx: &mut Context<Self>) {
+        self.editor.update(cx, |input, cx| {
+            let next = (input.font_size_px() + delta).clamp(11.0, 28.0);
+            input.set_font_size_px(next);
+            cx.notify();
+        });
+        cx.notify();
     }
 
     fn load_prompt(&mut self, index: usize, cx: &mut Context<Self>) {
@@ -155,6 +287,21 @@ impl StackerPrototype {
         let text = prompt.text.clone();
         self.editor.update(cx, |editor, cx| {
             editor.session.set_text(text);
+            cx.notify();
+        });
+        cx.notify();
+    }
+
+    /// Reset the editor to a blank draft (no active prompt). Used by the
+    /// "New Prompt" button so the user can start writing without first
+    /// saving the current draft. The caller is responsible for saving
+    /// the previous draft first if needed — typically this is called
+    /// after a manual Save or after the close-event autosave hook has
+    /// already persisted any pending work.
+    pub(crate) fn start_new_prompt(&mut self, cx: &mut Context<Self>) {
+        self.active_prompt = None;
+        self.editor.update(cx, |input, cx| {
+            input.session.set_text(String::new());
             cx.notify();
         });
         cx.notify();
@@ -234,6 +381,7 @@ impl Render for StackerPrototype {
             self.active_prompt,
             self.editor.clone(),
             self.show_chrome,
+            self.prompt_list_ratio,
             cx,
         );
         let mut frame = div().size_full().flex().flex_col();
@@ -245,12 +393,21 @@ impl Render for StackerPrototype {
             frame = frame.child(status_bar(self.editor.read(cx)));
         }
 
+        let pending_delete = self.pending_delete;
+        let pending_label = pending_delete
+            .and_then(|index| self.prompts.get(index))
+            .map(|prompt| prompt.label.clone());
+
         div()
+            .relative()
             .size_full()
             .bg(rgb(CONTENT_BG))
             .text_color(rgb(TEXT))
             .font_family("Inter")
             .child(frame)
+            .when_some(pending_label, |root, label| {
+                root.child(render::delete_confirmation_modal(label, cx))
+            })
     }
 }
 
@@ -262,6 +419,7 @@ struct StackerTextInput {
     scroll_y: Pixels,
     content_height: Pixels,
     is_selecting: bool,
+    font_size: f32,
 }
 
 impl StackerTextInput {
@@ -276,7 +434,16 @@ impl StackerTextInput {
             scroll_y: px(0.0),
             content_height: px(0.0),
             is_selecting: false,
+            font_size: 16.0,
         }
+    }
+
+    pub(crate) fn font_size_px(&self) -> f32 {
+        self.font_size
+    }
+
+    pub(crate) fn set_font_size_px(&mut self, size: f32) {
+        self.font_size = size;
     }
 
     fn left(&mut self, _: &Left, _: &mut Window, cx: &mut Context<Self>) {
@@ -583,16 +750,13 @@ impl Render for StackerTextInput {
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_move(cx.listener(Self::on_mouse_move))
-            .line_height(px(28.0))
-            .text_size(px(16.0))
+            .line_height(px(self.font_size * 1.6))
+            .text_size(px(self.font_size))
             .text_color(rgb(0xf4f4f8))
             .child(
                 div()
                     .size_full()
-                    .p(px(8.0))
-                    .rounded_sm()
-                    .border_1()
-                    .border_color(rgb(BORDER))
+                    .p(px(16.0))
                     .bg(rgb(CONTENT_BG))
                     .child(StackerTextElement { input: cx.entity() }),
             )
