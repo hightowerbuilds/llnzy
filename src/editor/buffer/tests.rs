@@ -173,6 +173,93 @@ fn pos_to_char_and_back() {
 }
 
 #[test]
+fn unicode_position_corpus_round_trips_all_character_offsets() {
+    for text in [
+        "",
+        "hello",
+        "aé文z",
+        "a😀b",
+        "line one\nline two",
+        "line one\n𝄞 music\nemoji 😀\n",
+        "क्ष and flags 🇺🇸",
+    ] {
+        let mut buf = Buffer::empty();
+        buf.insert(Position::new(0, 0), text);
+
+        for char_idx in 0..=buf.len_chars() {
+            let pos = buf.char_to_pos(char_idx);
+            assert_eq!(
+                buf.pos_to_char(pos),
+                char_idx,
+                "position round-trip failed for {text:?} at char {char_idx}"
+            );
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ScenarioEdit {
+    Insert(Position, &'static str),
+    Delete(Position, Position),
+    Replace(Position, Position, &'static str),
+}
+
+#[test]
+fn edit_sequences_undo_and_redo_to_exact_text() {
+    for (edits, expected) in [
+        (
+            &[
+                ScenarioEdit::Insert(Position::new(0, 0), "hello\nworld"),
+                ScenarioEdit::Replace(Position::new(1, 0), Position::new(1, 5), "🌍"),
+                ScenarioEdit::Insert(Position::new(0, 5), "!"),
+                ScenarioEdit::Delete(Position::new(0, 0), Position::new(0, 1)),
+            ][..],
+            "ello!\n🌍",
+        ),
+        (
+            &[
+                ScenarioEdit::Insert(Position::new(0, 0), "a\nb\nc"),
+                ScenarioEdit::Delete(Position::new(2, 1), Position::new(0, 1)),
+                ScenarioEdit::Insert(Position::new(0, 1), "é\n𝄞"),
+            ],
+            "aé\n𝄞",
+        ),
+        (
+            &[
+                ScenarioEdit::Insert(Position::new(0, 0), "alpha\nbeta\ngamma"),
+                ScenarioEdit::Replace(Position::new(2, 5), Position::new(1, 0), "BETA\nΓ"),
+                ScenarioEdit::Insert(Position::new(0, 5), "\ninserted"),
+            ],
+            "alpha\ninserted\nBETA\nΓ",
+        ),
+    ] {
+        let mut buf = Buffer::empty();
+        for edit in edits {
+            apply_scenario_edit(&mut buf, *edit);
+        }
+        assert_eq!(buf.text(), expected);
+
+        for _ in 0..edits.len() {
+            assert!(buf.undo().is_some());
+        }
+        assert_eq!(buf.text(), "");
+
+        for _ in 0..edits.len() {
+            assert!(buf.redo().is_some());
+        }
+        assert_eq!(buf.text(), expected);
+    }
+}
+
+fn apply_scenario_edit(buf: &mut Buffer, edit: ScenarioEdit) {
+    match edit {
+        ScenarioEdit::Insert(pos, text) => buf.insert(pos, text),
+        ScenarioEdit::Delete(start, end) => buf.delete(start, end),
+        ScenarioEdit::Replace(start, end, text) => buf.replace(start, end, text),
+    }
+}
+
+#[test]
 fn line_ending_detection() {
     assert_eq!(LineEnding::detect("a\nb\nc\n"), LineEnding::Lf);
     assert_eq!(LineEnding::detect("a\r\nb\r\nc\r\n"), LineEnding::CrLf);

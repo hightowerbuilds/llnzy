@@ -65,4 +65,50 @@ mod tests {
         assert_eq!(utf16_index_to_char_index(s, 100), 3);
         assert_eq!(char_index_to_utf16_index(s, 100), 3);
     }
+
+    #[test]
+    fn unicode_corpus_round_trips_valid_character_boundaries() {
+        for text in [
+            "",
+            "plain ascii",
+            "aé文z",
+            "a😀b",
+            "line one\n𝄞 music\nemoji 😀",
+            "क्ष and flags 🇺🇸",
+        ] {
+            for char_index in 0..=text.chars().count() {
+                let utf16_index = char_index_to_utf16_index(text, char_index);
+                assert_eq!(
+                    utf16_index_to_char_index(text, utf16_index),
+                    char_index,
+                    "valid UTF-16 boundary should round-trip for {text:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn arbitrary_utf16_offsets_map_to_neighboring_character_boundaries() {
+        for text in ["a😀b", "é\n𝄞x", "क्ष🇺🇸z"] {
+            let total_units = char_index_to_utf16_index(text, text.chars().count());
+
+            for utf16_index in 0..=total_units + 2 {
+                let char_index = utf16_index_to_char_index(text, utf16_index);
+                let clamped_utf16 = utf16_index.min(total_units);
+                let mapped_utf16 = char_index_to_utf16_index(text, char_index);
+
+                assert!(
+                    mapped_utf16 >= clamped_utf16,
+                    "mapped boundary should not precede requested UTF-16 offset"
+                );
+                if char_index > 0 {
+                    let previous_utf16 = char_index_to_utf16_index(text, char_index - 1);
+                    assert!(
+                        previous_utf16 <= clamped_utf16,
+                        "previous boundary should not exceed requested UTF-16 offset"
+                    );
+                }
+            }
+        }
+    }
 }
