@@ -1,4 +1,9 @@
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
+
+use crate::error_log::ErrorLog;
+
+pub const DIAGNOSTICS_REPORT_FILENAME: &str = "diagnostics-report.txt";
 
 pub fn diagnostics_dir() -> PathBuf {
     crate::platform::paths::development_paths().logs_dir
@@ -19,6 +24,57 @@ pub fn write_diagnostic(
     std::fs::write(path, contents)
 }
 
+pub fn export_diagnostics_report(log: Option<&ErrorLog>) -> std::io::Result<PathBuf> {
+    let report = render_diagnostics_report(log);
+    let path = diagnostics_path(DIAGNOSTICS_REPORT_FILENAME);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&path, report)?;
+    Ok(path)
+}
+
+pub fn render_diagnostics_report(log: Option<&ErrorLog>) -> String {
+    let paths = crate::platform::paths::development_paths();
+    let mut report = String::new();
+
+    let _ = writeln!(report, "LLNZY Diagnostics Report");
+    let _ = writeln!(report, "version: {}", env!("CARGO_PKG_VERSION"));
+    let _ = writeln!(report, "platform: {:?}", crate::platform::current_family());
+    let _ = writeln!(report, "config_dir: {}", paths.config_dir.display());
+    let _ = writeln!(report, "data_dir: {}", paths.data_dir.display());
+    let _ = writeln!(report, "logs_dir: {}", paths.logs_dir.display());
+    let _ = writeln!(
+        report,
+        "crash_reports_dir: {}",
+        paths.crash_reports_dir.display()
+    );
+
+    match log {
+        Some(log) => {
+            let (errors, warnings) = log.counts();
+            let _ = writeln!(report, "runtime_errors: {errors}");
+            let _ = writeln!(report, "runtime_warnings: {warnings}");
+            let _ = writeln!(report);
+            let _ = writeln!(report, "Recent Runtime Log");
+            for entry in log.recent(50) {
+                let _ = writeln!(
+                    report,
+                    "{:>8.2}s [{}] {}",
+                    entry.elapsed_secs,
+                    entry.level.label(),
+                    entry.message
+                );
+            }
+        }
+        None => {
+            let _ = writeln!(report, "runtime_log: unavailable");
+        }
+    }
+
+    report
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -27,5 +83,29 @@ mod tests {
     fn diagnostics_path_uses_logs_directory() {
         let path = diagnostics_path("crash.log");
         assert!(path.ends_with(Path::new("llnzy").join("logs").join("crash.log")));
+    }
+
+    #[test]
+    fn diagnostics_report_includes_context_and_recent_log_entries() {
+        let log = ErrorLog::new();
+        log.warn("LSP server unavailable: rust-analyzer");
+        log.error("Terminal session restart failed");
+
+        let report = render_diagnostics_report(Some(&log));
+
+        assert!(report.contains("LLNZY Diagnostics Report"));
+        assert!(report.contains(concat!("version: ", env!("CARGO_PKG_VERSION"))));
+        assert!(report.contains("config_dir:"));
+        assert!(report.contains("runtime_errors: 1"));
+        assert!(report.contains("runtime_warnings: 1"));
+        assert!(report.contains("[WARN] LSP server unavailable: rust-analyzer"));
+        assert!(report.contains("[ERR ] Terminal session restart failed"));
+    }
+
+    #[test]
+    fn diagnostics_report_handles_missing_runtime_log() {
+        let report = render_diagnostics_report(None);
+
+        assert!(report.contains("runtime_log: unavailable"));
     }
 }

@@ -58,6 +58,11 @@ Use `docs/performance.md` for the current release-mode performance budget
 command and policy. These checks are separate from the normal local gate because
 desktop timing is noisier than pure correctness tests.
 
+## Operations And Diagnostics
+
+Use `docs/operations.md` for diagnostics locations, report-export behavior, and
+the release-readiness command set.
+
 ## Expected Working Tree
 
 Generated build output, screenshots, local assistant/tool directories, and
