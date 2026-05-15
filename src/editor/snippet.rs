@@ -225,10 +225,9 @@ pub fn insert_snippet(buf: &mut Buffer, pos: Position, snippet: &Snippet) -> Opt
         // Convert byte offset in the inserted text to a buffer position
         let prefix = &snippet.text[..*byte_offset];
         let newlines = prefix.matches('\n').count();
-        let col = if newlines > 0 {
-            prefix[prefix.rfind('\n').unwrap() + 1..].chars().count()
-        } else {
-            pos.col + prefix.chars().count()
+        let col = match prefix.rsplit_once('\n') {
+            Some((_, line_tail)) => line_tail.chars().count(),
+            None => pos.col + prefix.chars().count(),
         };
         let line = pos.line + newlines;
         let end_col = col + ts.placeholder.chars().count();
@@ -374,5 +373,16 @@ mod tests {
         assert_eq!(active.next_stop(), Some((2, 0)));
         assert_eq!(active.next_stop(), None); // done
         assert_eq!(active.prev_stop(), Some((1, 4)));
+    }
+
+    #[test]
+    fn insert_snippet_maps_multiline_tab_stops() {
+        let snippet = parse_snippet("let ${1:name} = {\n    ${2:value}\n};$0", "main.rs", "");
+        let mut buffer = Buffer::empty();
+
+        let active = insert_snippet(&mut buffer, Position::new(0, 2), &snippet)
+            .expect("snippet should have tab stops");
+
+        assert_eq!(active.stops, vec![(0, 6, 10), (1, 4, 9), (2, 2, 2)]);
     }
 }
