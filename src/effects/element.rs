@@ -120,7 +120,8 @@ impl Element for EffectsElement {
         let params = self.params;
         let frame = EffectsHost::with_shared(|host| {
             host.render_frame(kind, app_time_seconds(), pixel_width, pixel_height, params)
-        });
+        })
+        .flatten();
         if let Some(buffer) = frame {
             window.paint_surface(bounds, buffer);
         }

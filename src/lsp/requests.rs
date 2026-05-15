@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
 
+use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::oneshot;
 
@@ -30,6 +31,16 @@ impl LspRequestExecutor for Transport {
         params: Value,
     ) -> Pin<Box<dyn std::future::Future<Output = Result<Value, String>> + Send + 'a>> {
         Box::pin(async move { Transport::request(self, method, params).await })
+    }
+}
+
+fn request_params<T: Serialize>(method: &'static str, params: T) -> Option<Value> {
+    match serde_json::to_value(params) {
+        Ok(value) => Some(value),
+        Err(error) => {
+            log::warn!("failed to serialize {method} request params: {error}");
+            None
+        }
     }
 }
 
@@ -281,7 +292,10 @@ async fn async_hover(
         work_done_progress_params: Default::default(),
     };
     let result = transport
-        .request("textDocument/hover", serde_json::to_value(params).unwrap())
+        .request(
+            "textDocument/hover",
+            request_params("textDocument/hover", params)?,
+        )
         .await
         .ok()?;
     if result.is_null() {
@@ -321,7 +335,10 @@ async fn async_completion(
     let result = match transport
         .request(
             "textDocument/completion",
-            serde_json::to_value(params).unwrap(),
+            match request_params("textDocument/completion", params) {
+                Some(params) => params,
+                None => return Vec::new(),
+            },
         )
         .await
     {
@@ -380,7 +397,7 @@ async fn async_definition(
     let result = transport
         .request(
             "textDocument/definition",
-            serde_json::to_value(params).unwrap(),
+            request_params("textDocument/definition", params)?,
         )
         .await
         .ok()?;
@@ -424,7 +441,7 @@ async fn async_signature_help(
     let result = transport
         .request(
             "textDocument/signatureHelp",
-            serde_json::to_value(params).unwrap(),
+            request_params("textDocument/signatureHelp", params)?,
         )
         .await
         .ok()?;
@@ -484,7 +501,10 @@ async fn async_references(
     let result = match transport
         .request(
             "textDocument/references",
-            serde_json::to_value(params).unwrap(),
+            match request_params("textDocument/references", params) {
+                Some(params) => params,
+                None => return Vec::new(),
+            },
         )
         .await
     {
@@ -535,7 +555,10 @@ async fn async_format(
     let result = match transport
         .request(
             "textDocument/formatting",
-            serde_json::to_value(params).unwrap(),
+            match request_params("textDocument/formatting", params) {
+                Some(params) => params,
+                None => return Vec::new(),
+            },
         )
         .await
     {
@@ -582,7 +605,10 @@ async fn async_range_format(
     let result = match transport
         .request(
             "textDocument/rangeFormatting",
-            serde_json::to_value(params).unwrap(),
+            match request_params("textDocument/rangeFormatting", params) {
+                Some(params) => params,
+                None => return Vec::new(),
+            },
         )
         .await
     {
@@ -635,7 +661,10 @@ async fn async_inlay_hints(
     let result = match transport
         .request(
             "textDocument/inlayHint",
-            serde_json::to_value(params).unwrap(),
+            match request_params("textDocument/inlayHint", params) {
+                Some(params) => params,
+                None => return Vec::new(),
+            },
         )
         .await
     {
@@ -683,7 +712,10 @@ async fn async_code_lens(
     let result = match transport
         .request(
             "textDocument/codeLens",
-            serde_json::to_value(params).unwrap(),
+            match request_params("textDocument/codeLens", params) {
+                Some(params) => params,
+                None => return Vec::new(),
+            },
         )
         .await
     {
@@ -741,7 +773,10 @@ async fn async_code_actions(
     let result = match transport
         .request(
             "textDocument/codeAction",
-            serde_json::to_value(params).unwrap(),
+            match request_params("textDocument/codeAction", params) {
+                Some(params) => params,
+                None => return Vec::new(),
+            },
         )
         .await
     {
@@ -854,7 +889,13 @@ async fn async_rename(
         work_done_progress_params: Default::default(),
     };
     let result = match transport
-        .request("textDocument/rename", serde_json::to_value(params).unwrap())
+        .request(
+            "textDocument/rename",
+            match request_params("textDocument/rename", params) {
+                Some(params) => params,
+                None => return Vec::new(),
+            },
+        )
         .await
     {
         Ok(r) => r,
@@ -887,7 +928,10 @@ async fn async_document_symbols(
     let result = match transport
         .request(
             "textDocument/documentSymbol",
-            serde_json::to_value(params).unwrap(),
+            match request_params("textDocument/documentSymbol", params) {
+                Some(params) => params,
+                None => return Vec::new(),
+            },
         )
         .await
     {
@@ -932,7 +976,13 @@ async fn async_workspace_symbols(
         partial_result_params: Default::default(),
     };
     let result = match transport
-        .request("workspace/symbol", serde_json::to_value(params).unwrap())
+        .request(
+            "workspace/symbol",
+            match request_params("workspace/symbol", params) {
+                Some(params) => params,
+                None => return Vec::new(),
+            },
+        )
         .await
     {
         Ok(r) => r,

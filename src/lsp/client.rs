@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use lsp_types::*;
+use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::mpsc;
 
@@ -30,6 +31,11 @@ pub enum ClientState {
 pub(crate) struct LspNotification {
     pub method: &'static str,
     pub params: Value,
+}
+
+fn request_params<T: Serialize>(method: &'static str, params: T) -> Result<Value, String> {
+    serde_json::to_value(params)
+        .map_err(|error| format!("failed to serialize {method} request params: {error}"))
 }
 
 /// A single language server client.
@@ -433,7 +439,10 @@ impl LspClient {
 
         let result = self
             .transport
-            .request("textDocument/hover", serde_json::to_value(params).unwrap())
+            .request(
+                "textDocument/hover",
+                request_params("textDocument/hover", params)?,
+            )
             .await?;
 
         if result.is_null() {
@@ -473,7 +482,7 @@ impl LspClient {
             .transport
             .request(
                 "textDocument/definition",
-                serde_json::to_value(params).unwrap(),
+                request_params("textDocument/definition", params)?,
             )
             .await?;
 
@@ -516,7 +525,7 @@ impl LspClient {
             .transport
             .request(
                 "textDocument/completion",
-                serde_json::to_value(params).unwrap(),
+                request_params("textDocument/completion", params)?,
             )
             .await?;
 
@@ -550,7 +559,7 @@ impl LspClient {
             .transport
             .request(
                 "textDocument/formatting",
-                serde_json::to_value(params).unwrap(),
+                request_params("textDocument/formatting", params)?,
             )
             .await?;
         if result.is_null() {
@@ -588,7 +597,10 @@ impl LspClient {
 
         let result = self
             .transport
-            .request("textDocument/rename", serde_json::to_value(params).unwrap())
+            .request(
+                "textDocument/rename",
+                request_params("textDocument/rename", params)?,
+            )
             .await?;
         if result.is_null() {
             return Ok(None);
@@ -638,7 +650,7 @@ impl LspClient {
             .transport
             .request(
                 "textDocument/codeAction",
-                serde_json::to_value(params).unwrap(),
+                request_params("textDocument/codeAction", params)?,
             )
             .await?;
         if result.is_null() {
@@ -669,7 +681,7 @@ impl LspClient {
             .transport
             .request(
                 "textDocument/documentSymbol",
-                serde_json::to_value(params).unwrap(),
+                request_params("textDocument/documentSymbol", params)?,
             )
             .await?;
         if result.is_null() {
@@ -710,7 +722,7 @@ impl LspClient {
             .transport
             .request(
                 "textDocument/signatureHelp",
-                serde_json::to_value(params).unwrap(),
+                request_params("textDocument/signatureHelp", params)?,
             )
             .await?;
         if result.is_null() {
@@ -754,7 +766,7 @@ impl LspClient {
             .transport
             .request(
                 "textDocument/references",
-                serde_json::to_value(params).unwrap(),
+                request_params("textDocument/references", params)?,
             )
             .await?;
         if result.is_null() {
@@ -780,7 +792,10 @@ impl LspClient {
 
         let result = self
             .transport
-            .request("workspace/symbol", serde_json::to_value(params).unwrap())
+            .request(
+                "workspace/symbol",
+                request_params("workspace/symbol", params)?,
+            )
             .await?;
         if result.is_null() {
             return Ok(Vec::new());
@@ -828,7 +843,7 @@ impl LspClient {
             .transport
             .request(
                 "textDocument/inlayHint",
-                serde_json::to_value(params).unwrap(),
+                request_params("textDocument/inlayHint", params)?,
             )
             .await?;
         if result.is_null() {
@@ -856,7 +871,7 @@ impl LspClient {
             .transport
             .request(
                 "textDocument/codeLens",
-                serde_json::to_value(params).unwrap(),
+                request_params("textDocument/codeLens", params)?,
             )
             .await?;
         if result.is_null() {

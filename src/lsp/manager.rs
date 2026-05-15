@@ -468,13 +468,14 @@ impl LspManager {
                     text,
                 }],
             };
-            if let Err(e) = transport
-                .notify(
-                    "textDocument/didChange",
-                    serde_json::to_value(params).unwrap(),
-                )
-                .await
-            {
+            let params = match serde_json::to_value(params) {
+                Ok(params) => params,
+                Err(error) => {
+                    log::warn!("failed to serialize async didChange params: {error}");
+                    return;
+                }
+            };
+            if let Err(e) = transport.notify("textDocument/didChange", params).await {
                 log::warn!("async didChange failed: {e}");
             }
         });

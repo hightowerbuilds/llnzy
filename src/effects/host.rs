@@ -141,8 +141,8 @@ impl EffectKind {
 }
 
 /// Owns options passed into every CVPixelBuffer alloc and the wgpu device
-/// state for the render pipelines. Built once in `EffectsHost::new` so the
-/// per-frame path only does the per-frame work (uniform write, encode,
+/// state for the render pipelines. Built once via `EffectsHost::try_new` so
+/// the per-frame path only does the per-frame work (uniform write, encode,
 /// submit, map, copy).
 pub struct EffectsHost {
     pixel_buffer_attrs: CFDictionary<CFString, CFType>,
@@ -158,7 +158,7 @@ pub struct EffectsHost {
 }
 
 impl EffectsHost {
-    pub fn new() -> Self {
+    pub fn try_new() -> Result<Self, String> {
         let mut instance_desc = wgpu::InstanceDescriptor::new_without_display_handle();
         instance_desc.backends = wgpu::Backends::METAL;
         let instance = wgpu::Instance::new(instance_desc);
@@ -173,7 +173,7 @@ impl EffectsHost {
                 force_fallback_adapter: false,
             })
             .block_on()
-            .expect("wgpu: no Metal adapter available");
+            .map_err(|error| format!("wgpu: no Metal adapter available: {error}"))?;
 
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
@@ -185,7 +185,7 @@ impl EffectsHost {
                 trace: wgpu::Trace::Off,
             })
             .block_on()
-            .expect("wgpu: failed to acquire Metal device");
+            .map_err(|error| format!("wgpu: failed to acquire Metal device: {error}"))?;
 
         // Uniform buffer: 64 bytes matching smoke.wgsl's `Uniforms`:
         //   [0..2]  resolution (vec2<f32>)
@@ -262,7 +262,7 @@ impl EffectsHost {
             include_str!("shaders/rain.wgsl"),
         );
 
-        Self {
+        Ok(Self {
             pixel_buffer_attrs: build_pixel_buffer_attrs(),
             _instance: instance,
             _adapter: adapter,
@@ -277,7 +277,7 @@ impl EffectsHost {
             ],
             uniform_buffer,
             bind_group,
-        }
+        })
     }
 
     /// Render a single frame at logical dimensions `width × height` (which
@@ -467,18 +467,12 @@ impl EffectsHost {
     }
 }
 
-impl Default for EffectsHost {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 // Thread-local singleton. `CFDictionary` inside `EffectsHost` is `!Sync`,
 // so we can't use `static OnceLock`. GPUI's render path lives on the main
 // thread, so a thread-local is the right shape: one EffectsHost per render
 // thread, reused across every paint of every EffectsElement.
 thread_local! {
-    static SHARED_HOST: OnceCell<EffectsHost> = const { OnceCell::new() };
+    static SHARED_HOST: OnceCell<Result<EffectsHost, String>> = const { OnceCell::new() };
 }
 /// Process-wide animation clock. Read by `EffectsElement::paint` so every
 /// instance of the element sees the same wall-clock time, which means a new
@@ -491,8 +485,19 @@ impl EffectsHost {
     /// lazily creating it on first call. Closure-based instead of returning
     /// a reference because `OnceCell` inside `thread_local!` doesn't give us
     /// a `'static` borrow.
-    pub fn with_shared<R>(f: impl FnOnce(&EffectsHost) -> R) -> R {
-        SHARED_HOST.with(|cell| f(cell.get_or_init(EffectsHost::new)))
+    pub fn with_shared<R>(f: impl FnOnce(&EffectsHost) -> R) -> Option<R> {
+        SHARED_HOST.with(|cell| {
+            cell.get_or_init(|| {
+                let result = EffectsHost::try_new();
+                if let Err(error) = &result {
+                    log::warn!("Disabling shader effects: {error}");
+                }
+                result
+            })
+            .as_ref()
+            .ok()
+            .map(f)
+        })
     }
 }
 
