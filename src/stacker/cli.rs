@@ -17,6 +17,13 @@ use super::storage::{
 use super::{load_queue_from_path, prompt_label, save_queue_to_path};
 use crate::platform::paths;
 
+mod args;
+
+use args::{
+    parse_add_flags, parse_delete_flags, parse_edit_flags, parse_list_flags, ListFormat,
+    PromptCliState,
+};
+
 const BODY_MAX_BYTES: usize = 256 * 1024;
 const LABEL_MAX_CHARS: usize = 256;
 const CATEGORY_MAX_CHARS: usize = 64;
@@ -73,90 +80,6 @@ pub struct CliPaths<'a> {
     pub tmp_dir: &'a Path,
     pub legacy_path: &'a Path,
     pub queue_path: &'a Path,
-}
-
-#[derive(Debug)]
-struct AddArgs {
-    label: String,
-    category: Option<String>,
-    workspace: Option<String>,
-    source_agent: Option<String>,
-    session_id: Option<String>,
-    file: Option<PathBuf>,
-    body: Option<String>,
-}
-
-#[derive(Debug)]
-struct ListArgs {
-    state: PromptCliState,
-    format: ListFormat,
-}
-
-#[derive(Debug)]
-struct EditArgs {
-    id: String,
-    state: PromptCliState,
-    label: Option<String>,
-    category: Option<String>,
-    file: Option<PathBuf>,
-    body: Option<String>,
-    read_stdin: bool,
-}
-
-#[derive(Debug)]
-struct DeleteArgs {
-    id: String,
-    state: PromptCliState,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum PromptCliState {
-    Saved,
-    Inbox,
-    Archive,
-}
-
-impl PromptCliState {
-    fn from_flag(value: &str) -> Result<Self, String> {
-        match value {
-            "saved" => Ok(Self::Saved),
-            "inbox" | "pending" => Ok(Self::Inbox),
-            "archive" | "archived" => Ok(Self::Archive),
-            other => Err(format!("unknown state: {other}")),
-        }
-    }
-
-    fn storage_state(self) -> PromptState {
-        match self {
-            Self::Saved => PromptState::Saved,
-            Self::Inbox => PromptState::Pending,
-            Self::Archive => PromptState::Archived,
-        }
-    }
-
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Saved => "saved",
-            Self::Inbox => "inbox",
-            Self::Archive => "archive",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ListFormat {
-    Text,
-    Json,
-}
-
-impl ListFormat {
-    fn from_flag(value: &str) -> Result<Self, String> {
-        match value {
-            "text" => Ok(Self::Text),
-            "json" => Ok(Self::Json),
-            other => Err(format!("unknown format: {other}")),
-        }
-    }
 }
 
 /// Wire-up for the real `main()`. Reads argv, stdin, and config paths from
@@ -619,123 +542,6 @@ fn run_delete<W: Write, E: Write>(
     }
 }
 
-fn parse_add_flags(args: &[String]) -> Result<AddArgs, String> {
-    let mut label: Option<String> = None;
-    let mut category = None;
-    let mut workspace = None;
-    let mut source_agent = None;
-    let mut session_id = None;
-    let mut file = None;
-    let mut body = None;
-
-    let mut iter = args.iter();
-    while let Some(arg) = iter.next() {
-        match arg.as_str() {
-            "--label" => label = Some(next_value(&mut iter, "--label")?),
-            "--category" => category = Some(next_value(&mut iter, "--category")?),
-            "--workspace" => workspace = Some(next_value(&mut iter, "--workspace")?),
-            "--source-agent" => source_agent = Some(next_value(&mut iter, "--source-agent")?),
-            "--session" => session_id = Some(next_value(&mut iter, "--session")?),
-            "--file" => file = Some(PathBuf::from(next_value(&mut iter, "--file")?)),
-            "--body" => body = Some(next_value(&mut iter, "--body")?),
-            other => return Err(format!("unknown flag: {other}")),
-        }
-    }
-
-    if file.is_some() && body.is_some() {
-        return Err("choose only one of --body or --file".to_string());
-    }
-
-    let label = label.ok_or_else(|| "missing required --label".to_string())?;
-    Ok(AddArgs {
-        label,
-        category,
-        workspace,
-        source_agent,
-        session_id,
-        file,
-        body,
-    })
-}
-
-fn parse_list_flags(args: &[String]) -> Result<ListArgs, String> {
-    let mut state = PromptCliState::Saved;
-    let mut format = ListFormat::Text;
-
-    let mut iter = args.iter();
-    while let Some(arg) = iter.next() {
-        match arg.as_str() {
-            "--state" => state = PromptCliState::from_flag(&next_value(&mut iter, "--state")?)?,
-            "--format" => format = ListFormat::from_flag(&next_value(&mut iter, "--format")?)?,
-            other => return Err(format!("unknown flag: {other}")),
-        }
-    }
-
-    Ok(ListArgs { state, format })
-}
-
-fn parse_edit_flags(args: &[String]) -> Result<EditArgs, String> {
-    let mut id = None;
-    let mut state = PromptCliState::Saved;
-    let mut label = None;
-    let mut category = None;
-    let mut file = None;
-    let mut body = None;
-    let mut read_stdin = false;
-
-    let mut iter = args.iter();
-    while let Some(arg) = iter.next() {
-        match arg.as_str() {
-            "--state" => state = PromptCliState::from_flag(&next_value(&mut iter, "--state")?)?,
-            "--label" => label = Some(next_value(&mut iter, "--label")?),
-            "--category" => category = Some(next_value(&mut iter, "--category")?),
-            "--file" => file = Some(PathBuf::from(next_value(&mut iter, "--file")?)),
-            "--body" => body = Some(next_value(&mut iter, "--body")?),
-            "--stdin" => read_stdin = true,
-            other if other.starts_with("--") => return Err(format!("unknown flag: {other}")),
-            other => {
-                if id.is_some() {
-                    return Err(format!("unexpected argument: {other}"));
-                }
-                id = Some(other.to_string());
-            }
-        }
-    }
-
-    let id = parse_prompt_id(&id.ok_or_else(|| "missing prompt id".to_string())?)?;
-    Ok(EditArgs {
-        id,
-        state,
-        label,
-        category,
-        file,
-        body,
-        read_stdin,
-    })
-}
-
-fn parse_delete_flags(args: &[String]) -> Result<DeleteArgs, String> {
-    let mut id = None;
-    let mut state = PromptCliState::Saved;
-
-    let mut iter = args.iter();
-    while let Some(arg) = iter.next() {
-        match arg.as_str() {
-            "--state" => state = PromptCliState::from_flag(&next_value(&mut iter, "--state")?)?,
-            other if other.starts_with("--") => return Err(format!("unknown flag: {other}")),
-            other => {
-                if id.is_some() {
-                    return Err(format!("unexpected argument: {other}"));
-                }
-                id = Some(other.to_string());
-            }
-        }
-    }
-
-    let id = parse_prompt_id(&id.ok_or_else(|| "missing prompt id".to_string())?)?;
-    Ok(DeleteArgs { id, state })
-}
-
 fn read_body_source<R: Read>(
     file: Option<&Path>,
     body: Option<&str>,
@@ -771,14 +577,6 @@ fn prompt_dir<'a>(paths: CliPaths<'a>, state: PromptCliState) -> &'a Path {
 
 fn prompt_path(dir: &Path, id: &str) -> PathBuf {
     dir.join(format!("{id}.md"))
-}
-
-fn parse_prompt_id(input: &str) -> Result<String, String> {
-    let trimmed = input.trim();
-    if trimmed.parse::<ulid::Ulid>().is_err() {
-        return Err("invalid prompt id".to_string());
-    }
-    Ok(trimmed.to_string())
 }
 
 fn migrate_legacy(paths: CliPaths<'_>) -> Result<(), String> {
@@ -831,12 +629,6 @@ fn warn_queue_sync<E: Write>(stderr: &mut E, command: &str, result: Result<bool,
             "llnzy prompt {command}: warning: prompt changed but queue sync failed: {err}"
         );
     }
-}
-
-fn next_value(iter: &mut std::slice::Iter<'_, String>, flag: &str) -> Result<String, String> {
-    iter.next()
-        .cloned()
-        .ok_or_else(|| format!("{flag} requires a value"))
 }
 
 fn read_stdin_body<R: Read>(reader: &mut R) -> Result<String, String> {
