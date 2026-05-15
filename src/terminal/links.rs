@@ -3,10 +3,16 @@ use regex::Regex;
 /// Detect URLs in a line of terminal text.
 /// Returns a list of (start_col, end_col, url_string) tuples.
 pub fn detect_urls(line: &str) -> Vec<(usize, usize, String)> {
-    static URL_RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
-    let re = URL_RE.get_or_init(|| {
-        Regex::new(r#"(?:https?://|file://)[^\s<>"'`\)\]\}]+"#).expect("URL regex")
-    });
+    static URL_RE: std::sync::OnceLock<Result<Regex, String>> = std::sync::OnceLock::new();
+    let re = match URL_RE.get_or_init(|| {
+        Regex::new(r#"(?:https?://|file://)[^\s<>"'`\)\]\}]+"#).map_err(|error| error.to_string())
+    }) {
+        Ok(re) => re,
+        Err(error) => {
+            log::warn!("terminal URL detection disabled: {error}");
+            return Vec::new();
+        }
+    };
     re.find_iter(line)
         .map(|m| (m.start(), m.end(), m.as_str().to_string()))
         .collect()
