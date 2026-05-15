@@ -50,15 +50,17 @@ jobs:
       - run: cargo test --all-targets --all-features
 
   build-release:
-    name: Build Release
+    name: Build Release Bundle
     runs-on: macos-latest
     needs: [check, fmt, clippy, test]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release
+      - run: ./bundle.sh --release
       - uses: actions/upload-artifact@v4
         with:
           name: llnzy-macos
-          path: target/release/llnzy
+          path: |
+            target/release/llnzy
+            target/llnzy.app

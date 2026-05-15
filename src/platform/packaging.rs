@@ -78,6 +78,9 @@ pub fn packaging_value(key: &str, fallback: &str) -> String {
 mod tests {
     use super::*;
 
+    const INFO_PLIST: &str = include_str!("../../assets/Info.plist");
+    const BUNDLE_SCRIPT: &str = include_str!("../../bundle.sh");
+
     #[test]
     fn development_metadata_uses_shared_packaging_values() {
         let metadata = PlatformPackagingMetadata::development();
@@ -94,5 +97,79 @@ mod tests {
 
         assert_eq!(metadata.build_mode, BuildMode::Packaged);
         assert_eq!(metadata.package_format, PackageFormat::MacAppBundle);
+    }
+
+    #[test]
+    fn packaging_env_declares_required_release_values() {
+        for key in [
+            "APP_ID",
+            "EXECUTABLE_NAME",
+            "DISPLAY_NAME",
+            "BUILD_CHANNEL",
+            "ICON_RESOURCE",
+            "MACOS_MIN_VERSION",
+            "CODESIGN_IDENTITY",
+        ] {
+            assert!(
+                PACKAGING_ENV
+                    .lines()
+                    .filter_map(|line| line.split_once('='))
+                    .any(|(name, value)| name.trim() == key && !value.trim().is_empty()),
+                "assets/packaging.env must declare non-empty {key}"
+            );
+        }
+    }
+
+    #[test]
+    fn info_plist_template_matches_shared_packaging_values() {
+        assert_plist_string("CFBundleName", &packaging_value("DISPLAY_NAME", "LLNZY"));
+        assert_plist_string(
+            "CFBundleDisplayName",
+            &packaging_value("DISPLAY_NAME", "LLNZY"),
+        );
+        assert_plist_string(
+            "CFBundleIdentifier",
+            &packaging_value("APP_ID", "com.hightowerbuilds.llnzy"),
+        );
+        assert_plist_string(
+            "CFBundleExecutable",
+            &packaging_value("EXECUTABLE_NAME", "llnzy"),
+        );
+        assert_plist_string(
+            "CFBundleIconFile",
+            packaging_value("ICON_RESOURCE", "llnzy.icns").trim_end_matches(".icns"),
+        );
+        assert_plist_string(
+            "LSMinimumSystemVersion",
+            &packaging_value("MACOS_MIN_VERSION", "13.0"),
+        );
+    }
+
+    #[test]
+    fn bundle_script_defaults_match_shared_packaging_values() {
+        for (name, fallback) in [
+            ("APP_ID", "com.hightowerbuilds.llnzy"),
+            ("EXECUTABLE_NAME", "llnzy"),
+            ("DISPLAY_NAME", "LLNZY"),
+            ("ICON_RESOURCE", "llnzy.icns"),
+            ("MACOS_MIN_VERSION", "13.0"),
+        ] {
+            let expected = format!(
+                "{name}=\"${{{name}:-{}}}\"",
+                packaging_value(name, fallback)
+            );
+            assert!(
+                BUNDLE_SCRIPT.contains(&expected),
+                "bundle.sh fallback for {name} must match assets/packaging.env"
+            );
+        }
+    }
+
+    fn assert_plist_string(key: &str, expected: &str) {
+        let expected_entry = format!("    <key>{key}</key>\n    <string>{expected}</string>");
+        assert!(
+            INFO_PLIST.contains(&expected_entry),
+            "assets/Info.plist {key} must be {expected:?}"
+        );
     }
 }
