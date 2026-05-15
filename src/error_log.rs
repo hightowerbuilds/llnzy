@@ -1,5 +1,5 @@
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Instant;
 
 const MAX_ENTRIES: usize = 1000;
@@ -67,8 +67,14 @@ impl ErrorLog {
         }
     }
 
+    fn lock_inner(&self) -> MutexGuard<'_, LogInner> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     pub fn log(&self, level: LogLevel, message: impl Into<String>) {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.lock_inner();
         let elapsed = inner.start.elapsed().as_secs_f64();
 
         match level {
@@ -102,20 +108,20 @@ impl ErrorLog {
 
     /// Get the most recent `n` entries (newest last).
     pub fn recent(&self, n: usize) -> Vec<LogEntry> {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.lock_inner();
         let start = inner.entries.len().saturating_sub(n);
         inner.entries.iter().skip(start).cloned().collect()
     }
 
     /// Total counts.
     pub fn counts(&self) -> (usize, usize) {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.lock_inner();
         (inner.error_count, inner.warn_count)
     }
 
     /// Total entry count.
     pub fn len(&self) -> usize {
-        self.inner.lock().unwrap().entries.len()
+        self.lock_inner().entries.len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -351,6 +357,24 @@ mod tests {
         });
         handle.join().unwrap();
         assert_eq!(log.len(), 1);
+    }
+
+    #[test]
+    fn poisoned_log_lock_keeps_log_accessible() {
+        let log = ErrorLog::new();
+        let poisoned_log = log.clone();
+        let handle = std::thread::spawn(move || {
+            let _guard = poisoned_log.inner.lock().unwrap();
+            panic!("poison log lock");
+        });
+
+        assert!(handle.join().is_err());
+
+        log.warn("after poison");
+
+        assert_eq!(log.len(), 1);
+        assert_eq!(log.counts(), (0, 1));
+        assert_eq!(log.recent(1)[0].message, "after poison");
     }
 
     // ── ErrorPanel ──

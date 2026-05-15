@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+use std::sync::{LazyLock, Mutex, MutexGuard};
+
 /// Configuration for a language server.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ServerConfig {
@@ -11,6 +14,15 @@ pub enum ServerLookup {
     Available(ServerConfig),
     MissingCommand(ServerConfig),
     UnsupportedLanguage,
+}
+
+static COMMAND_AVAILABILITY_CACHE: LazyLock<Mutex<HashMap<String, bool>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn command_availability_cache() -> MutexGuard<'static, HashMap<String, bool>> {
+    COMMAND_AVAILABILITY_CACHE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// All known language server configurations.
@@ -84,13 +96,7 @@ pub fn builtin_servers() -> Vec<ServerConfig> {
 /// would just fail at exec time anyway if a cached "available" command
 /// were later removed.
 pub fn is_available(command: &str) -> bool {
-    use std::collections::HashMap;
-    use std::sync::{LazyLock, Mutex};
-
-    static CACHE: LazyLock<Mutex<HashMap<String, bool>>> =
-        LazyLock::new(|| Mutex::new(HashMap::new()));
-
-    if let Some(&cached) = CACHE.lock().unwrap().get(command) {
+    if let Some(&cached) = command_availability_cache().get(command) {
         return cached;
     }
     let result = std::process::Command::new("which")
@@ -99,7 +105,7 @@ pub fn is_available(command: &str) -> bool {
         .stderr(std::process::Stdio::null())
         .status()
         .is_ok_and(|s| s.success());
-    CACHE.lock().unwrap().insert(command.to_string(), result);
+    command_availability_cache().insert(command.to_string(), result);
     result
 }
 
@@ -168,5 +174,17 @@ mod tests {
             resolve_server_with("totally-unknown", |_| true),
             ServerLookup::UnsupportedLanguage
         );
+    }
+
+    #[test]
+    fn command_cache_recovers_from_poisoned_lock() {
+        let _ = std::panic::catch_unwind(|| {
+            let _guard = COMMAND_AVAILABILITY_CACHE.lock().unwrap();
+            panic!("poison command cache");
+        });
+
+        command_availability_cache().insert("cached-server".to_string(), true);
+
+        assert!(is_available("cached-server"));
     }
 }

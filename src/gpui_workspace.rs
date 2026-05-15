@@ -218,20 +218,27 @@ pub fn run_workspace_prototype() {
         ]);
 
         let bounds = Bounds::centered(None, size(px(1320.0), px(820.0)), cx);
-        let window = cx
-            .open_window(
-                WindowOptions {
-                    window_bounds: Some(WindowBounds::Windowed(bounds)),
-                    ..Default::default()
-                },
-                |_, cx| cx.new(WorkspacePrototype::new),
-            )
-            .unwrap();
-        window
-            .update(cx, |view, window, cx| {
-                view.focus_surface(view.active_surface(), window, cx);
-            })
-            .unwrap();
+        let window = match cx.open_window(
+            WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(bounds)),
+                ..Default::default()
+            },
+            |_, cx| cx.new(WorkspacePrototype::new),
+        ) {
+            Ok(window) => window,
+            Err(error) => {
+                eprintln!("failed to open workspace window: {error:?}");
+                cx.quit();
+                return;
+            }
+        };
+        if let Err(error) = window.update(cx, |view, window, cx| {
+            view.focus_surface(view.active_surface(), window, cx);
+        }) {
+            eprintln!("failed to focus workspace window: {error:?}");
+            cx.quit();
+            return;
+        }
         cx.on_action(|_: &Quit, cx| cx.quit());
         cx.activate(true);
     });
@@ -463,10 +470,11 @@ impl WorkspacePrototype {
     }
 
     fn active_explorer_state_mut(&mut self) -> &mut ExplorerState {
-        if self.active_surface() == WorkspaceSurface::Explorer
-            && self.explorers.contains_key(&self.active_tab_id.0)
-        {
-            return self.explorers.get_mut(&self.active_tab_id.0).unwrap();
+        if self.active_surface() == WorkspaceSurface::Explorer {
+            let active_tab_id = self.active_tab_id.0;
+            if let Some(explorer) = self.explorers.get_mut(&active_tab_id) {
+                return explorer;
+            }
         }
         &mut self.sidebar_explorer
     }
