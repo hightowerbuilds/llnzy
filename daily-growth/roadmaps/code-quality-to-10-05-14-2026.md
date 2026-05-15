@@ -560,6 +560,26 @@ This order is deliberately conservative.
 
 Use this as the recurring review checklist.
 
+## Execution Status - 05-14-2026
+
+The 7/10 reliability gate has now been worked through for the supported build shapes. The app builds, formats, passes clippy with warnings denied, and passes the full automated test suite under `--all-targets --all-features`.
+
+Completed reliability work:
+
+- Restored the effects host against the pinned `wgpu` API and made missing GPU/effects setup non-fatal.
+- Fixed the packaging display-name mismatch so packaging metadata tests agree with `assets/packaging.env`.
+- Added the standard local quality gate and documented supported/unsupported Cargo build shapes in `docs/development.md`.
+- Made CI enforce formatting, clippy with `-D warnings`, and the full test suite.
+- Hardened GPUI startup, workspace focus, Stacker UI paint, editor startup, image preview, shared error log state, LSP runtime setup, LSP request serialization, LSP transport stdio setup, terminal URL detection, and Stacker storage formatting against recoverable panics.
+- Replaced the Stacker command descriptor searched-array `expect` with an exhaustive enum mapping.
+- Audited the remaining panic-pattern matches. The remaining `unwrap`, `expect`, and deliberate `panic!` matches are test-only fixtures, `#[cfg(test)]` helpers, assertion paths, or clippy expectation attributes rather than production runtime paths.
+
+Known status:
+
+- `cargo check --no-default-features` is intentionally unsupported for the current binary shape and is documented as such.
+- Manual GPUI and visual workflow checks are deferred to the final smoke-test list, per the working agreement for this roadmap.
+- The next active phase is the 8/10 architecture pass: shrink high-change UI/controller surfaces and make more behavior testable without GPUI.
+
 ### 7/10 Gate
 
 - Full build and tests pass.
