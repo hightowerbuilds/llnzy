@@ -17,10 +17,11 @@
 //! the same BT.601 full-range RGB->YUV conversion the M1 path used and
 //! write into the NV12 planes.
 //!
-//! Per-frame texture + staging buffer (vs. caching by size) keeps the code
-//! simple at our scale: resizes are rare and the allocation cost is
-//! dominated by the readback, not the create. A follow-up can pool by
-//! `(width, height)` if profiling shows allocation pressure.
+//! The render texture and staging buffer are pooled by `(width, height)`
+//! so steady-state rendering does no per-frame allocation. Resizes drop
+//! the cached entry and rebuild it. wgpu uncaptured errors (e.g. GPU
+//! out-of-memory) are caught by a custom handler that disables further
+//! rendering on this host instead of letting wgpu panic the process.
 //!
 //! Why readback instead of zero-copy IOSurface import: bridging
 //! `metal-rs::Texture` to the `objc2-metal::MTLTexture` protocol expected by
@@ -30,8 +31,9 @@
 //! enough to ship.
 
 use std::borrow::Cow;
-use std::cell::OnceCell;
-use std::sync::{mpsc, OnceLock};
+use std::cell::{OnceCell, RefCell};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc, OnceLock};
 use std::time::Instant;
 
 use core_foundation::{
@@ -140,6 +142,21 @@ impl EffectKind {
     }
 }
 
+/// wgpu render texture + staging buffer pair cached by (width, height) so
+/// the per-frame path can skip the texture/buffer create+drop syscalls.
+/// Allocations only happen on first frame and on resize.
+struct CachedRenderResources {
+    width: u32,
+    height: u32,
+    texture: wgpu::Texture,
+    view: wgpu::TextureView,
+    staging: wgpu::Buffer,
+    /// True if the staging buffer is currently mapped. We must `unmap()`
+    /// before the next `map_async`, even if a previous frame returned
+    /// early after mapping but before reading.
+    mapped: bool,
+}
+
 /// Owns options passed into every CVPixelBuffer alloc and the wgpu device
 /// state for the render pipelines. Built once via `EffectsHost::try_new` so
 /// the per-frame path only does the per-frame work (uniform write, encode,
@@ -155,6 +172,14 @@ pub struct EffectsHost {
     pipelines: [wgpu::RenderPipeline; 5],
     uniform_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
+    /// Pooled per-frame render resources. The cache is invalidated and
+    /// rebuilt when the requested dimensions change.
+    cache: RefCell<Option<CachedRenderResources>>,
+    /// Set to true by the wgpu uncaptured-error handler. Once raised, every
+    /// future `render_frame` call returns `None` instead of attempting more
+    /// GPU work that would also fail. Lets the caller degrade gracefully
+    /// instead of panicking.
+    disabled: Arc<AtomicBool>,
 }
 
 impl EffectsHost {
@@ -186,6 +211,18 @@ impl EffectsHost {
             })
             .block_on()
             .map_err(|error| format!("wgpu: failed to acquire Metal device: {error}"))?;
+
+        // Catch wgpu errors instead of letting wgpu's default handler panic
+        // the whole app. OutOfMemory disables the effect; validation /
+        // internal errors are logged but treated as non-fatal too (the host
+        // stays alive, the user sees no shader output, the rest of the
+        // editor keeps working).
+        let disabled = Arc::new(AtomicBool::new(false));
+        let disabled_for_handler = disabled.clone();
+        device.on_uncaptured_error(Arc::new(move |error: wgpu::Error| {
+            disabled_for_handler.store(true, Ordering::Relaxed);
+            log::error!("wgpu effects disabled after error: {error}");
+        }));
 
         // Uniform buffer: 64 bytes matching smoke.wgsl's `Uniforms`:
         //   [0..2]  resolution (vec2<f32>)
@@ -277,6 +314,8 @@ impl EffectsHost {
             ],
             uniform_buffer,
             bind_group,
+            cache: RefCell::new(None),
+            disabled,
         })
     }
 
@@ -296,6 +335,10 @@ impl EffectsHost {
         height: u32,
         params: EffectParams,
     ) -> Option<CVPixelBuffer> {
+        if self.disabled.load(Ordering::Relaxed) {
+            return None;
+        }
+
         let width_u = (width.max(2) + 1) & !1;
         let height_u = (height.max(2) + 1) & !1;
         let width = width_u as usize;
@@ -314,36 +357,70 @@ impl EffectsHost {
         self.queue
             .write_buffer(&self.uniform_buffer, 0, bytemuck_cast(&uniforms));
 
-        // 2. Allocate the per-frame render target + staging buffer. We size
-        //    them to (width_u, height_u) every frame; the parent texture
-        //    cache can be added later if the cost shows up in profiles.
-        let render_texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("effects-host-render"),
-            size: wgpu::Extent3d {
-                width: width_u,
-                height: height_u,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: RENDER_TEXTURE_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
-        let render_view = render_texture.create_view(&wgpu::TextureViewDescriptor::default());
-
         // wgpu requires the row stride in buffer copies be aligned to 256.
         let unpadded_bytes_per_row = width_u * 4; // RGBA8 = 4 bytes/pixel
         let padded_bytes_per_row = align_up(unpadded_bytes_per_row, COPY_BYTES_PER_ROW_ALIGNMENT);
         let staging_size = (padded_bytes_per_row as u64) * (height_u as u64);
 
-        let staging_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("effects-host-staging"),
-            size: staging_size,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
+        // 2. Reuse cached render target + staging buffer when dimensions
+        //    match. wgpu types are Arc-backed and cheap to clone. The cache
+        //    is rebuilt on resize; in steady state nothing allocates per
+        //    frame here.
+        let (render_texture, render_view, staging_buffer) = {
+            let mut cache = self.cache.borrow_mut();
+            let dimensions_match = cache
+                .as_ref()
+                .is_some_and(|c| c.width == width_u && c.height == height_u);
+            if !dimensions_match {
+                // Drop the previous entry before creating new ones so we
+                // don't hold double the memory mid-replace.
+                *cache = None;
+                let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("effects-host-render"),
+                    size: wgpu::Extent3d {
+                        width: width_u,
+                        height: height_u,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: RENDER_TEXTURE_FORMAT,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                    view_formats: &[],
+                });
+                let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+                let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("effects-host-staging"),
+                    size: staging_size,
+                    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                    mapped_at_creation: false,
+                });
+                *cache = Some(CachedRenderResources {
+                    width: width_u,
+                    height: height_u,
+                    texture,
+                    view,
+                    staging,
+                    mapped: false,
+                });
+            }
+            // Defensive unmap in case a previous frame mapped but returned
+            // early before reading. Without this, the next map_async would
+            // fail or stall.
+            if let Some(entry) = cache.as_mut() {
+                if entry.mapped {
+                    entry.staging.unmap();
+                    entry.mapped = false;
+                }
+            }
+            let entry = cache.as_ref().expect("cache initialized above");
+            (
+                entry.texture.clone(),
+                entry.view.clone(),
+                entry.staging.clone(),
+            )
+        };
 
         // 3. Encode the render pass + the texture->buffer copy in one
         //    submission so the GPU does them back-to-back without a CPU
@@ -414,19 +491,33 @@ impl EffectsHost {
         // PollType::Wait makes the call block until the submitted work is
         // done, at which point our map_async callback fires.
         let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
-        rx.recv().ok()?.ok()?;
+        // If map_async fails or the channel drops, the buffer was never
+        // mapped — no unmap needed, just skip the frame.
+        rx.recv().ok().and_then(|r| r.ok())?;
+
+        // From here on the buffer IS mapped. Any early return must unmap
+        // before exit, or the pooled buffer will fail the next map_async.
+        self.mark_cached_mapped(true);
 
         // 5. Allocate the destination CVPixelBuffer. Done after the GPU
         //    work succeeds so we don't burn an allocation if the readback
         //    fails.
-        let buffer = CVPixelBuffer::new(
+        let buffer = match CVPixelBuffer::new(
             kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
             width,
             height,
             Some(&self.pixel_buffer_attrs),
-        )
-        .ok()?;
+        ) {
+            Ok(buffer) => buffer,
+            Err(_) => {
+                staging_buffer.unmap();
+                self.mark_cached_mapped(false);
+                return None;
+            }
+        };
         if buffer.lock_base_address(0) != 0 {
+            staging_buffer.unmap();
+            self.mark_cached_mapped(false);
             return None;
         }
 
@@ -461,9 +552,18 @@ impl EffectsHost {
             }
         }
         staging_buffer.unmap();
+        self.mark_cached_mapped(false);
         let _ = buffer.unlock_base_address(0);
 
         Some(buffer)
+    }
+
+    /// Update the pooled cache's `mapped` flag so the next frame's defensive
+    /// unmap-on-entry knows whether the staging buffer needs to be cleared.
+    fn mark_cached_mapped(&self, mapped: bool) {
+        if let Some(entry) = self.cache.borrow_mut().as_mut() {
+            entry.mapped = mapped;
+        }
     }
 }
 

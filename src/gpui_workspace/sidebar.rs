@@ -65,8 +65,35 @@ pub(super) struct WorkspaceSidebarContext {
 pub(super) enum SidebarContextMenuView {
     Main,
     Rename,
+    NewEntry,
     Move,
     DeleteConfirm,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum NewEntryKind {
+    File,
+    Folder,
+}
+
+impl NewEntryKind {
+    pub(super) fn header_label(self) -> &'static str {
+        match self {
+            NewEntryKind::File => "New File",
+            NewEntryKind::Folder => "New Folder",
+        }
+    }
+
+    pub(super) fn is_dir(self) -> bool {
+        matches!(self, NewEntryKind::Folder)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct SidebarNewEntryState {
+    pub(super) parent: PathBuf,
+    pub(super) kind: NewEntryKind,
+    pub(super) text: String,
 }
 
 #[derive(Clone, Debug)]
@@ -231,6 +258,7 @@ pub(super) fn workspace_sidebar(
         .bg(rgb(CHROME_BG))
         .child(header)
         .child(sidebar_project_controls(
+            workspace_root.clone(),
             recent_projects,
             recent_projects_open,
             cx,
@@ -303,6 +331,7 @@ pub(super) fn workspace_sidebar_context_menu(
     menu: SidebarContextMenuState,
     workspace_root: Option<PathBuf>,
     rename: Option<SidebarRenameState>,
+    new_entry: Option<SidebarNewEntryState>,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     let menu_width = match menu.view {
@@ -344,8 +373,32 @@ pub(super) fn workspace_sidebar_context_menu(
             let has_relative_path = workspace_root
                 .as_ref()
                 .is_some_and(|root| menu.path.strip_prefix(root).is_ok());
+            panel = panel.child(sidebar_menu_header(menu.name.clone(), menu.is_dir));
+            if menu.is_dir {
+                panel = panel
+                    .child(sidebar_menu_button("New File".to_string(), false, cx, {
+                        let path = menu.path.clone();
+                        move |this, _window, cx| {
+                            this.start_sidebar_new_entry(path.clone(), NewEntryKind::File, cx)
+                        }
+                    }))
+                    .child(sidebar_menu_button(
+                        "New Folder".to_string(),
+                        false,
+                        cx,
+                        {
+                            let path = menu.path.clone();
+                            move |this, _window, cx| {
+                                this.start_sidebar_new_entry(
+                                    path.clone(),
+                                    NewEntryKind::Folder,
+                                    cx,
+                                )
+                            }
+                        },
+                    ));
+            }
             panel = panel
-                .child(sidebar_menu_header(menu.name.clone(), menu.is_dir))
                 .child(sidebar_menu_button("Rename".to_string(), false, cx, {
                     let path = menu.path.clone();
                     move |this, _window, cx| this.start_sidebar_rename(path.clone(), cx)
@@ -428,6 +481,58 @@ pub(super) fn workspace_sidebar_context_menu(
                     cx,
                     |this, _window, cx| {
                         this.commit_sidebar_rename(cx);
+                    },
+                ))
+                .child(sidebar_menu_button(
+                    "Cancel".to_string(),
+                    false,
+                    cx,
+                    |this, _window, cx| {
+                        this.close_sidebar_context_menu(cx);
+                    },
+                ));
+        }
+        SidebarContextMenuView::NewEntry => {
+            let active = new_entry
+                .as_ref()
+                .filter(|state| state.parent == menu.path);
+            let kind = active.map(|s| s.kind).unwrap_or(NewEntryKind::File);
+            let typed = active.map(|s| s.text.clone()).unwrap_or_default();
+            let field_text = if typed.is_empty() {
+                "Type name".to_string()
+            } else {
+                typed
+            };
+            let field_color = if field_text == "Type name" {
+                MUTED_TEXT
+            } else {
+                ACTIVE_TEXT
+            };
+            panel = panel
+                .child(sidebar_menu_header(kind.header_label().to_string(), kind.is_dir()))
+                .child(
+                    div()
+                        .w_full()
+                        .h(px(32.0))
+                        .flex()
+                        .items_center()
+                        .rounded_sm()
+                        .border_1()
+                        .border_color(rgb(0x4f5666))
+                        .bg(rgb(0x15171d))
+                        .px_2()
+                        .text_size(px(13.0))
+                        .text_color(rgb(field_color))
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .child(field_text),
+                )
+                .child(sidebar_menu_button(
+                    "Create".to_string(),
+                    false,
+                    cx,
+                    |this, _window, cx| {
+                        this.commit_sidebar_new_entry(cx);
                     },
                 ))
                 .child(sidebar_menu_button(
@@ -535,6 +640,7 @@ fn sidebar_close_project_button(
 }
 
 fn sidebar_project_controls(
+    workspace_root: Option<PathBuf>,
     recent_projects: Vec<PathBuf>,
     recent_projects_open: bool,
     cx: &mut Context<WorkspacePrototype>,
@@ -552,6 +658,27 @@ fn sidebar_project_controls(
         .child(project_button("Open Recent", false, cx, |this, cx| {
             this.toggle_recent_projects(cx);
         }));
+
+    if let Some(root) = workspace_root {
+        controls = controls.child(
+            div()
+                .flex()
+                .flex_row()
+                .gap_1()
+                .child(quick_create_button(
+                    "New File",
+                    NewEntryKind::File,
+                    root.clone(),
+                    cx,
+                ))
+                .child(quick_create_button(
+                    "New Folder",
+                    NewEntryKind::Folder,
+                    root,
+                    cx,
+                )),
+        );
+    }
 
     if recent_projects_open {
         let recent = recent_projects.into_iter().take(5).collect::<Vec<_>>();
@@ -595,6 +722,38 @@ fn project_button(
             MouseButton::Left,
             cx.listener(move |this, _: &MouseDownEvent, _window, cx| {
                 on_click(this, cx);
+            }),
+        )
+        .child(label)
+}
+
+fn quick_create_button(
+    label: &'static str,
+    kind: NewEntryKind,
+    root: PathBuf,
+    cx: &mut Context<WorkspacePrototype>,
+) -> impl IntoElement {
+    div()
+        .flex_1()
+        .h(px(28.0))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded_sm()
+        .bg(rgb(0x303440))
+        .text_color(rgb(0xe1e6ee))
+        .text_size(px(12.0))
+        .cursor_pointer()
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+                this.quick_create_in_root(
+                    root.clone(),
+                    kind,
+                    event.position.x / px(1.0),
+                    event.position.y / px(1.0),
+                    cx,
+                );
             }),
         )
         .child(label)

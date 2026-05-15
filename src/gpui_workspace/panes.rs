@@ -38,6 +38,7 @@ pub(super) struct WorkspaceSurfaceContext {
     pub(super) appearance_page: AppearancePage,
     pub(super) terminal_background_import_error: Option<String>,
     pub(super) show_explorer_button: bool,
+    pub(super) error_log_expanded: bool,
 }
 
 struct JoinedPaneResizeDrag {
@@ -216,6 +217,7 @@ pub(super) fn workspace_surface_pane(
         appearance_page,
         terminal_background_import_error,
         show_explorer_button,
+        error_log_expanded,
     } = context;
 
     let mut pane = div().h_full().overflow_hidden();
@@ -312,7 +314,9 @@ pub(super) fn workspace_surface_pane(
             cx,
         )),
         WorkspaceSurface::Home => pane.child(home_surface(workspace_root, recent_projects, cx)),
-        WorkspaceSurface::Settings => pane.child(settings_surface(show_explorer_button, cx)),
+        WorkspaceSurface::Settings => {
+            pane.child(settings_surface(show_explorer_button, error_log_expanded, cx))
+        }
     }
 }
 

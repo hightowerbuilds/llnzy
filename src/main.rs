@@ -1,5 +1,5 @@
 fn main() {
-    env_logger::init();
+    llnzy::error_log::install_logger();
 
     // Headless CLI dispatch must run before any GUI setup so
     // `llnzy stacker ...` / `llnzy prompt ...` can be used by agents and scripts.

@@ -12,7 +12,8 @@ use crate::{
 
 use super::{
     sidebar::{
-        initial_expanded_dirs, SidebarContextMenuState, SidebarContextMenuView, SidebarRenameState,
+        initial_expanded_dirs, NewEntryKind, SidebarContextMenuState, SidebarContextMenuView,
+        SidebarNewEntryState, SidebarRenameState,
     },
     tabs::{WorkspaceTab, WorkspaceTabId},
     WorkspacePrototype, WorkspaceSurface, BUMPER_RESIZE_WIDTH, SIDEBAR_MAX_WIDTH,
@@ -154,6 +155,7 @@ impl WorkspacePrototype {
         self.tab_overflow_open = false;
         self.tab_rename = None;
         self.sidebar_rename = None;
+        self.sidebar_new_entry = None;
         self.sidebar_context_menu = Some(SidebarContextMenuState {
             path,
             name,
@@ -169,6 +171,7 @@ impl WorkspacePrototype {
         if let Some(menu) = &mut self.sidebar_context_menu {
             menu.view = SidebarContextMenuView::Main;
             self.sidebar_rename = None;
+            self.sidebar_new_entry = None;
             cx.notify();
         }
     }
@@ -177,6 +180,7 @@ impl WorkspacePrototype {
         if let Some(menu) = &mut self.sidebar_context_menu {
             menu.view = SidebarContextMenuView::Move;
             self.sidebar_rename = None;
+            self.sidebar_new_entry = None;
             cx.notify();
         }
     }
@@ -185,6 +189,7 @@ impl WorkspacePrototype {
         if let Some(menu) = &mut self.sidebar_context_menu {
             menu.view = SidebarContextMenuView::DeleteConfirm;
             self.sidebar_rename = None;
+            self.sidebar_new_entry = None;
             cx.notify();
         }
     }
@@ -311,6 +316,164 @@ impl WorkspacePrototype {
         cx.notify();
     }
 
+    /// Open the New File / New Folder input at the sidebar position the
+    /// user clicked. Targets the project root and reuses the existing
+    /// context-menu popover for the input UI.
+    pub(super) fn quick_create_in_root(
+        &mut self,
+        root: PathBuf,
+        kind: NewEntryKind,
+        x: f32,
+        y: f32,
+        cx: &mut Context<Self>,
+    ) {
+        if !root.is_dir() {
+            self.sidebar_explorer.status =
+                Some("Open a project before creating files".to_string());
+            cx.notify();
+            return;
+        }
+        let name = root
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("project")
+            .to_string();
+        self.sidebar_rename = None;
+        self.sidebar_context_menu = Some(SidebarContextMenuState {
+            path: root.clone(),
+            name,
+            is_dir: true,
+            x,
+            y,
+            view: SidebarContextMenuView::NewEntry,
+        });
+        self.sidebar_new_entry = Some(SidebarNewEntryState {
+            parent: root,
+            kind,
+            text: String::new(),
+        });
+        cx.notify();
+    }
+
+    pub(super) fn start_sidebar_new_entry(
+        &mut self,
+        parent: PathBuf,
+        kind: NewEntryKind,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(menu) = &mut self.sidebar_context_menu else {
+            return;
+        };
+        if !parent.is_dir() {
+            self.sidebar_explorer.status =
+                Some("Can only create inside a folder".to_string());
+            cx.notify();
+            return;
+        }
+        menu.view = SidebarContextMenuView::NewEntry;
+        self.sidebar_rename = None;
+        self.sidebar_new_entry = Some(SidebarNewEntryState {
+            parent,
+            kind,
+            text: String::new(),
+        });
+        cx.notify();
+    }
+
+    pub(super) fn on_sidebar_new_entry_key_down(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) {
+        cx.stop_propagation();
+        match event.keystroke.key.as_str() {
+            "enter" => self.commit_sidebar_new_entry(cx),
+            "escape" => self.close_sidebar_context_menu(cx),
+            "backspace" => {
+                if let Some(state) = &mut self.sidebar_new_entry {
+                    state.text.pop();
+                    cx.notify();
+                }
+            }
+            _ => {
+                let modifiers = event.keystroke.modifiers;
+                if modifiers.control || modifiers.alt || modifiers.platform || modifiers.function {
+                    return;
+                }
+                let Some(text) = event.keystroke.key_char.as_deref() else {
+                    return;
+                };
+                if text.chars().any(char::is_control) {
+                    return;
+                }
+                if let Some(state) = &mut self.sidebar_new_entry {
+                    if state.text.chars().count() < 128 {
+                        state.text.push_str(text);
+                        cx.notify();
+                    }
+                }
+            }
+        }
+    }
+
+    pub(super) fn commit_sidebar_new_entry(&mut self, cx: &mut Context<Self>) {
+        let Some(state) = self.sidebar_new_entry.take() else {
+            return;
+        };
+        let name = state.text.trim();
+        if let Err(message) = validate_sidebar_entry_name(name) {
+            self.sidebar_explorer.status = Some(message);
+            self.sidebar_new_entry = Some(SidebarNewEntryState {
+                parent: state.parent,
+                kind: state.kind,
+                text: name.to_string(),
+            });
+            cx.notify();
+            return;
+        }
+        let destination = state.parent.join(name);
+        if destination.exists() {
+            self.sidebar_explorer.status = Some(format!("{name} already exists"));
+            self.sidebar_new_entry = Some(SidebarNewEntryState {
+                parent: state.parent,
+                kind: state.kind,
+                text: name.to_string(),
+            });
+            cx.notify();
+            return;
+        }
+
+        let result = match state.kind {
+            NewEntryKind::File => fs::write(&destination, b""),
+            NewEntryKind::Folder => fs::create_dir(&destination),
+        };
+        if let Err(error) = result {
+            let noun = match state.kind {
+                NewEntryKind::File => "file",
+                NewEntryKind::Folder => "folder",
+            };
+            self.sidebar_explorer.status = Some(format!("Create {noun} failed: {error}"));
+            self.sidebar_new_entry = Some(SidebarNewEntryState {
+                parent: state.parent,
+                kind: state.kind,
+                text: name.to_string(),
+            });
+            cx.notify();
+            return;
+        }
+
+        self.sidebar_explorer.expanded_dirs.insert(state.parent.clone());
+        self.sidebar_explorer.selected_path = Some(destination.clone());
+        self.sidebar_context_menu = None;
+        let noun = match state.kind {
+            NewEntryKind::File => "file",
+            NewEntryKind::Folder => "folder",
+        };
+        self.sidebar_explorer.status =
+            Some(format!("Created {noun} {}", display_path_name(&destination)));
+        cx.notify();
+    }
+
     pub(super) fn copy_sidebar_path(
         &mut self,
         path: PathBuf,
@@ -354,6 +517,7 @@ impl WorkspacePrototype {
     ) {
         self.sidebar_context_menu = None;
         self.sidebar_rename = None;
+        self.sidebar_new_entry = None;
         self.move_explorer_items_to_folder_with_origin(
             vec![source],
             destination_folder,
@@ -431,6 +595,7 @@ impl WorkspacePrototype {
         }
         self.sidebar_context_menu = None;
         self.sidebar_rename = None;
+        self.sidebar_new_entry = None;
         self.sidebar_explorer.status = Some(format!("Deleted {}", display_path_name(&path)));
         cx.notify();
     }

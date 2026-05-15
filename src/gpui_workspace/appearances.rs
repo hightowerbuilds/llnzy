@@ -558,7 +558,99 @@ fn terminal_background_image_controls(
         );
     }
 
+    controls = controls.child(terminal_background_library(config, cx));
+
     controls
+}
+
+fn terminal_background_library(
+    config: &Config,
+    cx: &mut Context<WorkspacePrototype>,
+) -> impl IntoElement {
+    let images = crate::theme_store::list_backgrounds();
+    let total = images.len();
+    let max = crate::theme_store::MAX_BACKGROUND_IMAGES;
+    let active_reference = config.effects.background_image.clone();
+
+    let mut section = div()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(control_label("Library"))
+                .child(
+                    div()
+                        .text_size(px(12.0))
+                        .text_color(rgb(MUTED_TEXT))
+                        .child(format!("{total} / {max}")),
+                ),
+        );
+
+    if images.is_empty() {
+        section = section.child(
+            div()
+                .pl(px(150.0))
+                .text_size(px(12.0))
+                .text_color(rgb(MUTED_TEXT))
+                .child("Import an image to start the library."),
+        );
+        return section;
+    }
+
+    let mut list = div().flex().flex_col().gap_1().pl(px(150.0));
+    for image in images {
+        let active = matches!(
+            (active_reference.as_deref(), gpui_terminal_background_reference(&image).ok()),
+            (Some(active), Some(reference)) if active == reference
+        );
+        list = list.child(background_library_row(image, active, cx));
+    }
+    section.child(list)
+}
+
+fn background_library_row(
+    image: std::path::PathBuf,
+    active: bool,
+    cx: &mut Context<WorkspacePrototype>,
+) -> impl IntoElement {
+    let display = image
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("image")
+        .to_string();
+    let apply_path = image.clone();
+    let delete_path = image;
+
+    div()
+        .flex()
+        .items_center()
+        .gap_2()
+        .child(
+            div()
+                .flex_1()
+                .max_w(px(300.0))
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_size(px(12.0))
+                .text_color(rgb(if active { ACTIVE_TEXT } else { MUTED_TEXT }))
+                .child(display),
+        )
+        .child(appearance_button(
+            if active { "Active".to_string() } else { "Apply".to_string() },
+            active,
+            cx,
+            move |this, cx| this.apply_library_background(apply_path.clone(), cx),
+        ))
+        .child(appearance_button(
+            "Delete".to_string(),
+            false,
+            cx,
+            move |this, cx| this.delete_library_background(delete_path.clone(), cx),
+        ))
 }
 
 fn editor_appearance_controls(
@@ -813,18 +905,21 @@ fn terminal_smoke_controls(
     let c3 = config.effects.background_color3.unwrap_or(default_c3);
     let intensity_pct = (config.effects.background_intensity * 100.0).round() as i32;
 
+    // Static three-band palette preview. Originally a live `EffectsElement`,
+    // but running a real shader per preview surface ran the wgpu allocator
+    // hot (the actual terminal background still renders the live shader;
+    // this swatch just communicates which colors will be used).
     let preview = div()
         .w_full()
         .h(px(160.0))
         .border_1()
         .border_color(rgb(BORDER))
         .overflow_hidden()
-        .child(
-            crate::effects::EffectsElement::new()
-                .with_kind(kind)
-                .with_intensity(config.effects.background_intensity)
-                .with_palette(c1, c2, c3),
-        );
+        .flex()
+        .flex_col()
+        .child(palette_band(c1))
+        .child(palette_band(c2))
+        .child(palette_band(c3));
 
     div()
         .flex()
@@ -1011,6 +1106,10 @@ fn appearance_button(
         .child(label)
 }
 
+fn palette_band(color: [u8; 3]) -> impl IntoElement {
+    div().flex_1().w_full().bg(rgb(color_u32(color)))
+}
+
 fn color_strip<const N: usize>(colors: [[u8; 3]; N]) -> impl IntoElement {
     let mut strip = div().flex().items_center().gap_1();
     for color in colors {
@@ -1086,13 +1185,19 @@ fn background_image_display_name(reference: &str) -> String {
 
 pub(super) fn settings_surface(
     show_explorer_button: bool,
+    error_log_expanded: bool,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
+    let error_entries = crate::error_log::global().recent(1000);
+
     div()
+        .id("settings-surface")
         .flex_1()
         .h_full()
         .flex()
         .flex_col()
+        .overflow_y_scroll()
+        .scrollbar_width(px(8.0))
         .bg(rgb(EDITOR_BG))
         .child(
             div()
@@ -1103,14 +1208,7 @@ pub(super) fn settings_surface(
                 .text_color(rgb(ACTIVE_TEXT))
                 .child("Settings"),
         )
-        .child(
-            div()
-                .px_6()
-                .pb_3()
-                .text_size(px(11.0))
-                .text_color(rgb(MUTED_TEXT))
-                .child("Footer"),
-        )
+        .child(settings_subheader("Footer"))
         .child(settings_section(vec![settings_toggle_row(
             "Show Explorer button",
             "Adds an Explorer entry to the footer nav bar next to Home.",
@@ -1119,6 +1217,22 @@ pub(super) fn settings_surface(
             |this, cx| this.toggle_show_explorer_button(cx),
         )
         .into_any_element()]))
+        .child(settings_subheader("Diagnostics"))
+        .child(settings_section(vec![settings_error_log_row(
+            error_log_expanded,
+            error_entries,
+            cx,
+        )
+        .into_any_element()]))
+}
+
+fn settings_subheader(label: &'static str) -> impl IntoElement {
+    div()
+        .px_6()
+        .pb_3()
+        .text_size(px(11.0))
+        .text_color(rgb(MUTED_TEXT))
+        .child(label)
 }
 
 fn settings_section(rows: Vec<gpui::AnyElement>) -> impl IntoElement {
@@ -1171,4 +1285,193 @@ fn settings_toggle_row(
                 ),
         )
         .child(effect_toggle_button("", active, cx, on_click))
+}
+
+fn settings_error_log_row(
+    expanded: bool,
+    entries: Vec<crate::error_log::LogEntry>,
+    cx: &mut Context<WorkspacePrototype>,
+) -> impl IntoElement {
+    let (error_count, warn_count) = entries
+        .iter()
+        .fold((0usize, 0usize), |(errs, warns), entry| {
+            match entry.level {
+                crate::error_log::LogLevel::Error => (errs + 1, warns),
+                crate::error_log::LogLevel::Warn => (errs, warns + 1),
+                crate::error_log::LogLevel::Info => (errs, warns),
+            }
+        });
+
+    let count_summary = format!(
+        "{} entries  ·  {} errors, {} warnings",
+        entries.len(),
+        error_count,
+        warn_count,
+    );
+
+    let chevron = if expanded { "▾" } else { "▸" };
+
+    let header = div()
+        .id("error-log-header")
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap_4()
+        .px_4()
+        .py_3()
+        .cursor_pointer()
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|this, _: &MouseDownEvent, _window, cx| {
+                this.toggle_error_log_expanded(cx);
+            }),
+        )
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(
+                    div()
+                        .text_size(px(13.0))
+                        .text_color(rgb(ACTIVE_TEXT))
+                        .child("Error Log"),
+                )
+                .child(
+                    div()
+                        .text_size(px(12.0))
+                        .text_color(rgb(MUTED_TEXT))
+                        .child(count_summary),
+                ),
+        )
+        .child(
+            div()
+                .text_size(px(14.0))
+                .text_color(rgb(MUTED_TEXT))
+                .child(chevron),
+        );
+
+    let mut row = div().flex().flex_col().child(header);
+
+    if expanded {
+        let has_entries = !entries.is_empty();
+        let toolbar = div()
+            .flex()
+            .items_center()
+            .justify_end()
+            .px_4()
+            .py_2()
+            .border_t_1()
+            .border_color(rgb(BORDER))
+            .child(appearance_button(
+                "Copy All".to_string(),
+                false,
+                cx,
+                |this, cx| {
+                    this.copy_error_log(cx);
+                },
+            ));
+        row = row.child(toolbar);
+        if has_entries {
+            row = row.child(error_log_list(entries));
+        } else {
+            row = row.child(
+                div()
+                    .px_4()
+                    .py_6()
+                    .border_t_1()
+                    .border_color(rgb(BORDER))
+                    .text_size(px(12.0))
+                    .text_color(rgb(MUTED_TEXT))
+                    .child("No errors recorded this session."),
+            );
+        }
+    }
+
+    row
+}
+
+fn error_log_list(entries: Vec<crate::error_log::LogEntry>) -> impl IntoElement {
+    let mut list = div()
+        .id("error-log-list")
+        .flex()
+        .flex_col()
+        .max_h(px(420.0))
+        .overflow_y_scroll()
+        .scrollbar_width(px(8.0))
+        .border_t_1()
+        .border_color(rgb(BORDER));
+
+    // Render newest first so users see the most recent failure at the top.
+    for entry in entries.into_iter().rev() {
+        list = list.child(error_log_entry_row(entry));
+    }
+    list
+}
+
+fn error_log_entry_row(entry: crate::error_log::LogEntry) -> impl IntoElement {
+    let [lr, lg, lb] = entry.level.color();
+    let level_color = ((lr as u32) << 16) | ((lg as u32) << 8) | (lb as u32);
+    let level_label = entry.level.label().trim().to_string();
+
+    let timestamp = entry.timestamp_label();
+
+    let module = entry
+        .module
+        .clone()
+        .unwrap_or_else(|| "<unknown module>".to_string());
+
+    let source_hint = match (entry.file.as_ref(), entry.line) {
+        (Some(file), Some(line)) => Some(format!("{file}:{line}")),
+        (Some(file), None) => Some(file.clone()),
+        _ => None,
+    };
+
+    let mut metadata_row = div()
+        .flex()
+        .items_center()
+        .gap_3()
+        .child(
+            div()
+                .text_size(px(10.0))
+                .text_color(rgb(level_color))
+                .child(level_label),
+        )
+        .child(
+            div()
+                .text_size(px(10.0))
+                .text_color(rgb(MUTED_TEXT))
+                .child(timestamp),
+        )
+        .child(
+            div()
+                .text_size(px(11.0))
+                .text_color(rgb(SIDEBAR_TEXT))
+                .child(module),
+        );
+
+    if let Some(hint) = source_hint {
+        metadata_row = metadata_row.child(
+            div()
+                .text_size(px(10.0))
+                .text_color(rgb(MUTED_TEXT))
+                .child(hint),
+        );
+    }
+
+    div()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .px_4()
+        .py_2()
+        .border_b_1()
+        .border_color(rgb(BORDER))
+        .child(metadata_row)
+        .child(
+            div()
+                .text_size(px(12.0))
+                .text_color(rgb(ACTIVE_TEXT))
+                .child(entry.message),
+        )
 }

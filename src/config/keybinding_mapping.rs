@@ -19,7 +19,6 @@ pub(super) fn apply_keybindings(keybindings: &mut KeyBindings, overrides: HashMa
             "toggle_fullscreen" => Some(Action::ToggleFullscreen),
             "toggle_effects" => Some(Action::ToggleEffects),
             "toggle_fps" => Some(Action::ToggleFps),
-            "toggle_error_panel" => Some(Action::ToggleErrorPanel),
             "scroll_page_up" => Some(Action::ScrollPageUp),
             "scroll_page_down" => Some(Action::ScrollPageDown),
             "zoom_in" => Some(Action::ZoomIn),

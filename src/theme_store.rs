@@ -11,6 +11,10 @@ use crate::theme::VisualTheme;
 pub const MAX_BACKGROUND_IMAGE_BYTES: u64 = 50 * 1024 * 1024;
 pub const MAX_BACKGROUND_IMAGE_DIMENSION: u32 = 8192;
 pub const MAX_BACKGROUND_IMAGE_PIXELS: u64 = 24_000_000;
+/// Maximum number of saved background images in the library. Imports past
+/// this count are rejected with an error so the user has to make room
+/// before adding more — files are only ever removed by an explicit delete.
+pub const MAX_BACKGROUND_IMAGES: usize = 10;
 
 /// Directory where saved background images live.
 pub fn backgrounds_dir() -> Option<PathBuf> {
@@ -107,6 +111,12 @@ fn resolve_background_path_in_dir(reference: &str, dir: &Path) -> Option<PathBuf
 fn import_background_into_dir(source: &Path, dir: &Path) -> Result<PathBuf, String> {
     validate_background_image(source)?;
     std::fs::create_dir_all(dir).map_err(|e| format!("Failed to create backgrounds dir: {e}"))?;
+
+    if list_backgrounds_in_dir(dir).len() >= MAX_BACKGROUND_IMAGES {
+        return Err(format!(
+            "Background library is full ({MAX_BACKGROUND_IMAGES} max). Delete one before adding more."
+        ));
+    }
 
     let file_name = source.file_name().ok_or("No file name")?;
     let dest = dir.join(file_name);
@@ -501,6 +511,30 @@ mod tests {
 
         delete_background(&first).unwrap();
         assert!(!first.exists());
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn background_import_rejects_when_library_is_full() {
+        let root = test_dir("background-library-full");
+        let source = root.join("source");
+        let library = root.join("library");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::create_dir_all(&library).unwrap();
+        write_test_png(&source.join("img.png"));
+
+        // Pre-seed the library with the maximum number of placeholder
+        // image files. Their contents don't need to validate since the
+        // cap check happens before we try to copy `source`.
+        for i in 0..MAX_BACKGROUND_IMAGES {
+            std::fs::write(library.join(format!("seed_{i}.png")), b"placeholder").unwrap();
+        }
+
+        let err = import_background_into_dir(&source.join("img.png"), &library).unwrap_err();
+
+        assert!(err.contains("Background library is full"));
+        assert_eq!(list_backgrounds_in_dir(&library).len(), MAX_BACKGROUND_IMAGES);
 
         let _ = std::fs::remove_dir_all(root);
     }

@@ -193,20 +193,7 @@ pub(super) fn workspace_tab_bar(
         )
         .child("Tabs");
 
-    bar.child(tab_strip).child(overflow_button).child(
-        div()
-            .ml_2()
-            .flex_none()
-            .rounded_sm()
-            .border_1()
-            .border_color(rgb(0x325c44))
-            .bg(rgb(0x102c20))
-            .px_2()
-            .py_1()
-            .text_size(px(11.0))
-            .text_color(rgb(QUEUE_GREEN))
-            .child("GPUI"),
-    )
+    bar.child(tab_strip).child(overflow_button)
 }
 
 pub(super) fn workspace_tab_layouts(

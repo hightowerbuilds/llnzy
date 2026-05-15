@@ -2,7 +2,7 @@ mod effects;
 mod render;
 mod text;
 
-use std::{ops::Range, time::Duration};
+use std::{ops::Range, path::PathBuf, time::Duration};
 
 use self::effects::{
     terminal_background_image, terminal_background_image_path, terminal_cursor_effects,
@@ -218,9 +218,10 @@ pub(crate) struct TerminalSurface {
 }
 
 impl TerminalSurface {
-    pub(crate) fn new(cx: &mut Context<Self>) -> Self {
+    pub(crate) fn new_with_cwd(cwd: Option<PathBuf>, cx: &mut Context<Self>) -> Self {
         let config = Config::default();
-        let (session, launch_error) = launch_session(&config, None);
+        let cwd_str = cwd.as_ref().and_then(|p| p.to_str());
+        let (session, launch_error) = launch_session(&config, cwd_str);
         let surface = Self {
             focus_handle: cx.focus_handle(),
             config,

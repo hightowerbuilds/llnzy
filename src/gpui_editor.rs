@@ -123,7 +123,7 @@ pub fn run_editor_prototype() {
         ) {
             Ok(window) => window,
             Err(error) => {
-                eprintln!("failed to open editor window: {error:?}");
+                log::error!("failed to open editor window: {error:?}");
                 cx.quit();
                 return;
             }
@@ -131,7 +131,7 @@ pub fn run_editor_prototype() {
         if let Err(error) = window.update(cx, |view, window, cx| {
             window.focus(&view.focus_handle(cx));
         }) {
-            eprintln!("failed to focus editor window: {error:?}");
+            log::error!("failed to focus editor window: {error:?}");
             cx.quit();
             return;
         }

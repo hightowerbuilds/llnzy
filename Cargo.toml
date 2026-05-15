@@ -13,7 +13,6 @@ gpui-workspace = ["gpui-editor", "gpui-stacker"]
 alacritty_terminal = "0.26"
 portable-pty = "0.8"
 log = "0.4"
-env_logger = "0.11"
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 dirs = "6"

@@ -15,6 +15,19 @@ pub struct WorkspacePreferences {
     /// Defaults to false — users opt-in from Settings.
     #[serde(default)]
     pub show_explorer_button: bool,
+
+    /// Library reference (file name under the backgrounds/ dir, or an
+    /// absolute path for legacy entries) of the terminal background image
+    /// last selected by the user. None when no image is active. Persisted so
+    /// the choice survives across app launches.
+    #[serde(default)]
+    pub terminal_background_image: Option<String>,
+
+    /// Persisted image fit mode ("fill", "fit", "tile", "center"). Empty
+    /// string means "use the BackgroundImageFit default" — kept as a String
+    /// so the preferences module doesn't depend on the config enum.
+    #[serde(default)]
+    pub terminal_background_image_fit: String,
 }
 
 impl WorkspacePreferences {
@@ -84,11 +97,28 @@ mod tests {
 
         let prefs = WorkspacePreferences {
             show_explorer_button: true,
+            terminal_background_image: Some("forest.png".to_string()),
+            terminal_background_image_fit: "fit".to_string(),
         };
         prefs.save_to(&path).unwrap();
 
         let loaded = WorkspacePreferences::load_from(&path);
         assert_eq!(loaded, prefs);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn missing_image_fields_default_to_none_and_empty() {
+        let dir = std::env::temp_dir().join("llnzy-prefs-test-partial");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("preferences.json");
+        std::fs::write(&path, r#"{"show_explorer_button": true}"#).unwrap();
+
+        let loaded = WorkspacePreferences::load_from(&path);
+        assert!(loaded.show_explorer_button);
+        assert!(loaded.terminal_background_image.is_none());
+        assert!(loaded.terminal_background_image_fit.is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

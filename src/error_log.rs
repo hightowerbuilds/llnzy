@@ -1,10 +1,15 @@
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Instant;
+use std::fs::{File, OpenOptions};
+use std::io::{BufRead, BufReader, Write};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const MAX_ENTRIES: usize = 1000;
+const ERRORS_LOG_FILENAME: &str = "errors.log";
+const REWRITE_THRESHOLD_BYTES: u64 = 5 * 1024 * 1024; // 5 MB
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LogLevel {
     Info,
     Warn,
@@ -27,16 +32,60 @@ impl LogLevel {
             LogLevel::Error => [220, 80, 80],
         }
     }
+
+    fn from_log(level: log::Level) -> Self {
+        match level {
+            log::Level::Error => LogLevel::Error,
+            log::Level::Warn => LogLevel::Warn,
+            _ => LogLevel::Info,
+        }
+    }
+
+    fn as_persistence_str(self) -> &'static str {
+        match self {
+            LogLevel::Info => "info",
+            LogLevel::Warn => "warn",
+            LogLevel::Error => "error",
+        }
+    }
+
+    fn from_persistence_str(s: &str) -> Option<Self> {
+        match s {
+            "info" => Some(LogLevel::Info),
+            "warn" => Some(LogLevel::Warn),
+            "error" => Some(LogLevel::Error),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone)]
 pub struct LogEntry {
     pub level: LogLevel,
     pub message: String,
-    pub elapsed_secs: f64,
+    /// Unix epoch milliseconds. Stable across sessions, unlike a process-relative
+    /// elapsed counter.
+    pub timestamp_ms: u64,
+    pub module: Option<String>,
+    pub file: Option<String>,
+    pub line: Option<u32>,
 }
 
-/// Thread-safe error log that can be written to from anywhere.
+impl LogEntry {
+    /// Format the timestamp for display in the Settings Error Log panel.
+    ///
+    /// Same-day entries render as `HH:MM:SS`; older entries include a
+    /// `Mon DD` prefix so users can tell which session a row came from.
+    pub fn timestamp_label(&self) -> String {
+        format_timestamp_for_display(self.timestamp_ms)
+    }
+}
+
+/// Thread-safe, optionally-persistent error log.
+///
+/// Construction (`new`) keeps the log purely in-memory. Calling
+/// `install_logger` at process startup attaches a file under the platform
+/// logs directory so entries survive restarts.
 #[derive(Clone)]
 pub struct ErrorLog {
     inner: Arc<Mutex<LogInner>>,
@@ -44,9 +93,10 @@ pub struct ErrorLog {
 
 struct LogInner {
     entries: VecDeque<LogEntry>,
-    start: Instant,
     error_count: usize,
     warn_count: usize,
+    /// Append-only file handle. `None` until `attach_persistence` is called.
+    persistence: Option<File>,
 }
 
 impl Default for ErrorLog {
@@ -60,9 +110,9 @@ impl ErrorLog {
         ErrorLog {
             inner: Arc::new(Mutex::new(LogInner {
                 entries: VecDeque::with_capacity(MAX_ENTRIES),
-                start: Instant::now(),
                 error_count: 0,
                 warn_count: 0,
+                persistence: None,
             })),
         }
     }
@@ -73,25 +123,58 @@ impl ErrorLog {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    pub fn log(&self, level: LogLevel, message: impl Into<String>) {
+    /// Push an entry into the ring buffer. When `persist` is true and a
+    /// persistence handle is attached, also append a JSON line to the file.
+    /// Replay-from-disk paths pass `persist=false` to avoid double-writing.
+    fn push_entry(&self, entry: LogEntry, persist: bool) {
         let mut inner = self.lock_inner();
-        let elapsed = inner.start.elapsed().as_secs_f64();
-
-        match level {
+        match entry.level {
             LogLevel::Error => inner.error_count += 1,
             LogLevel::Warn => inner.warn_count += 1,
             LogLevel::Info => {}
         }
-
         if inner.entries.len() >= MAX_ENTRIES {
             inner.entries.pop_front();
         }
+        inner.entries.push_back(entry.clone());
 
-        inner.entries.push_back(LogEntry {
+        if persist {
+            if let Some(file) = inner.persistence.as_mut() {
+                let line = serialize_entry(&entry);
+                if let Err(err) = writeln!(file, "{line}") {
+                    // Drop the handle so we don't spin on every subsequent log
+                    // call. The in-memory log keeps working.
+                    eprintln!("llnzy: error log persistence failed: {err}");
+                    inner.persistence = None;
+                }
+            }
+        }
+    }
+
+    pub fn log(&self, level: LogLevel, message: impl Into<String>) {
+        let entry = LogEntry {
             level,
             message: message.into(),
-            elapsed_secs: elapsed,
-        });
+            timestamp_ms: now_ms(),
+            module: None,
+            file: None,
+            line: None,
+        };
+        self.push_entry(entry, true);
+    }
+
+    /// Capture an entry directly from a `log::Record`, preserving the
+    /// module path and source location.
+    pub fn log_record(&self, record: &log::Record<'_>) {
+        let entry = LogEntry {
+            level: LogLevel::from_log(record.level()),
+            message: record.args().to_string(),
+            timestamp_ms: now_ms(),
+            module: record.module_path().map(str::to_string),
+            file: record.file().map(str::to_string),
+            line: record.line(),
+        };
+        self.push_entry(entry, true);
     }
 
     pub fn info(&self, msg: impl Into<String>) {
@@ -113,13 +196,11 @@ impl ErrorLog {
         inner.entries.iter().skip(start).cloned().collect()
     }
 
-    /// Total counts.
     pub fn counts(&self) -> (usize, usize) {
         let inner = self.lock_inner();
         (inner.error_count, inner.warn_count)
     }
 
-    /// Total entry count.
     pub fn len(&self) -> usize {
         self.lock_inner().entries.len()
     }
@@ -127,120 +208,223 @@ impl ErrorLog {
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
-}
 
-/// Error log panel state.
-pub struct ErrorPanel {
-    pub visible: bool,
-    pub scroll_offset: usize,
-}
+    /// Replay entries from `path` into the in-memory ring, then open the
+    /// file for append so subsequent writes persist. Missing or unreadable
+    /// files are treated as empty — never a startup-blocking failure.
+    fn attach_persistence(&self, path: &Path) {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
 
-impl Default for ErrorPanel {
-    fn default() -> Self {
-        Self::new()
+        // Compact if the file has grown past the rewrite threshold. Reads the
+        // last MAX_ENTRIES parseable lines back, then rewrites them. Anything
+        // we can't parse is dropped.
+        if file_too_large(path) {
+            if let Err(err) = compact_persistence_file(path) {
+                eprintln!("llnzy: error log compaction failed: {err}");
+            }
+        }
+
+        if let Ok(file) = File::open(path) {
+            let reader = BufReader::new(file);
+            let lines: Vec<String> = reader.lines().map_while(Result::ok).collect();
+            let start = lines.len().saturating_sub(MAX_ENTRIES);
+            for line in &lines[start..] {
+                if let Some(entry) = parse_entry(line) {
+                    self.push_entry(entry, false);
+                }
+            }
+        }
+
+        match OpenOptions::new().create(true).append(true).open(path) {
+            Ok(file) => {
+                let mut inner = self.lock_inner();
+                inner.persistence = Some(file);
+            }
+            Err(err) => {
+                eprintln!("llnzy: could not open error log for append: {err}");
+            }
+        }
     }
 }
 
-impl ErrorPanel {
-    pub fn new() -> Self {
-        ErrorPanel {
-            visible: false,
-            scroll_offset: 0,
+static GLOBAL_LOG: OnceLock<ErrorLog> = OnceLock::new();
+
+/// Process-global ErrorLog. The first caller wins; later callers share the
+/// same instance.
+pub fn global() -> &'static ErrorLog {
+    GLOBAL_LOG.get_or_init(ErrorLog::new)
+}
+
+struct ForwardingLogger;
+
+impl log::Log for ForwardingLogger {
+    fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
+        metadata.level() <= log::Level::Warn
+    }
+
+    fn log(&self, record: &log::Record<'_>) {
+        if self.enabled(record.metadata()) {
+            global().log_record(record);
         }
     }
 
-    pub fn toggle(&mut self) {
-        self.visible = !self.visible;
-        self.scroll_offset = 0;
+    fn flush(&self) {}
+}
+
+static LOGGER: ForwardingLogger = ForwardingLogger;
+
+/// Install the `log` facade and attach disk persistence under
+/// `{logs_dir}/errors.log`. Safe to call once at startup; later calls are
+/// no-ops. Replays the last 1000 lines from any prior session before
+/// enabling capture so the panel surfaces historical entries.
+pub fn install_logger() {
+    let log = global();
+    let path = persistence_path();
+    log.attach_persistence(&path);
+
+    if log::set_logger(&LOGGER).is_ok() {
+        log::set_max_level(log::LevelFilter::Warn);
     }
+}
 
-    pub fn scroll_up(&mut self) {
-        self.scroll_offset = self.scroll_offset.saturating_add(3);
-    }
+fn persistence_path() -> PathBuf {
+    crate::platform::paths::development_paths()
+        .logs_dir
+        .join(ERRORS_LOG_FILENAME)
+}
 
-    pub fn scroll_down(&mut self) {
-        self.scroll_offset = self.scroll_offset.saturating_sub(3);
-    }
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
 
-    /// Generate the display lines and colored rects for the error panel.
-    /// Returns (background_rect, line_rects, display_lines).
-    #[expect(
-        clippy::type_complexity,
-        reason = "render data is passed directly to the lightweight rect/text renderers"
-    )]
-    pub fn render_data(
-        &self,
-        log: &ErrorLog,
-        panel_w: f32,
-        panel_h: f32,
-        line_h: f32,
-    ) -> (
-        Vec<(f32, f32, f32, f32, [f32; 4])>, // background + line highlight rects
-        Vec<(String, [u8; 3])>,              // (text, color) per visible line
-    ) {
-        let max_lines = (panel_h / line_h) as usize;
-        let entries = log.recent(MAX_ENTRIES);
-        let total = entries.len();
+fn file_too_large(path: &Path) -> bool {
+    std::fs::metadata(path)
+        .map(|m| m.len() > REWRITE_THRESHOLD_BYTES)
+        .unwrap_or(false)
+}
 
-        // Apply scroll offset from the bottom
-        let end = total.saturating_sub(self.scroll_offset);
-        let start = end.saturating_sub(max_lines);
-        let visible = &entries[start..end];
+fn compact_persistence_file(path: &Path) -> std::io::Result<()> {
+    let file = File::open(path)?;
+    let reader = BufReader::new(file);
+    let lines: Vec<String> = reader.lines().map_while(Result::ok).collect();
+    let start = lines.len().saturating_sub(MAX_ENTRIES);
+    let kept = &lines[start..];
 
-        let panel_x = 0.0;
-        let panel_y_start = 0.0; // caller offsets this
-
-        // Panel background
-        let mut rects = vec![(
-            panel_x,
-            panel_y_start,
-            panel_w,
-            panel_h,
-            [0.08, 0.08, 0.10, 0.92],
-        )];
-
-        // Header bar
-        let (errs, warns) = log.counts();
-        rects.push((
-            panel_x,
-            panel_y_start,
-            panel_w,
-            line_h,
-            [0.12, 0.12, 0.15, 1.0],
-        ));
-
-        let mut lines: Vec<(String, [u8; 3])> = Vec::new();
-
-        // Header
-        let header = format!(
-            " Diagnostics — {} entries ({} errors, {} warnings)",
-            total, errs, warns,
-        );
-        lines.push((header, [180, 180, 190]));
-
-        // Log entries
-        for entry in visible {
-            let mins = (entry.elapsed_secs / 60.0) as u64;
-            let secs = entry.elapsed_secs % 60.0;
-            let line = format!(
-                " {:>3}:{:05.2}  [{}]  {}",
-                mins,
-                secs,
-                entry.level.label(),
-                entry.message,
-            );
-            lines.push((line, entry.level.color()));
+    let tmp_path = path.with_extension("log.tmp");
+    {
+        let mut out = File::create(&tmp_path)?;
+        for line in kept {
+            writeln!(out, "{line}")?;
         }
-
-        (rects, lines)
     }
+    std::fs::rename(&tmp_path, path)?;
+    Ok(())
+}
+
+fn serialize_entry(entry: &LogEntry) -> String {
+    let mut obj = serde_json::Map::new();
+    obj.insert(
+        "ts".into(),
+        serde_json::Value::Number(entry.timestamp_ms.into()),
+    );
+    obj.insert(
+        "level".into(),
+        serde_json::Value::String(entry.level.as_persistence_str().to_string()),
+    );
+    obj.insert(
+        "msg".into(),
+        serde_json::Value::String(entry.message.clone()),
+    );
+    if let Some(module) = &entry.module {
+        obj.insert("module".into(), serde_json::Value::String(module.clone()));
+    }
+    if let Some(file) = &entry.file {
+        obj.insert("file".into(), serde_json::Value::String(file.clone()));
+    }
+    if let Some(line) = entry.line {
+        obj.insert("line".into(), serde_json::Value::Number(line.into()));
+    }
+    serde_json::Value::Object(obj).to_string()
+}
+
+fn parse_entry(line: &str) -> Option<LogEntry> {
+    let value: serde_json::Value = serde_json::from_str(line.trim()).ok()?;
+    let obj = value.as_object()?;
+    let ts = obj.get("ts")?.as_u64()?;
+    let level_str = obj.get("level")?.as_str()?;
+    let level = LogLevel::from_persistence_str(level_str)?;
+    let message = obj.get("msg")?.as_str()?.to_string();
+    let module = obj
+        .get("module")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let file = obj
+        .get("file")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let line_no = obj
+        .get("line")
+        .and_then(|v| v.as_u64())
+        .and_then(|n| u32::try_from(n).ok());
+
+    Some(LogEntry {
+        level,
+        message,
+        timestamp_ms: ts,
+        module,
+        file,
+        line: line_no,
+    })
+}
+
+#[cfg(unix)]
+fn format_timestamp_for_display(ms: u64) -> String {
+    use std::mem::MaybeUninit;
+    let secs = (ms / 1000) as libc::time_t;
+    let now_secs = (now_ms() / 1000) as libc::time_t;
+
+    let mut entry_tm = MaybeUninit::<libc::tm>::uninit();
+    let mut now_tm = MaybeUninit::<libc::tm>::uninit();
+    // SAFETY: localtime_r reads a time_t and writes a fully-initialized tm
+    // into the destination. We pass valid pointers to stack memory.
+    unsafe {
+        libc::localtime_r(&secs, entry_tm.as_mut_ptr());
+        libc::localtime_r(&now_secs, now_tm.as_mut_ptr());
+    }
+    let entry_tm = unsafe { entry_tm.assume_init() };
+    let now_tm = unsafe { now_tm.assume_init() };
+
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let mon_idx = (entry_tm.tm_mon as usize).min(11);
+
+    if entry_tm.tm_year == now_tm.tm_year && entry_tm.tm_yday == now_tm.tm_yday {
+        format!(
+            "{:02}:{:02}:{:02}",
+            entry_tm.tm_hour, entry_tm.tm_min, entry_tm.tm_sec
+        )
+    } else {
+        format!(
+            "{} {:>2} {:02}:{:02}",
+            MONTHS[mon_idx], entry_tm.tm_mday, entry_tm.tm_hour, entry_tm.tm_min
+        )
+    }
+}
+
+#[cfg(not(unix))]
+fn format_timestamp_for_display(ms: u64) -> String {
+    format!("{}ms", ms)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // ── LogLevel ──
 
     #[test]
     fn log_level_labels() {
@@ -258,8 +442,6 @@ mod tests {
         assert_ne!(info, err);
         assert_ne!(warn, err);
     }
-
-    // ── ErrorLog ──
 
     #[test]
     fn new_log_is_empty() {
@@ -329,11 +511,14 @@ mod tests {
     }
 
     #[test]
-    fn log_entries_have_timestamps() {
+    fn log_entries_record_a_wall_clock_timestamp() {
         let log = ErrorLog::new();
+        let before = now_ms();
         log.info("msg");
-        let entries = log.recent(1);
-        assert!(entries[0].elapsed_secs >= 0.0);
+        let after = now_ms();
+        let entry = &log.recent(1)[0];
+        assert!(entry.timestamp_ms >= before);
+        assert!(entry.timestamp_ms <= after);
     }
 
     #[test]
@@ -343,7 +528,6 @@ mod tests {
             log.info(format!("msg {}", i));
         }
         assert_eq!(log.len(), MAX_ENTRIES);
-        // Oldest entries should have been evicted
         let recent = log.recent(1);
         assert_eq!(recent[0].message, "msg 1099");
     }
@@ -377,102 +561,105 @@ mod tests {
         assert_eq!(log.recent(1)[0].message, "after poison");
     }
 
-    // ── ErrorPanel ──
-
     #[test]
-    fn new_panel_not_visible() {
-        let panel = ErrorPanel::new();
-        assert!(!panel.visible);
-        assert_eq!(panel.scroll_offset, 0);
-    }
-
-    #[test]
-    fn toggle_panel() {
-        let mut panel = ErrorPanel::new();
-        panel.toggle();
-        assert!(panel.visible);
-        panel.toggle();
-        assert!(!panel.visible);
-    }
-
-    #[test]
-    fn toggle_resets_scroll() {
-        let mut panel = ErrorPanel::new();
-        panel.scroll_offset = 10;
-        panel.toggle();
-        assert_eq!(panel.scroll_offset, 0);
-    }
-
-    #[test]
-    fn scroll_up_increases_offset() {
-        let mut panel = ErrorPanel::new();
-        panel.scroll_up();
-        assert_eq!(panel.scroll_offset, 3);
-        panel.scroll_up();
-        assert_eq!(panel.scroll_offset, 6);
-    }
-
-    #[test]
-    fn scroll_down_decreases_offset() {
-        let mut panel = ErrorPanel::new();
-        panel.scroll_offset = 10;
-        panel.scroll_down();
-        assert_eq!(panel.scroll_offset, 7);
-    }
-
-    #[test]
-    fn scroll_down_saturates_at_zero() {
-        let mut panel = ErrorPanel::new();
-        panel.scroll_offset = 1;
-        panel.scroll_down();
-        assert_eq!(panel.scroll_offset, 0);
-        panel.scroll_down();
-        assert_eq!(panel.scroll_offset, 0);
-    }
-
-    // ── render_data ──
-
-    #[test]
-    fn render_data_includes_header() {
-        let panel = ErrorPanel {
-            visible: true,
-            scroll_offset: 0,
-        };
+    fn direct_log_call_leaves_module_and_file_unset() {
         let log = ErrorLog::new();
-        log.info("test");
-        log.error("fail");
-        let (rects, lines) = panel.render_data(&log, 800.0, 400.0, 20.0);
-        // Should have background + header rects
-        assert!(rects.len() >= 2);
-        // First line is header
-        assert!(lines[0].0.contains("Diagnostics"));
-        assert!(lines[0].0.contains("2 entries"));
-        assert!(lines[0].0.contains("1 errors"));
+        log.warn("plain message");
+        let entry = &log.recent(1)[0];
+        assert!(entry.module.is_none());
+        assert!(entry.file.is_none());
+        assert!(entry.line.is_none());
     }
 
     #[test]
-    fn render_data_shows_entries() {
-        let panel = ErrorPanel {
-            visible: true,
-            scroll_offset: 0,
-        };
+    fn log_record_captures_module_and_source_location() {
         let log = ErrorLog::new();
-        log.info("hello world");
-        let (_, lines) = panel.render_data(&log, 800.0, 400.0, 20.0);
-        assert_eq!(lines.len(), 2); // header + 1 entry
-        assert!(lines[1].0.contains("hello world"));
-        assert!(lines[1].0.contains("[INFO]"));
+        log.log_record(
+            &log::Record::builder()
+                .args(format_args!("LSP transport closed"))
+                .level(log::Level::Error)
+                .target("llnzy::lsp::transport")
+                .module_path(Some("llnzy::lsp::transport"))
+                .file(Some("src/lsp/transport.rs"))
+                .line(Some(142))
+                .build(),
+        );
+        let entry = &log.recent(1)[0];
+        assert_eq!(entry.level, LogLevel::Error);
+        assert_eq!(entry.message, "LSP transport closed");
+        assert_eq!(entry.module.as_deref(), Some("llnzy::lsp::transport"));
+        assert_eq!(entry.file.as_deref(), Some("src/lsp/transport.rs"));
+        assert_eq!(entry.line, Some(142));
+        assert_eq!(log.counts(), (1, 0));
     }
 
     #[test]
-    fn render_data_entry_colors_match_level() {
-        let panel = ErrorPanel {
-            visible: true,
-            scroll_offset: 0,
+    fn serialize_then_parse_roundtrip_preserves_fields() {
+        let entry = LogEntry {
+            level: LogLevel::Error,
+            message: "boom \"quoted\" \\backslash\nnewline".to_string(),
+            timestamp_ms: 1_731_672_372_123,
+            module: Some("llnzy::lsp::transport".into()),
+            file: Some("src/lsp/transport.rs".into()),
+            line: Some(142),
         };
+        let line = serialize_entry(&entry);
+        let parsed = parse_entry(&line).expect("parse roundtrip");
+        assert_eq!(parsed.level, entry.level);
+        assert_eq!(parsed.message, entry.message);
+        assert_eq!(parsed.timestamp_ms, entry.timestamp_ms);
+        assert_eq!(parsed.module, entry.module);
+        assert_eq!(parsed.file, entry.file);
+        assert_eq!(parsed.line, entry.line);
+    }
+
+    #[test]
+    fn parse_entry_rejects_malformed_lines() {
+        assert!(parse_entry("not json").is_none());
+        assert!(parse_entry("{}").is_none());
+        assert!(parse_entry(r#"{"ts":"not a number","level":"info","msg":"hi"}"#).is_none());
+    }
+
+    #[test]
+    fn attach_persistence_replays_existing_file_without_duplicating() {
+        let dir = std::env::temp_dir().join(format!(
+            "llnzy-error-log-replay-{}",
+            std::process::id(),
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("errors.log");
+
+        let prior = LogEntry {
+            level: LogLevel::Warn,
+            message: "from previous session".to_string(),
+            timestamp_ms: 1_700_000_000_000,
+            module: Some("llnzy::preferences".into()),
+            file: Some("src/preferences.rs".into()),
+            line: Some(50),
+        };
+        std::fs::write(&path, format!("{}\n", serialize_entry(&prior))).unwrap();
+
         let log = ErrorLog::new();
-        log.error("bad");
-        let (_, lines) = panel.render_data(&log, 800.0, 400.0, 20.0);
-        assert_eq!(lines[1].1, LogLevel::Error.color());
+        log.attach_persistence(&path);
+
+        // Replay should have pulled the previous entry into memory exactly
+        // once. The file itself should not have grown from the replay.
+        assert_eq!(log.len(), 1);
+        let entry = &log.recent(1)[0];
+        assert_eq!(entry.message, "from previous session");
+        assert_eq!(entry.module.as_deref(), Some("llnzy::preferences"));
+
+        let pre_size = std::fs::metadata(&path).unwrap().len();
+
+        // A new entry should now persist alongside the replayed one.
+        log.warn("new entry this session");
+        let post_size = std::fs::metadata(&path).unwrap().len();
+        assert!(post_size > pre_size);
+
+        let contents = std::fs::read_to_string(&path).unwrap();
+        let line_count = contents.lines().count();
+        assert_eq!(line_count, 2);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

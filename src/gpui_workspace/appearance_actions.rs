@@ -116,7 +116,10 @@ impl WorkspacePrototype {
                             workspace.terminal_background_import_error = None;
                             workspace.appearance_config.effects.enabled = true;
                             workspace.appearance_config.effects.background = "image".to_string();
-                            workspace.appearance_config.effects.background_image = Some(reference);
+                            workspace.appearance_config.effects.background_image =
+                                Some(reference.clone());
+                            workspace.preferences.terminal_background_image = Some(reference);
+                            workspace.preferences.save();
                             workspace.apply_appearance_config(cx);
                         }
                         Err(error) => {
@@ -136,6 +139,8 @@ impl WorkspacePrototype {
         if self.appearance_config.effects.background == "image" {
             self.appearance_config.effects.background = "none".to_string();
         }
+        self.preferences.terminal_background_image = None;
+        self.preferences.save();
         self.apply_appearance_config(cx);
     }
 
@@ -145,6 +150,67 @@ impl WorkspacePrototype {
         cx: &mut Context<Self>,
     ) {
         self.appearance_config.effects.background_image_fit = fit;
+        self.preferences.terminal_background_image_fit = fit.as_str().to_string();
+        self.preferences.save();
+        self.apply_appearance_config(cx);
+    }
+
+    /// Apply an image from the saved background library as the active
+    /// terminal background. Used by the per-row "Apply" button in the
+    /// Appearances library list.
+    pub(super) fn apply_library_background(
+        &mut self,
+        image_path: std::path::PathBuf,
+        cx: &mut Context<Self>,
+    ) {
+        let reference = match super::appearances::gpui_terminal_background_reference(&image_path) {
+            Ok(reference) => reference,
+            Err(error) => {
+                self.terminal_background_import_error = Some(error);
+                cx.notify();
+                return;
+            }
+        };
+        self.terminal_background_import_error = None;
+        self.appearance_config.effects.enabled = true;
+        self.appearance_config.effects.background = "image".to_string();
+        self.appearance_config.effects.background_image = Some(reference.clone());
+        self.preferences.terminal_background_image = Some(reference);
+        self.preferences.save();
+        self.apply_appearance_config(cx);
+    }
+
+    /// Delete a saved background image from the library. If it was the
+    /// currently active image, also clear the active selection so the
+    /// terminal stops trying to render it.
+    pub(super) fn delete_library_background(
+        &mut self,
+        image_path: std::path::PathBuf,
+        cx: &mut Context<Self>,
+    ) {
+        let was_active = match (
+            super::appearances::gpui_terminal_background_reference(&image_path).ok(),
+            self.appearance_config.effects.background_image.as_deref(),
+        ) {
+            (Some(reference), Some(active)) => reference == active,
+            _ => false,
+        };
+
+        if let Err(error) = crate::theme_store::delete_background(&image_path) {
+            self.terminal_background_import_error = Some(error);
+            cx.notify();
+            return;
+        }
+
+        self.terminal_background_import_error = None;
+        if was_active {
+            self.appearance_config.effects.background_image = None;
+            if self.appearance_config.effects.background == "image" {
+                self.appearance_config.effects.background = "none".to_string();
+            }
+            self.preferences.terminal_background_image = None;
+            self.preferences.save();
+        }
         self.apply_appearance_config(cx);
     }
 

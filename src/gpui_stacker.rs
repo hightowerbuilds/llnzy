@@ -73,7 +73,7 @@ pub fn run_stacker_prototype() {
         ) {
             Ok(window) => window,
             Err(error) => {
-                eprintln!("failed to open stacker window: {error:?}");
+                log::error!("failed to open stacker window: {error:?}");
                 cx.quit();
                 return;
             }
@@ -81,7 +81,7 @@ pub fn run_stacker_prototype() {
         if let Err(error) = window.update(cx, |view, window, cx| {
             window.focus(&view.editor.focus_handle(cx));
         }) {
-            eprintln!("failed to focus stacker window: {error:?}");
+            log::error!("failed to focus stacker window: {error:?}");
             cx.quit();
             return;
         }
@@ -767,7 +767,7 @@ impl Element for StackerTextElement {
                     window,
                     cx,
                 ) {
-                    eprintln!("failed to paint stacker text line: {error:?}");
+                    log::error!("failed to paint stacker text line: {error:?}");
                 }
             }
             if focus_handle.is_focused(window) {

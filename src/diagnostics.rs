@@ -66,11 +66,23 @@ pub fn render_diagnostics_report(log: Option<&ErrorLog>) -> String {
             let _ = writeln!(report);
             let _ = writeln!(report, "Recent Runtime Log");
             for entry in log.recent(50) {
+                let location = entry
+                    .module
+                    .as_deref()
+                    .map(|m| format!(" {m}"))
+                    .unwrap_or_default();
+                let source_hint = match (entry.file.as_deref(), entry.line) {
+                    (Some(file), Some(line)) => format!(" ({file}:{line})"),
+                    (Some(file), None) => format!(" ({file})"),
+                    _ => String::new(),
+                };
                 let _ = writeln!(
                     report,
-                    "{:>8.2}s [{}] {}",
-                    entry.elapsed_secs,
+                    "{} [{}]{}{} {}",
+                    entry.timestamp_label(),
                     entry.level.label(),
+                    location,
+                    source_hint,
                     entry.message
                 );
             }

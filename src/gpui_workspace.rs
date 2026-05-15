@@ -29,7 +29,8 @@ use self::footer::{load_workspace_queue, workspace_footer};
 use self::panes::{workspace_content, WorkspaceSurfaceContext};
 use self::sidebar::{
     collect_explorer_entries, sidebar_bumper, workspace_sidebar, workspace_sidebar_context_menu,
-    ExplorerState, SidebarContextMenuState, SidebarRenameState, WorkspaceSidebarContext,
+    ExplorerState, SidebarContextMenuState, SidebarNewEntryState, SidebarRenameState,
+    WorkspaceSidebarContext,
 };
 use self::tabs::{
     reorder_workspace_tab_block, workspace_tab_bar, workspace_tab_context_menu,
@@ -130,6 +131,29 @@ const SIDEBAR_ROW_SELECTED_HOVER_BG: u32 = 0x3a4050;
 const SIDEBAR_DROP_VALID_BG: u32 = 0x1f3a2b;
 const SIDEBAR_DROP_INVALID_BG: u32 = 0x3d2428;
 
+/// Build the initial appearance config for a new workspace session, honoring
+/// the user's last persisted background image selection. Any image-related
+/// preferences are applied on top of the config-file defaults so a user who
+/// imports a background once sees it again on next launch.
+fn appearance_config_from_preferences(
+    preferences: &crate::preferences::WorkspacePreferences,
+) -> Config {
+    let mut config = Config::load();
+    if let Some(image_ref) = preferences.terminal_background_image.as_deref() {
+        if !image_ref.is_empty() {
+            config.effects.enabled = true;
+            config.effects.background = "image".to_string();
+            config.effects.background_image = Some(image_ref.to_string());
+        }
+    }
+    if let Some(fit) = crate::config::BackgroundImageFit::parse(
+        preferences.terminal_background_image_fit.as_str(),
+    ) {
+        config.effects.background_image_fit = fit;
+    }
+    config
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum WorkspaceSurface {
     Home,
@@ -227,7 +251,7 @@ pub fn run_workspace_prototype() {
         ) {
             Ok(window) => window,
             Err(error) => {
-                eprintln!("failed to open workspace window: {error:?}");
+                log::error!("failed to open workspace window: {error:?}");
                 cx.quit();
                 return;
             }
@@ -235,7 +259,7 @@ pub fn run_workspace_prototype() {
         if let Err(error) = window.update(cx, |view, window, cx| {
             view.focus_surface(view.active_surface(), window, cx);
         }) {
-            eprintln!("failed to focus workspace window: {error:?}");
+            log::error!("failed to focus workspace window: {error:?}");
             cx.quit();
             return;
         }
@@ -354,6 +378,7 @@ struct WorkspacePrototype {
     tab_overflow_open: bool,
     sidebar_context_menu: Option<SidebarContextMenuState>,
     sidebar_rename: Option<SidebarRenameState>,
+    sidebar_new_entry: Option<SidebarNewEntryState>,
     active_tab_id: WorkspaceTabId,
     next_tab_id: u64,
     workspace_root: Option<PathBuf>,
@@ -369,25 +394,26 @@ struct WorkspacePrototype {
     terminal_background_import_error: Option<String>,
     palette: command_palette::CommandPaletteState,
     preferences: crate::preferences::WorkspacePreferences,
+    error_log_expanded: bool,
 }
 
 impl WorkspacePrototype {
     fn new(cx: &mut Context<Self>) -> Self {
         let workspace_root = std::env::current_dir().ok();
-        let tabs = vec![
-            WorkspaceTab::new(WorkspaceTabId(1), WorkspaceSurface::Home),
-            WorkspaceTab::new(WorkspaceTabId(2), WorkspaceSurface::Stacker),
-            WorkspaceTab::new(WorkspaceTabId(3), WorkspaceSurface::Terminal),
-            WorkspaceTab::new(WorkspaceTabId(4), WorkspaceSurface::Sketch),
-        ];
+        let tabs = vec![WorkspaceTab::new(
+            WorkspaceTabId(1),
+            WorkspaceSurface::Home,
+        )];
         let sidebar_explorer = ExplorerState::for_root(workspace_root.as_deref());
         let sketch = cx.new(SketchSurface::new);
         sketch.update(cx, |sketch, _cx| {
             sketch.set_workspace_root(workspace_root.clone());
         });
 
-        let mut terminals = BTreeMap::new();
-        terminals.insert(3, cx.new(TerminalSurface::new));
+        let terminals = BTreeMap::new();
+
+        let preferences = crate::preferences::WorkspacePreferences::load();
+        let appearance_config = appearance_config_from_preferences(&preferences);
 
         Self {
             stacker: cx.new(StackerPrototype::embedded),
@@ -403,8 +429,9 @@ impl WorkspacePrototype {
             tab_overflow_open: false,
             sidebar_context_menu: None,
             sidebar_rename: None,
+            sidebar_new_entry: None,
             active_tab_id: WorkspaceTabId(1),
-            next_tab_id: 5,
+            next_tab_id: 2,
             workspace_root,
             sidebar_explorer,
             explorers: BTreeMap::new(),
@@ -413,17 +440,34 @@ impl WorkspacePrototype {
             sidebar_visible: true,
             sidebar_width: SIDEBAR_DEFAULT_WIDTH,
             last_sidebar_width: SIDEBAR_DEFAULT_WIDTH,
-            appearance_config: Config::default(),
+            appearance_config,
             appearance_page: AppearancePage::Terminal,
             terminal_background_import_error: None,
             palette: command_palette::CommandPaletteState::default(),
-            preferences: crate::preferences::WorkspacePreferences::load(),
+            preferences,
+            error_log_expanded: false,
         }
     }
 
     pub(super) fn toggle_show_explorer_button(&mut self, cx: &mut Context<Self>) {
         self.preferences.show_explorer_button = !self.preferences.show_explorer_button;
         self.preferences.save();
+        cx.notify();
+    }
+
+    pub(super) fn toggle_error_log_expanded(&mut self, cx: &mut Context<Self>) {
+        self.error_log_expanded = !self.error_log_expanded;
+        cx.notify();
+    }
+
+    /// Copy the full diagnostics report (system context + every captured
+    /// runtime entry) to the system clipboard. Lets users hand the log over
+    /// to whoever's debugging the app or — once extensions ship — to the
+    /// author of a misbehaving extension.
+    pub(super) fn copy_error_log(&mut self, cx: &mut Context<Self>) {
+        let log = crate::error_log::global();
+        let report = crate::diagnostics::render_diagnostics_report(Some(log));
+        cx.write_to_clipboard(gpui::ClipboardItem::new_string(report));
         cx.notify();
     }
 
@@ -506,9 +550,13 @@ impl WorkspacePrototype {
     }
 
     fn close_sidebar_context_menu(&mut self, cx: &mut Context<Self>) {
-        if self.sidebar_context_menu.is_some() || self.sidebar_rename.is_some() {
+        if self.sidebar_context_menu.is_some()
+            || self.sidebar_rename.is_some()
+            || self.sidebar_new_entry.is_some()
+        {
             self.sidebar_context_menu = None;
             self.sidebar_rename = None;
+            self.sidebar_new_entry = None;
             cx.notify();
         }
     }
@@ -516,12 +564,15 @@ impl WorkspacePrototype {
     fn close_context_menus(&mut self, cx: &mut Context<Self>) {
         let had_tab_menu = self.tab_manager.context_menu().is_some();
         let had_tab_overflow_menu = self.tab_overflow_open;
-        let had_sidebar_menu = self.sidebar_context_menu.is_some() || self.sidebar_rename.is_some();
+        let had_sidebar_menu = self.sidebar_context_menu.is_some()
+            || self.sidebar_rename.is_some()
+            || self.sidebar_new_entry.is_some();
         self.tab_manager.close_context_menu();
         self.tab_overflow_open = false;
         self.tab_rename = None;
         self.sidebar_context_menu = None;
         self.sidebar_rename = None;
+        self.sidebar_new_entry = None;
         if had_tab_menu || had_tab_overflow_menu || had_sidebar_menu {
             cx.notify();
         }
@@ -532,6 +583,7 @@ impl WorkspacePrototype {
         self.tab_rename = None;
         self.sidebar_context_menu = None;
         self.sidebar_rename = None;
+        self.sidebar_new_entry = None;
         self.tab_overflow_open = !self.tab_overflow_open;
         cx.notify();
     }
@@ -548,6 +600,7 @@ impl WorkspacePrototype {
         self.tab_rename = None;
         self.sidebar_context_menu = None;
         self.sidebar_rename = None;
+        self.sidebar_new_entry = None;
         self.tab_manager
             .open_context_menu(tab_id.0, anchor.x, anchor.y, anchor.width);
         cx.notify();
@@ -608,6 +661,11 @@ impl WorkspacePrototype {
     ) {
         if self.palette.open {
             self.on_palette_key_down(event, window, cx);
+            return;
+        }
+
+        if self.sidebar_new_entry.is_some() {
+            self.on_sidebar_new_entry_key_down(event, cx);
             return;
         }
 
@@ -1023,7 +1081,8 @@ impl WorkspacePrototype {
     }
 
     fn new_terminal_surface(&self, cx: &mut Context<Self>) -> Entity<TerminalSurface> {
-        let terminal = cx.new(TerminalSurface::new);
+        let cwd = self.workspace_root.clone();
+        let terminal = cx.new(|cx| TerminalSurface::new_with_cwd(cwd, cx));
         let config = self.appearance_config.clone();
         terminal.update(cx, |terminal, cx| terminal.set_config(config, cx));
         terminal
@@ -1221,6 +1280,7 @@ impl Render for WorkspacePrototype {
         let tab_rename = self.tab_rename.clone();
         let sidebar_context_menu = self.sidebar_context_menu.clone();
         let sidebar_rename = self.sidebar_rename.clone();
+        let sidebar_new_entry = self.sidebar_new_entry.clone();
         let queued_prompts = load_workspace_queue();
         let appearance_config = self.appearance_config.clone();
         let appearance_page = self.appearance_page;
@@ -1269,6 +1329,7 @@ impl Render for WorkspacePrototype {
                     appearance_page,
                     terminal_background_import_error,
                     show_explorer_button: self.preferences.show_explorer_button,
+                    error_log_expanded: self.error_log_expanded,
                 },
                 active_surface,
                 active_tab_id,
@@ -1385,6 +1446,7 @@ impl Render for WorkspacePrototype {
                     menu,
                     self.workspace_root.clone(),
                     sidebar_rename,
+                    sidebar_new_entry,
                     cx,
                 ))
             })
