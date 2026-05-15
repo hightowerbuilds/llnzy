@@ -114,20 +114,27 @@ pub fn run_editor_prototype() {
         cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
 
         let bounds = Bounds::centered(None, size(px(1120.0), px(760.0)), cx);
-        let window = cx
-            .open_window(
-                WindowOptions {
-                    window_bounds: Some(WindowBounds::Windowed(bounds)),
-                    ..Default::default()
-                },
-                |_, cx| cx.new(EditorPrototype::standalone),
-            )
-            .unwrap();
-        window
-            .update(cx, |view, window, cx| {
-                window.focus(&view.focus_handle(cx));
-            })
-            .unwrap();
+        let window = match cx.open_window(
+            WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(bounds)),
+                ..Default::default()
+            },
+            |_, cx| cx.new(EditorPrototype::standalone),
+        ) {
+            Ok(window) => window,
+            Err(error) => {
+                eprintln!("failed to open editor window: {error:?}");
+                cx.quit();
+                return;
+            }
+        };
+        if let Err(error) = window.update(cx, |view, window, cx| {
+            window.focus(&view.focus_handle(cx));
+        }) {
+            eprintln!("failed to focus editor window: {error:?}");
+            cx.quit();
+            return;
+        }
         cx.on_action(|_: &Quit, cx| cx.quit());
         cx.activate(true);
     });
@@ -593,8 +600,7 @@ impl EditorPrototype {
                         .map(|name| name.to_string_lossy().into_owned())
                         .unwrap_or_else(|| change.path.display().to_string()),
                 });
-        if image_preview_active {
-            let preview = image_preview.expect("checked active image preview");
+        if let Some(preview) = image_preview.filter(|_| image_preview_active) {
             let appearance = self.appearance_config.for_language(None);
             return EditorSnapshot {
                 title: preview.path.display().to_string(),
