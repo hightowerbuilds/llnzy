@@ -49,7 +49,7 @@ Requires Rust 1.75+. macOS is the active release target.
 
 **Sketch** -- Drawing canvas with marker, rectangle, symbol, image, and text tools. Supports selection, moving/resizing, undo/redo, save, export, and saved appearance settings.
 
-**Stacker** -- Prompt queue manager. Save, edit, delete, categorize, search, queue, and copy prompts. Optional prompt bar above the footer for quick access. Agents and scripts can manage saved prompts with `llnzy stacker add/save/list/edit/delete` while the app owns the prompt store. Current command and saved-prompt workflow notes live in `docs/stacker-command-workflow-05-05-2026.md`.
+**Stacker** -- Prompt queue manager. Save, edit, delete, categorize, search, queue, and copy prompts. Optional prompt bar above the footer for quick access. Agents and scripts can manage saved prompts with `llnzy stacker add/save/list/edit/delete` while the app owns the prompt store. CLI reference: `docs/stacker-cli.md`.
 
 **Appearances** -- Apply built-in themes, tune terminal/editor/sketch colors, import terminal background images, and adjust cursor presentation.
 

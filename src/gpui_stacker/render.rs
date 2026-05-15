@@ -1,7 +1,7 @@
 use gpui::prelude::*;
 use gpui::{
     div, px, relative, rgb, rgba, App, Context, DragMoveEvent, Entity, FontWeight, MouseButton,
-    MouseDownEvent, MouseUpEvent, Render, Window,
+    MouseDownEvent, MouseUpEvent, Render, SharedString, Window,
 };
 
 use crate::stacker::{
@@ -241,7 +241,14 @@ fn prompt_list(
                 .text_size(px(12.0))
                 .text_color(rgb(MUTED_TEXT))
                 .child("SAVED PROMPTS")
-                .child(format!("{}", prompts.len())),
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(format!("{}", prompts.len()))
+                        .child(cli_help_button(cx)),
+                ),
         )
         .child(div().flex_1().overflow_hidden().child(list))
 }
@@ -602,6 +609,330 @@ fn modal_destructive_button(
             }),
         )
         .child(label)
+}
+
+fn cli_help_button(cx: &mut Context<StackerPrototype>) -> impl IntoElement {
+    div()
+        .id("stacker-cli-help")
+        .w(px(20.0))
+        .h(px(20.0))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded_sm()
+        .border_1()
+        .border_color(rgb(BORDER))
+        .bg(rgb(0x242632))
+        .text_size(px(11.0))
+        .text_color(rgb(TEXT))
+        .cursor_pointer()
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|this, _: &MouseDownEvent, _window, cx| {
+                this.toggle_cli_help(cx);
+            }),
+        )
+        .child("?")
+}
+
+/// Full-pane scrim + centered card explaining the Stacker CLI: what it
+/// is, how to install it, what commands exist, and how to hand it to an
+/// agent. Triggered by the "?" button in the saved-prompts header.
+pub(super) fn cli_help_modal(cx: &mut Context<StackerPrototype>) -> impl IntoElement {
+    let install_cmd = "open \"/Applications/LLNZY.app/Contents/Resources/install-cli.sh\"";
+    let inbox_path = "~/Library/Application Support/llnzy/prompts/inbox/";
+
+    let scrim = div()
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full()
+        .bg(rgba(0x000000aa))
+        .flex()
+        .items_center()
+        .justify_center()
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|this, _: &MouseDownEvent, _window, cx| {
+                this.close_cli_help(cx);
+            }),
+        );
+
+    let card = div()
+        .id("stacker-cli-help-card")
+        .w(px(620.0))
+        .max_h(px(640.0))
+        .flex()
+        .flex_col()
+        .gap_3()
+        .p_5()
+        .rounded_md()
+        .border_1()
+        .border_color(rgb(BORDER))
+        .bg(rgb(CHROME_BG))
+        .overflow_y_scroll()
+        .scrollbar_width(px(8.0))
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|_this, _: &MouseDownEvent, _window, cx| {
+                cx.stop_propagation();
+            }),
+        )
+        .child(cli_help_header(cx))
+        .child(cli_help_section_title("What it is"))
+        .child(cli_help_paragraph(
+            "The Stacker CLI is a separate `llnzy` command you install once. \
+             It writes prompts into the Stacker inbox so an agent — Claude, \
+             Codex, or anything else with shell access — can queue work for \
+             you without touching the GUI. Prompts you write here and \
+             prompts written by the CLI live in the same place.",
+        ))
+        .child(cli_help_section_title("Install"))
+        .child(cli_help_paragraph(
+            "Run this once in any terminal. It installs `/usr/local/bin/llnzy` \
+             as a small launcher that points into LLNZY.app:",
+        ))
+        .child(cli_help_command_block("install", install_cmd.to_string(), cx))
+        .child(cli_help_section_title("Use"))
+        .child(cli_help_paragraph(
+            "After install, any terminal can talk to Stacker. Works while \
+             LLNZY is running (the GUI polls every second and updates the \
+             inbox list automatically) and when it's closed.",
+        ))
+        .child(cli_help_command_block(
+            "add",
+            "echo \"Draft a prompt body\" | llnzy stacker add --label \"My idea\""
+                .to_string(),
+            cx,
+        ))
+        .child(cli_help_command_block(
+            "list",
+            "llnzy stacker list --state inbox --format json".to_string(),
+            cx,
+        ))
+        .child(cli_help_command_block(
+            "edit",
+            "llnzy stacker edit <id> --state inbox --label \"Better title\"".to_string(),
+            cx,
+        ))
+        .child(cli_help_command_block(
+            "delete",
+            "llnzy stacker delete <id> --state inbox".to_string(),
+            cx,
+        ))
+        .child(cli_help_section_title("Inbox location"))
+        .child(cli_help_paragraph(
+            "Each prompt is one Markdown file with YAML frontmatter, stored at:",
+        ))
+        .child(cli_help_command_block("inbox", inbox_path.to_string(), cx))
+        .child(cli_help_inbox_button_row(cx))
+        .child(cli_help_section_title("Agent handoff"))
+        .child(cli_help_paragraph(
+            "Tell your agent it can drop a prompt into Stacker with \
+             `llnzy stacker add --label \"<title>\"` (body on stdin or \
+             `--file <path>`). Use `--state inbox` and `--format json` for \
+             machine-readable list output.",
+        ))
+        .child(cli_help_agent_instructions_button(cx));
+
+    scrim.child(card)
+}
+
+fn cli_help_header(cx: &mut Context<StackerPrototype>) -> impl IntoElement {
+    div()
+        .flex()
+        .items_center()
+        .justify_between()
+        .child(
+            div()
+                .text_size(px(16.0))
+                .font_weight(FontWeight::BOLD)
+                .text_color(rgb(TEXT))
+                .child("Stacker CLI"),
+        )
+        .child(
+            div()
+                .id("stacker-cli-help-close")
+                .w(px(24.0))
+                .h(px(24.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded_sm()
+                .text_size(px(16.0))
+                .text_color(rgb(MUTED_TEXT))
+                .cursor_pointer()
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _: &MouseDownEvent, _window, cx| {
+                        this.close_cli_help(cx);
+                    }),
+                )
+                .child("×"),
+        )
+}
+
+fn cli_help_section_title(label: &'static str) -> impl IntoElement {
+    div()
+        .pt_2()
+        .text_size(px(11.0))
+        .font_weight(FontWeight::BOLD)
+        .text_color(rgb(MUTED_TEXT))
+        .child(label.to_uppercase())
+}
+
+fn cli_help_paragraph(body: &'static str) -> impl IntoElement {
+    div()
+        .text_size(px(13.0))
+        .line_height(px(20.0))
+        .text_color(rgb(TEXT))
+        .child(body)
+}
+
+/// Paste-ready Markdown block a user can drop into a fresh agent's
+/// context. The agent reads this and knows enough to use the Stacker
+/// CLI: the inbox path, the four mutation commands, the JSON list
+/// shape, the field limits, and the exit-code map.
+const AGENT_INSTRUCTIONS_TEMPLATE: &str = r##"# Stacker CLI instructions
+
+You can queue work for me through the Stacker CLI. Each item becomes a
+Markdown file in my inbox that I'll review and edit.
+
+## Inbox
+~/Library/Application Support/llnzy/prompts/inbox/
+
+Files are plain Markdown with YAML frontmatter. One prompt per file.
+
+## Commands
+
+Add a prompt (body on stdin OR via --file):
+  echo "<body>" | llnzy stacker add --label "<title>"
+  llnzy stacker add --label "<title>" --file <path>
+
+List inbox in machine-readable form:
+  llnzy stacker list --state inbox --format json
+
+Each list item has `id`, `label`, `category`, `body_path`, `created_at`,
+and other frontmatter fields. Use `id` for edit/delete.
+
+Edit (any subset of flags is fine):
+  llnzy stacker edit <id> --state inbox --label "<new title>"
+  llnzy stacker edit <id> --state inbox --body "<new body>"
+
+Delete:
+  llnzy stacker delete <id> --state inbox
+
+## Limits
+- Body: max 256 KB
+- Label: max 256 chars
+- Category: max 64 chars
+- Inbox quota: 1000 files, 50 MB total
+
+## Exit codes
+0 = success, 1 = usage error, 2 = bad input, 3 = quota exceeded
+"##;
+
+fn cli_help_inbox_button_row(cx: &mut Context<StackerPrototype>) -> impl IntoElement {
+    div().flex().gap_2().child(
+        div()
+            .id("stacker-cli-reveal-inbox")
+            .h(px(28.0))
+            .px_3()
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded_sm()
+            .border_1()
+            .border_color(rgb(BORDER))
+            .bg(rgb(0x242632))
+            .text_size(px(11.0))
+            .text_color(rgb(TEXT))
+            .cursor_pointer()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _: &MouseDownEvent, _window, cx| {
+                    this.reveal_inbox_in_finder(cx);
+                }),
+            )
+            .child("Reveal in Finder"),
+    )
+}
+
+fn cli_help_agent_instructions_button(
+    cx: &mut Context<StackerPrototype>,
+) -> impl IntoElement {
+    div().flex().child(
+        div()
+            .id("stacker-cli-copy-agent-instructions")
+            .h(px(28.0))
+            .px_3()
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded_sm()
+            .border_1()
+            .border_color(rgb(0x3fd663))
+            .bg(rgb(0x183a20))
+            .text_size(px(11.0))
+            .text_color(rgb(QUEUE_GREEN))
+            .cursor_pointer()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _: &MouseDownEvent, _window, cx| {
+                    this.copy_cli_snippet(AGENT_INSTRUCTIONS_TEMPLATE.to_string(), cx);
+                }),
+            )
+            .child("Copy Agent Instructions"),
+    )
+}
+
+fn cli_help_command_block(
+    id: &'static str,
+    snippet: String,
+    cx: &mut Context<StackerPrototype>,
+) -> impl IntoElement {
+    let snippet_for_copy = snippet.clone();
+    div()
+        .flex()
+        .items_center()
+        .gap_2()
+        .child(
+            div()
+                .flex_1()
+                .px_3()
+                .py_2()
+                .rounded_sm()
+                .border_1()
+                .border_color(rgb(BORDER))
+                .bg(rgb(CONTENT_PANEL_BG))
+                .font_family("Menlo")
+                .text_size(px(12.0))
+                .text_color(rgb(TEXT))
+                .child(snippet),
+        )
+        .child(
+            div()
+                .id(SharedString::from(format!("stacker-cli-copy-{id}")))
+                .h(px(28.0))
+                .px_3()
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded_sm()
+                .border_1()
+                .border_color(rgb(BORDER))
+                .bg(rgb(0x242632))
+                .text_size(px(11.0))
+                .text_color(rgb(MUTED_TEXT))
+                .cursor_pointer()
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _: &MouseDownEvent, _window, cx| {
+                        this.copy_cli_snippet(snippet_for_copy.clone(), cx);
+                    }),
+                )
+                .child("Copy"),
+        )
 }
 
 fn prompt_title(prompt: &StackerPrompt) -> String {

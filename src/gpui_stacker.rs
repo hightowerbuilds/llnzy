@@ -125,6 +125,8 @@ pub(crate) struct StackerPrototype {
     /// The editor takes the remainder. Dragging the divider between them
     /// updates this; clamped to a sensible range so neither pane collapses.
     prompt_list_ratio: f32,
+    /// True when the "?" help modal explaining the Stacker CLI is visible.
+    cli_help_open: bool,
 }
 
 impl StackerPrototype {
@@ -154,6 +156,46 @@ impl StackerPrototype {
             show_chrome,
             pending_delete: None,
             prompt_list_ratio: 0.34,
+            cli_help_open: false,
+        }
+    }
+
+    pub(crate) fn toggle_cli_help(&mut self, cx: &mut Context<Self>) {
+        self.cli_help_open = !self.cli_help_open;
+        cx.notify();
+    }
+
+    pub(crate) fn close_cli_help(&mut self, cx: &mut Context<Self>) {
+        if self.cli_help_open {
+            self.cli_help_open = false;
+            cx.notify();
+        }
+    }
+
+    /// Copy a snippet to the clipboard from the CLI help modal — used by
+    /// per-command copy affordances so users can paste the install or
+    /// example commands straight into their terminal.
+    pub(crate) fn copy_cli_snippet(&mut self, snippet: String, cx: &mut Context<Self>) {
+        cx.write_to_clipboard(gpui::ClipboardItem::new_string(snippet));
+        cx.notify();
+    }
+
+    /// Open the Stacker inbox directory in Finder so users can verify the
+    /// directory exists and inspect what an agent has written. Creates
+    /// the directory first if it's missing — early in a user's lifecycle
+    /// nothing may have populated it yet.
+    pub(crate) fn reveal_inbox_in_finder(&mut self, _cx: &mut Context<Self>) {
+        let Some(paths) = crate::platform::paths::current_paths() else {
+            log::error!("stacker cli help: could not resolve config paths");
+            return;
+        };
+        let inbox = paths.prompts_inbox_dir();
+        if let Err(err) = std::fs::create_dir_all(&inbox) {
+            log::error!("stacker cli help: create inbox dir failed: {err}");
+            return;
+        }
+        if let Err(err) = std::process::Command::new("open").arg(&inbox).spawn() {
+            log::error!("stacker cli help: open inbox in Finder failed: {err}");
         }
     }
 
@@ -397,6 +439,7 @@ impl Render for StackerPrototype {
         let pending_label = pending_delete
             .and_then(|index| self.prompts.get(index))
             .map(|prompt| prompt.label.clone());
+        let cli_help_open = self.cli_help_open;
 
         div()
             .relative()
@@ -408,6 +451,7 @@ impl Render for StackerPrototype {
             .when_some(pending_label, |root, label| {
                 root.child(render::delete_confirmation_modal(label, cx))
             })
+            .when(cli_help_open, |root| root.child(render::cli_help_modal(cx)))
     }
 }
 
