@@ -593,6 +593,7 @@ Completed architecture and durability work:
 - Unicode/UTF-16 and editor buffer position/undo/redo invariants have broader corpus coverage.
 - `src/diagnostics.rs` can render and write a diagnostics report containing version, platform/path context, and recent runtime log entries.
 - Remaining `unsafe` sites now carry explicit safety context.
+- `cargo audit` completes with allowed transitive maintenance/yank warnings recorded in `docs/operations.md`; `cargo deny` remains a tool-installation follow-up before license policy can be enforced.
 
 Current active docs:
 

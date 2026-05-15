@@ -87,3 +87,7 @@ cargo deny check
 
 If the tooling is unavailable locally, record that in the release notes rather
 than silently skipping the check.
+
+Current status: `cargo audit` runs locally and reports allowed warnings for
+unmaintained/yanked transitive crates. `cargo deny` is not installed locally yet,
+so license/duplicate policy is documented but not enforced by this pass.

@@ -44,3 +44,14 @@ cargo test --release --test performance_budgets -- --ignored --nocapture
 Dependency advisory/license checks remain a release-readiness requirement. Use
 `cargo audit` and `cargo deny` when available, and document any accepted risk in
 the release notes or pull request.
+
+Current dependency-audit snapshot:
+
+- `cargo audit` completes successfully with warnings allowed.
+- Reported warnings are transitive unmaintained/yanked crates through `gpui`,
+  `image`, `notify`, and `portable-pty`: `async-std`, `core2`, `instant`,
+  `paste`, `rustls-pemfile`, and `serial`.
+- No direct replacement work was completed in this roadmap pass. Treat these as
+  release-review items before broader distribution.
+- `cargo deny` is not installed in the current local toolchain; install it
+  before enforcing license/duplicate-dependency policy.
