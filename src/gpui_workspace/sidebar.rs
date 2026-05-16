@@ -8,10 +8,11 @@ use std::{
 
 use gpui::prelude::*;
 use gpui::{
-    div, px, rgb, App, ClickEvent, Context, DragMoveEvent, MouseButton, MouseDownEvent, Render,
-    Window,
+    div, px, rgb, App, ClickEvent, Context, DragMoveEvent, ExternalPaths, MouseButton,
+    MouseDownEvent, Render, Window,
 };
 
+use crate::path_utils::{path_extension_matches, BACKGROUND_IMAGE_EXTS};
 use crate::sidebar_move::{
     collect_sidebar_move_destinations, plan_sidebar_move, MoveOrigin, SidebarMoveDestination,
     SidebarMoveRequest,
@@ -236,14 +237,23 @@ pub(super) fn workspace_sidebar(
         .child(sidebar_close_project_button(has_project, cx));
 
     if let Some(root) = workspace_root.clone() {
-        let drop_target = root.clone();
+        let explorer_drop_target = root.clone();
+        let explorer_root = root.clone();
         header = header
+            .can_drop(|drag, _window, _cx| drag.downcast_ref::<ExplorerDragPayload>().is_some())
             .drag_over::<ExplorerDragPayload>(move |style, payload, _window, _cx| {
-                style.bg(rgb(explorer_drop_background(payload, &drop_target)))
+                style.bg(rgb(explorer_drop_background(
+                    payload,
+                    &explorer_drop_target,
+                )))
             })
             .on_drop(
                 cx.listener(move |this, payload: &ExplorerDragPayload, _window, cx| {
-                    this.move_explorer_items_to_folder(payload.paths.clone(), root.clone(), cx);
+                    this.move_explorer_items_to_folder(
+                        payload.paths.clone(),
+                        explorer_root.clone(),
+                        cx,
+                    );
                 }),
             );
     }
@@ -263,6 +273,27 @@ pub(super) fn workspace_sidebar(
             recent_projects_open,
             cx,
         ));
+
+    if let Some(root) = workspace_root.clone() {
+        sidebar = sidebar
+            .can_drop(|drag, _window, _cx| drag.downcast_ref::<ExternalPaths>().is_some())
+            .drag_over::<ExternalPaths>(|style, paths, _window, _cx| {
+                if external_paths_contain_project_images(paths) {
+                    style.bg(rgb(SIDEBAR_DROP_VALID_BG))
+                } else {
+                    style.bg(rgb(SIDEBAR_DROP_INVALID_BG))
+                }
+            })
+            .on_drop(
+                cx.listener(move |this, paths: &ExternalPaths, _window, cx| {
+                    this.import_external_images_to_project_root(
+                        paths.paths().to_vec(),
+                        root.clone(),
+                        cx,
+                    );
+                }),
+            );
+    }
 
     sidebar = sidebar
         .child(explorer_tree_panel(
@@ -382,21 +413,12 @@ pub(super) fn workspace_sidebar_context_menu(
                             this.start_sidebar_new_entry(path.clone(), NewEntryKind::File, cx)
                         }
                     }))
-                    .child(sidebar_menu_button(
-                        "New Folder".to_string(),
-                        false,
-                        cx,
-                        {
-                            let path = menu.path.clone();
-                            move |this, _window, cx| {
-                                this.start_sidebar_new_entry(
-                                    path.clone(),
-                                    NewEntryKind::Folder,
-                                    cx,
-                                )
-                            }
-                        },
-                    ));
+                    .child(sidebar_menu_button("New Folder".to_string(), false, cx, {
+                        let path = menu.path.clone();
+                        move |this, _window, cx| {
+                            this.start_sidebar_new_entry(path.clone(), NewEntryKind::Folder, cx)
+                        }
+                    }));
             }
             panel = panel
                 .child(sidebar_menu_button("Rename".to_string(), false, cx, {
@@ -493,9 +515,7 @@ pub(super) fn workspace_sidebar_context_menu(
                 ));
         }
         SidebarContextMenuView::NewEntry => {
-            let active = new_entry
-                .as_ref()
-                .filter(|state| state.parent == menu.path);
+            let active = new_entry.as_ref().filter(|state| state.parent == menu.path);
             let kind = active.map(|s| s.kind).unwrap_or(NewEntryKind::File);
             let typed = active.map(|s| s.text.clone()).unwrap_or_default();
             let field_text = if typed.is_empty() {
@@ -509,7 +529,10 @@ pub(super) fn workspace_sidebar_context_menu(
                 ACTIVE_TEXT
             };
             panel = panel
-                .child(sidebar_menu_header(kind.header_label().to_string(), kind.is_dir()))
+                .child(sidebar_menu_header(
+                    kind.header_label().to_string(),
+                    kind.is_dir(),
+                ))
                 .child(
                     div()
                         .w_full()
@@ -1058,6 +1081,17 @@ fn explorer_drop_is_valid(payload: &ExplorerDragPayload, destination_folder: &Pa
         MoveOrigin::DragDrop,
     );
     plan_sidebar_move(&request).is_ok()
+}
+
+fn external_paths_contain_project_images(paths: &ExternalPaths) -> bool {
+    paths
+        .paths()
+        .iter()
+        .any(|path| is_project_image_drop_path(path))
+}
+
+fn is_project_image_drop_path(path: &Path) -> bool {
+    path.is_file() && path_extension_matches(path, BACKGROUND_IMAGE_EXTS)
 }
 
 fn explorer_row_id(path: &Path) -> u64 {

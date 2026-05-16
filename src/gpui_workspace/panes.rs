@@ -19,8 +19,8 @@ use super::{
     home::home_surface,
     sidebar::{collect_explorer_entries, explorer_tree_panel, ExplorerState},
     tabs::WorkspaceTabId,
-    AppearancePage, JoinedWorkspacePanes, WorkspacePrototype, WorkspaceSurface, BORDER, EDITOR_BG,
-    JOINED_TAB_DIVIDER_WIDTH, PANEL_BG,
+    AppearancePage, ErrorLogFilter, JoinedWorkspacePanes, WorkspacePrototype, WorkspaceSurface,
+    BORDER, EDITOR_BG, JOINED_TAB_DIVIDER_WIDTH, PANEL_BG,
 };
 use crate::tab_groups::PartitionAxis;
 
@@ -38,11 +38,15 @@ pub(super) struct WorkspaceSurfaceContext {
     pub(super) appearance_page: AppearancePage,
     pub(super) terminal_background_import_error: Option<String>,
     pub(super) show_explorer_button: bool,
+    pub(super) joined_tab_limit: usize,
     pub(super) error_log_expanded: bool,
+    pub(super) error_log_filter: ErrorLogFilter,
+    pub(super) pending_clear_error_log: bool,
 }
 
 struct JoinedPaneResizeDrag {
     axis: PartitionAxis,
+    divider_index: usize,
 }
 
 impl Render for JoinedPaneResizeDrag {
@@ -73,9 +77,13 @@ pub(super) fn workspace_content(
     if let Some(joined) = joined_panes {
         let ratio = joined.ratio.clamp(0.18, 0.82);
         let axis = joined.axis;
-        let shared_terminal_background = joined.primary_surface == WorkspaceSurface::Terminal
-            && joined.secondary_surface == WorkspaceSurface::Terminal;
-        let resize_tab_id = joined.primary_id;
+        let shares = joined.shares;
+        let panes = joined.panes;
+        let pane_count = panes.len();
+        let shared_terminal_background = panes
+            .iter()
+            .all(|pane| pane.surface == WorkspaceSurface::Terminal);
+        let resize_tab_id = panes[0].id;
         let mut joined_container = div()
             .id("joined-workspace-panes")
             .relative()
@@ -92,8 +100,9 @@ pub(super) fn workspace_content(
                             return;
                         }
                         let ratio = ((event.event.position.x - event.bounds.left()) / width)
-                            .clamp(0.18, 0.82);
-                        this.resize_joined_panes_by_tab(resize_tab_id, ratio, cx);
+                            .clamp(0.0, 1.0);
+                        let divider_index = event.drag(cx).divider_index;
+                        this.resize_joined_panes_by_tab(resize_tab_id, divider_index, ratio, cx);
                     },
                 ))
             }
@@ -106,8 +115,9 @@ pub(super) fn workspace_content(
                             return;
                         }
                         let ratio = ((event.event.position.y - event.bounds.top()) / height)
-                            .clamp(0.18, 0.82);
-                        this.resize_joined_panes_by_tab(resize_tab_id, ratio, cx);
+                            .clamp(0.0, 1.0);
+                        let divider_index = event.drag(cx).divider_index;
+                        this.resize_joined_panes_by_tab(resize_tab_id, divider_index, ratio, cx);
                     },
                 )),
         };
@@ -121,80 +131,171 @@ pub(super) fn workspace_content(
             }
         }
 
-        let primary_pane = workspace_surface_pane(
-            context.clone(),
-            joined.primary_surface,
-            Some(joined.primary_id),
-            shared_terminal_background,
-            cx,
-        );
-        let secondary_pane = workspace_surface_pane(
-            context,
-            joined.secondary_surface,
-            Some(joined.secondary_id),
-            shared_terminal_background,
-            cx,
-        );
-        let (primary_pane, secondary_pane, resize_handle) = match axis {
-            PartitionAxis::Vertical => (
-                primary_pane.w(relative(ratio)),
-                secondary_pane.w(relative(1.0 - ratio)),
-                div()
-                    .id("joined-pane-resize-handle")
-                    .w(px(JOINED_TAB_DIVIDER_WIDTH))
-                    .h_full()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .cursor_col_resize()
-                    .on_drag(
-                        JoinedPaneResizeDrag {
-                            axis: PartitionAxis::Vertical,
-                        },
-                        |_drag, _offset, _window, cx: &mut App| {
-                            cx.new(|_| JoinedPaneResizeDrag {
+        if pane_count == 2 {
+            let primary = panes[0].clone();
+            let secondary = panes[1].clone();
+            let primary_pane = workspace_surface_pane(
+                context.clone(),
+                primary.surface,
+                Some(primary.id),
+                shared_terminal_background,
+                cx,
+            );
+            let secondary_pane = workspace_surface_pane(
+                context,
+                secondary.surface,
+                Some(secondary.id),
+                shared_terminal_background,
+                cx,
+            );
+            let (primary_pane, secondary_pane, resize_handle) = match axis {
+                PartitionAxis::Vertical => (
+                    primary_pane.w(relative(ratio)),
+                    secondary_pane.w(relative(1.0 - ratio)),
+                    div()
+                        .id("joined-pane-resize-handle")
+                        .w(px(JOINED_TAB_DIVIDER_WIDTH))
+                        .h_full()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .cursor_col_resize()
+                        .on_drag(
+                            JoinedPaneResizeDrag {
                                 axis: PartitionAxis::Vertical,
-                            })
-                        },
-                    )
-                    .child(div().w(px(1.0)).h_full().bg(rgb(BORDER))),
-            ),
-            PartitionAxis::Horizontal => (
-                primary_pane.h(relative(ratio)),
-                secondary_pane.h(relative(1.0 - ratio)),
-                div()
-                    .id("joined-pane-resize-handle")
-                    .w_full()
-                    .h(px(JOINED_TAB_DIVIDER_WIDTH))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .cursor_row_resize()
-                    .on_drag(
-                        JoinedPaneResizeDrag {
-                            axis: PartitionAxis::Horizontal,
-                        },
-                        |_drag, _offset, _window, cx: &mut App| {
-                            cx.new(|_| JoinedPaneResizeDrag {
+                                divider_index: 0,
+                            },
+                            |_drag, _offset, _window, cx: &mut App| {
+                                cx.new(|_| JoinedPaneResizeDrag {
+                                    axis: PartitionAxis::Vertical,
+                                    divider_index: 0,
+                                })
+                            },
+                        )
+                        .child(div().w(px(1.0)).h_full().bg(rgb(BORDER))),
+                ),
+                PartitionAxis::Horizontal => (
+                    primary_pane.h(relative(ratio)),
+                    secondary_pane.h(relative(1.0 - ratio)),
+                    div()
+                        .id("joined-pane-resize-handle")
+                        .w_full()
+                        .h(px(JOINED_TAB_DIVIDER_WIDTH))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .cursor_row_resize()
+                        .on_drag(
+                            JoinedPaneResizeDrag {
                                 axis: PartitionAxis::Horizontal,
-                            })
-                        },
-                    )
-                    .child(div().w_full().h(px(1.0)).bg(rgb(BORDER))),
-            ),
-        };
+                                divider_index: 0,
+                            },
+                            |_drag, _offset, _window, cx: &mut App| {
+                                cx.new(|_| JoinedPaneResizeDrag {
+                                    axis: PartitionAxis::Horizontal,
+                                    divider_index: 0,
+                                })
+                            },
+                        )
+                        .child(div().w_full().h(px(1.0)).bg(rgb(BORDER))),
+                ),
+            };
 
-        return content.child(
-            joined_container
-                .child(primary_pane)
-                .child(resize_handle)
-                .child(secondary_pane),
-        );
+            return content.child(
+                joined_container
+                    .child(primary_pane)
+                    .child(resize_handle)
+                    .child(secondary_pane),
+            );
+        }
+
+        let shares = normalized_pane_shares(pane_count, shares);
+        for (idx, pane_info) in panes.into_iter().enumerate() {
+            let share = shares[idx];
+            let pane = workspace_surface_pane(
+                context.clone(),
+                pane_info.surface,
+                Some(pane_info.id),
+                shared_terminal_background,
+                cx,
+            );
+            joined_container = match axis {
+                PartitionAxis::Vertical => joined_container.child(pane.w(relative(share))),
+                PartitionAxis::Horizontal => joined_container.child(pane.h(relative(share))),
+            };
+
+            if idx + 1 < pane_count {
+                joined_container = match axis {
+                    PartitionAxis::Vertical => joined_container.child(
+                        div()
+                            .id(("joined-pane-resize-handle", idx))
+                            .w(px(JOINED_TAB_DIVIDER_WIDTH))
+                            .h_full()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .cursor_col_resize()
+                            .on_drag(
+                                JoinedPaneResizeDrag {
+                                    axis: PartitionAxis::Vertical,
+                                    divider_index: idx,
+                                },
+                                move |_drag, _offset, _window, cx: &mut App| {
+                                    cx.new(|_| JoinedPaneResizeDrag {
+                                        axis: PartitionAxis::Vertical,
+                                        divider_index: idx,
+                                    })
+                                },
+                            )
+                            .child(div().w(px(1.0)).h_full().bg(rgb(BORDER))),
+                    ),
+                    PartitionAxis::Horizontal => joined_container.child(
+                        div()
+                            .id(("joined-pane-resize-handle", idx))
+                            .w_full()
+                            .h(px(JOINED_TAB_DIVIDER_WIDTH))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .cursor_row_resize()
+                            .on_drag(
+                                JoinedPaneResizeDrag {
+                                    axis: PartitionAxis::Horizontal,
+                                    divider_index: idx,
+                                },
+                                move |_drag, _offset, _window, cx: &mut App| {
+                                    cx.new(|_| JoinedPaneResizeDrag {
+                                        axis: PartitionAxis::Horizontal,
+                                        divider_index: idx,
+                                    })
+                                },
+                            )
+                            .child(div().w_full().h(px(1.0)).bg(rgb(BORDER))),
+                    ),
+                };
+            }
+        }
+
+        return content.child(joined_container);
     }
 
     content.child(
         workspace_surface_pane(context, active_surface, Some(active_tab_id), false, cx).flex_1(),
     )
+}
+
+fn normalized_pane_shares(count: usize, shares: Vec<f32>) -> Vec<f32> {
+    if count == 0 {
+        return Vec::new();
+    }
+    if shares.len() != count || shares.iter().any(|share| !share.is_finite()) {
+        return vec![1.0 / count as f32; count];
+    }
+    let total: f32 = shares.iter().sum();
+    if total <= f32::EPSILON {
+        return vec![1.0 / count as f32; count];
+    }
+    shares.into_iter().map(|share| share / total).collect()
 }
 
 pub(super) fn workspace_surface_pane(
@@ -217,8 +318,12 @@ pub(super) fn workspace_surface_pane(
         appearance_page,
         terminal_background_import_error,
         show_explorer_button,
+        joined_tab_limit,
         error_log_expanded,
+        error_log_filter,
+        pending_clear_error_log,
     } = context;
+    let sketch_toolbar_position = sketch.read(cx).toolbar_position();
 
     let mut pane = div().h_full().overflow_hidden();
     if !(surface == WorkspaceSurface::Terminal && shared_terminal_background) {
@@ -310,13 +415,19 @@ pub(super) fn workspace_surface_pane(
         WorkspaceSurface::Appearances => pane.child(appearances_surface(
             appearance_config,
             appearance_page,
+            sketch_toolbar_position,
             terminal_background_import_error,
             cx,
         )),
         WorkspaceSurface::Home => pane.child(home_surface(workspace_root, recent_projects, cx)),
-        WorkspaceSurface::Settings => {
-            pane.child(settings_surface(show_explorer_button, error_log_expanded, cx))
-        }
+        WorkspaceSurface::Settings => pane.child(settings_surface(
+            show_explorer_button,
+            joined_tab_limit,
+            error_log_expanded,
+            error_log_filter,
+            pending_clear_error_log,
+            cx,
+        )),
     }
 }
 

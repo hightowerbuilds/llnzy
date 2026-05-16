@@ -8,20 +8,20 @@
 //! at half resolution. Chroma subsampling halves color detail but the eye
 //! is far more sensitive to luma; for ambient backgrounds this is invisible.
 //!
-//! ## M2 pipeline (wgpu placeholder)
+//! ## M2 pipeline (wgpu)
 //!
-//! M1 filled both NV12 planes on the CPU with a gradient. M2 introduces a
-//! wgpu render pipeline -- a fullscreen-triangle pass with a placeholder
-//! fragment shader (solid purple) writing into an RGBA8 texture. The
-//! texture is read back to CPU bytes via a staging buffer, then we apply
-//! the same BT.601 full-range RGB->YUV conversion the M1 path used and
-//! write into the NV12 planes.
+//! M1 filled both NV12 planes on the CPU with a gradient. M2 introduced a
+//! wgpu render pipeline -- a fullscreen-triangle pass with built-in WGSL
+//! fragment shaders writing into an RGBA8 texture. The texture is read back
+//! to CPU bytes via a staging buffer, then we apply the same BT.601
+//! full-range RGB->YUV conversion the M1 path used and write into the NV12
+//! planes.
 //!
 //! The render texture and staging buffer are pooled by `(width, height)`
 //! so steady-state rendering does no per-frame allocation. Resizes drop
-//! the cached entry and rebuild it. wgpu uncaptured errors (e.g. GPU
-//! out-of-memory) are caught by a custom handler that disables further
-//! rendering on this host instead of letting wgpu panic the process.
+//! the cached entry and rebuild it. Pipeline creation and frame rendering
+//! run under wgpu error scopes; uncaptured errors and synchronous panics
+//! disable further rendering on this host instead of taking down the app.
 //!
 //! Why readback instead of zero-copy IOSurface import: bridging
 //! `metal-rs::Texture` to the `objc2-metal::MTLTexture` protocol expected by
@@ -32,6 +32,7 @@
 
 use std::borrow::Cow;
 use std::cell::{OnceCell, RefCell};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, OnceLock};
 use std::time::Instant;
@@ -64,6 +65,14 @@ const RENDER_TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Uno
 /// Size of the smoke shader's `Uniforms` block in bytes. 16 f32s laid out as
 /// resolution + time + intensity + 3 vec4 colours.
 const SMOKE_UNIFORM_BYTES: usize = 16 * 4;
+
+/// Guardrails for the offscreen render target. The shader effect is a
+/// full-window background, so unusually large backing-pixel dimensions can
+/// allocate hundreds of megabytes across the render texture, staging buffer,
+/// and destination CVPixelBuffer. Fail closed before asking Metal for a size
+/// that is likely to trigger device loss.
+const MAX_EFFECT_EDGE: u32 = 8192;
+const MAX_EFFECT_PIXELS: u64 = 24_000_000;
 
 /// User-facing render parameters threaded into every smoke frame.
 #[derive(Clone, Copy, Debug)]
@@ -268,36 +277,16 @@ impl EffectsHost {
             immediate_size: 0,
         });
 
-        let smoke_pipeline = build_effect_pipeline(
-            &device,
-            &pipeline_layout,
-            "smoke",
-            include_str!("shaders/smoke.wgsl"),
-        );
-        let fire_pipeline = build_effect_pipeline(
-            &device,
-            &pipeline_layout,
-            "fire",
-            include_str!("shaders/fire.wgsl"),
-        );
-        let aurora_pipeline = build_effect_pipeline(
-            &device,
-            &pipeline_layout,
-            "aurora",
-            include_str!("shaders/aurora.wgsl"),
-        );
-        let canopy_pipeline = build_effect_pipeline(
-            &device,
-            &pipeline_layout,
-            "canopy",
-            include_str!("shaders/canopy.wgsl"),
-        );
-        let rain_pipeline = build_effect_pipeline(
-            &device,
-            &pipeline_layout,
-            "rain",
-            include_str!("shaders/rain.wgsl"),
-        );
+        let shader_sources = builtin_shader_sources();
+        let build_pipeline = |index: usize| {
+            let (label, wgsl) = shader_sources[index];
+            build_effect_pipeline(&device, &pipeline_layout, label, wgsl)
+        };
+        let smoke_pipeline = build_pipeline(0)?;
+        let fire_pipeline = build_pipeline(1)?;
+        let aurora_pipeline = build_pipeline(2)?;
+        let canopy_pipeline = build_pipeline(3)?;
+        let rain_pipeline = build_pipeline(4)?;
 
         Ok(Self {
             pixel_buffer_attrs: build_pixel_buffer_attrs(),
@@ -339,10 +328,46 @@ impl EffectsHost {
             return None;
         }
 
+        match catch_unwind(AssertUnwindSafe(|| {
+            self.render_frame_inner(kind, time, width, height, params)
+        })) {
+            Ok(frame) => frame,
+            Err(payload) => {
+                self.disable_after_error(format!(
+                    "shader render panicked: {}",
+                    panic_payload_to_string(payload)
+                ));
+                None
+            }
+        }
+    }
+
+    pub fn is_disabled(&self) -> bool {
+        self.disabled.load(Ordering::Relaxed)
+    }
+
+    fn render_frame_inner(
+        &self,
+        kind: EffectKind,
+        time: f32,
+        width: u32,
+        height: u32,
+        params: EffectParams,
+    ) -> Option<CVPixelBuffer> {
         let width_u = (width.max(2) + 1) & !1;
         let height_u = (height.max(2) + 1) & !1;
+        let pixels = (width_u as u64) * (height_u as u64);
+        if width_u > MAX_EFFECT_EDGE || height_u > MAX_EFFECT_EDGE || pixels > MAX_EFFECT_PIXELS {
+            self.disable_after_error(format!(
+                "shader frame size is too large: {width_u}x{height_u} ({pixels} px)"
+            ));
+            return None;
+        }
+
         let width = width_u as usize;
         let height = height_u as usize;
+
+        let scopes = WgpuErrorScopes::push(&self.device);
 
         // 1. Pack the 16 f32 uniforms (resolution + time + intensity + 3
         //    colour vec4s) and write in a single upload.
@@ -490,10 +515,30 @@ impl EffectsHost {
         });
         // PollType::Wait makes the call block until the submitted work is
         // done, at which point our map_async callback fires.
-        let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
-        // If map_async fails or the channel drops, the buffer was never
-        // mapped — no unmap needed, just skip the frame.
-        rx.recv().ok().and_then(|r| r.ok())?;
+        let map_result = match self.device.poll(wgpu::PollType::wait_indefinitely()) {
+            Ok(_) => rx
+                .recv()
+                .map_err(|_| "shader readback callback channel closed".to_string())
+                .and_then(|result| {
+                    result.map_err(|error| format!("shader readback map failed: {error:?}"))
+                }),
+            Err(error) => Err(format!("shader GPU poll failed: {error}")),
+        };
+        let scoped_error = scopes.pop();
+        if let Some(error) = scoped_error {
+            if map_result.is_ok() {
+                staging_buffer.unmap();
+                self.mark_cached_mapped(false);
+            }
+            self.disable_after_error(format!(
+                "wgpu error while rendering {kind:?} shader: {error}"
+            ));
+            return None;
+        }
+        if let Err(error) = map_result {
+            self.disable_after_error(error);
+            return None;
+        }
 
         // From here on the buffer IS mapped. Any early return must unmap
         // before exit, or the pooled buffer will fail the next map_async.
@@ -509,15 +554,22 @@ impl EffectsHost {
             Some(&self.pixel_buffer_attrs),
         ) {
             Ok(buffer) => buffer,
-            Err(_) => {
+            Err(error) => {
                 staging_buffer.unmap();
                 self.mark_cached_mapped(false);
+                self.disable_after_error(format!(
+                    "shader CVPixelBuffer allocation failed: {error:?}"
+                ));
                 return None;
             }
         };
-        if buffer.lock_base_address(0) != 0 {
+        let lock_result = buffer.lock_base_address(0);
+        if lock_result != 0 {
             staging_buffer.unmap();
             self.mark_cached_mapped(false);
+            self.disable_after_error(format!(
+                "shader CVPixelBuffer lock failed: CVReturn {lock_result}"
+            ));
             return None;
         }
 
@@ -553,7 +605,13 @@ impl EffectsHost {
         }
         staging_buffer.unmap();
         self.mark_cached_mapped(false);
-        let _ = buffer.unlock_base_address(0);
+        let unlock_result = buffer.unlock_base_address(0);
+        if unlock_result != 0 {
+            self.disable_after_error(format!(
+                "shader CVPixelBuffer unlock failed: CVReturn {unlock_result}"
+            ));
+            return None;
+        }
 
         Some(buffer)
     }
@@ -563,6 +621,12 @@ impl EffectsHost {
     fn mark_cached_mapped(&self, mapped: bool) {
         if let Some(entry) = self.cache.borrow_mut().as_mut() {
             entry.mapped = mapped;
+        }
+    }
+
+    fn disable_after_error(&self, reason: impl AsRef<str>) {
+        if !self.disabled.swap(true, Ordering::Relaxed) {
+            log::error!("Disabling shader effects: {}", reason.as_ref());
         }
     }
 }
@@ -588,7 +652,13 @@ impl EffectsHost {
     pub fn with_shared<R>(f: impl FnOnce(&EffectsHost) -> R) -> Option<R> {
         SHARED_HOST.with(|cell| {
             cell.get_or_init(|| {
-                let result = EffectsHost::try_new();
+                let result = catch_unwind(AssertUnwindSafe(|| EffectsHost::try_new()))
+                    .unwrap_or_else(|payload| {
+                        Err(format!(
+                            "wgpu effects host init panicked: {}",
+                            panic_payload_to_string(payload)
+                        ))
+                    });
                 if let Err(error) = &result {
                     log::warn!("Disabling shader effects: {error}");
                 }
@@ -615,12 +685,13 @@ fn build_effect_pipeline(
     pipeline_layout: &wgpu::PipelineLayout,
     label: &str,
     wgsl: &'static str,
-) -> wgpu::RenderPipeline {
+) -> Result<wgpu::RenderPipeline, String> {
+    let scopes = WgpuErrorScopes::push(device);
     let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some(&format!("effects-host-shader-{label}")),
         source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(wgsl)),
     });
-    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some(&format!("effects-host-pipeline-{label}")),
         layout: Some(pipeline_layout),
         vertex: wgpu::VertexState {
@@ -652,7 +723,62 @@ fn build_effect_pipeline(
         }),
         multiview_mask: None,
         cache: None,
-    })
+    });
+    if let Some(error) = scopes.pop() {
+        return Err(format!("{label} shader pipeline failed: {error}"));
+    }
+    Ok(pipeline)
+}
+
+/// Pushes all three wgpu error-scope classes so validation, internal, and
+/// out-of-memory failures are reported to our log path rather than surfacing
+/// through the device's default panic handler.
+struct WgpuErrorScopes {
+    out_of_memory: wgpu::ErrorScopeGuard,
+    internal: wgpu::ErrorScopeGuard,
+    validation: wgpu::ErrorScopeGuard,
+}
+
+impl WgpuErrorScopes {
+    fn push(device: &wgpu::Device) -> Self {
+        Self {
+            out_of_memory: device.push_error_scope(wgpu::ErrorFilter::OutOfMemory),
+            internal: device.push_error_scope(wgpu::ErrorFilter::Internal),
+            validation: device.push_error_scope(wgpu::ErrorFilter::Validation),
+        }
+    }
+
+    fn pop(self) -> Option<wgpu::Error> {
+        let Self {
+            out_of_memory,
+            internal,
+            validation,
+        } = self;
+        let validation_error = validation.pop().block_on();
+        let internal_error = internal.pop().block_on();
+        let out_of_memory_error = out_of_memory.pop().block_on();
+        validation_error.or(internal_error).or(out_of_memory_error)
+    }
+}
+
+fn panic_payload_to_string(payload: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(message) = payload.downcast_ref::<&str>() {
+        (*message).to_string()
+    } else if let Some(message) = payload.downcast_ref::<String>() {
+        message.clone()
+    } else {
+        "unknown panic payload".to_string()
+    }
+}
+
+fn builtin_shader_sources() -> [(&'static str, &'static str); 5] {
+    [
+        ("smoke", include_str!("shaders/smoke.wgsl")),
+        ("fire", include_str!("shaders/fire.wgsl")),
+        ("aurora", include_str!("shaders/aurora.wgsl")),
+        ("canopy", include_str!("shaders/canopy.wgsl")),
+        ("rain", include_str!("shaders/rain.wgsl")),
+    ]
 }
 
 /// Build the CFDictionary of pixel-buffer creation attributes: IOSurface
@@ -752,4 +878,35 @@ fn bytemuck_cast(uniforms: &[f32; 16]) -> &[u8] {
     // SAFETY: f32 and u8 have no padding and the resulting slice is the
     // same length in bytes (16 floats * 4 bytes = 64 bytes).
     unsafe { std::slice::from_raw_parts(uniforms.as_ptr() as *const u8, SMOKE_UNIFORM_BYTES) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builtin_effect_shaders_parse_validate_and_expose_entries() {
+        for (label, wgsl) in builtin_shader_sources() {
+            let module = naga::front::wgsl::parse_str(wgsl)
+                .unwrap_or_else(|error| panic!("{label} WGSL parse failed: {error:?}"));
+
+            let mut validator = naga::valid::Validator::new(
+                naga::valid::ValidationFlags::all(),
+                naga::valid::Capabilities::default(),
+            );
+            validator
+                .validate(&module)
+                .unwrap_or_else(|error| panic!("{label} WGSL validation failed: {error:?}"));
+
+            let mut has_vertex_entry = false;
+            let mut has_fragment_entry = false;
+            for entry in &module.entry_points {
+                has_vertex_entry |= entry.name == "vs_main";
+                has_fragment_entry |= entry.name == "fs_main";
+            }
+
+            assert!(has_vertex_entry, "{label} shader is missing vs_main");
+            assert!(has_fragment_entry, "{label} shader is missing fs_main");
+        }
+    }
 }

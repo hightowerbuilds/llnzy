@@ -1,10 +1,15 @@
-use std::path::{Path, PathBuf};
+use std::{
+    fs::File,
+    io::Read,
+    path::{Path, PathBuf},
+};
 
 use crate::config::{BackgroundImageFit, ColorScheme, Config, CursorStyle, EffectsConfig};
 use crate::path_utils::{
     path_extension_is, path_extension_matches, safe_config_stem, BACKGROUND_IMAGE_EXTS, TOML_EXT,
 };
 use crate::theme::VisualTheme;
+use sha2::{Digest, Sha256};
 
 // ── Background Image Library ──
 
@@ -112,6 +117,11 @@ fn import_background_into_dir(source: &Path, dir: &Path) -> Result<PathBuf, Stri
     validate_background_image(source)?;
     std::fs::create_dir_all(dir).map_err(|e| format!("Failed to create backgrounds dir: {e}"))?;
 
+    let source_digest = background_file_digest(source)?;
+    if let Some(existing) = find_matching_background(&source_digest, dir) {
+        return Ok(existing);
+    }
+
     if list_backgrounds_in_dir(dir).len() >= MAX_BACKGROUND_IMAGES {
         return Err(format!(
             "Background library is full ({MAX_BACKGROUND_IMAGES} max). Delete one before adding more."
@@ -139,6 +149,37 @@ fn import_background_into_dir(source: &Path, dir: &Path) -> Result<PathBuf, Stri
 
     std::fs::copy(source, &dest).map_err(|e| format!("Failed to copy image: {e}"))?;
     Ok(dest)
+}
+
+fn find_matching_background(source_digest: &[u8; 32], dir: &Path) -> Option<PathBuf> {
+    list_backgrounds_in_dir(dir)
+        .into_iter()
+        .find(|path| match background_file_digest(path) {
+            Ok(digest) => &digest == source_digest,
+            Err(err) => {
+                log::warn!(
+                    "failed to fingerprint background image at {}: {err}",
+                    path.display()
+                );
+                false
+            }
+        })
+}
+
+fn background_file_digest(path: &Path) -> Result<[u8; 32], String> {
+    let mut file = File::open(path).map_err(|e| format!("Failed to read background image: {e}"))?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 8192];
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .map_err(|e| format!("Failed to fingerprint background image: {e}"))?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(hasher.finalize().into())
 }
 
 /// List all saved background images.
@@ -462,7 +503,11 @@ mod tests {
     }
 
     fn write_test_png(path: &Path) {
-        let image = image::RgbaImage::from_pixel(2, 2, image::Rgba([10, 20, 30, 255]));
+        write_test_png_with_pixel(path, [10, 20, 30, 255]);
+    }
+
+    fn write_test_png_with_pixel(path: &Path, pixel: [u8; 4]) {
+        let image = image::RgbaImage::from_pixel(2, 2, image::Rgba(pixel));
         image.save(path).unwrap();
     }
 
@@ -502,15 +547,43 @@ mod tests {
         );
         assert_eq!(
             second.file_name().and_then(|name| name.to_str()),
+            Some("sky.png")
+        );
+        assert_eq!(first, second);
+        assert_eq!(list_backgrounds_in_dir(&library), vec![first.clone()]);
+
+        delete_background(&first).unwrap();
+        assert!(!first.exists());
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn background_import_suffixes_same_name_with_different_content() {
+        let root = test_dir("backgrounds-same-name-different-content");
+        let source_a = root.join("source-a");
+        let source_b = root.join("source-b");
+        let library = root.join("library");
+        std::fs::create_dir_all(&source_a).unwrap();
+        std::fs::create_dir_all(&source_b).unwrap();
+        write_test_png_with_pixel(&source_a.join("sky.png"), [10, 20, 30, 255]);
+        write_test_png_with_pixel(&source_b.join("sky.png"), [30, 20, 10, 255]);
+
+        let first = import_background_into_dir(&source_a.join("sky.png"), &library).unwrap();
+        let second = import_background_into_dir(&source_b.join("sky.png"), &library).unwrap();
+
+        assert_eq!(
+            first.file_name().and_then(|name| name.to_str()),
+            Some("sky.png")
+        );
+        assert_eq!(
+            second.file_name().and_then(|name| name.to_str()),
             Some("sky_1.png")
         );
         assert_eq!(
             list_backgrounds_in_dir(&library),
-            vec![first.clone(), second]
+            vec![first.clone(), second.clone()]
         );
-
-        delete_background(&first).unwrap();
-        assert!(!first.exists());
 
         let _ = std::fs::remove_dir_all(root);
     }
@@ -534,7 +607,10 @@ mod tests {
         let err = import_background_into_dir(&source.join("img.png"), &library).unwrap_err();
 
         assert!(err.contains("Background library is full"));
-        assert_eq!(list_backgrounds_in_dir(&library).len(), MAX_BACKGROUND_IMAGES);
+        assert_eq!(
+            list_backgrounds_in_dir(&library).len(),
+            MAX_BACKGROUND_IMAGES
+        );
 
         let _ = std::fs::remove_dir_all(root);
     }

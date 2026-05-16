@@ -7,7 +7,7 @@ use std::{
 use gpui::{px, AppContext, ClipboardItem, Context, KeyDownEvent, Pixels, Window};
 
 use crate::{
-    path_utils::{path_contains, same_path},
+    path_utils::{path_contains, path_extension_matches, same_path, BACKGROUND_IMAGE_EXTS},
     sidebar_move::{plan_sidebar_move, MoveOrigin, SidebarMovePlanItem, SidebarMoveRequest},
 };
 
@@ -329,8 +329,7 @@ impl WorkspacePrototype {
         cx: &mut Context<Self>,
     ) {
         if !root.is_dir() {
-            self.sidebar_explorer.status =
-                Some("Open a project before creating files".to_string());
+            self.sidebar_explorer.status = Some("Open a project before creating files".to_string());
             cx.notify();
             return;
         }
@@ -366,8 +365,7 @@ impl WorkspacePrototype {
             return;
         };
         if !parent.is_dir() {
-            self.sidebar_explorer.status =
-                Some("Can only create inside a folder".to_string());
+            self.sidebar_explorer.status = Some("Can only create inside a folder".to_string());
             cx.notify();
             return;
         }
@@ -463,15 +461,19 @@ impl WorkspacePrototype {
             return;
         }
 
-        self.sidebar_explorer.expanded_dirs.insert(state.parent.clone());
+        self.sidebar_explorer
+            .expanded_dirs
+            .insert(state.parent.clone());
         self.sidebar_explorer.selected_path = Some(destination.clone());
         self.sidebar_context_menu = None;
         let noun = match state.kind {
             NewEntryKind::File => "file",
             NewEntryKind::Folder => "folder",
         };
-        self.sidebar_explorer.status =
-            Some(format!("Created {noun} {}", display_path_name(&destination)));
+        self.sidebar_explorer.status = Some(format!(
+            "Created {noun} {}",
+            display_path_name(&destination)
+        ));
         cx.notify();
     }
 
@@ -613,6 +615,86 @@ impl WorkspacePrototype {
             MoveOrigin::DragDrop,
             cx,
         );
+    }
+
+    pub(super) fn import_external_images_to_project_root(
+        &mut self,
+        sources: Vec<PathBuf>,
+        project_root: PathBuf,
+        cx: &mut Context<Self>,
+    ) {
+        if !project_root.is_dir() {
+            self.sidebar_explorer.status =
+                Some("Open a project before importing images".to_string());
+            cx.notify();
+            return;
+        }
+
+        let image_sources = project_image_drop_sources(sources);
+        if image_sources.is_empty() {
+            self.sidebar_explorer.status =
+                Some("Drop PNG, JPEG, BMP, WEBP, or GIF images".to_string());
+            cx.notify();
+            return;
+        }
+
+        let mut copied_count = 0usize;
+        let mut already_present = 0usize;
+        let mut last_destination = None;
+        let mut last_error = None;
+
+        for source in image_sources {
+            let Some(destination) = unique_project_image_destination(&project_root, &source) else {
+                last_error = Some(format!("{} has no file name", source.display()));
+                continue;
+            };
+
+            if same_path(&source, &destination) {
+                already_present += 1;
+                last_destination = Some(destination);
+                continue;
+            }
+
+            match fs::copy(&source, &destination) {
+                Ok(_) => {
+                    copied_count += 1;
+                    last_destination = Some(destination);
+                }
+                Err(error) => {
+                    last_error = Some(format!("{}: {error}", display_path_name(&source)));
+                }
+            }
+        }
+
+        if let Some(destination) = last_destination {
+            self.sidebar_explorer
+                .expanded_dirs
+                .insert(project_root.clone());
+            self.sidebar_explorer.selected_path = Some(destination);
+        }
+
+        self.sidebar_explorer.status = if copied_count > 0 {
+            if let Some(error) = last_error {
+                Some(format!("Imported {copied_count} image(s); skipped {error}"))
+            } else if already_present > 0 {
+                Some(format!(
+                    "Imported {copied_count} image(s); {already_present} already in project"
+                ))
+            } else {
+                Some(format!("Imported {copied_count} image(s)"))
+            }
+        } else if already_present > 0 {
+            Some(if already_present == 1 {
+                "Image already in project root".to_string()
+            } else {
+                format!("{already_present} images already in project root")
+            })
+        } else if let Some(error) = last_error {
+            Some(format!("Image import failed: {error}"))
+        } else {
+            Some("No images imported".to_string())
+        };
+        cx.notify();
     }
 
     fn move_explorer_items_to_folder_with_origin(
@@ -838,9 +920,101 @@ fn validate_sidebar_entry_name(name: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn project_image_drop_sources(sources: Vec<PathBuf>) -> Vec<PathBuf> {
+    sources
+        .into_iter()
+        .filter(|path| path.is_file() && path_extension_matches(path, BACKGROUND_IMAGE_EXTS))
+        .collect()
+}
+
+fn unique_project_image_destination(project_root: &Path, source: &Path) -> Option<PathBuf> {
+    let file_name = source.file_name()?;
+    let first_candidate = project_root.join(file_name);
+    if same_path(source, &first_candidate) {
+        return Some(first_candidate);
+    }
+    if !first_candidate.exists() {
+        return Some(first_candidate);
+    }
+
+    let stem = source
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .filter(|stem| !stem.is_empty())
+        .unwrap_or("image");
+    let ext = source
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("png");
+    let mut index = 1usize;
+    loop {
+        let candidate = project_root.join(format!("{stem}_{index}.{ext}"));
+        if !candidate.exists() {
+            return Some(candidate);
+        }
+        index += 1;
+    }
+}
+
 fn display_path_name(path: &Path) -> String {
     path.file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("item")
         .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_dir(name: &str) -> PathBuf {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "llnzy-project-import-{name}-{}-{nonce}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn project_image_drop_sources_filters_supported_image_files() {
+        let root = test_dir("filters");
+        let png = root.join("image.png");
+        let txt = root.join("note.txt");
+        let dir = root.join("folder.jpg");
+        std::fs::write(&png, "png").unwrap();
+        std::fs::write(&txt, "txt").unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+
+        assert_eq!(
+            project_image_drop_sources(vec![png.clone(), txt, dir]),
+            vec![png]
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn unique_project_image_destination_suffixes_existing_name() {
+        let root = test_dir("suffix");
+        let project_root = root.join("project");
+        let desktop = root.join("desktop");
+        std::fs::create_dir_all(&project_root).unwrap();
+        std::fs::create_dir_all(&desktop).unwrap();
+        std::fs::write(project_root.join("logo.png"), "existing").unwrap();
+        let source = desktop.join("logo.png");
+        std::fs::write(&source, "new").unwrap();
+
+        assert_eq!(
+            unique_project_image_destination(&project_root, &source),
+            Some(project_root.join("logo_1.png"))
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
 }

@@ -221,10 +221,7 @@ impl StackerPrototype {
     ) {
         let editor_command = crate::stacker::commands::stacker_editor_command(id);
         self.editor.update(cx, |input, cx| {
-            crate::stacker::commands::execute_stacker_command(
-                &mut input.session,
-                editor_command,
-            );
+            crate::stacker::commands::execute_stacker_command(&mut input.session, editor_command);
             input.session.set_selection(input.session.selection());
             cx.notify();
         });

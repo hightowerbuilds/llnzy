@@ -3,17 +3,18 @@ use std::path::{Path, PathBuf};
 use gpui::prelude::*;
 use gpui::{
     actions, div, fill, img, point, px, relative, rgb, rgba, size, App, Bounds, ContentMask,
-    Context, Element, ElementId, Entity, FocusHandle, Focusable, GlobalElementId, KeyBinding,
-    LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, PaintQuad,
-    Path as GpuiPath, PathBuilder, Pixels, Point, Render, SharedString, Style, StyledImage,
-    TextAlign, TextRun, Window, WrappedLine,
+    Context, Element, ElementId, Entity, ExternalPaths, FocusHandle, Focusable, GlobalElementId,
+    KeyBinding, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit,
+    PaintQuad, Path as GpuiPath, PathBuilder, Pixels, Point, Render, SharedString, Style,
+    StyledImage, TextAlign, TextRun, Window, WrappedLine,
 };
 
+use crate::path_utils::{path_extension_matches, BACKGROUND_IMAGE_EXTS};
 use crate::sketch::{
     default_jpeg_export_file_name, export_jpeg_to_path, save_appearance_settings,
-    save_default_document, save_named_sketch, sketch_screenshot_drop_dir, DraftElement,
-    ImageElement, RectElement, SketchCanvasBackgroundMode, SketchElement, SketchGridMode,
-    SketchPoint, SketchState, SketchTool,
+    save_default_document, save_named_sketch, DraftElement, ImageElement, RectElement,
+    SketchCanvasBackgroundMode, SketchElement, SketchGridMode, SketchPoint, SketchState,
+    SketchTool, SketchToolbarPosition,
 };
 
 const SKETCH_BG: u32 = 0x191920;
@@ -72,6 +73,24 @@ impl SketchSurface {
 
     pub(crate) fn set_workspace_root(&mut self, workspace_root: Option<PathBuf>) {
         self.workspace_root = workspace_root;
+    }
+
+    pub(crate) fn toolbar_position(&self) -> SketchToolbarPosition {
+        self.state.appearance.toolbar_position
+    }
+
+    pub(crate) fn set_toolbar_position(
+        &mut self,
+        position: SketchToolbarPosition,
+        cx: &mut Context<Self>,
+    ) {
+        if self.state.appearance.toolbar_position == position {
+            return;
+        }
+        self.state.appearance.toolbar_position = position;
+        let _ = save_appearance_settings(&self.state.appearance);
+        self.status_message = Some(format!("Toolbar: {}", toolbar_position_label(position)));
+        cx.notify();
     }
 
     fn set_tool(&mut self, tool: SketchTool, cx: &mut Context<Self>) {
@@ -228,19 +247,6 @@ impl SketchSurface {
         cx.notify();
     }
 
-    fn open_screenshot_drop_folder(&mut self, cx: &mut Context<Self>) {
-        match sketch_screenshot_drop_dir() {
-            Ok(dir) => {
-                self.status_message = Some(format!("Screenshot drop folder: {}", dir.display()));
-                let _ = std::process::Command::new("open").arg(&dir).spawn();
-            }
-            Err(err) => {
-                self.status_message = Some(format!("Drop folder failed: {err}"));
-            }
-        }
-        cx.notify();
-    }
-
     fn resize_selected_image(&mut self, scale: f32, cx: &mut Context<Self>) {
         if self.state.resize_selected_image_to_scale(scale) {
             self.status_message = Some(format!("Image {:.0}%", scale * 100.0));
@@ -251,6 +257,55 @@ impl SketchSurface {
 
     fn default_import_point(&self) -> SketchPoint {
         SketchPoint::new(24.0, 24.0)
+    }
+
+    fn import_dropped_images(
+        &mut self,
+        paths: &ExternalPaths,
+        position: Point<Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        let image_paths = sketch_image_drop_paths(paths);
+        if image_paths.is_empty() {
+            self.status_message = Some("Drop PNG, JPEG, BMP, WEBP, or GIF images".into());
+            cx.notify();
+            return;
+        }
+
+        let base_point = self
+            .canvas_point(position)
+            .unwrap_or_else(|| self.default_import_point());
+        let mut imported = 0usize;
+        let mut last_error = None;
+
+        for (index, path) in image_paths.iter().enumerate() {
+            let offset = index as f32 * 24.0;
+            let point = SketchPoint::new(base_point.x + offset, base_point.y + offset);
+            match self.state.add_image_from_path(path, point) {
+                Ok(_) => imported += 1,
+                Err(err) => {
+                    let name = path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or("image");
+                    last_error = Some(format!("{name}: {err}"));
+                }
+            }
+        }
+
+        if imported > 0 {
+            self.state.set_tool(SketchTool::Select);
+            self.persist_if_dirty();
+            self.status_message = if let Some(error) = last_error {
+                Some(format!("Imported {imported} image(s); skipped {error}"))
+            } else {
+                Some(format!("Imported {imported} image(s)"))
+            };
+        } else if let Some(error) = last_error {
+            self.status_message = Some(format!("Image drop failed: {error}"));
+        }
+
+        cx.notify();
     }
 
     fn export_canvas_size(&self) -> [f32; 2] {
@@ -428,34 +483,100 @@ impl Render for SketchSurface {
             .on_action(cx.listener(Self::redo_action))
             .on_action(cx.listener(Self::save_action))
             .child(sketch_header(self))
-            .child(sketch_toolbar(
-                self.state.tool,
-                self.state.appearance.grid_mode,
-                self.state.selected_image_scale(),
-                cx,
-            ))
-            .child(
-                div()
-                    .relative()
-                    .flex_1()
-                    .w_full()
-                    .overflow_hidden()
-                    .bg(rgb(SKETCH_PANEL_BG))
-                    .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
-                    .on_mouse_move(cx.listener(Self::on_mouse_move))
-                    .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
-                    .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
-                    .child(SketchCanvasElement {
-                        surface: cx.entity(),
-                        layer: SketchCanvasLayer::Background,
-                    })
-                    .child(sketch_image_layer(&self.state))
-                    .child(SketchCanvasElement {
-                        surface: cx.entity(),
-                        layer: SketchCanvasLayer::Foreground,
-                    }),
-            )
+            .child(sketch_body(self, cx))
     }
+}
+
+fn sketch_body(surface: &SketchSurface, cx: &mut Context<SketchSurface>) -> gpui::Div {
+    let position = surface.state.appearance.toolbar_position;
+    let toolbar = sketch_toolbar(
+        surface.state.tool,
+        surface.state.appearance.grid_mode,
+        surface.state.selected_image_scale(),
+        position,
+        cx,
+    );
+    let canvas = sketch_canvas(surface, cx);
+
+    match position {
+        SketchToolbarPosition::Top => div()
+            .flex_1()
+            .w_full()
+            .flex()
+            .flex_col()
+            .child(toolbar)
+            .child(canvas),
+        SketchToolbarPosition::Left => div()
+            .flex_1()
+            .w_full()
+            .flex()
+            .overflow_hidden()
+            .child(toolbar)
+            .child(canvas),
+        SketchToolbarPosition::Right => div()
+            .flex_1()
+            .w_full()
+            .flex()
+            .overflow_hidden()
+            .child(canvas)
+            .child(toolbar),
+    }
+}
+
+fn sketch_canvas(surface: &SketchSurface, cx: &mut Context<SketchSurface>) -> gpui::Div {
+    div()
+        .relative()
+        .flex_1()
+        .h_full()
+        .w_full()
+        .overflow_hidden()
+        .border_2()
+        .border_color(rgba(0x00000000))
+        .bg(rgb(SKETCH_PANEL_BG))
+        .can_drop(|drag, _window, _cx| {
+            drag.downcast_ref::<ExternalPaths>()
+                .is_some_and(external_paths_contain_sketch_images)
+        })
+        .drag_over::<ExternalPaths>(|style, paths, _window, _cx| {
+            if external_paths_contain_sketch_images(paths) {
+                style.border_color(rgb(SKETCH_ACCENT))
+            } else {
+                style.border_color(rgb(0xff7a7a))
+            }
+        })
+        .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
+            this.import_dropped_images(paths, window.mouse_position(), cx);
+        }))
+        .on_mouse_down(MouseButton::Left, cx.listener(SketchSurface::on_mouse_down))
+        .on_mouse_move(cx.listener(SketchSurface::on_mouse_move))
+        .on_mouse_up(MouseButton::Left, cx.listener(SketchSurface::on_mouse_up))
+        .on_mouse_up_out(MouseButton::Left, cx.listener(SketchSurface::on_mouse_up))
+        .child(sketch_canvas_layer(
+            cx.entity(),
+            SketchCanvasLayer::Background,
+        ))
+        .child(sketch_image_layer(&surface.state))
+        .child(sketch_canvas_layer(
+            cx.entity(),
+            SketchCanvasLayer::Foreground,
+        ))
+}
+
+fn external_paths_contain_sketch_images(paths: &ExternalPaths) -> bool {
+    paths.paths().iter().any(|path| is_sketch_image_path(path))
+}
+
+fn sketch_image_drop_paths(paths: &ExternalPaths) -> Vec<PathBuf> {
+    paths
+        .paths()
+        .iter()
+        .filter(|path| is_sketch_image_path(path))
+        .cloned()
+        .collect()
+}
+
+fn is_sketch_image_path(path: &Path) -> bool {
+    path.is_file() && path_extension_matches(path, BACKGROUND_IMAGE_EXTS)
 }
 
 fn sketch_header(surface: &SketchSurface) -> impl IntoElement {
@@ -515,21 +636,47 @@ fn sketch_toolbar(
     active_tool: SketchTool,
     grid_mode: SketchGridMode,
     selected_image_scale: Option<f32>,
+    position: SketchToolbarPosition,
     cx: &mut Context<SketchSurface>,
 ) -> impl IntoElement {
+    let vertical = position != SketchToolbarPosition::Top;
     let mut toolbar = div()
-        .h(px(44.0))
-        .w_full()
+        .id("sketch-toolbar")
         .flex()
-        .items_center()
         .gap_1()
-        .px_3()
-        .border_b_1()
         .border_color(rgb(SKETCH_BORDER))
-        .bg(rgb(SKETCH_BG))
+        .bg(rgb(SKETCH_BG));
+
+    toolbar = match position {
+        SketchToolbarPosition::Top => toolbar
+            .h(px(44.0))
+            .w_full()
+            .items_center()
+            .px_3()
+            .border_b_1(),
+        SketchToolbarPosition::Left => toolbar
+            .h_full()
+            .w(px(116.0))
+            .flex_col()
+            .p_2()
+            .border_r_1()
+            .overflow_y_scroll()
+            .scrollbar_width(px(6.0)),
+        SketchToolbarPosition::Right => toolbar
+            .h_full()
+            .w(px(116.0))
+            .flex_col()
+            .p_2()
+            .border_l_1()
+            .overflow_y_scroll()
+            .scrollbar_width(px(6.0)),
+    };
+
+    let mut toolbar = toolbar
         .child(tool_button(
             "Select",
             active_tool == SketchTool::Select,
+            vertical,
             cx,
             |this, cx| {
                 this.set_tool(SketchTool::Select, cx);
@@ -538,6 +685,7 @@ fn sketch_toolbar(
         .child(tool_button(
             "Marker",
             active_tool == SketchTool::Marker,
+            vertical,
             cx,
             |this, cx| {
                 this.set_tool(SketchTool::Marker, cx);
@@ -546,66 +694,84 @@ fn sketch_toolbar(
         .child(tool_button(
             "Rectangle",
             active_tool == SketchTool::Rectangle,
+            vertical,
             cx,
             |this, cx| {
                 this.set_tool(SketchTool::Rectangle, cx);
             },
         ))
-        .child(div().w(px(1.0)).h(px(24.0)).bg(rgb(SKETCH_BORDER)))
+        .child(toolbar_separator(position))
         .child(tool_button(
             grid_label(grid_mode),
             grid_mode != SketchGridMode::Hidden,
+            vertical,
             cx,
             |this, cx| {
                 this.cycle_grid(cx);
             },
         ))
-        .child(tool_button("Undo", false, cx, |this, cx| {
+        .child(tool_button("Undo", false, vertical, cx, |this, cx| {
             this.undo_from_workspace(cx);
         }))
-        .child(tool_button("Redo", false, cx, |this, cx| {
+        .child(tool_button("Redo", false, vertical, cx, |this, cx| {
             this.redo_from_workspace(cx);
         }))
-        .child(div().w(px(1.0)).h(px(24.0)).bg(rgb(SKETCH_BORDER)))
-        .child(tool_button("Import", false, cx, |this, cx| {
+        .child(toolbar_separator(position))
+        .child(tool_button("Import", false, vertical, cx, |this, cx| {
             this.import_image(cx);
-        }))
-        .child(tool_button("Drop Folder", false, cx, |this, cx| {
-            this.open_screenshot_drop_folder(cx);
         }));
 
     if let Some(scale) = selected_image_scale {
         let smaller = (scale * 0.8).max(0.05);
         let larger = (scale * 1.25).min(2.0);
         toolbar = toolbar
-            .child(div().w(px(1.0)).h(px(24.0)).bg(rgb(SKETCH_BORDER)))
-            .child(tool_button("Image -", false, cx, move |this, cx| {
-                this.resize_selected_image(smaller, cx);
-            }))
+            .child(toolbar_separator(position))
+            .child(tool_button(
+                "Image -",
+                false,
+                vertical,
+                cx,
+                move |this, cx| {
+                    this.resize_selected_image(smaller, cx);
+                },
+            ))
             .child(tool_button(
                 "Image 100%",
                 (scale - 1.0).abs() < 0.01,
+                vertical,
                 cx,
                 |this, cx| {
                     this.resize_selected_image(1.0, cx);
                 },
             ))
-            .child(tool_button("Image +", false, cx, move |this, cx| {
-                this.resize_selected_image(larger, cx);
-            }));
+            .child(tool_button(
+                "Image +",
+                false,
+                vertical,
+                cx,
+                move |this, cx| {
+                    this.resize_selected_image(larger, cx);
+                },
+            ));
     }
 
     toolbar
         .child(div().flex_1())
-        .child(tool_button("Clear", false, cx, |this, cx| {
+        .child(tool_button("Clear", false, vertical, cx, |this, cx| {
             this.clear_canvas(cx);
         }))
-        .child(tool_button("Save", false, cx, |this, cx| {
+        .child(tool_button("Save", false, vertical, cx, |this, cx| {
             this.save_from_workspace(cx);
         }))
-        .child(tool_button("Export JPG", false, cx, |this, cx| {
-            this.export_jpeg(cx);
-        }))
+        .child(tool_button(
+            "Export JPG",
+            false,
+            vertical,
+            cx,
+            |this, cx| {
+                this.export_jpeg(cx);
+            },
+        ))
 }
 
 fn grid_label(grid_mode: SketchGridMode) -> &'static str {
@@ -616,14 +782,31 @@ fn grid_label(grid_mode: SketchGridMode) -> &'static str {
     }
 }
 
+fn toolbar_position_label(position: SketchToolbarPosition) -> &'static str {
+    match position {
+        SketchToolbarPosition::Top => "Top",
+        SketchToolbarPosition::Left => "Left",
+        SketchToolbarPosition::Right => "Right",
+    }
+}
+
+fn toolbar_separator(position: SketchToolbarPosition) -> gpui::Div {
+    if position == SketchToolbarPosition::Top {
+        div().w(px(1.0)).h(px(24.0)).bg(rgb(SKETCH_BORDER))
+    } else {
+        div().h(px(1.0)).w_full().bg(rgb(SKETCH_BORDER))
+    }
+}
+
 fn tool_button(
     label: impl Into<SharedString>,
     active: bool,
+    full_width: bool,
     cx: &mut Context<SketchSurface>,
     on_click: impl Fn(&mut SketchSurface, &mut Context<SketchSurface>) + 'static,
-) -> impl IntoElement {
+) -> gpui::Div {
     let label = label.into();
-    div()
+    let mut button = div()
         .h(px(30.0))
         .flex()
         .items_center()
@@ -647,7 +830,13 @@ fn tool_button(
                 on_click(this, cx);
             }),
         )
-        .child(label)
+        .child(label);
+
+    if full_width {
+        button = button.w_full();
+    }
+
+    button
 }
 
 struct SketchCanvasElement {
@@ -659,6 +848,18 @@ struct SketchCanvasElement {
 enum SketchCanvasLayer {
     Background,
     Foreground,
+}
+
+fn sketch_canvas_layer(
+    surface: Entity<SketchSurface>,
+    layer: SketchCanvasLayer,
+) -> impl IntoElement {
+    div()
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full()
+        .child(SketchCanvasElement { surface, layer })
 }
 
 struct SketchPrepaintState {

@@ -118,7 +118,12 @@ impl Element for EffectsElement {
 
         let kind = self.kind;
         let params = self.params;
+        let mut should_continue_animating = false;
         let frame = EffectsHost::with_shared(|host| {
+            if host.is_disabled() {
+                return None;
+            }
+            should_continue_animating = true;
             host.render_frame(kind, app_time_seconds(), pixel_width, pixel_height, params)
         })
         .flatten();
@@ -126,7 +131,9 @@ impl Element for EffectsElement {
             window.paint_surface(bounds, buffer);
         }
 
-        window.request_animation_frame();
+        if should_continue_animating {
+            window.request_animation_frame();
+        }
     }
 }
 

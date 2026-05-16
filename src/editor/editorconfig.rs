@@ -492,9 +492,10 @@ impl GlobMatcher {
         } else {
             // editorconfig: an unanchored pattern with no slashes matches at
             // any depth. Patterns with slashes are anchored to the config dir.
-            let has_slash_token = self.tokens.iter().any(|t| {
-                matches!(t, GlobToken::Literal('/') | GlobToken::DoubleStar)
-            });
+            let has_slash_token = self
+                .tokens
+                .iter()
+                .any(|t| matches!(t, GlobToken::Literal('/') | GlobToken::DoubleStar));
             if has_slash_token {
                 match_tokens(&self.tokens, path)
             } else {
@@ -716,11 +717,7 @@ mod tests {
             "root = true\n[*]\nindent_style = space\nindent_size = 4\n",
         )
         .unwrap();
-        fs::write(
-            child.join(".editorconfig"),
-            "[*]\nindent_size = 2\n",
-        )
-        .unwrap();
+        fs::write(child.join(".editorconfig"), "[*]\nindent_size = 2\n").unwrap();
 
         let file = child.join("a.txt");
         fs::write(&file, "").unwrap();

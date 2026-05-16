@@ -2,6 +2,7 @@ use gpui::Context;
 
 use crate::{
     config::{BackgroundImageFit, CursorStyle, TerminalLayoutMode},
+    sketch::SketchToolbarPosition,
     theme::builtin_themes,
 };
 
@@ -29,6 +30,16 @@ impl WorkspacePrototype {
 
     pub(super) fn set_appearance_page(&mut self, page: AppearancePage, cx: &mut Context<Self>) {
         self.appearance_page = page;
+        cx.notify();
+    }
+
+    pub(super) fn set_sketch_toolbar_position(
+        &mut self,
+        position: SketchToolbarPosition,
+        cx: &mut Context<Self>,
+    ) {
+        self.sketch
+            .update(cx, |sketch, cx| sketch.set_toolbar_position(position, cx));
         cx.notify();
     }
 

@@ -13,6 +13,11 @@ Options:
   --pkg       Build a macOS installer package that installs LLNZY.app and /usr/local/bin/llnzy.
   --dmg       Build a compressed DMG. With --pkg, the DMG contains the installer package.
               Without --pkg, the DMG contains the app plus CLI install helper commands.
+
+Environment:
+  LLNZY_KEEP_RELEASE_ARTIFACTS=1
+              Keep old target/LLNZY-*.dmg and target/LLNZY-*.pkg files instead
+              of clearing them before a fresh release bundle/package build.
 EOF
 }
 
@@ -56,6 +61,23 @@ for arg in "$@"; do
             ;;
     esac
 done
+
+prepare_release_artifacts() {
+    mkdir -p target
+    if [ "${LLNZY_KEEP_RELEASE_ARTIFACTS:-0}" = "1" ]; then
+        return
+    fi
+
+    find target -maxdepth 1 \
+        \( -name "$DISPLAY_NAME-*.dmg" -o -name "$DISPLAY_NAME-*.pkg" \) \
+        -print -delete
+
+    if [ -f "$DISPLAY_NAME.dmg" ]; then
+        echo "Warning: $DISPLAY_NAME.dmg exists at the repo root and may be stale." >&2
+    fi
+}
+
+prepare_release_artifacts
 
 if [ "$PROFILE" = "release" ]; then
     cargo build --release --bin "$EXECUTABLE_NAME"
@@ -169,6 +191,10 @@ if [ "$BUILD_PKG" -eq 1 ]; then
         --version "$VERSION" \
         --install-location "/" \
         "$PKG_PATH"
+    # Remove the staging tree once the .pkg is produced so it doesn't sit
+    # in target/ as a duplicate of /Applications/LLNZY.app — macOS's
+    # Storage view flags those copies as "Duplicates" otherwise.
+    rm -rf "$PKG_ROOT"
     echo "Built $PKG_PATH"
 fi
 
@@ -193,5 +219,9 @@ if [ "$BUILD_DMG" -eq 1 ]; then
         -ov \
         -format UDZO \
         "$DMG_PATH"
+    # Same cleanup as the .pkg path: drop the staging tree once the
+    # .dmg is produced so target/dmg-root/LLNZY.app doesn't sit on disk
+    # as a phantom duplicate of /Applications/LLNZY.app.
+    rm -rf "$DMG_ROOT"
     echo "Built $DMG_PATH"
 fi

@@ -506,6 +506,33 @@ impl EditorPrototype {
         self.reopen_recent_buffer_tab(cx);
     }
 
+    /// Move the active buffer's cursor to `(line, col)` (zero-indexed) and
+    /// scroll it into view. Used by callers outside the editor — e.g. the
+    /// error-log panel jumping to a logged source location — that have
+    /// already opened the target file in this editor.
+    pub(crate) fn navigate_to_position_from_workspace(
+        &mut self,
+        line: u32,
+        col: u32,
+        cx: &mut Context<Self>,
+    ) {
+        let visible_cols = self.visible_col_limit();
+        let visible_lines = self.visible_line_limit();
+        if let Some((buffer, view)) = self.active_buffer_and_view() {
+            let line = line as usize;
+            let col = col as usize;
+            let line_count = buffer.line_count();
+            let target_line = line.min(line_count.saturating_sub(1));
+            let target_col = col.min(buffer.line_len(target_line));
+            view.cursor.pos = Position::new(target_line, target_col);
+            view.cursor.clear_selection();
+            view.cursor.desired_col = None;
+            reveal_cursor(view, line_count, visible_cols, visible_lines);
+            self.wake_cursor_blink();
+            cx.notify();
+        }
+    }
+
     fn with_chrome(cx: &mut Context<Self>, show_chrome: bool) -> Self {
         start_cursor_blink_task(cx);
         start_lsp_poll_task(cx);

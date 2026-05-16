@@ -42,6 +42,7 @@ actions!(
     workspace_gpui,
     [
         Quit,
+        MenuNewWindow,
         MenuNewTab,
         MenuCloseTab,
         MenuNextTab,
@@ -146,9 +147,9 @@ fn appearance_config_from_preferences(
             config.effects.background_image = Some(image_ref.to_string());
         }
     }
-    if let Some(fit) = crate::config::BackgroundImageFit::parse(
-        preferences.terminal_background_image_fit.as_str(),
-    ) {
+    if let Some(fit) =
+        crate::config::BackgroundImageFit::parse(preferences.terminal_background_image_fit.as_str())
+    {
         config.effects.background_image_fit = fit;
     }
     // Layer the rest of the persisted appearance state on top of the
@@ -167,9 +168,9 @@ fn appearance_config_from_preferences(
             config.font_family = Some(family.to_string());
         }
     }
-    if let Some(layout) = crate::config::TerminalLayoutMode::parse(
-        preferences.terminal_layout.as_str(),
-    ) {
+    if let Some(layout) =
+        crate::config::TerminalLayoutMode::parse(preferences.terminal_layout.as_str())
+    {
         config.terminal_layout = layout;
     }
     config
@@ -222,11 +223,15 @@ impl AppearancePage {
 }
 
 #[derive(Clone, Copy)]
+struct JoinedWorkspacePane {
+    id: WorkspaceTabId,
+    surface: WorkspaceSurface,
+}
+
+#[derive(Clone)]
 struct JoinedWorkspacePanes {
-    primary_id: WorkspaceTabId,
-    primary_surface: WorkspaceSurface,
-    secondary_id: WorkspaceTabId,
-    secondary_surface: WorkspaceSurface,
+    panes: Vec<JoinedWorkspacePane>,
+    shares: Vec<f32>,
     ratio: f32,
     axis: crate::tab_groups::PartitionAxis,
 }
@@ -297,6 +302,27 @@ pub fn run_workspace_prototype() {
             }
             cx.quit();
         });
+        cx.on_action(|_: &MenuNewWindow, cx| {
+            let bounds = Bounds::centered(None, size(px(1320.0), px(820.0)), cx);
+            let window = match cx.open_window(
+                WindowOptions {
+                    window_bounds: Some(WindowBounds::Windowed(bounds)),
+                    ..Default::default()
+                },
+                |_, cx| cx.new(WorkspacePrototype::new),
+            ) {
+                Ok(window) => window,
+                Err(error) => {
+                    log::error!("failed to open new workspace window: {error:?}");
+                    return;
+                }
+            };
+            if let Err(error) = window.update(cx, |view, window, cx| {
+                view.focus_surface(view.active_surface(), window, cx);
+            }) {
+                log::error!("failed to focus new workspace window: {error:?}");
+            }
+        });
         cx.activate(true);
     });
 }
@@ -310,6 +336,8 @@ fn install_workspace_menu_bar(cx: &mut App) {
         Menu {
             name: "File".into(),
             items: vec![
+                MenuItem::action("New Window", MenuNewWindow),
+                MenuItem::separator(),
                 MenuItem::action("New Tab", MenuNewTab),
                 MenuItem::action("Close Tab", MenuCloseTab),
                 MenuItem::separator(),
@@ -428,15 +456,38 @@ struct WorkspacePrototype {
     palette: command_palette::CommandPaletteState,
     preferences: crate::preferences::WorkspacePreferences,
     error_log_expanded: bool,
+    error_log_filter: ErrorLogFilter,
+    pending_clear_error_log: bool,
+}
+
+/// Which severity levels the Settings → Error Log panel should display.
+/// Session-only state; not persisted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ErrorLogFilter {
+    All,
+    WarnAndError,
+    ErrorOnly,
+}
+
+impl ErrorLogFilter {
+    fn includes(self, level: crate::error_log::LogLevel) -> bool {
+        use crate::error_log::LogLevel;
+        matches!(
+            (self, level),
+            (ErrorLogFilter::All, _)
+                | (
+                    ErrorLogFilter::WarnAndError,
+                    LogLevel::Warn | LogLevel::Error
+                )
+                | (ErrorLogFilter::ErrorOnly, LogLevel::Error)
+        )
+    }
 }
 
 impl WorkspacePrototype {
     fn new(cx: &mut Context<Self>) -> Self {
         let workspace_root = std::env::current_dir().ok();
-        let tabs = vec![WorkspaceTab::new(
-            WorkspaceTabId(1),
-            WorkspaceSurface::Home,
-        )];
+        let tabs = vec![WorkspaceTab::new(WorkspaceTabId(1), WorkspaceSurface::Home)];
         let sidebar_explorer = ExplorerState::for_root(workspace_root.as_deref());
         let sketch = cx.new(SketchSurface::new);
         sketch.update(cx, |sketch, _cx| {
@@ -479,12 +530,29 @@ impl WorkspacePrototype {
             palette: command_palette::CommandPaletteState::default(),
             preferences,
             error_log_expanded: false,
+            error_log_filter: ErrorLogFilter::All,
+            pending_clear_error_log: false,
         }
+    }
+
+    fn tab_join_limit(&self) -> usize {
+        self.preferences.joined_tab_limit()
     }
 
     pub(super) fn toggle_show_explorer_button(&mut self, cx: &mut Context<Self>) {
         self.preferences.show_explorer_button = !self.preferences.show_explorer_button;
         self.preferences.save();
+        cx.notify();
+    }
+
+    pub(super) fn set_joined_tab_limit(&mut self, limit: u8, cx: &mut Context<Self>) {
+        let limit = limit.clamp(2, 4);
+        if self.preferences.joined_tab_limit == limit {
+            return;
+        }
+        self.preferences.joined_tab_limit = limit;
+        self.preferences.save();
+        self.tab_manager.enforce_join_limit(limit as usize);
         cx.notify();
     }
 
@@ -510,6 +578,67 @@ impl WorkspacePrototype {
         let report = crate::diagnostics::render_diagnostics_report(Some(log));
         cx.write_to_clipboard(gpui::ClipboardItem::new_string(report));
         cx.notify();
+    }
+
+    pub(super) fn set_error_log_filter(&mut self, filter: ErrorLogFilter, cx: &mut Context<Self>) {
+        if self.error_log_filter != filter {
+            self.error_log_filter = filter;
+            cx.notify();
+        }
+    }
+
+    /// Open the clear-confirmation modal. The actual wipe runs only on
+    /// `confirm_clear_error_log` to keep destructive actions explicit —
+    /// the persisted log includes every prior session, so a misclick
+    /// would burn debug context.
+    pub(super) fn request_clear_error_log(&mut self, cx: &mut Context<Self>) {
+        self.pending_clear_error_log = true;
+        cx.notify();
+    }
+
+    pub(super) fn cancel_clear_error_log(&mut self, cx: &mut Context<Self>) {
+        if self.pending_clear_error_log {
+            self.pending_clear_error_log = false;
+            cx.notify();
+        }
+    }
+
+    pub(super) fn confirm_clear_error_log(&mut self, cx: &mut Context<Self>) {
+        self.pending_clear_error_log = false;
+        crate::error_log::global().clear();
+        cx.notify();
+    }
+
+    /// Open the file logged for an error-log entry in the editor and jump
+    /// to the recorded line. Falls back silently when the path does not
+    /// resolve under the active workspace root — entries from external
+    /// crates often log paths the user has no checkout of.
+    pub(super) fn open_error_log_source(
+        &mut self,
+        file: String,
+        line: u32,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let candidate = PathBuf::from(&file);
+        let resolved = if candidate.is_absolute() && candidate.exists() {
+            Some(candidate)
+        } else if let Some(root) = self.workspace_root.as_ref() {
+            let joined = root.join(&candidate);
+            joined.exists().then_some(joined)
+        } else {
+            None
+        };
+        let Some(path) = resolved else {
+            return;
+        };
+
+        self.open_sidebar_file(path, window, cx);
+
+        let editor = self.active_editor_entity();
+        editor.update(cx, |editor, cx| {
+            editor.navigate_to_position_from_workspace(line, 0, cx);
+        });
     }
 
     fn active_surface(&self) -> WorkspaceSurface {
@@ -567,16 +696,24 @@ impl WorkspacePrototype {
     fn joined_panes_for_active(&self) -> Option<JoinedWorkspacePanes> {
         let joined = self
             .tab_manager
-            .joined_pair_for(self.active_tab_id.0, &self.tab_ids())?;
-        let primary_id = WorkspaceTabId(joined.primary);
-        let secondary_id = WorkspaceTabId(joined.secondary);
-        let primary_surface = self.tab_by_id(primary_id)?.surface;
-        let secondary_surface = self.tab_by_id(secondary_id)?.surface;
+            .joined_group_for(self.active_tab_id.0, &self.tab_ids())?;
+        let panes = joined
+            .members
+            .into_iter()
+            .filter_map(|member| {
+                let id = WorkspaceTabId(member);
+                Some(JoinedWorkspacePane {
+                    id,
+                    surface: self.tab_by_id(id)?.surface,
+                })
+            })
+            .collect::<Vec<_>>();
+        if panes.len() < 2 {
+            return None;
+        }
         Some(JoinedWorkspacePanes {
-            primary_id,
-            primary_surface,
-            secondary_id,
-            secondary_surface,
+            panes,
+            shares: joined.shares,
             ratio: joined.ratio,
             axis: joined.axis,
         })
@@ -913,35 +1050,62 @@ impl WorkspacePrototype {
         if self.tab_by_id(primary_id).is_none() || self.tab_by_id(secondary_id).is_none() {
             return;
         }
-        if self.tab_manager.join_pair(primary_id.0, secondary_id.0) {
-            self.place_joined_tabs_together(primary_id, secondary_id);
+        if self
+            .tab_manager
+            .join_tabs(primary_id.0, secondary_id.0, self.tab_join_limit())
+        {
+            let group_ids = self.joined_tab_ids_for(primary_id);
+            self.place_joined_tabs_together(&group_ids);
             self.active_tab_id = primary_id;
             cx.notify();
         }
     }
 
-    fn place_joined_tabs_together(
-        &mut self,
-        primary_id: WorkspaceTabId,
-        secondary_id: WorkspaceTabId,
-    ) {
-        let Some(primary_index) = self.tabs.iter().position(|tab| tab.id == primary_id) else {
-            return;
-        };
-        let Some(secondary_index) = self.tabs.iter().position(|tab| tab.id == secondary_id) else {
-            return;
-        };
-        if secondary_index == primary_index + 1 {
+    fn joined_tab_ids_for(&self, tab_id: WorkspaceTabId) -> Vec<WorkspaceTabId> {
+        self.tab_manager
+            .joined_group_for(tab_id.0, &self.tab_ids())
+            .map(|joined| {
+                joined
+                    .members
+                    .into_iter()
+                    .map(WorkspaceTabId)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_else(|| vec![tab_id])
+    }
+
+    fn place_joined_tabs_together(&mut self, group_ids: &[WorkspaceTabId]) {
+        if group_ids.len() < 2 {
             return;
         }
 
-        let secondary = self.tabs.remove(secondary_index);
-        let insert_index = if secondary_index < primary_index {
-            primary_index
-        } else {
-            primary_index + 1
+        let Some(insert_anchor) = self.tabs.iter().position(|tab| group_ids.contains(&tab.id))
+        else {
+            return;
         };
-        self.tabs.insert(insert_index, secondary);
+
+        let grouped = group_ids
+            .iter()
+            .filter_map(|id| self.tabs.iter().find(|tab| tab.id == *id).cloned())
+            .collect::<Vec<_>>();
+        if grouped.len() != group_ids.len() {
+            return;
+        }
+
+        let mut remaining = Vec::with_capacity(self.tabs.len() - grouped.len());
+        for tab in self.tabs.drain(..) {
+            if !group_ids.contains(&tab.id) {
+                remaining.push(tab);
+            }
+        }
+
+        let insert_index = remaining
+            .iter()
+            .take(insert_anchor)
+            .filter(|tab| !group_ids.contains(&tab.id))
+            .count();
+        remaining.splice(insert_index..insert_index, grouped);
+        self.tabs = remaining;
     }
 
     fn separate_tab_by_id(&mut self, tab_id: WorkspaceTabId, cx: &mut Context<Self>) {
@@ -960,10 +1124,14 @@ impl WorkspacePrototype {
     fn resize_joined_panes_by_tab(
         &mut self,
         tab_id: WorkspaceTabId,
+        divider_index: usize,
         ratio: f32,
         cx: &mut Context<Self>,
     ) {
-        if self.tab_manager.set_ratio_for_tab(tab_id.0, ratio) {
+        if self
+            .tab_manager
+            .set_split_for_tab(tab_id.0, divider_index, ratio)
+        {
             cx.notify();
         }
     }
@@ -1015,19 +1183,20 @@ impl WorkspacePrototype {
         let valid_tabs = self.tab_ids();
         let block_ids = self
             .tab_manager
-            .joined_pair_for(dragged_id.0, &valid_tabs)
+            .joined_group_for(dragged_id.0, &valid_tabs)
             .map(|joined| {
-                let mut ids = [
-                    WorkspaceTabId(joined.primary),
-                    WorkspaceTabId(joined.secondary),
-                ];
+                let mut ids = joined
+                    .members
+                    .into_iter()
+                    .map(WorkspaceTabId)
+                    .collect::<Vec<_>>();
                 ids.sort_by_key(|id| {
                     self.tabs
                         .iter()
                         .position(|tab| tab.id == *id)
                         .unwrap_or(usize::MAX)
                 });
-                ids.to_vec()
+                ids
             })
             .unwrap_or_else(|| vec![dragged_id]);
 
@@ -1155,7 +1324,7 @@ impl WorkspacePrototype {
         cx: &mut Context<Self>,
     ) {
         let primary_id = self.active_tab_id;
-        if self.tab_manager.is_joined(primary_id.0) {
+        if self.tab_manager.joined_member_count(primary_id.0) >= self.tab_join_limit() {
             return;
         }
         let secondary_id = WorkspaceTabId(self.next_tab_id);
@@ -1165,18 +1334,21 @@ impl WorkspacePrototype {
         let terminal = self.new_terminal_surface(cx);
         self.terminals.insert(secondary_id.0, terminal);
 
-        let joined = self
-            .tab_manager
-            .join_pair_with_axis(primary_id.0, secondary_id.0, axis);
+        let joined = self.tab_manager.join_tabs_with_axis(
+            primary_id.0,
+            secondary_id.0,
+            self.tab_join_limit(),
+            axis,
+        );
         if !joined {
-            // Roll back the freshly allocated terminal if the pairing failed
-            // (defensive — `join_pair_with_axis` only refuses if primary ==
-            // secondary, which can't happen here).
+            // Roll back the freshly allocated terminal if the join failed.
             self.tabs.retain(|tab| tab.id != secondary_id);
             self.terminals.remove(&secondary_id.0);
             return;
         }
 
+        let group_ids = self.joined_tab_ids_for(primary_id);
+        self.place_joined_tabs_together(&group_ids);
         self.active_tab_id = primary_id;
         self.tab_manager.set_active_tab(primary_id.0);
         if let Some(active_surface) = self.tab_by_id(primary_id).map(|tab| tab.surface) {
@@ -1379,7 +1551,10 @@ impl Render for WorkspacePrototype {
                     appearance_page,
                     terminal_background_import_error,
                     show_explorer_button: self.preferences.show_explorer_button,
+                    joined_tab_limit: self.tab_join_limit(),
                     error_log_expanded: self.error_log_expanded,
+                    error_log_filter: self.error_log_filter,
+                    pending_clear_error_log: self.pending_clear_error_log,
                 },
                 active_surface,
                 active_tab_id,
@@ -1480,6 +1655,7 @@ impl Render for WorkspacePrototype {
                     self.tab_choices(),
                     &self.tab_manager,
                     tab_rename,
+                    self.tab_join_limit(),
                     cx,
                 ))
             })

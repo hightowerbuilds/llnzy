@@ -236,18 +236,26 @@ pub(super) fn workspace_tab_menu_anchor(
             ),
         });
 
-    if let Some(joined) = tab_manager.joined_pair_for(tab_id.0, &valid_tabs) {
-        let primary = layouts
+    if let Some(joined) = tab_manager.joined_group_for(tab_id.0, &valid_tabs) {
+        let joined_layouts = joined
+            .members
             .iter()
-            .find(|layout| layout.id.0 == joined.primary)
-            .copied();
-        let secondary = layouts
-            .iter()
-            .find(|layout| layout.id.0 == joined.secondary)
-            .copied();
-        if let (Some(primary), Some(secondary)) = (primary, secondary) {
-            let left = primary.x.min(secondary.x);
-            let right = (primary.x + primary.width).max(secondary.x + secondary.width);
+            .filter_map(|member| {
+                layouts
+                    .iter()
+                    .find(|layout| layout.id.0 == *member)
+                    .copied()
+            })
+            .collect::<Vec<_>>();
+        if joined_layouts.len() == joined.members.len() {
+            let left = joined_layouts
+                .iter()
+                .map(|layout| layout.x)
+                .fold(f32::MAX, f32::min);
+            let right = joined_layouts
+                .iter()
+                .map(|layout| layout.x + layout.width)
+                .fold(f32::MIN, f32::max);
             return WorkspaceTabMenuAnchor {
                 x: left,
                 y: TAB_BAR_PADDING_Y + TAB_HEIGHT,
@@ -427,6 +435,7 @@ pub(super) fn workspace_tab_context_menu(
     tabs: Vec<GpuiTabChoice>,
     tab_manager: &GpuiTabManager,
     tab_rename: Option<TabRenameState>,
+    join_limit: usize,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     let tab_id = WorkspaceTabId(menu.tab_id);
@@ -436,6 +445,10 @@ pub(super) fn workspace_tab_context_menu(
         .map(|tab| tab.title.clone())
         .unwrap_or_else(|| "Tab".to_string());
     let joined = tab_manager.is_joined(menu.tab_id);
+    let joined_count = tab_manager.joined_member_count(menu.tab_id);
+    let can_join_more = tabs
+        .iter()
+        .any(|tab| tab_manager.can_join(menu.tab_id, tab.id, join_limit));
     let menu_width = menu.width;
 
     let mut menu_panel = div()
@@ -524,26 +537,29 @@ pub(super) fn workspace_tab_context_menu(
                 },
             ));
             if joined {
-                menu_panel = menu_panel
-                    .child(tab_menu_button(
+                if joined_count == 2 {
+                    menu_panel = menu_panel.child(tab_menu_button(
                         "Swap Tabs".to_string(),
                         false,
                         cx,
                         move |this, _window, cx| {
                             this.swap_tabs_by_id(tab_id, cx);
                         },
-                    ))
-                    .child(tab_menu_button(
-                        "Separate Tabs".to_string(),
-                        false,
-                        cx,
-                        move |this, _window, cx| {
-                            this.separate_tab_by_id(tab_id, cx);
-                        },
                     ));
-            } else {
+                }
                 menu_panel = menu_panel.child(tab_menu_button(
-                    "Join Tab".to_string(),
+                    "Separate Tabs".to_string(),
+                    false,
+                    cx,
+                    move |this, _window, cx| {
+                        this.separate_tab_by_id(tab_id, cx);
+                    },
+                ));
+            }
+            if !joined || can_join_more {
+                let label = if joined { "Add Tab" } else { "Join Tab" };
+                menu_panel = menu_panel.child(tab_menu_button(
+                    label.to_string(),
                     join_targets_active,
                     cx,
                     move |this, _window, cx| {
@@ -563,11 +579,11 @@ pub(super) fn workspace_tab_context_menu(
         .gap_1()
         .child(menu_panel);
 
-    if !joined && menu.view == GpuiTabContextMenuView::JoinTargets {
+    if (!joined || can_join_more) && menu.view == GpuiTabContextMenuView::JoinTargets {
         menu_root = menu_root.child(tab_join_side_menu(
             menu_width.max(180.0),
             tab_id,
-            tab_manager.join_choices(&tabs, menu.tab_id),
+            tab_manager.join_choices(&tabs, menu.tab_id, join_limit),
             cx,
         ));
     }
@@ -609,7 +625,8 @@ pub(super) fn workspace_tab_overflow_menu(
     for tab in tabs {
         let tab_id = tab.id;
         let active = tab_id == active_tab_id;
-        let joined = tab_manager.is_joined(tab_id.0);
+        let joined_count = tab_manager.joined_member_count(tab_id.0);
+        let joined = joined_count >= 2;
         let label = workspace_tab_label(&tab);
         let subtitle = tab
             .file_path
@@ -668,7 +685,11 @@ pub(super) fn workspace_tab_overflow_menu(
                             .px_1()
                             .text_size(px(10.0))
                             .text_color(rgb(QUEUE_GREEN))
-                            .child("joined"),
+                            .child(if joined_count > 2 {
+                                format!("joined {joined_count}")
+                            } else {
+                                "joined".to_string()
+                            }),
                     )
                 }),
         );

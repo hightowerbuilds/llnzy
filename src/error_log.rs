@@ -74,8 +74,8 @@ pub struct LogEntry {
 impl LogEntry {
     /// Format the timestamp for display in the Settings Error Log panel.
     ///
-    /// Same-day entries render as `HH:MM:SS`; older entries include a
-    /// `Mon DD` prefix so users can tell which session a row came from.
+    /// Entries render with a local date/time plus a human age label so old
+    /// persisted failures stand out as yesterday, last week, last month, etc.
     pub fn timestamp_label(&self) -> String {
         format_timestamp_for_display(self.timestamp_ms)
     }
@@ -207,6 +207,24 @@ impl ErrorLog {
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    /// Drop every in-memory entry, reset counters, and truncate the
+    /// persistence file to zero bytes so subsequent restarts replay
+    /// nothing. The file handle stays open for append; macOS/Linux honor
+    /// `set_len(0)` for append-mode handles and re-position writes at the
+    /// new end. If truncation fails, the in-memory state is still cleared
+    /// — replays just return what survived on disk.
+    pub fn clear(&self) {
+        let mut inner = self.lock_inner();
+        inner.entries.clear();
+        inner.error_count = 0;
+        inner.warn_count = 0;
+        if let Some(file) = inner.persistence.as_mut() {
+            if let Err(err) = file.set_len(0) {
+                eprintln!("llnzy: error log truncate failed: {err}");
+            }
+        }
     }
 
     /// Replay entries from `path` into the in-memory ring, then open the
@@ -363,10 +381,7 @@ fn parse_entry(line: &str) -> Option<LogEntry> {
         .get("module")
         .and_then(|v| v.as_str())
         .map(str::to_string);
-    let file = obj
-        .get("file")
-        .and_then(|v| v.as_str())
-        .map(str::to_string);
+    let file = obj.get("file").and_then(|v| v.as_str()).map(str::to_string);
     let line_no = obj
         .get("line")
         .and_then(|v| v.as_u64())
@@ -403,23 +418,53 @@ fn format_timestamp_for_display(ms: u64) -> String {
         "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
     ];
     let mon_idx = (entry_tm.tm_mon as usize).min(11);
+    let year = entry_tm.tm_year + 1900;
+    let day_diff = (local_day_number(&now_tm) - local_day_number(&entry_tm)).max(0) as u64;
+    let age = relative_age_label_from_days(day_diff);
 
-    if entry_tm.tm_year == now_tm.tm_year && entry_tm.tm_yday == now_tm.tm_yday {
-        format!(
-            "{:02}:{:02}:{:02}",
-            entry_tm.tm_hour, entry_tm.tm_min, entry_tm.tm_sec
-        )
-    } else {
-        format!(
-            "{} {:>2} {:02}:{:02}",
-            MONTHS[mon_idx], entry_tm.tm_mday, entry_tm.tm_hour, entry_tm.tm_min
-        )
+    format!(
+        "{} {}, {} {:02}:{:02} - {}",
+        MONTHS[mon_idx], entry_tm.tm_mday, year, entry_tm.tm_hour, entry_tm.tm_min, age
+    )
+}
+
+#[cfg(unix)]
+fn local_day_number(tm: &libc::tm) -> i64 {
+    days_before_year(tm.tm_year + 1900) + tm.tm_yday as i64
+}
+
+fn days_before_year(year: i32) -> i64 {
+    let years = year as i64 - 1;
+    years * 365 + years / 4 - years / 100 + years / 400
+}
+
+fn relative_age_label_from_days(days: u64) -> String {
+    match days {
+        0 => "today".to_string(),
+        1 => "yesterday".to_string(),
+        2..=6 => format!("{days} days ago"),
+        7..=13 => "last week".to_string(),
+        14..=29 => {
+            let weeks = days / 7;
+            format!("{weeks} weeks ago")
+        }
+        30..=59 => "last month".to_string(),
+        60..=364 => {
+            let months = days / 30;
+            format!("{months} months ago")
+        }
+        365..=729 => "last year".to_string(),
+        _ => {
+            let years = days / 365;
+            format!("{years} years ago")
+        }
     }
 }
 
 #[cfg(not(unix))]
 fn format_timestamp_for_display(ms: u64) -> String {
-    format!("{}ms", ms)
+    let elapsed_days = now_ms().saturating_sub(ms) / 86_400_000;
+    format!("{}ms - {}", ms, relative_age_label_from_days(elapsed_days))
 }
 
 #[cfg(test)]
@@ -522,6 +567,32 @@ mod tests {
     }
 
     #[test]
+    fn timestamp_label_includes_readable_age() {
+        let entry = LogEntry {
+            level: LogLevel::Info,
+            message: "msg".to_string(),
+            timestamp_ms: now_ms(),
+            module: None,
+            file: None,
+            line: None,
+        };
+
+        assert!(entry.timestamp_label().contains("today"));
+    }
+
+    #[test]
+    fn relative_age_labels_call_out_stale_entries() {
+        assert_eq!(relative_age_label_from_days(0), "today");
+        assert_eq!(relative_age_label_from_days(1), "yesterday");
+        assert_eq!(relative_age_label_from_days(6), "6 days ago");
+        assert_eq!(relative_age_label_from_days(7), "last week");
+        assert_eq!(relative_age_label_from_days(21), "3 weeks ago");
+        assert_eq!(relative_age_label_from_days(30), "last month");
+        assert_eq!(relative_age_label_from_days(90), "3 months ago");
+        assert_eq!(relative_age_label_from_days(365), "last year");
+    }
+
+    #[test]
     fn max_entries_cap() {
         let log = ErrorLog::new();
         for i in 0..1100 {
@@ -621,11 +692,58 @@ mod tests {
     }
 
     #[test]
+    fn clear_empties_in_memory_state() {
+        let log = ErrorLog::new();
+        log.error("boom");
+        log.warn("careful");
+        log.info("hello");
+        assert_eq!(log.len(), 3);
+        assert_eq!(log.counts(), (1, 1));
+
+        log.clear();
+
+        assert_eq!(log.len(), 0);
+        assert_eq!(log.counts(), (0, 0));
+        assert!(log.recent(10).is_empty());
+
+        log.warn("after clear");
+        assert_eq!(log.len(), 1);
+        assert_eq!(log.counts(), (0, 1));
+        assert_eq!(log.recent(1)[0].message, "after clear");
+    }
+
+    #[test]
+    fn clear_truncates_persistence_file() {
+        let dir =
+            std::env::temp_dir().join(format!("llnzy-error-log-clear-{}", std::process::id(),));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("errors.log");
+
+        let log = ErrorLog::new();
+        log.attach_persistence(&path);
+        log.error("session entry 1");
+        log.warn("session entry 2");
+        let pre_size = std::fs::metadata(&path).unwrap().len();
+        assert!(pre_size > 0);
+
+        log.clear();
+
+        let post_clear_size = std::fs::metadata(&path).unwrap().len();
+        assert_eq!(post_clear_size, 0);
+
+        log.warn("after clear");
+        let contents = std::fs::read_to_string(&path).unwrap();
+        let line_count = contents.lines().count();
+        assert_eq!(line_count, 1);
+        assert!(contents.contains("after clear"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn attach_persistence_replays_existing_file_without_duplicating() {
-        let dir = std::env::temp_dir().join(format!(
-            "llnzy-error-log-replay-{}",
-            std::process::id(),
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("llnzy-error-log-replay-{}", std::process::id(),));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("errors.log");
 

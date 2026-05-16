@@ -22,11 +22,7 @@ struct StackerSplitDrag;
 
 impl Render for StackerSplitDrag {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .w(px(40.0))
-            .h(px(2.0))
-            .rounded_sm()
-            .bg(rgb(BORDER))
+        div().w(px(40.0)).h(px(2.0)).rounded_sm().bg(rgb(BORDER))
     }
 }
 
@@ -302,21 +298,9 @@ fn formatting_toolbar(cx: &mut Context<StackerPrototype>) -> impl IntoElement {
         .border_b_1()
         .border_color(rgb(BORDER))
         .bg(rgb(CHROME_BG))
-        .child(toolbar_command_button(
-            "H1",
-            StackerCommandId::Heading1,
-            cx,
-        ))
-        .child(toolbar_command_button(
-            "H2",
-            StackerCommandId::Heading2,
-            cx,
-        ))
-        .child(toolbar_command_button(
-            "H3",
-            StackerCommandId::Heading3,
-            cx,
-        ))
+        .child(toolbar_command_button("H1", StackerCommandId::Heading1, cx))
+        .child(toolbar_command_button("H2", StackerCommandId::Heading2, cx))
+        .child(toolbar_command_button("H3", StackerCommandId::Heading3, cx))
         .child(toolbar_separator())
         .child(toolbar_command_button(
             "• List",
@@ -329,16 +313,8 @@ fn formatting_toolbar(cx: &mut Context<StackerPrototype>) -> impl IntoElement {
             cx,
         ))
         .child(toolbar_separator())
-        .child(toolbar_command_button(
-            "B",
-            StackerCommandId::Bold,
-            cx,
-        ))
-        .child(toolbar_command_button(
-            "I",
-            StackerCommandId::Italic,
-            cx,
-        ))
+        .child(toolbar_command_button("B", StackerCommandId::Bold, cx))
+        .child(toolbar_command_button("I", StackerCommandId::Italic, cx))
         .child(toolbar_command_button(
             "Code",
             StackerCommandId::CodeBlock,
@@ -614,8 +590,8 @@ fn modal_destructive_button(
 fn cli_help_button(cx: &mut Context<StackerPrototype>) -> impl IntoElement {
     div()
         .id("stacker-cli-help")
-        .w(px(20.0))
-        .h(px(20.0))
+        .h(px(24.0))
+        .px_2()
         .flex()
         .items_center()
         .justify_center()
@@ -632,12 +608,13 @@ fn cli_help_button(cx: &mut Context<StackerPrototype>) -> impl IntoElement {
                 this.toggle_cli_help(cx);
             }),
         )
-        .child("?")
+        .child("What is Stacker CLI?")
 }
 
 /// Full-pane scrim + centered card explaining the Stacker CLI: what it
 /// is, how to install it, what commands exist, and how to hand it to an
-/// agent. Triggered by the "?" button in the saved-prompts header.
+/// agent. Triggered by the "What is Stacker CLI?" button in the
+/// saved-prompts header.
 pub(super) fn cli_help_modal(cx: &mut Context<StackerPrototype>) -> impl IntoElement {
     let install_cmd = "open \"/Applications/LLNZY.app/Contents/Resources/install-cli.sh\"";
     let inbox_path = "~/Library/Application Support/llnzy/prompts/inbox/";
@@ -692,7 +669,11 @@ pub(super) fn cli_help_modal(cx: &mut Context<StackerPrototype>) -> impl IntoEle
             "Run this once in any terminal. It installs `/usr/local/bin/llnzy` \
              as a small launcher that points into LLNZY.app:",
         ))
-        .child(cli_help_command_block("install", install_cmd.to_string(), cx))
+        .child(cli_help_command_block(
+            "install",
+            install_cmd.to_string(),
+            cx,
+        ))
         .child(cli_help_section_title("Use"))
         .child(cli_help_paragraph(
             "After install, any terminal can talk to Stacker. Works while \
@@ -701,8 +682,7 @@ pub(super) fn cli_help_modal(cx: &mut Context<StackerPrototype>) -> impl IntoEle
         ))
         .child(cli_help_command_block(
             "add",
-            "echo \"Draft a prompt body\" | llnzy stacker add --label \"My idea\""
-                .to_string(),
+            "echo \"Draft a prompt body\" | llnzy stacker add --label \"My idea\"".to_string(),
             cx,
         ))
         .child(cli_help_command_block(
@@ -858,9 +838,7 @@ fn cli_help_inbox_button_row(cx: &mut Context<StackerPrototype>) -> impl IntoEle
     )
 }
 
-fn cli_help_agent_instructions_button(
-    cx: &mut Context<StackerPrototype>,
-) -> impl IntoElement {
+fn cli_help_agent_instructions_button(cx: &mut Context<StackerPrototype>) -> impl IntoElement {
     div().flex().child(
         div()
             .id("stacker-cli-copy-agent-instructions")

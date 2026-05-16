@@ -1,15 +1,16 @@
 use std::path::{Path, PathBuf};
 
 use gpui::prelude::*;
-use gpui::{div, px, rgb, Context, MouseButton, MouseDownEvent};
+use gpui::{div, px, rgb, rgba, Context, FontWeight, MouseButton, MouseDownEvent};
 
 use crate::{
     config::{BackgroundImageFit, Config, CursorStyle, TerminalLayoutMode},
+    sketch::SketchToolbarPosition,
     theme::builtin_themes,
 };
 
 use super::{
-    AppearancePage, WorkspacePrototype, ACTIVE_TEXT, BORDER, EDITOR_BG,
+    AppearancePage, ErrorLogFilter, WorkspacePrototype, ACTIVE_TEXT, BORDER, EDITOR_BG,
     GPUI_TERMINAL_BACKGROUND_MAX_EDGE, MUTED_TEXT, PANEL_BG, QUEUE_GREEN, SIDEBAR_TEXT,
 };
 
@@ -42,6 +43,7 @@ pub(super) fn is_display_font(family: &str) -> bool {
 pub(super) fn appearances_surface(
     config: Config,
     page: AppearancePage,
+    sketch_toolbar_position: SketchToolbarPosition,
     terminal_background_import_error: Option<String>,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
@@ -92,6 +94,7 @@ pub(super) fn appearances_surface(
                 .child(appearance_controls_column(
                     config,
                     page,
+                    sketch_toolbar_position,
                     terminal_background_import_error,
                     cx,
                 )),
@@ -128,6 +131,7 @@ fn appearance_theme_column(
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     let mut themes = div()
+        .id("appearance-themes-scroll")
         .w(px(320.0))
         .h_full()
         .flex()
@@ -137,7 +141,8 @@ fn appearance_theme_column(
         .border_color(rgb(BORDER))
         .bg(rgb(PANEL_BG))
         .p_3()
-        .overflow_hidden()
+        .overflow_y_scroll()
+        .scrollbar_width(px(8.0))
         .child(
             div()
                 .text_size(px(13.0))
@@ -202,6 +207,7 @@ fn appearance_theme_column(
 fn appearance_controls_column(
     config: Config,
     page: AppearancePage,
+    sketch_toolbar_position: SketchToolbarPosition,
     terminal_background_import_error: Option<String>,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
@@ -215,7 +221,6 @@ fn appearance_controls_column(
         .border_color(rgb(BORDER))
         .bg(rgb(0x15151c))
         .p_4()
-        .overflow_hidden()
         .child(
             div()
                 .text_size(px(18.0))
@@ -223,14 +228,19 @@ fn appearance_controls_column(
                 .child(page.title()),
         );
 
-    match page {
+    let content = match page {
         AppearancePage::Terminal => {
             terminal_appearance_controls(content, config, terminal_background_import_error, cx)
         }
         AppearancePage::Editor => editor_appearance_controls(content, config, cx),
         AppearancePage::Markdown => markdown_appearance_controls(content, config),
-        AppearancePage::Sketch => sketch_appearance_controls(content),
-    }
+        AppearancePage::Sketch => sketch_appearance_controls(content, sketch_toolbar_position, cx),
+    };
+
+    content
+        .id("appearance-controls-scroll")
+        .overflow_y_scroll()
+        .scrollbar_width(px(8.0))
 }
 
 fn terminal_appearance_controls(
@@ -572,23 +582,19 @@ fn terminal_background_library(
     let max = crate::theme_store::MAX_BACKGROUND_IMAGES;
     let active_reference = config.effects.background_image.clone();
 
-    let mut section = div()
-        .flex()
-        .flex_col()
-        .gap_1()
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .gap_2()
-                .child(control_label("Library"))
-                .child(
-                    div()
-                        .text_size(px(12.0))
-                        .text_color(rgb(MUTED_TEXT))
-                        .child(format!("{total} / {max}")),
-                ),
-        );
+    let mut section = div().flex().flex_col().gap_1().child(
+        div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(control_label("Library"))
+            .child(
+                div()
+                    .text_size(px(12.0))
+                    .text_color(rgb(MUTED_TEXT))
+                    .child(format!("{total} / {max}")),
+            ),
+    );
 
     if images.is_empty() {
         section = section.child(
@@ -640,7 +646,11 @@ fn background_library_row(
                 .child(display),
         )
         .child(appearance_button(
-            if active { "Active".to_string() } else { "Apply".to_string() },
+            if active {
+                "Active".to_string()
+            } else {
+                "Apply".to_string()
+            },
             active,
             cx,
             move |this, cx| this.apply_library_background(apply_path.clone(), cx),
@@ -905,21 +915,7 @@ fn terminal_smoke_controls(
     let c3 = config.effects.background_color3.unwrap_or(default_c3);
     let intensity_pct = (config.effects.background_intensity * 100.0).round() as i32;
 
-    // Static three-band palette preview. Originally a live `EffectsElement`,
-    // but running a real shader per preview surface ran the wgpu allocator
-    // hot (the actual terminal background still renders the live shader;
-    // this swatch just communicates which colors will be used).
-    let preview = div()
-        .w_full()
-        .h(px(160.0))
-        .border_1()
-        .border_color(rgb(BORDER))
-        .overflow_hidden()
-        .flex()
-        .flex_col()
-        .child(palette_band(c1))
-        .child(palette_band(c2))
-        .child(palette_band(c3));
+    let preview = shader_preview(kind, config.effects.background_intensity, c1, c2, c3);
 
     div()
         .flex()
@@ -951,21 +947,71 @@ fn terminal_smoke_controls(
         )
 }
 
-fn sketch_appearance_controls(content: gpui::Div) -> gpui::Div {
-    content
+fn shader_preview(
+    kind: crate::effects::EffectKind,
+    intensity: f32,
+    c1: ColorStop,
+    c2: ColorStop,
+    c3: ColorStop,
+) -> impl IntoElement {
+    div()
+        .relative()
+        .w_full()
+        .h(px(160.0))
+        .border_1()
+        .border_color(rgb(BORDER))
+        .overflow_hidden()
+        .bg(rgb(0x08090d))
         .child(
             div()
-                .text_size(px(13.0))
-                .text_color(rgb(SIDEBAR_TEXT))
-                .child("Sketch canvas rendering is back on the GPUI path with persisted grid, canvas, and selection settings."),
+                .absolute()
+                .size_full()
+                .flex()
+                .flex_col()
+                .child(palette_band(c1))
+                .child(palette_band(c2))
+                .child(palette_band(c3)),
         )
         .child(
-            div()
-                .mt_2()
-                .text_size(px(12.0))
-                .text_color(rgb(MUTED_TEXT))
-                .child("The next pass should expose full canvas color, grid spacing, image, symbol, and text editing controls here."),
+            div().absolute().size_full().child(
+                crate::effects::EffectsElement::new()
+                    .with_kind(kind)
+                    .with_intensity(intensity)
+                    .with_palette(c1, c2, c3),
+            ),
         )
+}
+
+fn sketch_appearance_controls(
+    content: gpui::Div,
+    toolbar_position: SketchToolbarPosition,
+    cx: &mut Context<WorkspacePrototype>,
+) -> gpui::Div {
+    content.child(
+        div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(control_label("Toolbar"))
+            .child(appearance_button(
+                "Top".to_string(),
+                toolbar_position == SketchToolbarPosition::Top,
+                cx,
+                |this, cx| this.set_sketch_toolbar_position(SketchToolbarPosition::Top, cx),
+            ))
+            .child(appearance_button(
+                "Left".to_string(),
+                toolbar_position == SketchToolbarPosition::Left,
+                cx,
+                |this, cx| this.set_sketch_toolbar_position(SketchToolbarPosition::Left, cx),
+            ))
+            .child(appearance_button(
+                "Right".to_string(),
+                toolbar_position == SketchToolbarPosition::Right,
+                cx,
+                |this, cx| this.set_sketch_toolbar_position(SketchToolbarPosition::Right, cx),
+            )),
+    )
 }
 
 fn markdown_appearance_controls(content: gpui::Div, config: Config) -> gpui::Div {
@@ -1185,12 +1231,15 @@ fn background_image_display_name(reference: &str) -> String {
 
 pub(super) fn settings_surface(
     show_explorer_button: bool,
+    joined_tab_limit: usize,
     error_log_expanded: bool,
+    error_log_filter: ErrorLogFilter,
+    pending_clear_error_log: bool,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     let error_entries = crate::error_log::global().recent(1000);
 
-    div()
+    let scroll = div()
         .id("settings-surface")
         .flex_1()
         .h_full()
@@ -1217,13 +1266,28 @@ pub(super) fn settings_surface(
             |this, cx| this.toggle_show_explorer_button(cx),
         )
         .into_any_element()]))
-        .child(settings_subheader("Diagnostics"))
-        .child(settings_section(vec![settings_error_log_row(
-            error_log_expanded,
-            error_entries,
+        .child(settings_subheader("Tabs"))
+        .child(settings_section(vec![settings_join_limit_row(
+            joined_tab_limit,
             cx,
         )
         .into_any_element()]))
+        .child(settings_subheader("Diagnostics"))
+        .child(settings_section(vec![settings_error_log_row(
+            error_log_expanded,
+            error_log_filter,
+            error_entries,
+            cx,
+        )
+        .into_any_element()]));
+
+    let mut root = div().relative().size_full().flex().flex_col().child(scroll);
+
+    if pending_clear_error_log {
+        root = root.child(error_log_clear_modal(cx));
+    }
+
+    root
 }
 
 fn settings_subheader(label: &'static str) -> impl IntoElement {
@@ -1250,6 +1314,47 @@ fn settings_section(rows: Vec<gpui::AnyElement>) -> impl IntoElement {
         section = section.child(row);
     }
     section
+}
+
+fn settings_join_limit_row(
+    current_limit: usize,
+    cx: &mut Context<WorkspacePrototype>,
+) -> impl IntoElement {
+    let mut choices = div().flex().items_center().gap_1();
+    for limit in [2_u8, 3, 4] {
+        choices = choices.child(appearance_button(
+            limit.to_string(),
+            current_limit == limit as usize,
+            cx,
+            move |this, cx| this.set_joined_tab_limit(limit, cx),
+        ));
+    }
+
+    div()
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap_4()
+        .px_4()
+        .py_3()
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(
+                    div()
+                        .text_size(px(13.0))
+                        .text_color(rgb(ACTIVE_TEXT))
+                        .child("Joined tab limit"),
+                )
+                .child(
+                    div().text_size(px(12.0)).text_color(rgb(MUTED_TEXT)).child(
+                        "Choose whether joined tab groups can hold two, three, or four tabs.",
+                    ),
+                ),
+        )
+        .child(choices)
 }
 
 fn settings_toggle_row(
@@ -1289,18 +1394,18 @@ fn settings_toggle_row(
 
 fn settings_error_log_row(
     expanded: bool,
+    filter: ErrorLogFilter,
     entries: Vec<crate::error_log::LogEntry>,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
-    let (error_count, warn_count) = entries
-        .iter()
-        .fold((0usize, 0usize), |(errs, warns), entry| {
-            match entry.level {
+    let (error_count, warn_count) =
+        entries
+            .iter()
+            .fold((0usize, 0usize), |(errs, warns), entry| match entry.level {
                 crate::error_log::LogLevel::Error => (errs + 1, warns),
                 crate::error_log::LogLevel::Warn => (errs, warns + 1),
                 crate::error_log::LogLevel::Info => (errs, warns),
-            }
-        });
+            });
 
     let count_summary = format!(
         "{} entries  ·  {} errors, {} warnings",
@@ -1354,15 +1459,39 @@ fn settings_error_log_row(
     let mut row = div().flex().flex_col().child(header);
 
     if expanded {
-        let has_entries = !entries.is_empty();
-        let toolbar = div()
+        let filtered: Vec<_> = entries
+            .into_iter()
+            .filter(|entry| filter.includes(entry.level))
+            .collect();
+        let has_entries = !filtered.is_empty();
+
+        let filter_group = div()
             .flex()
             .items_center()
-            .justify_end()
-            .px_4()
-            .py_2()
-            .border_t_1()
-            .border_color(rgb(BORDER))
+            .gap_1()
+            .child(error_log_filter_button(
+                "All",
+                ErrorLogFilter::All,
+                filter,
+                cx,
+            ))
+            .child(error_log_filter_button(
+                "Warn+",
+                ErrorLogFilter::WarnAndError,
+                filter,
+                cx,
+            ))
+            .child(error_log_filter_button(
+                "Errors",
+                ErrorLogFilter::ErrorOnly,
+                filter,
+                cx,
+            ));
+
+        let actions = div()
+            .flex()
+            .items_center()
+            .gap_2()
             .child(appearance_button(
                 "Copy All".to_string(),
                 false,
@@ -1370,11 +1499,36 @@ fn settings_error_log_row(
                 |this, cx| {
                     this.copy_error_log(cx);
                 },
+            ))
+            .child(appearance_button(
+                "Clear".to_string(),
+                false,
+                cx,
+                |this, cx| {
+                    this.request_clear_error_log(cx);
+                },
             ));
+
+        let toolbar = div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_3()
+            .px_4()
+            .py_2()
+            .border_t_1()
+            .border_color(rgb(BORDER))
+            .child(filter_group)
+            .child(actions);
         row = row.child(toolbar);
         if has_entries {
-            row = row.child(error_log_list(entries));
+            row = row.child(error_log_list(filtered, cx));
         } else {
+            let empty_label = match filter {
+                ErrorLogFilter::All => "No errors recorded this session.",
+                ErrorLogFilter::WarnAndError => "No warnings or errors match the filter.",
+                ErrorLogFilter::ErrorOnly => "No errors match the filter.",
+            };
             row = row.child(
                 div()
                     .px_4()
@@ -1383,7 +1537,7 @@ fn settings_error_log_row(
                     .border_color(rgb(BORDER))
                     .text_size(px(12.0))
                     .text_color(rgb(MUTED_TEXT))
-                    .child("No errors recorded this session."),
+                    .child(empty_label),
             );
         }
     }
@@ -1391,7 +1545,22 @@ fn settings_error_log_row(
     row
 }
 
-fn error_log_list(entries: Vec<crate::error_log::LogEntry>) -> impl IntoElement {
+fn error_log_filter_button(
+    label: &'static str,
+    target: ErrorLogFilter,
+    active_filter: ErrorLogFilter,
+    cx: &mut Context<WorkspacePrototype>,
+) -> impl IntoElement {
+    let active = target == active_filter;
+    appearance_button(label.to_string(), active, cx, move |this, cx| {
+        this.set_error_log_filter(target, cx);
+    })
+}
+
+fn error_log_list(
+    entries: Vec<crate::error_log::LogEntry>,
+    cx: &mut Context<WorkspacePrototype>,
+) -> impl IntoElement {
     let mut list = div()
         .id("error-log-list")
         .flex()
@@ -1403,13 +1572,19 @@ fn error_log_list(entries: Vec<crate::error_log::LogEntry>) -> impl IntoElement 
         .border_color(rgb(BORDER));
 
     // Render newest first so users see the most recent failure at the top.
-    for entry in entries.into_iter().rev() {
-        list = list.child(error_log_entry_row(entry));
+    // Use enumerate after reversing so each row gets a stable id for
+    // GPUI's interactive element book-keeping.
+    for (idx, entry) in entries.into_iter().rev().enumerate() {
+        list = list.child(error_log_entry_row(idx, entry, cx));
     }
     list
 }
 
-fn error_log_entry_row(entry: crate::error_log::LogEntry) -> impl IntoElement {
+fn error_log_entry_row(
+    idx: usize,
+    entry: crate::error_log::LogEntry,
+    cx: &mut Context<WorkspacePrototype>,
+) -> impl IntoElement {
     let [lr, lg, lb] = entry.level.color();
     let level_color = ((lr as u32) << 16) | ((lg as u32) << 8) | (lb as u32);
     let level_label = entry.level.label().trim().to_string();
@@ -1427,6 +1602,13 @@ fn error_log_entry_row(entry: crate::error_log::LogEntry) -> impl IntoElement {
         _ => None,
     };
 
+    // Capture the source coordinates before the row consumes `entry`
+    // below — we use them in the click handler to jump to the file.
+    let jump_target = match (entry.file.as_ref(), entry.line) {
+        (Some(file), Some(line)) => Some((file.clone(), line)),
+        _ => None,
+    };
+
     let mut metadata_row = div()
         .flex()
         .items_center()
@@ -1441,6 +1623,7 @@ fn error_log_entry_row(entry: crate::error_log::LogEntry) -> impl IntoElement {
             div()
                 .text_size(px(10.0))
                 .text_color(rgb(MUTED_TEXT))
+                .whitespace_nowrap()
                 .child(timestamp),
         )
         .child(
@@ -1459,7 +1642,8 @@ fn error_log_entry_row(entry: crate::error_log::LogEntry) -> impl IntoElement {
         );
     }
 
-    div()
+    let mut row = div()
+        .id(("error-log-row", idx))
         .flex()
         .flex_col()
         .gap_1()
@@ -1473,5 +1657,89 @@ fn error_log_entry_row(entry: crate::error_log::LogEntry) -> impl IntoElement {
                 .text_size(px(12.0))
                 .text_color(rgb(ACTIVE_TEXT))
                 .child(entry.message),
+        );
+
+    if let Some((file, line)) = jump_target {
+        row = row.cursor_pointer().on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, _: &MouseDownEvent, window, cx| {
+                this.open_error_log_source(file.clone(), line, window, cx);
+            }),
+        );
+    }
+
+    row
+}
+
+/// Scrim + centered card asking the user to confirm clearing the
+/// persisted error log. Same look-and-feel as Stacker's delete modal.
+fn error_log_clear_modal(cx: &mut Context<WorkspacePrototype>) -> impl IntoElement {
+    let scrim = div()
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full()
+        .bg(rgba(0x00000099))
+        .flex()
+        .items_center()
+        .justify_center()
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|this, _: &MouseDownEvent, _window, cx| {
+                this.cancel_clear_error_log(cx);
+            }),
+        );
+
+    let card = div()
+        .w(px(380.0))
+        .flex()
+        .flex_col()
+        .gap_3()
+        .p_5()
+        .rounded_md()
+        .border_1()
+        .border_color(rgb(BORDER))
+        .bg(rgb(PANEL_BG))
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|_this, _: &MouseDownEvent, _window, cx| {
+                cx.stop_propagation();
+            }),
         )
+        .child(
+            div()
+                .text_size(px(15.0))
+                .font_weight(FontWeight::BOLD)
+                .text_color(rgb(ACTIVE_TEXT))
+                .child("Clear error log"),
+        )
+        .child(div().text_size(px(13.0)).text_color(rgb(MUTED_TEXT)).child(
+            "Drop every in-memory entry and truncate the persisted log on disk. \
+                     Past sessions will no longer replay. This cannot be undone.",
+        ))
+        .child(
+            div()
+                .flex()
+                .justify_end()
+                .gap_2()
+                .pt_2()
+                .child(appearance_button(
+                    "Cancel".to_string(),
+                    false,
+                    cx,
+                    |this, cx| {
+                        this.cancel_clear_error_log(cx);
+                    },
+                ))
+                .child(appearance_button(
+                    "Clear".to_string(),
+                    true,
+                    cx,
+                    |this, cx| {
+                        this.confirm_clear_error_log(cx);
+                    },
+                )),
+        );
+
+    scrim.child(card)
 }

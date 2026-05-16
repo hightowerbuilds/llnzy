@@ -54,9 +54,23 @@ pub struct WorkspacePreferences {
     /// "use TerminalLayoutMode::default()".
     #[serde(default)]
     pub terminal_layout: String,
+
+    /// Maximum number of tabs a joined tab group may contain. Missing / zero
+    /// keeps the historical two-tab behavior; Settings can raise this to 3
+    /// or 4.
+    #[serde(default)]
+    pub joined_tab_limit: u8,
 }
 
 impl WorkspacePreferences {
+    pub fn joined_tab_limit(&self) -> usize {
+        if self.joined_tab_limit == 0 {
+            2
+        } else {
+            self.joined_tab_limit.clamp(2, 4) as usize
+        }
+    }
+
     /// Load preferences from the platform-default sidecar. Returns
     /// `Default::default()` if the file is missing, unreadable, or
     /// malformed — preferences are best-effort, never a hard error.
@@ -129,6 +143,7 @@ mod tests {
             terminal_background_intensity: Some(0.42),
             terminal_font_family: Some("Menlo".to_string()),
             terminal_layout: "display".to_string(),
+            joined_tab_limit: 4,
         };
         prefs.save_to(&path).unwrap();
 
@@ -153,6 +168,7 @@ mod tests {
         assert!(loaded.terminal_background_intensity.is_none());
         assert!(loaded.terminal_font_family.is_none());
         assert!(loaded.terminal_layout.is_empty());
+        assert_eq!(loaded.joined_tab_limit(), 2);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

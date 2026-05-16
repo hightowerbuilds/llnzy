@@ -7,10 +7,10 @@ pub(crate) struct GpuiTabChoice {
     pub joined: bool,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct GpuiJoinedTabs {
-    pub primary: TabId,
-    pub secondary: TabId,
+    pub members: Vec<TabId>,
+    pub shares: Vec<f32>,
     pub ratio: f32,
     pub axis: PartitionAxis,
 }
@@ -72,47 +72,84 @@ impl GpuiTabManager {
         self.groups.group_for_tab(tab_id).is_some()
     }
 
-    pub fn joined_pair_for(
+    pub fn joined_group_for(
         &self,
         active_tab: TabId,
         valid_tabs: &[TabId],
     ) -> Option<GpuiJoinedTabs> {
         let group = self.groups.group_for_tab(active_tab)?.clamped();
-        if !valid_tabs.contains(&group.primary) || !valid_tabs.contains(&group.secondary) {
-            return None;
-        }
-        if group.primary == group.secondary {
+        if group.member_count() < 2
+            || !group
+                .members()
+                .iter()
+                .all(|member| valid_tabs.contains(member))
+        {
             return None;
         }
         Some(GpuiJoinedTabs {
-            primary: group.primary,
-            secondary: group.secondary,
+            members: group.members().to_vec(),
+            shares: group.shares().to_vec(),
             ratio: group.ratio,
             axis: group.axis,
         })
     }
 
-    pub fn join_choices(&self, tabs: &[GpuiTabChoice], source: TabId) -> Vec<GpuiTabChoice> {
+    pub fn joined_member_count(&self, tab_id: TabId) -> usize {
+        self.groups.group_member_count(tab_id)
+    }
+
+    pub fn can_join(&self, source: TabId, target: TabId, max_members: usize) -> bool {
+        if source == target {
+            return false;
+        }
+        let Some(source_group) = self.groups.group_for_tab(source) else {
+            return self.groups.group_member_count(target) < max_members.clamp(2, 4);
+        };
+        if source_group.contains(target) {
+            return false;
+        }
+        let source_members = source_group.members();
+        let target_members = self
+            .groups
+            .group_for_tab(target)
+            .map(|group| group.members().to_vec())
+            .unwrap_or_else(|| vec![target]);
+        let mut combined = source_members.to_vec();
+        for member in target_members {
+            if !combined.contains(&member) {
+                combined.push(member);
+            }
+        }
+        combined.len() <= max_members.clamp(2, 4)
+    }
+
+    pub fn join_choices(
+        &self,
+        tabs: &[GpuiTabChoice],
+        source: TabId,
+        max_members: usize,
+    ) -> Vec<GpuiTabChoice> {
         tabs.iter()
             .filter(|tab| tab.id != source)
-            .filter(|tab| !self.is_joined(tab.id))
+            .filter(|tab| self.can_join(source, tab.id, max_members))
             .cloned()
             .collect()
     }
 
-    pub fn join_pair(&mut self, primary: TabId, secondary: TabId) -> bool {
-        self.join_pair_with_axis(primary, secondary, PartitionAxis::default())
+    pub fn join_tabs(&mut self, primary: TabId, secondary: TabId, max_members: usize) -> bool {
+        self.join_tabs_with_axis(primary, secondary, max_members, PartitionAxis::default())
     }
 
-    pub fn join_pair_with_axis(
+    pub fn join_tabs_with_axis(
         &mut self,
         primary: TabId,
         secondary: TabId,
+        max_members: usize,
         axis: PartitionAxis,
     ) -> bool {
         let joined = self
             .groups
-            .join_pair_with_axis(primary, secondary, axis)
+            .join_tabs_with_axis(primary, secondary, max_members, axis)
             .is_some();
         if joined {
             self.groups.set_active_tab(primary);
@@ -141,8 +178,14 @@ impl GpuiTabManager {
         self.groups.set_active_tab(tab_id);
     }
 
-    pub fn set_ratio_for_tab(&mut self, tab_id: TabId, ratio: f32) -> bool {
-        self.groups.set_ratio_for_tab(tab_id, ratio)
+    pub fn set_split_for_tab(
+        &mut self,
+        tab_id: TabId,
+        divider_index: usize,
+        boundary: f32,
+    ) -> bool {
+        self.groups
+            .set_split_for_tab(tab_id, divider_index, boundary)
     }
 
     pub fn retain_tabs(&mut self, valid_tabs: &[TabId]) {
@@ -154,5 +197,9 @@ impl GpuiTabManager {
         {
             self.context_menu = None;
         }
+    }
+
+    pub fn enforce_join_limit(&mut self, max_members: usize) {
+        self.groups.enforce_max_members(max_members);
     }
 }
