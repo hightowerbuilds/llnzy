@@ -132,8 +132,8 @@ pub(super) fn workspace_content(
         }
 
         if pane_count == 2 {
-            let primary = panes[0].clone();
-            let secondary = panes[1].clone();
+            let primary = panes[0];
+            let secondary = panes[1];
             let primary_pane = workspace_surface_pane(
                 context.clone(),
                 primary.surface,

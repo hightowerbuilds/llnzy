@@ -354,7 +354,9 @@ fn text_style_for_col(
 }
 
 fn highlight_color(group: Option<HighlightGroup>, appearance: &EditorAppearance) -> gpui::Rgba {
-    let [red, green, blue] = group.map(group_color).unwrap_or(appearance.foreground);
+    let [red, green, blue] = group
+        .map(|group| group_color_with_overrides(group, &appearance.syntax_colors))
+        .unwrap_or(appearance.foreground);
     rgb(((red as u32) << 16) | ((green as u32) << 8) | blue as u32)
 }
 

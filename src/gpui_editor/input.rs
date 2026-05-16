@@ -170,14 +170,21 @@ impl EditorPrototype {
         if self.image_preview_active {
             return;
         }
+        cx.stop_propagation();
 
         let appearance = self.active_appearance();
         let pixel_delta = event.delta.pixel_delta(appearance.line_height);
-        let lines = (pixel_delta.y / appearance.line_height).round() as isize;
-        let columns = (pixel_delta.x / appearance.char_width).round() as isize;
+        let lines = scroll_units_from_wheel(
+            -pixel_delta.y / appearance.line_height,
+            &mut self.scroll_line_remainder,
+        );
+        let columns = scroll_units_from_wheel(
+            pixel_delta.x / appearance.char_width,
+            &mut self.scroll_col_remainder,
+        );
         let mut changed = false;
         if lines != 0 {
-            changed |= self.scroll_active_by_lines_without_notify(-lines);
+            changed |= self.scroll_active_by_lines_without_notify(lines);
         }
         if columns != 0 {
             changed |= self.scroll_active_by_columns_without_notify(columns);
@@ -970,6 +977,13 @@ fn scroll_col_by_delta(
     }
 }
 
+fn scroll_units_from_wheel(units: f32, remainder: &mut f32) -> isize {
+    let total = units + *remainder;
+    let whole = total.trunc() as isize;
+    *remainder = total - whole as f32;
+    whole
+}
+
 fn max_buffer_line_len(buffer: &Buffer) -> usize {
     (0..buffer.line_count())
         .map(|line| buffer.line_len(line))
@@ -1032,6 +1046,28 @@ mod tests {
         assert_eq!(scroll_col_by_delta(25, 140, 80, 100), 61);
         assert_eq!(scroll_col_by_delta(25, 140, 80, -100), 0);
         assert_eq!(scroll_col_by_delta(25, 40, 80, 100), 0);
+    }
+
+    #[test]
+    fn wheel_scroll_accumulates_fractional_units() {
+        let mut remainder = 0.0;
+
+        assert_eq!(scroll_units_from_wheel(0.4, &mut remainder), 0);
+        assert!((remainder - 0.4).abs() < 0.0001);
+        assert_eq!(scroll_units_from_wheel(0.7, &mut remainder), 1);
+        assert!((remainder - 0.1).abs() < 0.0001);
+    }
+
+    #[test]
+    fn vertical_wheel_down_maps_to_positive_scroll_lines() {
+        let mut remainder = 0.0;
+        let line_height = 20.0;
+        let wheel_down_pixels = -60.0;
+
+        let lines = scroll_units_from_wheel(-wheel_down_pixels / line_height, &mut remainder);
+
+        assert_eq!(lines, 3);
+        assert_eq!(remainder, 0.0);
     }
 
     #[test]

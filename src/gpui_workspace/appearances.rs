@@ -4,7 +4,10 @@ use gpui::prelude::*;
 use gpui::{div, px, rgb, rgba, Context, FontWeight, MouseButton, MouseDownEvent};
 
 use crate::{
-    config::{BackgroundImageFit, Config, CursorStyle, TerminalLayoutMode},
+    config::{
+        editor_syntax_presets, BackgroundImageFit, Config, CursorStyle, EditorSyntaxPreset,
+        TerminalLayoutMode,
+    },
     sketch::SketchToolbarPosition,
     theme::builtin_themes,
 };
@@ -233,7 +236,7 @@ fn appearance_controls_column(
             terminal_appearance_controls(content, config, terminal_background_import_error, cx)
         }
         AppearancePage::Editor => editor_appearance_controls(content, config, cx),
-        AppearancePage::Markdown => markdown_appearance_controls(content, config),
+        AppearancePage::Markdown => markdown_appearance_controls(content, config, cx),
         AppearancePage::Sketch => sketch_appearance_controls(content, sketch_toolbar_position, cx),
     };
 
@@ -673,6 +676,7 @@ fn editor_appearance_controls(
         .font_size
         .unwrap_or((config.font_size - 2.0).max(10.0));
     content
+        .child(editor_syntax_theme_controls(&config, cx))
         .child(metric_row(
             "Editor Font Size",
             format!("{editor_font:.0}px"),
@@ -687,13 +691,91 @@ fn editor_appearance_controls(
             |this, cx| this.adjust_sidebar_font_size(-1.0, cx),
             |this, cx| this.adjust_sidebar_font_size(1.0, cx),
         ))
+}
+
+fn editor_syntax_theme_controls(
+    config: &Config,
+    cx: &mut Context<WorkspacePrototype>,
+) -> impl IntoElement {
+    let mut buttons = div().flex().flex_wrap().gap_2();
+    for preset in editor_syntax_presets() {
+        buttons = buttons.child(editor_syntax_theme_button(*preset, config, cx));
+    }
+
+    div()
+        .w_full()
+        .flex()
+        .flex_col()
+        .gap_2()
         .child(
             div()
-                .mt_2()
                 .text_size(px(12.0))
                 .text_color(rgb(MUTED_TEXT))
-                .child("Syntax color editing and dirty-file editor tabs come with the next editor pass."),
+                .child("Editor Themes"),
         )
+        .child(buttons)
+}
+
+fn editor_syntax_theme_button(
+    preset: EditorSyntaxPreset,
+    config: &Config,
+    cx: &mut Context<WorkspacePrototype>,
+) -> impl IntoElement {
+    let preset_name = preset.name.to_string();
+    let active = editor_syntax_theme_active(config, preset);
+
+    div()
+        .w(px(178.0))
+        .h(px(48.0))
+        .flex()
+        .flex_col()
+        .justify_center()
+        .items_center()
+        .gap_1()
+        .rounded_sm()
+        .border_1()
+        .border_color(rgb(if active { 0x47785f } else { BORDER }))
+        .bg(rgb(if active { 0x183725 } else { 0x242632 }))
+        .px_2()
+        .py_1()
+        .cursor_pointer()
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, _: &MouseDownEvent, _window, cx| {
+                this.apply_editor_syntax_theme(&preset_name, cx);
+            }),
+        )
+        .child(
+            div()
+                .w_full()
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap_2()
+                .child(color_strip(preset.swatch()))
+                .child(
+                    div()
+                        .text_size(px(11.0))
+                        .text_color(rgb(if active { QUEUE_GREEN } else { MUTED_TEXT }))
+                        .child(if active { "Active" } else { "" }),
+                ),
+        )
+        .child(
+            div()
+                .w_full()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_size(px(12.0))
+                .text_color(rgb(if active { QUEUE_GREEN } else { SIDEBAR_TEXT }))
+                .child(preset.name),
+        )
+}
+
+fn editor_syntax_theme_active(config: &Config, preset: EditorSyntaxPreset) -> bool {
+    if config.syntax_colors.is_empty() {
+        return preset.name == "One Dark";
+    }
+    preset.matches_colors(&config.syntax_colors)
 }
 
 // Curated palettes for shader-driven background effects. Each preset sets
@@ -1014,15 +1096,29 @@ fn sketch_appearance_controls(
     )
 }
 
-fn markdown_appearance_controls(content: gpui::Div, config: Config) -> gpui::Div {
+fn markdown_appearance_controls(
+    content: gpui::Div,
+    config: Config,
+    cx: &mut Context<WorkspacePrototype>,
+) -> gpui::Div {
     let editor_font = config
         .editor
         .font_size
         .unwrap_or((config.font_size - 2.0).max(10.0));
     content
-        .child(metric_readout(
-            "Preview Font",
-            format!("{editor_font:.0}px editor base"),
+        .child(metric_row(
+            "Preview Font Size",
+            format!("{editor_font:.0}px"),
+            cx,
+            |this, cx| this.adjust_editor_font_size(-1.0, cx),
+            |this, cx| this.adjust_editor_font_size(1.0, cx),
+        ))
+        .child(metric_row(
+            "Preview Line Height",
+            format!("{:.2}x", config.editor.line_height),
+            cx,
+            |this, cx| this.adjust_editor_line_height(-0.05, cx),
+            |this, cx| this.adjust_editor_line_height(0.05, cx),
         ))
         .child(metric_readout(
             "Preview Width",
@@ -1033,14 +1129,7 @@ fn markdown_appearance_controls(content: gpui::Div, config: Config) -> gpui::Div
                 .mt_2()
                 .text_size(px(13.0))
                 .text_color(rgb(SIDEBAR_TEXT))
-                .child("Markdown preview uses the editor theme colors and keeps source, preview, and split modes separate from terminal and sketch settings."),
-        )
-        .child(
-            div()
-                .mt_2()
-                .text_size(px(12.0))
-                .text_color(rgb(MUTED_TEXT))
-                .child("Dedicated markdown typography controls can build on this page after the live preview workflow settles."),
+                .child("Markdown preview uses editor font, line height, and theme colors while keeping Source, Preview, and Split mode state separate."),
         )
 }
 

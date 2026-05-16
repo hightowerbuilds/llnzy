@@ -652,13 +652,14 @@ impl EffectsHost {
     pub fn with_shared<R>(f: impl FnOnce(&EffectsHost) -> R) -> Option<R> {
         SHARED_HOST.with(|cell| {
             cell.get_or_init(|| {
-                let result = catch_unwind(AssertUnwindSafe(|| EffectsHost::try_new()))
-                    .unwrap_or_else(|payload| {
+                let result = catch_unwind(AssertUnwindSafe(EffectsHost::try_new)).unwrap_or_else(
+                    |payload| {
                         Err(format!(
                             "wgpu effects host init panicked: {}",
                             panic_payload_to_string(payload)
                         ))
-                    });
+                    },
+                );
                 if let Err(error) = &result {
                     log::warn!("Disabling shader effects: {error}");
                 }

@@ -55,6 +55,11 @@ pub struct WorkspacePreferences {
     #[serde(default)]
     pub terminal_layout: String,
 
+    /// Name of the syntax-color preset chosen from Appearance > Editor.
+    /// `None` means "use config.toml or the built-in editor default".
+    #[serde(default)]
+    pub editor_syntax_theme: Option<String>,
+
     /// Maximum number of tabs a joined tab group may contain. Missing / zero
     /// keeps the historical two-tab behavior; Settings can raise this to 3
     /// or 4.
@@ -143,6 +148,7 @@ mod tests {
             terminal_background_intensity: Some(0.42),
             terminal_font_family: Some("Menlo".to_string()),
             terminal_layout: "display".to_string(),
+            editor_syntax_theme: Some("Dracula".to_string()),
             joined_tab_limit: 4,
         };
         prefs.save_to(&path).unwrap();
@@ -168,6 +174,7 @@ mod tests {
         assert!(loaded.terminal_background_intensity.is_none());
         assert!(loaded.terminal_font_family.is_none());
         assert!(loaded.terminal_layout.is_empty());
+        assert!(loaded.editor_syntax_theme.is_none());
         assert_eq!(loaded.joined_tab_limit(), 2);
         let _ = std::fs::remove_dir_all(&dir);
     }

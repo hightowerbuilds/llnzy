@@ -1,5 +1,5 @@
 use super::colors::{apply_time_of_day_at_hour, parse_hex};
-use super::presets::preset_scheme;
+use super::presets::{editor_syntax_preset, preset_scheme};
 use super::schema::ConfigFile;
 use super::*;
 use crate::editor::syntax::HighlightGroup;
@@ -262,4 +262,17 @@ fn apply_editor_syntax_colors() {
         config.syntax_colors.get(&HighlightGroup::Module),
         Some(&[0x01, 0x02, 0x03])
     );
+}
+
+#[test]
+fn editor_syntax_preset_maps_common_theme_name() {
+    let preset = editor_syntax_preset("solarized dark").unwrap();
+    let colors = preset.colors_map();
+
+    assert_eq!(preset.name, "Solarized Dark");
+    assert_eq!(
+        colors.get(&HighlightGroup::Function),
+        Some(&[0x26, 0x8B, 0xD2])
+    );
+    assert!(editor_syntax_preset("one_dark").is_some());
 }

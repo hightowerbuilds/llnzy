@@ -5,7 +5,7 @@ use gpui::{img, ObjectFit, StyledImage};
 impl Render for EditorPrototype {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let snapshot = self.snapshot(self.focus_handle.is_focused(window));
-        let content = div().flex_1().flex().flex_col();
+        let content = div().flex_1().min_h(px(0.0)).flex().flex_col();
         let content = if self.show_chrome {
             content.child(editor_header(&snapshot))
         } else {
@@ -177,6 +177,7 @@ fn editor_body(
     let body = match mode {
         MarkdownViewMode::Preview => div()
             .flex_1()
+            .min_h(px(0.0))
             .w_full()
             .flex()
             .flex_col()
@@ -184,6 +185,7 @@ fn editor_body(
             .child(markdown_preview_body(snapshot)),
         MarkdownViewMode::Source => div()
             .flex_1()
+            .min_h(px(0.0))
             .w_full()
             .flex()
             .flex_col()
@@ -191,15 +193,21 @@ fn editor_body(
             .child(editor_source_body(snapshot, input, cx)),
         MarkdownViewMode::Split => div()
             .flex_1()
+            .min_h(px(0.0))
             .w_full()
             .flex()
             .overflow_hidden()
-            .child(editor_source_body(snapshot, input, cx).w(relative(0.5)))
+            .child(
+                editor_source_body(snapshot, input, cx)
+                    .w(relative(0.5))
+                    .min_h(px(0.0)),
+            )
             .child(div().w(px(1.0)).h_full().bg(rgb(EDITOR_BORDER)))
             .child(
                 div()
                     .w(relative(0.5))
                     .h_full()
+                    .min_h(px(0.0))
                     .flex()
                     .flex_col()
                     .overflow_hidden()
@@ -255,10 +263,12 @@ fn editor_source_body(
     div()
         .relative()
         .flex_1()
+        .min_h(px(0.0))
         .w_full()
         .overflow_hidden()
         .bg(snapshot.appearance.background_color())
         .cursor(CursorStyle::IBeam)
+        .on_scroll_wheel(cx.listener(EditorPrototype::on_editor_scroll))
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(EditorPrototype::on_editor_mouse_down),
@@ -272,7 +282,6 @@ fn editor_source_body(
             cx.listener(EditorPrototype::on_editor_mouse_up),
         )
         .on_mouse_move(cx.listener(EditorPrototype::on_editor_mouse_move))
-        .on_scroll_wheel(cx.listener(EditorPrototype::on_editor_scroll))
         .child(lines)
         .child(ruler_layer)
         .child(input_layer)
@@ -359,6 +368,8 @@ fn markdown_preview_body(snapshot: &EditorSnapshot) -> impl IntoElement {
         div()
             .flex()
             .flex_col()
+            .flex_none()
+            .h_auto()
             .gap_4()
             .w_full()
             .max_w(px(820.0))
@@ -366,64 +377,62 @@ fn markdown_preview_body(snapshot: &EditorSnapshot) -> impl IntoElement {
             .pr_4()
             .pt_8()
             .pb_24()
-            .font_family("Atkinson Hyperlegible"),
+            .font_family(snapshot.appearance.font_family.clone()),
         |column, block| column.child(markdown_preview_block(block, &snapshot.appearance)),
     );
 
-    // Outer relative wrapper + absolute scroll child gives the scroll
-    // container a defined bounded height regardless of flex quirks.
-    div().relative().flex_1().w_full().overflow_hidden().child(
-        div()
-            .id("markdown-preview")
-            .absolute()
-            .top_0()
-            .left_0()
-            .size_full()
-            .overflow_y_scroll()
-            .track_scroll(&snapshot.markdown_preview_scroll)
-            .scrollbar_width(px(10.0))
-            .bg(snapshot.appearance.background_color())
-            .child(column),
-    )
+    div()
+        .id("markdown-preview")
+        .flex_1()
+        .min_h(px(0.0))
+        .w_full()
+        .overflow_y_scroll()
+        .track_scroll(&snapshot.markdown_preview_scroll)
+        .scrollbar_width(px(10.0))
+        .bg(snapshot.appearance.background_color())
+        .child(column)
 }
 
 fn markdown_preview_block(
     block: MarkdownPreviewBlock,
     appearance: &EditorAppearance,
 ) -> impl IntoElement {
+    let base_size = markdown_preview_font_size(appearance);
+    let base_line_height = markdown_preview_line_height(appearance);
     match block.kind {
         MarkdownPreviewBlockKind::Heading(level) => {
-            let (size, top_pad) = match level {
-                1 => (32.0, 4.0),
-                2 => (24.0, 4.0),
-                3 => (19.0, 2.0),
-                _ => (16.0, 0.0),
+            let (scale, top_pad) = match level {
+                1 => (2.0, 4.0),
+                2 => (1.5, 4.0),
+                3 => (1.2, 2.0),
+                _ => (1.0, 0.0),
             };
+            let size = (base_size * scale).clamp(base_size, 40.0);
             div()
                 .w_full()
                 .pt(px(top_pad))
                 .text_size(px(size))
-                .line_height(px(size * 1.3))
+                .line_height(px((size * 1.25).max(base_line_height)))
                 .font_weight(gpui::FontWeight::BOLD)
                 .text_color(appearance.foreground_color())
                 .child(block.text)
         }
         MarkdownPreviewBlockKind::Paragraph => div()
             .w_full()
-            .text_size(px(16.0))
-            .line_height(px(26.0))
+            .text_size(px(base_size))
+            .line_height(px(base_line_height))
             .text_color(appearance.foreground_color())
             .child(block.text),
         MarkdownPreviewBlockKind::Bullet => div()
             .w_full()
             .flex()
             .gap_3()
-            .text_size(px(16.0))
-            .line_height(px(26.0))
+            .text_size(px(base_size))
+            .line_height(px(base_line_height))
             .text_color(appearance.foreground_color())
             .child(
                 div()
-                    .w(px(16.0))
+                    .w(px((base_size * 1.1).max(14.0)))
                     .text_color(appearance.muted_color())
                     .child("•"),
             )
@@ -434,8 +443,8 @@ fn markdown_preview_block(
             .border_color(appearance.muted_color())
             .pl_4()
             .py_1()
-            .text_size(px(16.0))
-            .line_height(px(26.0))
+            .text_size(px(base_size))
+            .line_height(px(base_line_height))
             .text_color(appearance.muted_color())
             .child(block.text),
         MarkdownPreviewBlockKind::Code => div()
@@ -446,12 +455,22 @@ fn markdown_preview_block(
             .bg(rgb(0x10131a))
             .px_4()
             .py_3()
-            .font_family("Menlo")
-            .text_size(px(13.0))
-            .line_height(px(20.0))
+            .font_family(appearance.font_family.clone())
+            .text_size(px((base_size * 0.9).max(11.0)))
+            .line_height(px((base_line_height * 0.92).max(base_size * 1.25)))
             .text_color(appearance.foreground_color())
             .child(block.text),
     }
+}
+
+fn markdown_preview_font_size(appearance: &EditorAppearance) -> f32 {
+    (appearance.font_size / px(1.0)).clamp(12.0, 24.0)
+}
+
+fn markdown_preview_line_height(appearance: &EditorAppearance) -> f32 {
+    let font_size = markdown_preview_font_size(appearance);
+    let configured = appearance.line_height / px(1.0);
+    configured.max(font_size * 1.35)
 }
 
 /// Toggle pill that flips between Source (editable) and Preview (read-only).
@@ -971,61 +990,174 @@ fn find_button(
 }
 
 fn status_bar(snapshot: &EditorSnapshot) -> impl IntoElement {
-    let left = if let Some(preview) = &snapshot.image_preview {
-        preview
-            .dimensions
-            .map(|(width, height)| format!("Image {width}x{height}"))
-            .unwrap_or_else(|| "Image preview".to_string())
-    } else if let Some(cursor) = snapshot.cursor {
-        format!("Ln {}, Col {}", cursor.line + 1, cursor.col + 1)
-    } else if snapshot.sample {
-        "sample fallback".to_string()
-    } else {
-        "EditorState active buffer".to_string()
-    };
-    let diagnostics = diagnostic_status(&snapshot.diagnostics);
-    let lsp = [snapshot.lsp_status.clone(), diagnostics]
-        .into_iter()
-        .filter(|status| !status.is_empty())
-        .collect::<Vec<_>>()
-        .join(" | ");
-    let right = snapshot
-        .status_message
-        .clone()
-        .or_else(|| snapshot.load_error.clone())
-        .or_else(|| snapshot.cursor_diagnostic_message.clone())
-        .unwrap_or_else(|| "Ready".to_string());
-
-    let position = if snapshot.image_preview.is_some() {
-        left
-    } else {
-        format!(
-            "{left} | {}-{} / {}{}",
-            snapshot.first_line_number,
-            snapshot
-                .first_line_number
-                .saturating_add(snapshot.lines.len().saturating_sub(1)),
-            snapshot.total_lines,
-            if lsp.is_empty() {
-                String::new()
-            } else {
-                format!(" | {lsp}")
-            }
-        )
-    };
+    let left = status_bar_left(snapshot);
+    let right = status_bar_right(snapshot);
 
     div()
         .h(px(24.0))
         .w_full()
         .flex()
         .items_center()
-        .justify_between()
+        .gap_3()
         .px_3()
         .border_t_1()
         .border_color(rgb(EDITOR_BORDER))
         .bg(rgb(EDITOR_CHROME_BG))
         .text_size(px(11.0))
         .text_color(snapshot.appearance.muted_color())
-        .child(position)
-        .child(right)
+        .child(
+            div()
+                .flex_1()
+                .min_w(px(0.0))
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .child(left),
+        )
+        .child(
+            div()
+                .max_w(px(440.0))
+                .flex_shrink_0()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_color(snapshot.appearance.dim_color())
+                .child(right),
+        )
+}
+
+fn status_bar_left(snapshot: &EditorSnapshot) -> String {
+    if let Some(preview) = &snapshot.image_preview {
+        let dimensions = preview
+            .dimensions
+            .map(|(width, height)| format!("{width}x{height}"))
+            .unwrap_or_else(|| "dimensions unavailable".to_string());
+        let size = preview
+            .file_size
+            .map(format_file_size)
+            .unwrap_or_else(|| "size unavailable".to_string());
+        return format!("Image Preview | {dimensions} | {size}");
+    }
+
+    if snapshot.markdown && snapshot.markdown_mode == MarkdownViewMode::Preview {
+        let lines = match snapshot.total_lines {
+            0 => "No source lines".to_string(),
+            1 => "1 source line".to_string(),
+            count => format!("{count} source lines"),
+        };
+        return format!(
+            "{} | {} | {}",
+            editor_mode_label(snapshot),
+            snapshot.language.as_str(),
+            lines
+        );
+    }
+
+    let cursor = snapshot
+        .cursor
+        .map(|cursor| format!("Ln {}, Col {}", cursor.line + 1, cursor.col + 1))
+        .unwrap_or_else(|| "No cursor".to_string());
+    format!(
+        "{} | {} | {} | {}",
+        editor_mode_label(snapshot),
+        snapshot.language.as_str(),
+        cursor,
+        line_window_label(snapshot),
+    )
+}
+
+fn status_bar_right(snapshot: &EditorSnapshot) -> String {
+    if snapshot.image_preview.is_none() {
+        let modified = if snapshot.modified { " | modified" } else { "" };
+        let diagnostics = diagnostic_status(&snapshot.diagnostics);
+        let lsp = [snapshot.lsp_status.clone(), diagnostics]
+            .into_iter()
+            .filter(|status| !status.is_empty())
+            .collect::<Vec<_>>()
+            .join(" | ");
+        let activity = compact_status_message(snapshot)
+            .or_else(|| snapshot.cursor_diagnostic_message.clone())
+            .unwrap_or_else(|| "Ready".to_string());
+        if lsp.is_empty() {
+            return format!(
+                "{} lines | {} chars{modified} | {activity}",
+                snapshot.total_lines, snapshot.total_chars
+            );
+        }
+        return format!(
+            "{} lines | {} chars{modified} | {lsp} | {activity}",
+            snapshot.total_lines, snapshot.total_chars
+        );
+    }
+
+    compact_status_message(snapshot)
+        .or_else(|| snapshot.load_error.clone())
+        .unwrap_or_else(|| "Ready".to_string())
+}
+
+fn line_window_label(snapshot: &EditorSnapshot) -> String {
+    if snapshot.total_lines == 0 {
+        return "No lines".to_string();
+    }
+    let first = snapshot.first_line_number.max(1);
+    let last = first
+        .saturating_add(snapshot.lines.len().saturating_sub(1))
+        .min(snapshot.total_lines);
+    format!("Lines {first}-{last} of {}", snapshot.total_lines)
+}
+
+fn compact_status_message(snapshot: &EditorSnapshot) -> Option<String> {
+    if let Some(error) = snapshot.load_error.clone() {
+        return Some(error);
+    }
+    let message = snapshot.status_message.as_deref()?;
+    if message.starts_with("Opened ") {
+        Some("Opened".to_string())
+    } else if message.starts_with("Focused ") {
+        Some("Focused".to_string())
+    } else {
+        Some(message.to_string())
+    }
+}
+
+fn editor_mode_label(snapshot: &EditorSnapshot) -> &'static str {
+    if snapshot.image_preview.is_some() {
+        return "Image Preview";
+    }
+    if snapshot.sample {
+        return "Fallback";
+    }
+    if snapshot.markdown {
+        return match snapshot.markdown_mode {
+            MarkdownViewMode::Preview => "Markdown Preview",
+            MarkdownViewMode::Source => "Markdown Source",
+            MarkdownViewMode::Split => "Markdown Split",
+        };
+    }
+    "Source"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn markdown_preview_metrics_follow_editor_appearance() {
+        let mut config = Config::default();
+        config.editor.font_size = Some(18.0);
+        config.editor.line_height = 1.5;
+        let appearance = EditorAppearanceConfig::from_config(&config).for_language(None);
+
+        assert!((markdown_preview_font_size(&appearance) - 18.0).abs() < 0.0001);
+        assert!((markdown_preview_line_height(&appearance) - 27.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn markdown_preview_metrics_keep_readable_minimums() {
+        let mut config = Config::default();
+        config.editor.font_size = Some(8.0);
+        config.editor.line_height = 1.0;
+        let appearance = EditorAppearanceConfig::from_config(&config).for_language(None);
+
+        assert!((markdown_preview_font_size(&appearance) - 12.0).abs() < 0.0001);
+        assert!((markdown_preview_line_height(&appearance) - 16.2).abs() < 0.0001);
+    }
 }

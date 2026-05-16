@@ -11,6 +11,7 @@ pub use model::{
     BackgroundImageFit, ColorScheme, Config, CursorStyle, EditorConfig, EditorLanguageConfig,
     EffectiveEditorConfig, EffectsConfig, TerminalLayoutMode,
 };
+pub(crate) use presets::{editor_syntax_preset, editor_syntax_presets, EditorSyntaxPreset};
 
 #[cfg(test)]
 mod tests;

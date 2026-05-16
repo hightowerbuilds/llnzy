@@ -8,7 +8,7 @@ use crate::config::{Config, CursorStyle as ConfigCursorStyle, EditorConfig};
 use crate::editor::buffer::{Buffer, Position};
 use crate::editor::perf;
 use crate::editor::search::EditorSearch;
-use crate::editor::syntax::{group_color, HighlightGroup, HighlightSpan};
+use crate::editor::syntax::{group_color_with_overrides, HighlightGroup, HighlightSpan};
 use crate::editor::{BufferId, BufferView, EditorState, MarkdownViewMode};
 use crate::lsp::{DiagSeverity, LspManager};
 use crate::path_utils::{path_extension_matches, PREVIEW_IMAGE_EXTS};
@@ -21,6 +21,7 @@ use gpui::{
     MouseMoveEvent, MouseUpEvent, Pixels, Render, ScrollHandle, ScrollWheelEvent, ShapedLine,
     SharedString, Style, TextRun, UTF16Selection, Window, WindowBounds, WindowOptions,
 };
+use rustc_hash::FxHashMap;
 
 mod commands;
 mod files;
@@ -207,6 +208,8 @@ pub(crate) struct EditorPrototype {
     load_error: Option<String>,
     sample_text: String,
     sample_scroll_line: usize,
+    scroll_line_remainder: f32,
+    scroll_col_remainder: f32,
     status_message: Option<String>,
     last_text_bounds: Option<Bounds<gpui::Pixels>>,
     last_text_layout: Option<EditorMeasuredLayout>,
@@ -239,6 +242,7 @@ struct EditorAppearanceConfig {
     selection_alpha: f32,
     cursor_style: ConfigCursorStyle,
     editor: EditorConfig,
+    syntax_colors: FxHashMap<HighlightGroup, [u8; 3]>,
 }
 
 impl EditorAppearanceConfig {
@@ -253,6 +257,7 @@ impl EditorAppearanceConfig {
             selection_alpha: config.colors.selection_alpha,
             cursor_style: config.cursor_style,
             editor: config.editor.clone(),
+            syntax_colors: config.syntax_colors.clone(),
         }
     }
 
@@ -292,6 +297,7 @@ impl EditorAppearanceConfig {
             highlight_current_line: effective.highlight_current_line,
             visible_whitespace: effective.visible_whitespace,
             rulers: effective.rulers,
+            syntax_colors: self.syntax_colors.clone(),
         }
     }
 }
@@ -327,6 +333,7 @@ struct EditorAppearance {
     highlight_current_line: bool,
     visible_whitespace: bool,
     rulers: Vec<usize>,
+    syntax_colors: FxHashMap<HighlightGroup, [u8; 3]>,
 }
 
 impl EditorAppearance {
@@ -411,6 +418,11 @@ impl EditorPrototype {
     #[cfg(feature = "gpui-workspace")]
     pub(crate) fn new(cx: &mut Context<Self>) -> Self {
         Self::with_chrome(cx, false)
+    }
+
+    #[cfg(feature = "gpui-workspace")]
+    pub(crate) fn file_tab(cx: &mut Context<Self>) -> Self {
+        Self::with_chrome_and_initial_file(cx, false, false)
     }
 
     pub(crate) fn standalone(cx: &mut Context<Self>) -> Self {
@@ -534,24 +546,23 @@ impl EditorPrototype {
     }
 
     fn with_chrome(cx: &mut Context<Self>, show_chrome: bool) -> Self {
+        Self::with_chrome_and_initial_file(cx, show_chrome, true)
+    }
+
+    fn with_chrome_and_initial_file(
+        cx: &mut Context<Self>,
+        show_chrome: bool,
+        load_initial_file: bool,
+    ) -> Self {
         start_cursor_blink_task(cx);
         start_lsp_poll_task(cx);
         let mut editor = EditorState::new();
-        let mut load_error = None;
         let mut last_seen_disk_text = HashMap::new();
-
-        if let Some(path) = initial_path() {
-            if let Err(err) = editor.open(path.clone()) {
-                load_error = Some(format!("{}: {err}", path.display()));
-            } else {
-                refresh_active_syntax(&mut editor);
-                if let Ok(text) = read_normalized_file_text(&path) {
-                    last_seen_disk_text.insert(path, text);
-                }
-            }
-        } else {
-            load_error = Some("No readable file found for GPUI editor".to_string());
-        }
+        let load_error = open_initial_file_if_requested(
+            &mut editor,
+            &mut last_seen_disk_text,
+            load_initial_file,
+        );
 
         let mut this = Self {
             focus_handle: cx.focus_handle(),
@@ -577,6 +588,8 @@ impl EditorPrototype {
             load_error,
             sample_text: sample_text(),
             sample_scroll_line: 0,
+            scroll_line_remainder: 0.0,
+            scroll_col_remainder: 0.0,
             status_message: None,
             last_text_bounds: None,
             last_text_layout: None,
@@ -593,6 +606,8 @@ impl EditorPrototype {
     pub(crate) fn set_appearance_config(&mut self, config: Config, cx: &mut Context<Self>) {
         self.appearance_config = EditorAppearanceConfig::from_config(&config);
         self.last_text_layout = None;
+        self.scroll_line_remainder = 0.0;
+        self.scroll_col_remainder = 0.0;
         cx.notify();
     }
 
@@ -642,6 +657,8 @@ impl EditorPrototype {
                 selection: None,
                 scroll_col: 0,
                 total_lines: 0,
+                total_chars: 0,
+                modified: false,
                 load_error: self.load_error.clone(),
                 status_message: self.status_message.clone(),
                 image_preview: Some(EditorImagePreviewSnapshot {
@@ -746,6 +763,8 @@ impl EditorPrototype {
                 selection: view.cursor.selection(),
                 scroll_col: view.scroll_col,
                 total_lines: line_count,
+                total_chars: buffer.len_chars(),
+                modified: buffer.is_modified(),
                 load_error: self.load_error.clone(),
                 status_message: self.status_message.clone(),
                 image_preview: None,
@@ -802,6 +821,8 @@ impl EditorPrototype {
             selection: None,
             scroll_col: 0,
             total_lines: self.sample_text.lines().count().max(1),
+            total_chars: self.sample_text.chars().count(),
+            modified: false,
             load_error: self.load_error.clone(),
             status_message: self.status_message.clone(),
             image_preview: None,
@@ -1192,6 +1213,30 @@ fn refresh_active_syntax(editor: &mut EditorState) {
     editor.views[active].folded_ranges.clear();
 }
 
+fn open_initial_file_if_requested(
+    editor: &mut EditorState,
+    last_seen_disk_text: &mut HashMap<PathBuf, String>,
+    load_initial_file: bool,
+) -> Option<String> {
+    if !load_initial_file {
+        return None;
+    }
+
+    if let Some(path) = initial_path() {
+        if let Err(err) = editor.open(path.clone()) {
+            Some(format!("{}: {err}", path.display()))
+        } else {
+            refresh_active_syntax(editor);
+            if let Ok(text) = read_normalized_file_text(&path) {
+                last_seen_disk_text.insert(path, text);
+            }
+            None
+        }
+    } else {
+        Some("No readable file found for GPUI editor".to_string())
+    }
+}
+
 fn sample_text() -> String {
     [
         "LLNZY GPUI editor",
@@ -1216,6 +1261,8 @@ struct EditorSnapshot {
     selection: Option<(Position, Position)>,
     scroll_col: usize,
     total_lines: usize,
+    total_chars: usize,
+    modified: bool,
     load_error: Option<String>,
     status_message: Option<String>,
     sample: bool,
@@ -1280,7 +1327,7 @@ const EDITOR_DIM_FG: u32 = 0x70707d;
 // Used before GPUI has reported real text bounds for the embedded editor.
 // Keep this high enough that the first paint inside the workspace does not
 // leave a short 30-line editor floating above an otherwise empty pane.
-const VISIBLE_LINE_LIMIT: usize = 160;
+const VISIBLE_LINE_LIMIT: usize = 48;
 const EDITOR_VERTICAL_PADDING: gpui::Pixels = px(12.0);
 const DEFAULT_VISIBLE_COL_LIMIT: usize = 96;
 const RECENTLY_CLOSED_LIMIT: usize = 16;
@@ -1337,6 +1384,9 @@ mod tests {
         config.cursor_style = ConfigCursorStyle::Underline;
         config.colors.foreground = [10, 20, 30];
         config.colors.background = [1, 2, 3];
+        config
+            .syntax_colors
+            .insert(HighlightGroup::Keyword, [90, 80, 70]);
 
         let appearance = EditorAppearanceConfig::from_config(&config).for_language(None);
 
@@ -1348,6 +1398,23 @@ mod tests {
         assert_eq!(appearance.cursor_style, ConfigCursorStyle::Underline);
         assert_eq!(appearance.foreground, [10, 20, 30]);
         assert_eq!(appearance.background, [1, 2, 3]);
+        assert_eq!(
+            appearance.syntax_colors.get(&HighlightGroup::Keyword),
+            Some(&[90, 80, 70])
+        );
+    }
+
+    #[test]
+    fn file_tab_startup_skips_fallback_initial_file() {
+        let mut editor = EditorState::new();
+        let mut last_seen_disk_text = HashMap::new();
+
+        let load_error =
+            open_initial_file_if_requested(&mut editor, &mut last_seen_disk_text, false);
+
+        assert!(load_error.is_none());
+        assert!(editor.is_empty());
+        assert!(last_seen_disk_text.is_empty());
     }
 
     #[test]

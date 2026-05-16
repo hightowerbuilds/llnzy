@@ -173,6 +173,11 @@ fn appearance_config_from_preferences(
     {
         config.terminal_layout = layout;
     }
+    if let Some(theme_name) = preferences.editor_syntax_theme.as_deref() {
+        if let Some(theme) = crate::config::editor_syntax_preset(theme_name) {
+            config.syntax_colors = theme.colors_map();
+        }
+    }
     config
 }
 
@@ -498,10 +503,15 @@ impl WorkspacePrototype {
 
         let preferences = crate::preferences::WorkspacePreferences::load();
         let appearance_config = appearance_config_from_preferences(&preferences);
+        let stacker = cx.new(StackerPrototype::embedded);
+        let editor = cx.new(EditorPrototype::new);
+        editor.update(cx, |editor, cx| {
+            editor.set_appearance_config(appearance_config.clone(), cx);
+        });
 
         Self {
-            stacker: cx.new(StackerPrototype::embedded),
-            editor: cx.new(EditorPrototype::new),
+            stacker,
+            editor,
             file_editors: BTreeMap::new(),
             terminals,
             sketch,
@@ -681,6 +691,13 @@ impl WorkspacePrototype {
             .get(&self.active_tab_id.0)
             .cloned()
             .unwrap_or_else(|| self.editor.clone())
+    }
+
+    fn editor_entities(&self) -> Vec<Entity<EditorPrototype>> {
+        let mut editors = Vec::with_capacity(self.file_editors.len() + 1);
+        editors.push(self.editor.clone());
+        editors.extend(self.file_editors.values().cloned());
+        editors
     }
 
     fn active_explorer_state_mut(&mut self) -> &mut ExplorerState {

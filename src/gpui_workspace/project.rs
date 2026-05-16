@@ -1,6 +1,5 @@
 use std::{
     fs,
-    panic::{catch_unwind, AssertUnwindSafe},
     path::{Path, PathBuf},
 };
 
@@ -104,7 +103,7 @@ impl WorkspacePrototype {
         path: PathBuf,
         cx: &mut Context<Self>,
     ) -> Option<gpui::Entity<crate::gpui_editor::EditorPrototype>> {
-        let editor = cx.new(crate::gpui_editor::EditorPrototype::new);
+        let editor = cx.new(crate::gpui_editor::EditorPrototype::file_tab);
         let config = self.appearance_config.clone();
         let opened = editor.update(cx, |editor, cx| {
             editor.set_appearance_config(config, cx);
@@ -538,10 +537,7 @@ impl WorkspacePrototype {
             return;
         }
 
-        self.editor.update(cx, |editor, cx| {
-            editor.close_clean_paths_for_delete(&moved_sources, cx);
-        });
-        for editor in self.file_editors.values() {
+        for editor in self.editor_entities() {
             editor.update(cx, |editor, cx| {
                 editor.close_clean_paths_for_delete(&moved_sources, cx);
             });
@@ -782,31 +778,31 @@ impl WorkspacePrototype {
             .iter()
             .map(|item| (item.source.clone(), item.destination.clone(), item.is_dir))
             .collect::<Vec<_>>();
-        self.editor
-            .update(cx, |editor, cx| editor.remap_moved_paths(&editor_moves, cx));
-        for editor in self.file_editors.values() {
+        for editor in self.editor_entities() {
             editor.update(cx, |editor, cx| editor.remap_moved_paths(&editor_moves, cx));
         }
     }
 
     pub(super) fn pick_open_project(&mut self, cx: &mut Context<Self>) {
-        let selection = catch_unwind(AssertUnwindSafe(|| {
-            rfd::FileDialog::new()
-                .set_title("Open Project Folder")
-                .pick_folder()
-        }));
-
-        match selection {
-            Ok(Some(path)) => self.open_project(path, cx),
-            Ok(None) => {}
-            Err(_) => {
-                let message = "Open Project dialog failed. Choose a recent project instead.";
-                crate::error_log::global().error(message);
-                self.sidebar_explorer.status = Some(message.to_string());
-                self.recent_projects_open = true;
-                cx.notify();
-            }
-        }
+        cx.spawn(
+            |workspace: gpui::WeakEntity<WorkspacePrototype>, cx: &mut gpui::AsyncApp| {
+                let mut cx = cx.clone();
+                async move {
+                    let Some(folder) = rfd::AsyncFileDialog::new()
+                        .set_title("Open Project Folder")
+                        .pick_folder()
+                        .await
+                    else {
+                        return;
+                    };
+                    let path = folder.path().to_path_buf();
+                    let _ = workspace.update(&mut cx, |workspace, cx| {
+                        workspace.open_project(path, cx);
+                    });
+                }
+            },
+        )
+        .detach();
     }
 
     pub(super) fn open_project(&mut self, path: PathBuf, cx: &mut Context<Self>) {

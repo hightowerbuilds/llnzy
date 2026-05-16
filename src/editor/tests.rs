@@ -34,6 +34,18 @@ fn open_defers_tree_sitter_parse_to_background() {
 }
 
 #[test]
+fn markdown_buffers_open_in_source_mode() {
+    let path = temp_file("markdown_default.md", "# Title\n\nBody\n");
+
+    let mut editor = EditorState::new();
+    let buffer_id = editor.open(path.clone()).unwrap();
+    let idx = editor.index_for_id(buffer_id).unwrap();
+
+    assert_eq!(editor.views[idx].markdown_mode, MarkdownViewMode::Source);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
 fn large_syntax_fixture_skips_tree_sitter_parse() {
     let dir = std::env::temp_dir().join(format!("llnzy-editor-large-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();

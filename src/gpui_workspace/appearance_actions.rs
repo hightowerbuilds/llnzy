@@ -1,7 +1,7 @@
 use gpui::Context;
 
 use crate::{
-    config::{BackgroundImageFit, CursorStyle, TerminalLayoutMode},
+    config::{editor_syntax_preset, BackgroundImageFit, CursorStyle, TerminalLayoutMode},
     sketch::SketchToolbarPosition,
     theme::builtin_themes,
 };
@@ -14,10 +14,7 @@ use super::{
 impl WorkspacePrototype {
     pub(super) fn apply_appearance_config(&mut self, cx: &mut Context<Self>) {
         let config = self.appearance_config.clone();
-        self.editor.update(cx, |editor, cx| {
-            editor.set_appearance_config(config.clone(), cx)
-        });
-        for editor in self.file_editors.values() {
+        for editor in self.editor_entities() {
             let config = config.clone();
             editor.update(cx, |editor, cx| editor.set_appearance_config(config, cx));
         }
@@ -278,10 +275,25 @@ impl WorkspacePrototype {
         self.apply_appearance_config(cx);
     }
 
+    pub(super) fn adjust_editor_line_height(&mut self, delta: f32, cx: &mut Context<Self>) {
+        self.appearance_config.editor.line_height =
+            (self.appearance_config.editor.line_height + delta).clamp(1.0, 2.2);
+        self.apply_appearance_config(cx);
+    }
+
     pub(super) fn adjust_sidebar_font_size(&mut self, delta: f32, cx: &mut Context<Self>) {
         self.appearance_config.editor.sidebar_font_size =
             (self.appearance_config.editor.sidebar_font_size + delta).clamp(8.0, 24.0);
         cx.notify();
+    }
+
+    pub(super) fn apply_editor_syntax_theme(&mut self, theme_name: &str, cx: &mut Context<Self>) {
+        if let Some(theme) = editor_syntax_preset(theme_name) {
+            self.appearance_config.syntax_colors = theme.colors_map();
+            self.preferences.editor_syntax_theme = Some(theme.name.to_string());
+            self.preferences.save();
+            self.apply_appearance_config(cx);
+        }
     }
 
     pub(super) fn adjust_selection_alpha(&mut self, delta: f32, cx: &mut Context<Self>) {
