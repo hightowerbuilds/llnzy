@@ -513,8 +513,7 @@ const C_HL: &str = r#"
 (preproc_def) @attribute
 ["if" "else" "for" "while" "do" "switch" "case" "default" "break" "continue"
  "return" "goto" "struct" "union" "enum" "typedef" "extern" "static" "const"
- "volatile" "inline" "sizeof" "register" "auto" "restrict" "_Atomic"
- "_Noreturn" "_Thread_local"] @keyword
+ "volatile" "inline" "sizeof" "register" "auto" "restrict"] @keyword
 ["=" "+" "-" "*" "/" "%" "==" "!=" "<" ">" "<=" ">=" "&&" "||" "!" "&" "|"
  "^" "~" "<<" ">>" "+=" "-=" "*=" "/=" "->" "++""--" "?"] @operator
 [";" "," "(" ")" "{" "}" "[" "]" ":" "."] @punctuation
@@ -570,14 +569,41 @@ const BASH_HL: &str = r#"
 ["if" "then" "else" "elif" "fi" "for" "while" "until" "do" "done" "case"
  "esac" "in" "function" "local" "export" "declare" "readonly"
  "unset"] @keyword
-["=" "==" "!=" "<" ">" ">=" "<=" "&&" "||" "|" "&" "!" ";;" "-eq" "-ne"
- "-lt" "-gt" "-le" "-ge" "-z" "-n" "-f" "-d" "-e" "-r" "-w" "-x"] @operator
+["=" "==" "!=" "<" ">" ">=" "<=" "&&" "||" "|" "&" "!" ";;"] @operator
 [";" "(" ")" "{" "}" "[" "]" "[[" "]]" "$" "${" "}"] @punctuation
 "#;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_builtin_highlight_query_compiles() {
+        let cases: &[(&str, tree_sitter::Language, &str)] = &[
+            ("rust", tree_sitter_rust::LANGUAGE.into(), RUST_HL),
+            ("javascript", tree_sitter_javascript::LANGUAGE.into(), JS_HL),
+            (
+                "typescript",
+                tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+                TS_HL,
+            ),
+            ("tsx", tree_sitter_typescript::LANGUAGE_TSX.into(), TS_HL),
+            ("python", tree_sitter_python::LANGUAGE.into(), PYTHON_HL),
+            ("go", tree_sitter_go::LANGUAGE.into(), GO_HL),
+            ("c", tree_sitter_c::LANGUAGE.into(), C_HL),
+            ("json", tree_sitter_json::LANGUAGE.into(), JSON_HL),
+            ("html", tree_sitter_html::LANGUAGE.into(), HTML_HL),
+            ("css", tree_sitter_css::LANGUAGE.into(), CSS_HL),
+            ("bash", tree_sitter_bash::LANGUAGE.into(), BASH_HL),
+        ];
+        let mut failed = Vec::new();
+        for (id, language, src) in cases {
+            if let Err(err) = Query::new(language, src) {
+                failed.push(format!("{id}: {err}"));
+            }
+        }
+        assert!(failed.is_empty(), "broken highlight queries: {failed:#?}");
+    }
 
     #[test]
     fn detect_languages() {

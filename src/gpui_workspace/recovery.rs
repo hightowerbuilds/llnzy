@@ -55,6 +55,12 @@ pub(super) struct WorkspaceRecoveryTab {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(super) struct WorkspaceRecoveryTabNameOverride {
+    pub(super) id: u64,
+    pub(super) name: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(super) struct WorkspaceRecoveryJoinedGroup {
     pub(super) members: Vec<u64>,
     #[serde(default)]
@@ -73,7 +79,7 @@ pub(super) struct WorkspaceRecoverySnapshot {
     #[serde(default)]
     pub(super) tabs: Vec<WorkspaceRecoveryTab>,
     #[serde(default)]
-    pub(super) tab_name_overrides: BTreeMap<u64, String>,
+    pub(super) tab_name_overrides: Vec<WorkspaceRecoveryTabNameOverride>,
     #[serde(default)]
     pub(super) joined_groups: Vec<WorkspaceRecoveryJoinedGroup>,
     pub(super) sidebar_visible: bool,
@@ -251,7 +257,8 @@ pub(super) fn plan_restore(snapshot: WorkspaceRecoverySnapshot) -> Option<Worksp
     let tab_name_overrides = snapshot
         .tab_name_overrides
         .into_iter()
-        .filter(|(tab_id, name)| valid_ids.contains(tab_id) && !name.trim().is_empty())
+        .filter(|entry| valid_ids.contains(&entry.id) && !entry.name.trim().is_empty())
+        .map(|entry| (entry.id, entry.name))
         .collect();
     let joined_groups = snapshot
         .joined_groups
@@ -341,7 +348,7 @@ mod tests {
                     file_path: None,
                 },
             ],
-            tab_name_overrides: BTreeMap::new(),
+            tab_name_overrides: Vec::new(),
             joined_groups: Vec::new(),
             sidebar_visible: true,
             sidebar_width: 240.0,
@@ -426,6 +433,39 @@ mod tests {
         let plan = plan_restore(snapshot).unwrap();
         assert_eq!(plan.joined_groups.len(), 1);
         assert_eq!(plan.joined_groups[0].members, vec![1, 2]);
+    }
+
+    #[test]
+    fn save_load_round_trips_tab_name_overrides() {
+        let dir = temp_dir("overrides");
+        let path = dir.join("last_session.toml");
+        let mut snapshot = snapshot(Some(dir.clone()), false);
+        snapshot.tab_name_overrides = vec![
+            WorkspaceRecoveryTabNameOverride {
+                id: 1,
+                name: "Notes".to_string(),
+            },
+            WorkspaceRecoveryTabNameOverride {
+                id: 2,
+                name: "Build".to_string(),
+            },
+        ];
+
+        save_snapshot(&path, &snapshot).unwrap();
+        let loaded = load_snapshot(&path).unwrap().unwrap();
+        assert_eq!(loaded.tab_name_overrides, snapshot.tab_name_overrides);
+
+        let plan = plan_restore(loaded).unwrap();
+        assert_eq!(
+            plan.tab_name_overrides.get(&1).map(String::as_str),
+            Some("Notes")
+        );
+        assert_eq!(
+            plan.tab_name_overrides.get(&2).map(String::as_str),
+            Some("Build")
+        );
+
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]

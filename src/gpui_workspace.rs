@@ -31,7 +31,8 @@ use self::panes::{workspace_content, WorkspaceSurfaceContext};
 use self::recovery::{
     plan_restore, recovery_file, save_snapshot, WorkspaceRecoveryAxis,
     WorkspaceRecoveryJoinedGroup, WorkspaceRecoveryPlan, WorkspaceRecoverySnapshot,
-    WorkspaceRecoverySurface, WorkspaceRecoveryTab, WORKSPACE_RECOVERY_VERSION,
+    WorkspaceRecoverySurface, WorkspaceRecoveryTab, WorkspaceRecoveryTabNameOverride,
+    WORKSPACE_RECOVERY_VERSION,
 };
 use self::sidebar::{
     collect_explorer_entries, sidebar_bumper, workspace_sidebar, workspace_sidebar_context_menu,
@@ -837,7 +838,14 @@ impl WorkspacePrototype {
                     file_path: tab.file_path.clone(),
                 })
                 .collect(),
-            tab_name_overrides: self.tab_name_overrides.clone(),
+            tab_name_overrides: self
+                .tab_name_overrides
+                .iter()
+                .map(|(id, name)| WorkspaceRecoveryTabNameOverride {
+                    id: *id,
+                    name: name.clone(),
+                })
+                .collect(),
             joined_groups: self.workspace_recovery_joined_groups(),
             sidebar_visible: self.sidebar_visible,
             sidebar_width: self.sidebar_width,
