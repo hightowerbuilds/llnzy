@@ -24,6 +24,7 @@ use gpui::{
 use rustc_hash::FxHashMap;
 
 mod commands;
+mod file_state;
 mod files;
 mod input;
 mod key_actions;
@@ -38,7 +39,8 @@ use commands::{
     byte_index_for_char_col, EditorCommand, EditorDeleteTarget, EditorLineMove, EditorMotion,
     EditorSelectTarget,
 };
-use files::{initial_path, read_normalized_file_text};
+use file_state::read_normalized_file_text;
+use files::initial_path;
 use input::{
     reveal_cursor, visible_col_limit_for_bounds, visible_line_limit_for_bounds, EditorInputElement,
     EditorMeasuredLayout,
@@ -1330,7 +1332,6 @@ const EDITOR_DIM_FG: u32 = 0x70707d;
 const VISIBLE_LINE_LIMIT: usize = 48;
 const EDITOR_VERTICAL_PADDING: gpui::Pixels = px(12.0);
 const DEFAULT_VISIBLE_COL_LIMIT: usize = 96;
-const RECENTLY_CLOSED_LIMIT: usize = 16;
 const CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(530);
 const CURSOR_BLINK_TICK: Duration = Duration::from_millis(80);
 const LSP_POLL_TICK: Duration = Duration::from_millis(220);

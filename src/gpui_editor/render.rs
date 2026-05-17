@@ -326,13 +326,11 @@ fn image_preview_body(
         .overflow_hidden()
         .bg(appearance.background_color())
         .child(
-            div()
-                .absolute()
-                .top_0()
-                .left_0()
-                .size_full()
-                .p_4()
-                .child(img(preview.path).size_full().object_fit(ObjectFit::Contain)),
+            div().absolute().top_0().left_0().size_full().p_4().child(
+                img(preview.path)
+                    .size_full()
+                    .object_fit(ObjectFit::ScaleDown),
+            ),
         )
         .child(
             div()

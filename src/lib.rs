@@ -1,4 +1,5 @@
 pub mod async_guard;
+pub(crate) mod atomic_write;
 pub mod config;
 pub mod diagnostics;
 pub mod editor;

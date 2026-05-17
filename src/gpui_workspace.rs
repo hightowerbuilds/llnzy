@@ -15,6 +15,7 @@ mod home;
 mod menu_actions;
 mod panes;
 mod project;
+mod recovery;
 mod sidebar;
 mod tabs;
 
@@ -27,6 +28,11 @@ use crate::gpui_terminal::{bind_terminal_keys, TerminalSurface};
 
 use self::footer::{load_workspace_queue, workspace_footer};
 use self::panes::{workspace_content, WorkspaceSurfaceContext};
+use self::recovery::{
+    plan_restore, recovery_file, save_snapshot, WorkspaceRecoveryAxis,
+    WorkspaceRecoveryJoinedGroup, WorkspaceRecoveryPlan, WorkspaceRecoverySnapshot,
+    WorkspaceRecoverySurface, WorkspaceRecoveryTab, WORKSPACE_RECOVERY_VERSION,
+};
 use self::sidebar::{
     collect_explorer_entries, sidebar_bumper, workspace_sidebar, workspace_sidebar_context_menu,
     ExplorerState, SidebarContextMenuState, SidebarNewEntryState, SidebarRenameState,
@@ -208,6 +214,36 @@ impl WorkspaceSurface {
     }
 }
 
+impl From<WorkspaceRecoverySurface> for WorkspaceSurface {
+    fn from(surface: WorkspaceRecoverySurface) -> Self {
+        match surface {
+            WorkspaceRecoverySurface::Home => Self::Home,
+            WorkspaceRecoverySurface::Stacker => Self::Stacker,
+            WorkspaceRecoverySurface::Editor => Self::Editor,
+            WorkspaceRecoverySurface::Terminal => Self::Terminal,
+            WorkspaceRecoverySurface::Explorer => Self::Explorer,
+            WorkspaceRecoverySurface::Sketch => Self::Sketch,
+            WorkspaceRecoverySurface::Appearances => Self::Appearances,
+            WorkspaceRecoverySurface::Settings => Self::Settings,
+        }
+    }
+}
+
+impl From<WorkspaceSurface> for WorkspaceRecoverySurface {
+    fn from(surface: WorkspaceSurface) -> Self {
+        match surface {
+            WorkspaceSurface::Home => Self::Home,
+            WorkspaceSurface::Stacker => Self::Stacker,
+            WorkspaceSurface::Editor => Self::Editor,
+            WorkspaceSurface::Terminal => Self::Terminal,
+            WorkspaceSurface::Explorer => Self::Explorer,
+            WorkspaceSurface::Sketch => Self::Sketch,
+            WorkspaceSurface::Appearances => Self::Appearances,
+            WorkspaceSurface::Settings => Self::Settings,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AppearancePage {
     Terminal,
@@ -314,7 +350,7 @@ pub fn run_workspace_prototype() {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
                     ..Default::default()
                 },
-                |_, cx| cx.new(WorkspacePrototype::new),
+                |_, cx| cx.new(WorkspacePrototype::new_secondary),
             ) {
                 Ok(window) => window,
                 Err(error) => {
@@ -430,6 +466,21 @@ fn install_workspace_menu_bar(cx: &mut App) {
     ]);
 }
 
+fn restore_joined_group_shares(tab_manager: &mut GpuiTabManager, primary: u64, shares: &[f32]) {
+    if shares.len() < 2 || shares.iter().any(|share| !share.is_finite()) {
+        return;
+    }
+    let mut boundary = 0.0;
+    for (divider_index, share) in shares
+        .iter()
+        .take(shares.len().saturating_sub(1))
+        .enumerate()
+    {
+        boundary += *share;
+        tab_manager.set_split_for_tab(primary, divider_index, boundary);
+    }
+}
+
 struct WorkspacePrototype {
     stacker: Entity<StackerPrototype>,
     editor: Entity<EditorPrototype>,
@@ -460,6 +511,8 @@ struct WorkspacePrototype {
     terminal_background_import_error: Option<String>,
     palette: command_palette::CommandPaletteState,
     preferences: crate::preferences::WorkspacePreferences,
+    recovery_enabled: bool,
+    last_recovery_snapshot: Option<WorkspaceRecoverySnapshot>,
     error_log_expanded: bool,
     error_log_filter: ErrorLogFilter,
     pending_clear_error_log: bool,
@@ -491,6 +544,14 @@ impl ErrorLogFilter {
 
 impl WorkspacePrototype {
     fn new(cx: &mut Context<Self>) -> Self {
+        Self::with_recovery(cx, true)
+    }
+
+    fn new_secondary(cx: &mut Context<Self>) -> Self {
+        Self::with_recovery(cx, false)
+    }
+
+    fn with_recovery(cx: &mut Context<Self>, recovery_enabled: bool) -> Self {
         let workspace_root = std::env::current_dir().ok();
         let tabs = vec![WorkspaceTab::new(WorkspaceTabId(1), WorkspaceSurface::Home)];
         let sidebar_explorer = ExplorerState::for_root(workspace_root.as_deref());
@@ -509,7 +570,7 @@ impl WorkspacePrototype {
             editor.set_appearance_config(appearance_config.clone(), cx);
         });
 
-        Self {
+        let mut workspace = Self {
             stacker,
             editor,
             file_editors: BTreeMap::new(),
@@ -539,10 +600,18 @@ impl WorkspacePrototype {
             terminal_background_import_error: None,
             palette: command_palette::CommandPaletteState::default(),
             preferences,
+            recovery_enabled,
+            last_recovery_snapshot: None,
             error_log_expanded: false,
             error_log_filter: ErrorLogFilter::All,
             pending_clear_error_log: false,
+        };
+
+        if recovery_enabled {
+            workspace.restore_after_unclean_shutdown(cx);
+            workspace.persist_workspace_recovery(false);
         }
+        workspace
     }
 
     fn tab_join_limit(&self) -> usize {
@@ -573,10 +642,237 @@ impl WorkspacePrototype {
 
     /// Best-effort save of any in-flight Stacker draft. Invoked from the
     /// app-level Quit handler before `cx.quit()` so closing the app
-    /// (Cmd+Q, menu Quit, or window close) doesn't drop pending work.
+    /// doesn't drop pending work or leave the recovery snapshot marked dirty.
     pub(crate) fn save_drafts_before_quit(&mut self, cx: &mut Context<Self>) {
         self.stacker
             .update(cx, |stacker, cx| stacker.save_active_prompt(cx));
+        self.persist_workspace_recovery(true);
+        self.recovery_enabled = false;
+    }
+
+    fn restore_after_unclean_shutdown(&mut self, cx: &mut Context<Self>) {
+        let Some(path) = recovery_file() else {
+            return;
+        };
+        let snapshot = match recovery::load_snapshot(&path) {
+            Ok(Some(snapshot)) => snapshot,
+            Ok(None) => return,
+            Err(err) => {
+                log::warn!("{err}");
+                if let Err(remove_err) = recovery::remove_snapshot(&path) {
+                    log::warn!("{remove_err}");
+                }
+                return;
+            }
+        };
+        let Some(plan) = plan_restore(snapshot) else {
+            return;
+        };
+        self.apply_recovery_plan(plan, cx);
+    }
+
+    fn apply_recovery_plan(&mut self, plan: WorkspaceRecoveryPlan, cx: &mut Context<Self>) {
+        self.workspace_root = plan.workspace_root.clone();
+        self.sketch.update(cx, |sketch, _cx| {
+            sketch.set_workspace_root(plan.workspace_root.clone())
+        });
+        let restore_status = plan.status_message();
+        self.sidebar_explorer = ExplorerState::for_root(plan.workspace_root.as_deref());
+        self.sidebar_explorer.expanded_dirs = plan.sidebar_expanded_dirs;
+        self.sidebar_explorer.selected_path = plan.sidebar_selected_path;
+        self.sidebar_explorer.status = restore_status;
+        self.sidebar_visible = plan.sidebar_visible;
+        self.sidebar_width = plan
+            .sidebar_width
+            .clamp(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH);
+        self.last_sidebar_width = plan
+            .last_sidebar_width
+            .clamp(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH);
+        self.recent_projects_open = false;
+        self.close_context_menus(cx);
+
+        self.tabs.clear();
+        self.file_editors.clear();
+        self.terminals.clear();
+        self.explorers.clear();
+        self.tab_manager = GpuiTabManager::default();
+
+        let mut skipped_open_files = Vec::new();
+        for restored in plan.tabs {
+            let tab_id = WorkspaceTabId(restored.id);
+            let surface = WorkspaceSurface::from(restored.surface);
+            if let Some(path) = restored.file_path {
+                let Some(editor) = self.new_file_editor(path.clone(), cx) else {
+                    skipped_open_files.push(path);
+                    continue;
+                };
+                self.file_editors.insert(tab_id.0, editor);
+                self.tabs.push(WorkspaceTab::file(tab_id, path));
+                continue;
+            }
+
+            self.tabs.push(WorkspaceTab::new(tab_id, surface));
+            match surface {
+                WorkspaceSurface::Terminal => {
+                    let terminal = self.new_terminal_surface(cx);
+                    self.terminals.insert(tab_id.0, terminal);
+                }
+                WorkspaceSurface::Explorer => {
+                    self.explorers.insert(
+                        tab_id.0,
+                        ExplorerState::for_root(self.workspace_root.as_deref()),
+                    );
+                }
+                _ => {}
+            }
+        }
+
+        if self.tabs.is_empty() {
+            self.tabs
+                .push(WorkspaceTab::new(WorkspaceTabId(1), WorkspaceSurface::Home));
+        }
+
+        self.next_tab_id = plan
+            .next_tab_id
+            .max(self.tabs.iter().map(|tab| tab.id.0).max().unwrap_or(1) + 1);
+        let valid_tabs = self.tab_ids();
+        self.tab_name_overrides = plan
+            .tab_name_overrides
+            .into_iter()
+            .filter(|(tab_id, _)| valid_tabs.contains(tab_id))
+            .collect();
+        self.restore_joined_groups(&plan.joined_groups);
+
+        self.active_tab_id = if valid_tabs.contains(&plan.active_tab_id) {
+            WorkspaceTabId(plan.active_tab_id)
+        } else {
+            self.tabs
+                .iter()
+                .find(|tab| tab.surface == WorkspaceSurface::Home)
+                .or_else(|| self.tabs.first())
+                .map(|tab| tab.id)
+                .unwrap_or(WorkspaceTabId(1))
+        };
+        self.tab_manager.set_active_tab(self.active_tab_id.0);
+        if let Some(path) = self
+            .tab_by_id(self.active_tab_id)
+            .and_then(|tab| tab.file_path.clone())
+        {
+            self.sidebar_explorer.selected_path = Some(path);
+        }
+
+        if !skipped_open_files.is_empty() {
+            let extra = if skipped_open_files.len() == 1 {
+                format!("Skipped file {}", skipped_open_files[0].display())
+            } else {
+                format!(
+                    "Skipped {} files that failed to open",
+                    skipped_open_files.len()
+                )
+            };
+            self.sidebar_explorer.status = Some(match self.sidebar_explorer.status.take() {
+                Some(existing) => format!("{existing}; {extra}"),
+                None => extra,
+            });
+        }
+    }
+
+    fn restore_joined_groups(&mut self, groups: &[WorkspaceRecoveryJoinedGroup]) {
+        let valid_tabs = self.tab_ids();
+        for group in groups {
+            let members = group
+                .members
+                .iter()
+                .copied()
+                .filter(|member| valid_tabs.contains(member))
+                .take(self.tab_join_limit())
+                .collect::<Vec<_>>();
+            let Some((&primary, rest)) = members.split_first() else {
+                continue;
+            };
+            if rest.is_empty() {
+                continue;
+            }
+            let axis = crate::tab_groups::PartitionAxis::from(group.axis);
+            for member in rest {
+                self.tab_manager
+                    .join_tabs_with_axis(primary, *member, self.tab_join_limit(), axis);
+            }
+            restore_joined_group_shares(&mut self.tab_manager, primary, &group.shares);
+        }
+        self.tab_manager.retain_tabs(&valid_tabs);
+    }
+
+    fn persist_workspace_recovery(&mut self, clean_shutdown: bool) {
+        if !self.recovery_enabled {
+            return;
+        }
+        let Some(path) = recovery_file() else {
+            return;
+        };
+        let snapshot = self.workspace_recovery_snapshot(clean_shutdown);
+        if self.last_recovery_snapshot.as_ref() == Some(&snapshot) {
+            return;
+        }
+        if let Err(err) = save_snapshot(&path, &snapshot) {
+            log::warn!("{err}");
+            return;
+        }
+        self.last_recovery_snapshot = Some(snapshot);
+    }
+
+    fn workspace_recovery_snapshot(&self, clean_shutdown: bool) -> WorkspaceRecoverySnapshot {
+        WorkspaceRecoverySnapshot {
+            version: WORKSPACE_RECOVERY_VERSION,
+            clean_shutdown,
+            workspace_root: self.workspace_root.clone(),
+            active_tab_id: self.active_tab_id.0,
+            next_tab_id: self.next_tab_id,
+            tabs: self
+                .tabs
+                .iter()
+                .map(|tab| WorkspaceRecoveryTab {
+                    id: tab.id.0,
+                    surface: WorkspaceRecoverySurface::from(tab.surface),
+                    file_path: tab.file_path.clone(),
+                })
+                .collect(),
+            tab_name_overrides: self.tab_name_overrides.clone(),
+            joined_groups: self.workspace_recovery_joined_groups(),
+            sidebar_visible: self.sidebar_visible,
+            sidebar_width: self.sidebar_width,
+            last_sidebar_width: self.last_sidebar_width,
+            sidebar_selected_path: self.sidebar_explorer.selected_path.clone(),
+            sidebar_expanded_dirs: self
+                .sidebar_explorer
+                .expanded_dirs
+                .iter()
+                .cloned()
+                .collect(),
+        }
+    }
+
+    fn workspace_recovery_joined_groups(&self) -> Vec<WorkspaceRecoveryJoinedGroup> {
+        let valid_tabs = self.tab_ids();
+        let mut seen = Vec::<Vec<u64>>::new();
+        let mut groups = Vec::new();
+        for tab_id in &valid_tabs {
+            let Some(joined) = self.tab_manager.joined_group_for(*tab_id, &valid_tabs) else {
+                continue;
+            };
+            let mut key = joined.members.clone();
+            key.sort_unstable();
+            if seen.contains(&key) {
+                continue;
+            }
+            seen.push(key);
+            groups.push(WorkspaceRecoveryJoinedGroup {
+                members: joined.members,
+                shares: joined.shares,
+                axis: WorkspaceRecoveryAxis::from(joined.axis),
+            });
+        }
+        groups
     }
 
     /// Copy the full diagnostics report (system context + every captured
@@ -1509,6 +1805,8 @@ impl Focusable for WorkspacePrototype {
 
 impl Render for WorkspacePrototype {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.persist_workspace_recovery(false);
+
         let active_surface = self.active_surface();
         let active_tab_id = self.active_tab_id;
         let tabs = self.tabs.clone();

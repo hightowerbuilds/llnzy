@@ -92,7 +92,7 @@ Status updated after resuming the interrupted session on 2026-05-16.
   checks.
 - [x] Open a `.md` file and confirm it starts in Source, then switch to Preview
   and Split without losing source cursor/scroll state.
-- [ ] Open an image preview and confirm the footer reports read-only image
+- [x] Open an image preview and confirm the footer reports read-only image
   details.
 - [x] Open multiple file tabs and verify visible-editor routing for normal
   editor actions.
@@ -235,7 +235,7 @@ Add focused tests around the corrected behavior:
 Manual smoke should cover:
 
 - [x] `.rs`, `.json`, `.md`.
-- [ ] Image preview.
+- [x] Image preview.
 - [x] Multiple file tabs.
 - [x] Joined panes if editor tabs can participate.
 - [x] Theme/font changes while files are open.

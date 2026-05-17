@@ -6,18 +6,13 @@ use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::mpsc;
 
+pub(crate) use super::document::uri_to_path;
 use super::document::{path_to_uri, DocumentStore, OpenAction};
 use super::transport::{LspNotifier, ServerMessage, Transport};
 
 mod init;
 
 use init::{initialize_params, workspace_folder_additions, workspace_folders_from_paths};
-
-/// Convert a URI back to a file path.
-pub fn uri_to_path(uri: &Uri) -> Option<PathBuf> {
-    let s = uri.as_str();
-    s.strip_prefix("file://").map(PathBuf::from)
-}
 
 /// State of an LSP client connection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

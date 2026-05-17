@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::Path;
 
+use crate::atomic_write::atomic_write;
 use crate::lsp::FormatEdit;
 
 use super::super::byte_index_for_char_col;
@@ -16,7 +17,7 @@ pub(super) fn apply_format_edits_to_file(
         fs::read_to_string(path).map_err(|err| format!("read {} failed: {err}", path.display()))?;
     let (new_text, applied) = apply_format_edits_to_text(&text, edits)?;
     if applied > 0 {
-        fs::write(path, new_text)
+        atomic_write(path, new_text.as_bytes())
             .map_err(|err| format!("write {} failed: {err}", path.display()))?;
     }
     Ok(applied)

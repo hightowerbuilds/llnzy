@@ -1,6 +1,7 @@
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
-use ropey::Rope;
+use ropey::{Rope, RopeSlice};
 
 use crate::editor::history::UndoHistory;
 
@@ -45,17 +46,9 @@ pub struct Buffer {
     /// Save-time policy sourced from `.editorconfig`. `None` means "no
     /// opinion, leave the existing behavior alone".
     ///
-    /// TODO: Wire these into the save path:
-    ///   - `insert_final_newline = Some(true)` should append `\n` if missing.
-    ///   - `insert_final_newline = Some(false)` should strip a trailing `\n`.
-    ///   - `trim_trailing_whitespace = Some(true)` should strip trailing
-    ///     `[ \t]+` from each line on save.
-    ///   - `eol_override` should override `line_ending` for the next save.
-    ///   - `charset_override` requires real encoding plumbing (the buffer
-    ///     currently assumes UTF-8 via `fs::read_to_string`); recorded but
-    ///     not applied.
-    ///
-    /// All four fields are intentionally inert today — see `Buffer::save`.
+    /// The UTF-8 save path applies final-newline, trailing-whitespace, line
+    /// ending, and UTF-8 BOM policies. Non-UTF-8 charsets are recorded for
+    /// future encoding support, but the buffer still reads and writes UTF-8.
     pub insert_final_newline: Option<bool>,
     pub trim_trailing_whitespace: Option<bool>,
     pub eol_override: Option<crate::editor::editorconfig::EndOfLine>,
@@ -138,13 +131,11 @@ impl Buffer {
     }
 
     /// Get the text of a specific line (without trailing newline).
-    pub fn line(&self, idx: usize) -> &str {
+    pub fn line(&self, idx: usize) -> Cow<'_, str> {
         if idx >= self.rope.len_lines() {
-            return "";
+            return Cow::Borrowed("");
         }
-        let line = self.rope.line(idx);
-        let s = line.as_str().unwrap_or("");
-        s.trim_end_matches('\n').trim_end_matches('\r')
+        line_without_newline(self.rope.line(idx))
     }
 
     /// Get the length of a line in characters (without trailing newline).
@@ -279,4 +270,36 @@ impl Buffer {
         }
         None
     }
+}
+
+fn line_without_newline(line: RopeSlice<'_>) -> Cow<'_, str> {
+    match line.as_str() {
+        Some(s) => Cow::Borrowed(trim_line_end(s)),
+        None => {
+            let mut text = rope_slice_to_string(line);
+            let trimmed_len = {
+                let trimmed = trim_line_end(&text);
+                trimmed.len()
+            };
+            text.truncate(trimmed_len);
+            Cow::Owned(text)
+        }
+    }
+}
+
+pub(super) fn rope_slice_to_string(slice: RopeSlice<'_>) -> String {
+    match slice.as_str() {
+        Some(s) => s.to_string(),
+        None => {
+            let mut text = String::with_capacity(slice.len_bytes());
+            for chunk in slice.chunks() {
+                text.push_str(chunk);
+            }
+            text
+        }
+    }
+}
+
+fn trim_line_end(s: &str) -> &str {
+    s.trim_end_matches('\n').trim_end_matches('\r')
 }

@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use super::{Buffer, Position};
 
 /// How this buffer indents.
@@ -154,9 +156,15 @@ impl Buffer {
     }
 
     /// Get the indentation string of a line.
-    pub fn line_indent(&self, line_idx: usize) -> &str {
+    pub fn line_indent(&self, line_idx: usize) -> Cow<'_, str> {
         let line = self.line(line_idx);
-        let trimmed = line.trim_start_matches([' ', '\t']);
-        &line[..line.len() - trimmed.len()]
+        let indent_len = leading_whitespace_len(&line);
+        match line {
+            Cow::Borrowed(line) => Cow::Borrowed(&line[..indent_len]),
+            Cow::Owned(mut line) => {
+                line.truncate(indent_len);
+                Cow::Owned(line)
+            }
+        }
     }
 }

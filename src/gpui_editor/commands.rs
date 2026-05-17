@@ -171,7 +171,7 @@ impl EditorPrototype {
 
             let indent = buffer.line_indent(view.cursor.pos.line).to_string();
             let line_before = buffer.line(view.cursor.pos.line);
-            let cursor_byte = byte_index_for_char_col(line_before, view.cursor.pos.col);
+            let cursor_byte = byte_index_for_char_col(&line_before, view.cursor.pos.col);
             let before_cursor = &line_before[..cursor_byte];
             let extra = if before_cursor.trim_end().ends_with('{')
                 || before_cursor.trim_end().ends_with('(')
@@ -593,7 +593,7 @@ fn dedented_lines_replacement(buffer: &Buffer, start_line: usize, end_line: usiz
     (start_line..=end_line)
         .map(|line_idx| {
             let line = buffer.line(line_idx);
-            let remove_count = dedent_char_count(line, buffer.indent_style.width());
+            let remove_count = dedent_char_count(&line, buffer.indent_style.width());
             line.chars().skip(remove_count).collect::<String>()
         })
         .collect::<Vec<_>>()
@@ -712,7 +712,7 @@ fn toggle_line_comments_as_command(
             continue;
         }
         any_content = true;
-        let indent = line_indent(line);
+        let indent = line_indent(&line);
         if !line[indent.len()..].starts_with(prefix) {
             all_commented = false;
             break;
@@ -729,7 +729,7 @@ fn toggle_line_comments_as_command(
                 return line.to_string();
             }
 
-            let indent = line_indent(line);
+            let indent = line_indent(&line);
             let after_indent = &line[indent.len()..];
             if all_commented {
                 let after_prefix = &after_indent[prefix.len()..];

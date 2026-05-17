@@ -98,7 +98,7 @@ impl WorkspacePrototype {
         cx.notify();
     }
 
-    fn new_file_editor(
+    pub(super) fn new_file_editor(
         &self,
         path: PathBuf,
         cx: &mut Context<Self>,

@@ -707,7 +707,7 @@ fn build_measured_layout(
     let editor_font = font(appearance.font_family.clone());
     let lines = (first_line..visible_end)
         .map(|line_idx| {
-            let visible_text = skip_chars(buffer.line(line_idx), view.scroll_col);
+            let visible_text = skip_chars(&buffer.line(line_idx), view.scroll_col);
             let display_text = SharedString::from(visible_text.clone());
             let run = TextRun {
                 len: display_text.len(),

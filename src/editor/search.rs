@@ -105,7 +105,7 @@ impl EditorSearch {
             let line_text = buf.line(line_idx);
             let line_lower;
             let search_text = if self.case_sensitive {
-                line_text
+                line_text.as_ref()
             } else {
                 line_lower = line_text.to_lowercase();
                 line_lower.as_str()
@@ -146,6 +146,7 @@ impl EditorSearch {
 
         for line_idx in 0..buf.line_count() {
             let line_text = buf.line(line_idx);
+            let line_text = line_text.as_ref();
             for m in re.find_iter(line_text) {
                 let start_col = line_text[..m.start()].chars().count();
                 let match_len = m.as_str().chars().count();

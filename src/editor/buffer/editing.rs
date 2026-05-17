@@ -1,7 +1,7 @@
 use crate::editor::history::EditOp;
 
 use super::indent::leading_whitespace_len;
-use super::model::content_hash;
+use super::model::{content_hash, rope_slice_to_string};
 use super::{Buffer, BufferEdit, Position};
 
 impl Buffer {
@@ -159,8 +159,7 @@ impl Buffer {
         if line_idx >= self.rope.len_lines() {
             return String::new();
         }
-        let line = self.rope.line(line_idx);
-        line.as_str().unwrap_or("").to_string()
+        rope_slice_to_string(self.rope.line(line_idx))
     }
 
     /// Move a line up by one position. Returns new cursor position.
@@ -268,7 +267,7 @@ impl Buffer {
                 continue;
             }
             any_content = true;
-            let indent_len = leading_whitespace_len(line);
+            let indent_len = leading_whitespace_len(&line);
             let after_indent = &line[indent_len..];
             if !after_indent.starts_with(prefix) {
                 all_commented = false;
@@ -285,7 +284,7 @@ impl Buffer {
             if line.trim().is_empty() {
                 continue;
             }
-            let indent_len = leading_whitespace_len(line);
+            let indent_len = leading_whitespace_len(&line);
             if all_commented {
                 let after_prefix = indent_len + prefix.len();
                 let remove_end = if line[after_prefix..].starts_with(' ') {

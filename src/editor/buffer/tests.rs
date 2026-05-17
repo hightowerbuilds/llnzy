@@ -263,6 +263,7 @@ fn apply_scenario_edit(buf: &mut Buffer, edit: ScenarioEdit) {
 fn line_ending_detection() {
     assert_eq!(LineEnding::detect("a\nb\nc\n"), LineEnding::Lf);
     assert_eq!(LineEnding::detect("a\r\nb\r\nc\r\n"), LineEnding::CrLf);
+    assert_eq!(LineEnding::detect("a\rb\rc\r"), LineEnding::Cr);
     assert_eq!(LineEnding::detect("a\r\nb\nc\n"), LineEnding::Lf);
 }
 
@@ -293,6 +294,26 @@ fn char_at_position() {
     assert_eq!(buf.char_at(Position::new(0, 4)), Some('o'));
     assert_eq!(buf.char_at(Position::new(0, 5)), None);
     assert_eq!(buf.char_at(Position::new(1, 0)), None);
+}
+
+#[test]
+fn line_handles_non_contiguous_rope_slice() {
+    let prefix = "a".repeat(16_384);
+    let suffix = "β".repeat(16_384);
+    let line_text = format!("{prefix}中{suffix}");
+    let mut buf = Buffer::empty();
+    buf.insert(Position::new(0, 0), &format!("{line_text}\nnext"));
+
+    assert!(
+        buf.rope.line(0).as_str().is_none(),
+        "test fixture should span multiple rope chunks"
+    );
+    assert_eq!(buf.line(0).as_ref(), line_text);
+    assert_eq!(buf.line_len(0), line_text.chars().count());
+    assert_eq!(
+        buf.char_at(Position::new(0, prefix.chars().count())),
+        Some('中')
+    );
 }
 
 #[test]
@@ -356,6 +377,23 @@ fn failed_save_keeps_buffer_modified() {
 }
 
 #[test]
+fn failed_policy_save_does_not_transform_buffer() {
+    let missing_parent =
+        std::env::temp_dir().join(format!("llnzy-policy-missing-parent-{}", unique_suffix()));
+    let path = missing_parent.join("file.txt");
+
+    let mut buf = Buffer::empty();
+    buf.insert(Position::new(0, 0), "unsaved   ");
+    buf.trim_trailing_whitespace = Some(true);
+    buf.insert_final_newline = Some(true);
+
+    assert!(buf.save_to(&path).is_err());
+    assert!(buf.is_modified());
+    assert!(buf.path().is_none());
+    assert_eq!(buf.text(), "unsaved   ");
+}
+
+#[test]
 fn crlf_preserved_on_save() {
     let dir = std::env::temp_dir();
     let path = dir.join(format!("llnzy-crlf-{}.txt", std::process::id()));
@@ -371,6 +409,104 @@ fn crlf_preserved_on_save() {
 
     let raw = std::fs::read_to_string(&path).unwrap();
     assert!(raw.contains("\r\n"), "CRLF should be preserved");
+
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn editorconfig_save_trims_trailing_whitespace_and_inserts_final_newline() {
+    let dir = std::env::temp_dir();
+    let path = dir.join(format!(
+        "llnzy-editorconfig-trim-{}-{}.txt",
+        std::process::id(),
+        unique_suffix()
+    ));
+
+    let mut buf = Buffer::empty();
+    buf.insert(Position::new(0, 0), "alpha   \n beta\t");
+    buf.trim_trailing_whitespace = Some(true);
+    buf.insert_final_newline = Some(true);
+
+    buf.save_to(&path).unwrap();
+
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "alpha\n beta\n");
+    assert_eq!(buf.text(), "alpha\n beta\n");
+    assert!(!buf.is_modified());
+
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn editorconfig_save_can_remove_final_newlines() {
+    let dir = std::env::temp_dir();
+    let path = dir.join(format!(
+        "llnzy-editorconfig-no-final-{}-{}.txt",
+        std::process::id(),
+        unique_suffix()
+    ));
+
+    let mut buf = Buffer::empty();
+    buf.insert(Position::new(0, 0), "alpha\n\n");
+    buf.insert_final_newline = Some(false);
+
+    buf.save_to(&path).unwrap();
+
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "alpha");
+    assert_eq!(buf.text(), "alpha");
+    assert!(!buf.is_modified());
+
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn editorconfig_save_honors_eol_override() {
+    use crate::editor::editorconfig::EndOfLine;
+
+    let dir = std::env::temp_dir();
+    let path = dir.join(format!(
+        "llnzy-editorconfig-eol-{}-{}.txt",
+        std::process::id(),
+        unique_suffix()
+    ));
+
+    let mut buf = Buffer::empty();
+    buf.insert(Position::new(0, 0), "alpha\nbeta\n");
+    buf.eol_override = Some(EndOfLine::Cr);
+
+    buf.save_to(&path).unwrap();
+
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "alpha\rbeta\r");
+    assert_eq!(buf.text(), "alpha\nbeta\n");
+    assert_eq!(buf.line_ending(), LineEnding::Cr);
+
+    let loaded = Buffer::from_file(&path).unwrap();
+    assert_eq!(loaded.line_ending(), LineEnding::Cr);
+    assert_eq!(loaded.text(), "alpha\nbeta\n");
+
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn editorconfig_save_writes_and_loads_utf8_bom() {
+    use crate::editor::editorconfig::Charset;
+
+    let dir = std::env::temp_dir();
+    let path = dir.join(format!(
+        "llnzy-editorconfig-bom-{}-{}.txt",
+        std::process::id(),
+        unique_suffix()
+    ));
+
+    let mut buf = Buffer::empty();
+    buf.insert(Position::new(0, 0), "hello");
+    buf.charset_override = Some(Charset::Utf8Bom);
+
+    buf.save_to(&path).unwrap();
+
+    let raw = std::fs::read(&path).unwrap();
+    assert!(raw.starts_with(b"\xEF\xBB\xBF"));
+    let loaded = Buffer::from_file(&path).unwrap();
+    assert_eq!(loaded.text(), "hello");
 
     let _ = std::fs::remove_file(&path);
 }
@@ -475,6 +611,21 @@ fn move_line_down() {
     assert_eq!(buf.line(0), "bbb");
     assert_eq!(buf.line(1), "aaa");
     assert_eq!(buf.line(2), "ccc");
+}
+
+#[test]
+fn move_line_preserves_non_contiguous_rope_slice() {
+    let long_line = "x".repeat(16_384);
+    let mut buf = Buffer::empty();
+    buf.insert(Position::new(0, 0), &format!("{long_line}\nshort"));
+
+    assert!(
+        buf.rope.line(0).as_str().is_none(),
+        "test fixture should span multiple rope chunks"
+    );
+    buf.move_line_down(0);
+    assert_eq!(buf.line(0), "short");
+    assert_eq!(buf.line(1).as_ref(), long_line);
 }
 
 #[test]
@@ -641,4 +792,11 @@ fn prose_buffer_supports_normal_edits_without_changing_kind() {
     assert_eq!(buf.line(0), "hello world");
     assert_eq!(buf.kind(), BufferKind::Prose);
     assert!(buf.is_modified());
+}
+
+fn unique_suffix() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos()
 }
