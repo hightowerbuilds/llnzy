@@ -17,11 +17,16 @@ pub enum PtyReadResult {
     Disconnected(Option<i32>),
 }
 
+/// Maximum number of pending write chunks before new writes are dropped.
+/// 64 chunks × typical write granularity comfortably covers normal pastes
+/// while bounding queued memory when the shell is unable to drain.
+const PTY_WRITE_QUEUE_CAPACITY: usize = 64;
+
 pub struct Pty {
     master: Box<dyn MasterPty + Send>,
     child: Box<dyn Child + Send + Sync>,
     process_id: Option<u32>,
-    write_tx: mpsc::Sender<Vec<u8>>,
+    write_tx: mpsc::SyncSender<Vec<u8>>,
     output_rx: mpsc::Receiver<Vec<u8>>,
     /// Signalled by the reader thread whenever a read completes (data
     /// arrived, EOF, or error). The GPUI render task awaits this notifier
@@ -73,7 +78,7 @@ impl Pty {
         let mut writer = pair.master.take_writer().map_err(io::Error::other)?;
 
         let (read_tx, read_rx) = mpsc::channel();
-        let (write_tx, write_rx) = mpsc::channel::<Vec<u8>>();
+        let (write_tx, write_rx) = mpsc::sync_channel::<Vec<u8>>(PTY_WRITE_QUEUE_CAPACITY);
 
         let wakeup = Arc::new(Notify::new());
         let wakeup_reader = wakeup.clone();
@@ -181,11 +186,25 @@ impl Pty {
     /// Write input bytes to the PTY (non-blocking).
     /// Data is sent to a background write thread that handles the
     /// potentially-blocking PTY write, keeping the main thread free.
+    /// The write queue is bounded; on overflow the chunk is dropped and a
+    /// warning is logged rather than blocking the caller or growing memory.
     pub fn write(&mut self, data: &[u8]) {
         if self.dead {
             return;
         }
-        let _ = self.write_tx.send(data.to_vec());
+        match self.write_tx.try_send(data.to_vec()) {
+            Ok(()) => {}
+            Err(mpsc::TrySendError::Full(dropped)) => {
+                log::warn!(
+                    "PTY write queue full ({} chunks); dropping {} bytes",
+                    PTY_WRITE_QUEUE_CAPACITY,
+                    dropped.len()
+                );
+            }
+            Err(mpsc::TrySendError::Disconnected(_)) => {
+                self.dead = true;
+            }
+        }
     }
 
     /// Resize the PTY.
@@ -196,6 +215,16 @@ impl Pty {
             pixel_width: 0,
             pixel_height: 0,
         });
+    }
+}
+
+impl Drop for Pty {
+    /// Kill the child process so neither the OS process nor the reader/writer
+    /// threads outlive this `Pty`. The reader thread exits once the master
+    /// read returns EOF after the child closes; the writer thread exits once
+    /// `write_tx` is dropped along with the rest of `Self`.
+    fn drop(&mut self) {
+        let _ = self.child.kill();
     }
 }
 

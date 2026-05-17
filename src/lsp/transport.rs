@@ -10,6 +10,12 @@ use tokio::sync::{mpsc, oneshot, Mutex};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Soft cap on the number of outstanding LSP requests held in `pending`.
+/// A stalled server cannot drive this above the request rate × timeout
+/// product (≈ a few hundred entries in the worst observed case); past
+/// the cap we reject new requests instead of letting the map grow.
+const PENDING_REQUESTS_CAPACITY: usize = 256;
+
 /// Wakes whichever UI runtime owns the LSP manager after server activity.
 #[derive(Clone)]
 pub struct LspNotifier {
@@ -129,7 +135,17 @@ impl Transport {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
 
         let (tx, rx) = oneshot::channel();
-        self.pending.lock().await.insert(id, tx);
+        {
+            let mut pending = self.pending.lock().await;
+            if pending.len() >= PENDING_REQUESTS_CAPACITY {
+                return Err(format!(
+                    "LSP transport has {} outstanding requests; refusing new \
+                     {method} request to bound memory",
+                    pending.len()
+                ));
+            }
+            pending.insert(id, tx);
+        }
 
         let msg = serde_json::json!({
             "jsonrpc": "2.0",

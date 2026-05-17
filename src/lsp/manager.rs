@@ -1,11 +1,18 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use rustc_hash::FxHashMap;
 use serde_json::Value;
 use tokio::runtime::Runtime;
 use tokio::sync::oneshot;
+use tokio::time::timeout;
+
+/// Per-client shutdown budget. After this elapses without the LSP server
+/// replying to `shutdown`/`exit`, we abandon the graceful handshake and let
+/// the client drop, which force-kills the child via `kill_on_drop=true`.
+const LSP_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 
 use super::client::{self, LspClient, LspNotification};
 use super::diagnostics::{clear_document_diagnostics, remap_document_diagnostics};
@@ -673,8 +680,21 @@ impl LspManager {
         for lang_id in keys {
             if let Some(mut client) = self.clients.remove(lang_id) {
                 runtime.block_on(async {
-                    let _ = client.shutdown().await;
+                    if timeout(LSP_SHUTDOWN_TIMEOUT, client.shutdown())
+                        .await
+                        .is_err()
+                    {
+                        log::warn!(
+                            "LSP {} did not respond to shutdown within {:?}; \
+                             force-killing on drop",
+                            lang_id,
+                            LSP_SHUTDOWN_TIMEOUT
+                        );
+                    }
                 });
+                // `client` drops here. Its transport's `kill_on_drop=true`
+                // setting on the child process guarantees we never leak the
+                // server process even if the graceful handshake bailed out.
             }
         }
     }
