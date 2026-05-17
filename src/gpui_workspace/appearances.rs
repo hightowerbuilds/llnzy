@@ -1320,6 +1320,7 @@ fn background_image_display_name(reference: &str) -> String {
 
 pub(super) fn settings_surface(
     show_explorer_button: bool,
+    editor_word_wrap: bool,
     joined_tab_limit: usize,
     error_log_expanded: bool,
     error_log_filter: ErrorLogFilter,
@@ -1353,6 +1354,15 @@ pub(super) fn settings_surface(
             show_explorer_button,
             cx,
             |this, cx| this.toggle_show_explorer_button(cx),
+        )
+        .into_any_element()]))
+        .child(settings_subheader("Editor"))
+        .child(settings_section(vec![settings_toggle_row(
+            "Word wrap",
+            "Wraps long source lines in JavaScript, Markdown, and other text files.",
+            editor_word_wrap,
+            cx,
+            |this, cx| this.toggle_editor_word_wrap(cx),
         )
         .into_any_element()]))
         .child(settings_subheader("Tabs"))

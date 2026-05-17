@@ -28,21 +28,34 @@ pub(super) fn editor_line(
     cursor_visible: bool,
     selection: Option<(Position, Position)>,
     scroll_col: usize,
+    visible_cols: Option<usize>,
+    show_line_number: bool,
     appearance: &EditorAppearance,
 ) -> gpui::Div {
     let line = number.saturating_sub(1);
-    let visible_text = display_visible_text(text, scroll_col, appearance.visible_whitespace);
+    let visible_text = display_visible_text(
+        text,
+        scroll_col,
+        visible_cols,
+        appearance.visible_whitespace,
+    );
+    let visible_text_cols = visible_text.chars().count();
+    let visible_end_col = scroll_col + visible_text_cols;
+    let line_cols = text.chars().count();
     let diagnostic_range = diagnostic.and_then(|diagnostic| {
         diagnostic_line_range(
             diagnostic,
             line,
             text.chars().count(),
             scroll_col,
-            visible_text.chars().count().max(1),
+            visible_text_cols.max(1),
         )
     });
     let visible_cursor = cursor.and_then(|cursor| {
-        (cursor.col >= scroll_col).then_some(Position::new(line, cursor.col - scroll_col))
+        let in_segment = cursor.col >= scroll_col
+            && (cursor.col < visible_end_col
+                || (cursor.col == line_cols && cursor.col == visible_end_col));
+        in_segment.then_some(Position::new(line, cursor.col - scroll_col))
     });
     let line_selection =
         selection.and_then(|(start, end)| selection_for_line(start, end, line, text));
@@ -50,7 +63,8 @@ pub(super) fn editor_line(
     let selected = line_selection.is_some();
     let trailing_selection = line_selection.is_some_and(|selection| {
         selection.includes_line_break
-            && selection.end_col >= scroll_col + visible_text.chars().count()
+            && selection.end_col >= visible_end_col
+            && visible_end_col >= line_cols
     });
     let text_cell = if let Some(cursor) = visible_cursor {
         let (before, after) = split_chars(&visible_text, cursor.col);
@@ -145,7 +159,11 @@ pub(super) fn editor_line(
                 .when_some(diagnostic, |gutter, diagnostic| {
                     gutter.child(diagnostic_marker(diagnostic.severity))
                 })
-                .child(number.to_string()),
+                .child(if show_line_number {
+                    number.to_string()
+                } else {
+                    String::new()
+                }),
         );
     } else if let Some(diagnostic) = diagnostic {
         row = row.child(
@@ -213,8 +231,16 @@ pub(super) fn skip_chars(text: &str, char_count: usize) -> String {
     text[byte..].to_string()
 }
 
-fn display_visible_text(text: &str, scroll_col: usize, visible_whitespace: bool) -> String {
-    let visible = skip_chars(text, scroll_col);
+fn display_visible_text(
+    text: &str,
+    scroll_col: usize,
+    visible_cols: Option<usize>,
+    visible_whitespace: bool,
+) -> String {
+    let visible = match visible_cols {
+        Some(cols) => take_chars(&skip_chars(text, scroll_col), cols),
+        None => skip_chars(text, scroll_col),
+    };
     if !visible_whitespace {
         return visible;
     }
@@ -227,6 +253,15 @@ fn display_visible_text(text: &str, scroll_col: usize, visible_whitespace: bool)
             _ => ch,
         })
         .collect()
+}
+
+fn take_chars(text: &str, char_count: usize) -> String {
+    let byte = text
+        .char_indices()
+        .map(|(byte, _)| byte)
+        .nth(char_count)
+        .unwrap_or(text.len());
+    text[..byte].to_string()
 }
 
 fn styled_text_segments(

@@ -102,11 +102,12 @@ impl EditorPrototype {
 
         let visible_cols = self.visible_col_limit();
         let visible_lines = self.visible_line_limit();
+        let word_wrap = self.active_appearance().word_wrap;
         let moved = if let Some((buffer, view)) = self.active_buffer_and_view() {
             view.cursor.pos = Position::new(line, 0);
             view.cursor.clear_selection();
             view.cursor.desired_col = None;
-            reveal_cursor(view, buffer.line_count(), visible_cols, visible_lines);
+            reveal_cursor(view, buffer, visible_cols, visible_lines, word_wrap);
             true
         } else {
             false
@@ -240,11 +241,12 @@ impl EditorPrototype {
         };
         let visible_cols = self.visible_col_limit();
         let visible_lines = self.visible_line_limit();
+        let word_wrap = self.active_appearance().word_wrap;
         if let Some((buffer, view)) = self.active_buffer_and_view() {
             view.cursor.anchor = Some(search_match.start);
             view.cursor.pos = search_match.end;
             view.cursor.desired_col = None;
-            reveal_cursor(view, buffer.line_count(), visible_cols, visible_lines);
+            reveal_cursor(view, buffer, visible_cols, visible_lines, word_wrap);
         }
         cx.notify();
     }

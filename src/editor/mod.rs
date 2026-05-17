@@ -33,6 +33,9 @@ impl BufferId {
 /// Per-buffer view state (cursor position, scroll offsets, syntax tree).
 pub struct BufferView {
     pub cursor: EditorCursor,
+    /// Vertical scroll in wrapped visual rows. Used only when soft word wrap is
+    /// active; `scroll_line` remains the logical-line scroll for classic mode.
+    pub wrap_scroll_row: usize,
     pub scroll_line: usize,
     pub scroll_col: usize,
     /// Smooth scroll target (None = already at destination).
@@ -85,6 +88,7 @@ impl Default for BufferView {
     fn default() -> Self {
         Self {
             cursor: EditorCursor::new(),
+            wrap_scroll_row: 0,
             scroll_line: 0,
             scroll_col: 0,
             scroll_target: None,
@@ -110,6 +114,7 @@ impl Clone for BufferView {
     fn clone(&self) -> Self {
         Self {
             cursor: self.cursor.clone(),
+            wrap_scroll_row: self.wrap_scroll_row,
             scroll_line: self.scroll_line,
             scroll_col: self.scroll_col,
             scroll_target: self.scroll_target,

@@ -9,8 +9,17 @@ pub(super) struct EditorMeasuredLayout {
 #[derive(Clone)]
 struct EditorMeasuredLine {
     source_line: usize,
+    wrap_start_col: usize,
     visible_text: String,
     shaped: ShapedLine,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct WrappedVisualRow {
+    pub(super) source_line: usize,
+    pub(super) wrap_start_col: usize,
+    pub(super) wrap_cols: usize,
+    pub(super) show_line_number: bool,
 }
 
 impl EditorPrototype {
@@ -210,11 +219,12 @@ impl EditorPrototype {
             if event.click_count >= 3 {
                 let visible_cols = self.visible_col_limit();
                 let visible_lines = self.visible_line_limit();
+                let word_wrap = self.active_appearance().word_wrap;
                 if let Some((buffer, view)) = self.active_buffer_and_view() {
                     view.cursor.pos = position;
                     view.cursor.select_line(buffer);
                     view.cursor.desired_col = None;
-                    reveal_cursor(view, buffer.line_count(), visible_cols, visible_lines);
+                    reveal_cursor(view, buffer, visible_cols, visible_lines, word_wrap);
                 }
                 self.is_selecting = false;
                 self.wake_cursor_blink();
@@ -225,11 +235,12 @@ impl EditorPrototype {
             if event.click_count == 2 {
                 let visible_cols = self.visible_col_limit();
                 let visible_lines = self.visible_line_limit();
+                let word_wrap = self.active_appearance().word_wrap;
                 if let Some((buffer, view)) = self.active_buffer_and_view() {
                     view.cursor.pos = position;
                     view.cursor.select_word(buffer);
                     view.cursor.desired_col = None;
-                    reveal_cursor(view, buffer.line_count(), visible_cols, visible_lines);
+                    reveal_cursor(view, buffer, visible_cols, visible_lines, word_wrap);
                 }
                 self.is_selecting = false;
                 self.wake_cursor_blink();
@@ -294,12 +305,13 @@ impl EditorPrototype {
         if let Some((position, scrolled)) = self.drag_position_for_point(point) {
             let visible_cols = self.visible_col_limit();
             let visible_lines = self.visible_line_limit();
+            let word_wrap = self.active_appearance().word_wrap;
             let changed = if let Some((buffer, view)) = self.active_buffer_and_view() {
                 let changed = view.cursor.pos != position || scrolled;
                 view.cursor.start_selection();
                 view.cursor.pos = position;
                 view.cursor.desired_col = None;
-                reveal_cursor(view, buffer.line_count(), visible_cols, visible_lines);
+                reveal_cursor(view, buffer, visible_cols, visible_lines, word_wrap);
                 changed
             } else {
                 false
@@ -336,8 +348,11 @@ impl EditorPrototype {
         let appearance = self.active_appearance();
         let vertical_delta =
             drag_scroll_delta_for_local_y(local_point.y, bounds.size.height, &appearance);
-        let horizontal_delta =
-            drag_scroll_delta_for_local_x(local_point.x, bounds.size.width, &appearance);
+        let horizontal_delta = if appearance.word_wrap {
+            0
+        } else {
+            drag_scroll_delta_for_local_x(local_point.x, bounds.size.width, &appearance)
+        };
         let scrolled = self.scroll_active_by_lines_without_notify(vertical_delta)
             | self.scroll_active_by_columns_without_notify(horizontal_delta);
         let clamped_point = clamp_local_editor_point(bounds, local_point);
@@ -364,6 +379,25 @@ impl EditorPrototype {
 
         let row = editor_row_for_local_y(local_point.y, &appearance)
             .min(self.visible_line_limit().saturating_sub(1));
+        if appearance.word_wrap {
+            let wrap_cols = self.visible_col_limit().max(1);
+            let visual_row = view.wrap_scroll_row.saturating_add(row);
+            let wrapped = wrapped_row_for_visual_row(buffer, visual_row, wrap_cols)?;
+            let line = wrapped
+                .source_line
+                .min(buffer.line_count().saturating_sub(1));
+            let col = if local_point.x <= appearance.line_number_width {
+                wrapped.wrap_start_col
+            } else {
+                let visible_col = ((local_point.x - appearance.line_number_width)
+                    / appearance.char_width)
+                    .round()
+                    .max(0.0) as usize;
+                wrapped.wrap_start_col.saturating_add(visible_col)
+            };
+            return Some(Position::new(line, col.min(buffer.line_len(line))));
+        }
+
         let line = (view.scroll_line + row).min(buffer.line_count().saturating_sub(1));
         let col = if local_point.x <= appearance.line_number_width {
             0
@@ -381,8 +415,15 @@ impl EditorPrototype {
         if delta == 0 {
             return false;
         }
+        let appearance = self.active_appearance();
         let visible_lines = self.visible_line_limit();
+        let visible_cols = self.visible_col_limit();
         if let Some((buffer, view)) = self.active_buffer_and_view() {
+            if appearance.word_wrap {
+                let old_scroll_row = view.wrap_scroll_row;
+                scroll_wrapped_view_by_rows(view, buffer, visible_cols, visible_lines, delta);
+                return view.wrap_scroll_row != old_scroll_row;
+            }
             let old_scroll_line = view.scroll_line;
             scroll_view_by_lines(view, buffer.line_count(), visible_lines, delta);
             view.scroll_line != old_scroll_line
@@ -400,6 +441,14 @@ impl EditorPrototype {
 
     pub(super) fn scroll_active_by_columns_without_notify(&mut self, delta: isize) -> bool {
         if delta == 0 {
+            return false;
+        }
+        if self.active_appearance().word_wrap {
+            if let Some((_, view)) = self.active_buffer_and_view() {
+                let changed = view.scroll_col != 0;
+                view.scroll_col = 0;
+                return changed;
+            }
             return false;
         }
         let visible_cols = self.visible_col_limit();
@@ -563,8 +612,10 @@ impl EntityInputHandler for EditorPrototype {
     ) -> Option<Bounds<gpui::Pixels>> {
         let start = self.position_for_utf16(range_utf16.start)?;
         let appearance = self.active_appearance();
+        let (_, buffer, view) = self.editor.active_buffer_view()?;
         Some(bounds_for_position(
-            self.editor.active_buffer_view()?.2,
+            view,
+            buffer,
             start,
             bounds,
             self.last_text_layout.as_ref(),
@@ -649,6 +700,14 @@ impl Element for EditorInputElement {
             input.last_text_bounds = Some(bounds);
             input.last_text_layout = layout;
             if previous_viewport != Some(next_viewport) {
+                if appearance.word_wrap {
+                    let active = input.editor.active;
+                    if active < input.editor.buffers.len() && active < input.editor.views.len() {
+                        let buffer = &input.editor.buffers[active];
+                        let view = &mut input.editor.views[active];
+                        reveal_cursor(view, buffer, next_viewport.0, next_viewport.1, true);
+                    }
+                }
                 _cx.notify();
             }
         });
@@ -700,14 +759,36 @@ fn build_measured_layout(
     window: &mut Window,
 ) -> Option<EditorMeasuredLayout> {
     let (_, buffer, view) = editor.active_buffer_view()?;
-    let line_count = buffer.line_count();
-    let first_line = view.scroll_line.min(line_count.saturating_sub(1));
     let visible_lines = visible_line_limit_for_bounds(bounds, appearance);
-    let visible_end = line_count.min(first_line + visible_lines);
+    let wrap_cols = visible_col_limit_for_bounds(bounds, appearance).max(1);
     let editor_font = font(appearance.font_family.clone());
-    let lines = (first_line..visible_end)
+    let rows = if appearance.word_wrap {
+        wrapped_visual_rows(buffer, view.wrap_scroll_row, visible_lines, wrap_cols)
+    } else {
+        let line_count = buffer.line_count();
+        let first_line = view.scroll_line.min(line_count.saturating_sub(1));
+        let visible_end = line_count.min(first_line + visible_lines);
+        (first_line..visible_end)
+            .map(|source_line| WrappedVisualRow {
+                source_line,
+                wrap_start_col: view.scroll_col,
+                wrap_cols: usize::MAX,
+                show_line_number: true,
+            })
+            .collect()
+    };
+    let lines = rows
+        .into_iter()
         .map(|line_idx| {
-            let visible_text = skip_chars(&buffer.line(line_idx), view.scroll_col);
+            let source = buffer.line(line_idx.source_line);
+            let visible_text = if appearance.word_wrap {
+                take_chars(
+                    &skip_chars(&source, line_idx.wrap_start_col),
+                    line_idx.wrap_cols,
+                )
+            } else {
+                skip_chars(&source, line_idx.wrap_start_col)
+            };
             let display_text = SharedString::from(visible_text.clone());
             let run = TextRun {
                 len: display_text.len(),
@@ -722,7 +803,8 @@ fn build_measured_layout(
                     .text_system()
                     .shape_line(display_text, appearance.font_size, &[run], None);
             EditorMeasuredLine {
-                source_line: line_idx,
+                source_line: line_idx.source_line,
+                wrap_start_col: line_idx.wrap_start_col,
                 visible_text,
                 shaped,
             }
@@ -730,7 +812,11 @@ fn build_measured_layout(
         .collect();
 
     Some(EditorMeasuredLayout {
-        scroll_col: view.scroll_col,
+        scroll_col: if appearance.word_wrap {
+            0
+        } else {
+            view.scroll_col
+        },
         lines,
     })
 }
@@ -746,11 +832,165 @@ pub(super) fn measured_position_for_point(
     let text_x = (local_point.x - appearance.line_number_width).max(px(0.0));
     let byte_index = measured_line.shaped.closest_index_for_x(text_x);
     let visible_col = char_count_for_byte_index(&measured_line.visible_text, byte_index);
-    let col = layout.scroll_col.saturating_add(visible_col);
+    let col = if appearance.word_wrap {
+        measured_line.wrap_start_col.saturating_add(visible_col)
+    } else {
+        layout.scroll_col.saturating_add(visible_col)
+    };
     let line = measured_line
         .source_line
         .min(buffer.line_count().saturating_sub(1));
     Some(Position::new(line, col.min(buffer.line_len(line))))
+}
+
+pub(super) fn wrapped_visual_rows(
+    buffer: &Buffer,
+    start_visual_row: usize,
+    visible_rows: usize,
+    wrap_cols: usize,
+) -> Vec<WrappedVisualRow> {
+    let wrap_cols = wrap_cols.max(1);
+    let mut rows = Vec::new();
+    let mut visual_base = 0usize;
+    let end_visual_row = start_visual_row.saturating_add(visible_rows.max(1));
+
+    for source_line in 0..buffer.line_count() {
+        let line_len = buffer.line_len(source_line);
+        let row_count = wrapped_row_count(line_len, wrap_cols);
+        let line_end = visual_base + row_count;
+        if line_end <= start_visual_row {
+            visual_base = line_end;
+            continue;
+        }
+        if visual_base >= end_visual_row {
+            break;
+        }
+
+        let first_wrap = start_visual_row.saturating_sub(visual_base);
+        let last_wrap = row_count.min(end_visual_row.saturating_sub(visual_base));
+        for wrap_index in first_wrap..last_wrap {
+            rows.push(WrappedVisualRow {
+                source_line,
+                wrap_start_col: wrap_index * wrap_cols,
+                wrap_cols,
+                show_line_number: wrap_index == 0,
+            });
+        }
+        visual_base = line_end;
+    }
+
+    rows
+}
+
+pub(super) fn total_wrapped_rows(buffer: &Buffer, wrap_cols: usize) -> usize {
+    let wrap_cols = wrap_cols.max(1);
+    (0..buffer.line_count())
+        .map(|line| wrapped_row_count(buffer.line_len(line), wrap_cols))
+        .sum()
+}
+
+pub(super) fn visual_row_for_position(
+    buffer: &Buffer,
+    position: Position,
+    wrap_cols: usize,
+) -> usize {
+    let wrap_cols = wrap_cols.max(1);
+    let preceding_rows = (0..position.line.min(buffer.line_count()))
+        .map(|line| wrapped_row_count(buffer.line_len(line), wrap_cols))
+        .sum::<usize>();
+    let line_len = buffer.line_len(position.line.min(buffer.line_count().saturating_sub(1)));
+    preceding_rows + wrapped_row_index_for_col(line_len, position.col, wrap_cols)
+}
+
+pub(super) fn move_cursor_by_wrapped_rows(
+    view: &mut BufferView,
+    buffer: &Buffer,
+    visible_cols: usize,
+    row_delta: isize,
+    extend: bool,
+) {
+    let wrap_cols = visible_cols.max(1);
+    let current_visual_row = visual_row_for_position(buffer, view.cursor.pos, wrap_cols);
+    let total_rows = total_wrapped_rows(buffer, wrap_cols);
+    let current_visual_col = view
+        .cursor
+        .desired_col
+        .unwrap_or_else(|| visual_col_for_wrapped_position(buffer, view.cursor.pos, wrap_cols));
+
+    let target_position = if row_delta < 0 && current_visual_row == 0 {
+        Position::new(0, 0)
+    } else if row_delta > 0 && current_visual_row >= total_rows.saturating_sub(1) {
+        let line = buffer.line_count().saturating_sub(1);
+        Position::new(line, buffer.line_len(line))
+    } else {
+        let target_visual_row = if row_delta < 0 {
+            current_visual_row.saturating_sub(row_delta.unsigned_abs())
+        } else {
+            current_visual_row.saturating_add(row_delta as usize)
+        }
+        .min(total_rows.saturating_sub(1));
+        let Some(row) = wrapped_row_for_visual_row(buffer, target_visual_row, wrap_cols) else {
+            return;
+        };
+        Position::new(
+            row.source_line,
+            row.wrap_start_col
+                .saturating_add(current_visual_col)
+                .min(buffer.line_len(row.source_line)),
+        )
+    };
+
+    if extend {
+        view.cursor.start_selection();
+    } else {
+        view.cursor.clear_selection();
+    }
+    view.cursor.pos = target_position;
+    view.cursor.desired_col = Some(current_visual_col);
+}
+
+fn wrapped_row_for_visual_row(
+    buffer: &Buffer,
+    visual_row: usize,
+    wrap_cols: usize,
+) -> Option<WrappedVisualRow> {
+    wrapped_visual_rows(buffer, visual_row, 1, wrap_cols)
+        .into_iter()
+        .next()
+}
+
+fn wrapped_row_count(line_len: usize, wrap_cols: usize) -> usize {
+    let wrap_cols = wrap_cols.max(1);
+    if line_len == 0 {
+        1
+    } else {
+        line_len.saturating_sub(1) / wrap_cols + 1
+    }
+}
+
+fn wrapped_row_index_for_col(line_len: usize, col: usize, wrap_cols: usize) -> usize {
+    let wrap_cols = wrap_cols.max(1);
+    if col > 0 && col == line_len && col % wrap_cols == 0 {
+        col / wrap_cols - 1
+    } else {
+        col / wrap_cols
+    }
+}
+
+fn visual_col_for_wrapped_position(buffer: &Buffer, position: Position, wrap_cols: usize) -> usize {
+    let wrap_cols = wrap_cols.max(1);
+    let line_len = buffer.line_len(position.line.min(buffer.line_count().saturating_sub(1)));
+    let wrap_index = wrapped_row_index_for_col(line_len, position.col, wrap_cols);
+    position.col.saturating_sub(wrap_index * wrap_cols)
+}
+
+fn take_chars(text: &str, char_count: usize) -> String {
+    let byte = text
+        .char_indices()
+        .map(|(byte, _)| byte)
+        .nth(char_count)
+        .unwrap_or(text.len());
+    text[..byte].to_string()
 }
 
 fn char_count_for_byte_index(text: &str, byte_index: usize) -> usize {
@@ -767,33 +1007,47 @@ pub(super) fn editor_row_for_local_y(y: Pixels, appearance: &EditorAppearance) -
 
 fn bounds_for_position(
     view: &BufferView,
+    buffer: &Buffer,
     position: Position,
     bounds: Bounds<gpui::Pixels>,
     measured: Option<&EditorMeasuredLayout>,
     appearance: &EditorAppearance,
 ) -> Bounds<gpui::Pixels> {
-    if let Some(line) = measured.and_then(|layout| {
-        layout
-            .lines
-            .iter()
-            .find(|line| line.source_line == position.line)
+    if let Some((row, line)) = measured.and_then(|layout| {
+        layout.lines.iter().enumerate().find(|(_, line)| {
+            if line.source_line != position.line {
+                return false;
+            }
+            let start = line.wrap_start_col;
+            let end = start + line.visible_text.chars().count();
+            position.col >= start && (position.col < end || position.col == end)
+        })
     }) {
-        let visible_col = position.col.saturating_sub(view.scroll_col);
+        let visible_col = position.col.saturating_sub(line.wrap_start_col);
         let byte_index = byte_index_for_char_col(&line.visible_text, visible_col);
         let x = line.shaped.x_for_index(byte_index.min(line.shaped.len()));
         return Bounds::new(
             gpui::point(
                 bounds.left() + appearance.line_number_width + x,
-                bounds.top()
-                    + appearance.vertical_padding
-                    + appearance.line_height
-                        * position.line.saturating_sub(view.scroll_line) as f32,
+                bounds.top() + appearance.vertical_padding + appearance.line_height * row as f32,
             ),
             size(px(2.0), appearance.line_height),
         );
     }
 
-    let visible_col = position.col.saturating_sub(view.scroll_col);
+    let (visible_col, visible_row) = if appearance.word_wrap {
+        let wrap_cols = visible_col_limit_for_bounds(bounds, appearance);
+        (
+            visual_col_for_wrapped_position(buffer, position, wrap_cols),
+            visual_row_for_position(buffer, position, wrap_cols)
+                .saturating_sub(view.wrap_scroll_row),
+        )
+    } else {
+        (
+            position.col.saturating_sub(view.scroll_col),
+            position.line.saturating_sub(view.scroll_line),
+        )
+    };
     Bounds::new(
         gpui::point(
             bounds.left()
@@ -801,7 +1055,7 @@ fn bounds_for_position(
                 + appearance.char_width * visible_col as f32,
             bounds.top()
                 + appearance.vertical_padding
-                + appearance.line_height * position.line.saturating_sub(view.scroll_line) as f32,
+                + appearance.line_height * visible_row as f32,
         ),
         size(px(2.0), appearance.line_height),
     )
@@ -910,10 +1164,30 @@ fn drag_scroll_delta_for_local_x(
 
 pub(super) fn reveal_cursor(
     view: &mut BufferView,
-    line_count: usize,
+    buffer: &Buffer,
     visible_cols: usize,
     visible_lines: usize,
+    word_wrap: bool,
 ) {
+    if word_wrap {
+        let wrap_cols = visible_cols.max(1);
+        let cursor_row = visual_row_for_position(buffer, view.cursor.pos, wrap_cols);
+        if cursor_row < view.wrap_scroll_row {
+            view.wrap_scroll_row = cursor_row;
+        } else if cursor_row >= view.wrap_scroll_row + visible_lines.max(1) {
+            view.wrap_scroll_row = cursor_row.saturating_sub(visible_lines.max(1) - 1);
+        }
+        view.wrap_scroll_row = view
+            .wrap_scroll_row
+            .min(total_wrapped_rows(buffer, wrap_cols).saturating_sub(visible_lines.max(1)));
+        view.scroll_col = 0;
+        if let Some(row) = wrapped_row_for_visual_row(buffer, view.wrap_scroll_row, wrap_cols) {
+            view.scroll_line = row.source_line;
+        }
+        return;
+    }
+
+    let line_count = buffer.line_count();
     let cursor_line = view.cursor.pos.line.min(line_count.saturating_sub(1));
     if cursor_line < view.scroll_line {
         view.scroll_line = cursor_line;
@@ -928,6 +1202,7 @@ pub(super) fn reveal_cursor(
     } else if cursor_col >= view.scroll_col.saturating_add(visible_cols) {
         view.scroll_col = cursor_col.saturating_sub(visible_cols.saturating_sub(1));
     }
+    view.wrap_scroll_row = view.scroll_line;
 }
 
 fn scroll_view_by_lines(
@@ -947,6 +1222,31 @@ fn scroll_view_by_columns(
 ) {
     let max_line_len = max_buffer_line_len(buffer);
     view.scroll_col = scroll_col_by_delta(view.scroll_col, max_line_len, visible_cols, delta);
+}
+
+fn scroll_wrapped_view_by_rows(
+    view: &mut BufferView,
+    buffer: &Buffer,
+    visible_cols: usize,
+    visible_lines: usize,
+    delta: isize,
+) {
+    let wrap_cols = visible_cols.max(1);
+    let total_rows = total_wrapped_rows(buffer, wrap_cols);
+    let max_scroll = total_rows.saturating_sub(visible_lines.max(1));
+    view.wrap_scroll_row = if delta < 0 {
+        view.wrap_scroll_row
+            .saturating_sub(delta.unsigned_abs())
+            .min(max_scroll)
+    } else {
+        view.wrap_scroll_row
+            .saturating_add(delta as usize)
+            .min(max_scroll)
+    };
+    view.scroll_col = 0;
+    if let Some(row) = wrapped_row_for_visual_row(buffer, view.wrap_scroll_row, wrap_cols) {
+        view.scroll_line = row.source_line;
+    }
 }
 
 fn scroll_line_by_delta(
@@ -1072,12 +1372,13 @@ mod tests {
 
     #[test]
     fn reveal_cursor_does_not_jump_when_cursor_is_visible() {
+        let buffer = buffer_with_lines(100, 120);
         let mut view = BufferView::default();
         view.scroll_line = 10;
         view.scroll_col = 20;
         view.cursor.pos = Position::new(15, 30);
 
-        reveal_cursor(&mut view, 100, 80, 32);
+        reveal_cursor(&mut view, &buffer, 80, 32, false);
 
         assert_eq!(view.scroll_line, 10);
         assert_eq!(view.scroll_col, 20);
@@ -1085,15 +1386,72 @@ mod tests {
 
     #[test]
     fn reveal_cursor_scrolls_minimally_to_cursor() {
+        let buffer = buffer_with_lines(200, 200);
         let mut view = BufferView::default();
         view.scroll_line = 10;
         view.scroll_col = 20;
         view.cursor.pos = Position::new(100, 150);
 
-        reveal_cursor(&mut view, 200, 80, 32);
+        reveal_cursor(&mut view, &buffer, 80, 32, false);
 
         assert_eq!(view.scroll_line, 100usize.saturating_sub(32 - 1));
         assert_eq!(view.scroll_col, 71);
+    }
+
+    #[test]
+    fn wrapped_visual_rows_split_long_lines() {
+        let buffer = buffer_with_text("abcdefghij\nxy");
+
+        let rows = wrapped_visual_rows(&buffer, 1, 3, 4);
+
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].source_line, 0);
+        assert_eq!(rows[0].wrap_start_col, 4);
+        assert!(!rows[0].show_line_number);
+        assert_eq!(rows[1].source_line, 0);
+        assert_eq!(rows[1].wrap_start_col, 8);
+        assert!(!rows[1].show_line_number);
+        assert_eq!(rows[2].source_line, 1);
+        assert_eq!(rows[2].wrap_start_col, 0);
+        assert!(rows[2].show_line_number);
+    }
+
+    #[test]
+    fn visual_row_for_position_keeps_boundary_cursor_on_previous_wrap() {
+        let buffer = buffer_with_text("abcdefgh\nnext");
+
+        assert_eq!(visual_row_for_position(&buffer, Position::new(0, 8), 4), 1);
+        assert_eq!(visual_row_for_position(&buffer, Position::new(1, 0), 4), 2);
+    }
+
+    #[test]
+    fn wrapped_vertical_movement_preserves_visual_column() {
+        let buffer = buffer_with_text("abcdefghij\nxyz");
+        let mut view = BufferView::default();
+        view.cursor.pos = Position::new(0, 6);
+
+        move_cursor_by_wrapped_rows(&mut view, &buffer, 4, 1, false);
+
+        assert_eq!(view.cursor.pos, Position::new(0, 10));
+        assert_eq!(view.cursor.desired_col, Some(2));
+
+        move_cursor_by_wrapped_rows(&mut view, &buffer, 4, 1, false);
+
+        assert_eq!(view.cursor.pos, Position::new(1, 2));
+        assert_eq!(view.cursor.desired_col, Some(2));
+    }
+
+    #[test]
+    fn reveal_cursor_scrolls_by_wrapped_rows() {
+        let buffer = buffer_with_text("abcdefghij\nxyz");
+        let mut view = BufferView::default();
+        view.cursor.pos = Position::new(0, 9);
+
+        reveal_cursor(&mut view, &buffer, 4, 2, true);
+
+        assert_eq!(view.wrap_scroll_row, 1);
+        assert_eq!(view.scroll_line, 0);
+        assert_eq!(view.scroll_col, 0);
     }
 
     #[test]
@@ -1112,5 +1470,20 @@ mod tests {
 
     fn test_appearance() -> EditorAppearance {
         EditorAppearanceConfig::default().for_language(None)
+    }
+
+    fn buffer_with_lines(line_count: usize, line_len: usize) -> Buffer {
+        let line = "x".repeat(line_len);
+        let text = (0..line_count)
+            .map(|_| line.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        buffer_with_text(&text)
+    }
+
+    fn buffer_with_text(text: &str) -> Buffer {
+        let mut buffer = Buffer::empty();
+        buffer.insert(Position::new(0, 0), text);
+        buffer
     }
 }

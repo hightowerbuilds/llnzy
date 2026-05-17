@@ -43,8 +43,8 @@ use commands::{
 use file_state::read_normalized_file_text;
 use files::initial_path;
 use input::{
-    reveal_cursor, visible_col_limit_for_bounds, visible_line_limit_for_bounds, EditorInputElement,
-    EditorMeasuredLayout,
+    reveal_cursor, visible_col_limit_for_bounds, visible_line_limit_for_bounds,
+    wrapped_visual_rows, EditorInputElement, EditorMeasuredLayout, WrappedVisualRow,
 };
 use line_render::{skip_chars, EditorSearchLineMatch};
 use lsp::*;
@@ -305,6 +305,7 @@ impl EditorAppearanceConfig {
             show_line_numbers: effective.show_line_numbers,
             highlight_current_line: effective.highlight_current_line,
             visible_whitespace: effective.visible_whitespace,
+            word_wrap: effective.word_wrap,
             rulers: effective.rulers,
             syntax_colors: Arc::clone(&self.syntax_colors),
         }
@@ -341,6 +342,7 @@ struct EditorAppearance {
     show_line_numbers: bool,
     highlight_current_line: bool,
     visible_whitespace: bool,
+    word_wrap: bool,
     rulers: Vec<usize>,
     syntax_colors: Arc<FxHashMap<HighlightGroup, [u8; 3]>>,
 }
@@ -461,9 +463,10 @@ impl EditorPrototype {
         }
         let visible_cols = self.visible_col_limit();
         let visible_lines = self.visible_line_limit();
+        let word_wrap = self.active_appearance().word_wrap;
         if let Some((buffer, view)) = self.active_buffer_and_view() {
             view.cursor.select_all(buffer);
-            reveal_cursor(view, buffer.line_count(), visible_cols, visible_lines);
+            reveal_cursor(view, buffer, visible_cols, visible_lines, word_wrap);
             cx.notify();
         } else {
             self.status_message = Some("No active buffer to select".to_string());
@@ -552,6 +555,7 @@ impl EditorPrototype {
     ) {
         let visible_cols = self.visible_col_limit();
         let visible_lines = self.visible_line_limit();
+        let word_wrap = self.active_appearance().word_wrap;
         if let Some((buffer, view)) = self.active_buffer_and_view() {
             let line = line as usize;
             let col = col as usize;
@@ -561,7 +565,7 @@ impl EditorPrototype {
             view.cursor.pos = Position::new(target_line, target_col);
             view.cursor.clear_selection();
             view.cursor.desired_col = None;
-            reveal_cursor(view, line_count, visible_cols, visible_lines);
+            reveal_cursor(view, buffer, visible_cols, visible_lines, word_wrap);
             self.wake_cursor_blink();
             cx.notify();
         }
@@ -631,6 +635,16 @@ impl EditorPrototype {
         self.last_text_layout = None;
         self.scroll_line_remainder = 0.0;
         self.scroll_col_remainder = 0.0;
+        let visible_cols = self.visible_col_limit();
+        let visible_lines = self.visible_line_limit();
+        let appearance_config = self.appearance_config.clone();
+        for (buffer, view) in self.editor.buffers.iter().zip(self.editor.views.iter_mut()) {
+            if appearance_config.for_language(view.lang_id).word_wrap {
+                reveal_cursor(view, buffer, visible_cols, visible_lines, true);
+            } else {
+                view.wrap_scroll_row = view.scroll_line;
+            }
+        }
         cx.notify();
     }
 
@@ -743,8 +757,29 @@ impl EditorPrototype {
                 panel
             });
             let visible_lines = self.visible_line_limit();
-            let visible_start = view.scroll_line.min(line_count.saturating_sub(1));
-            let visible_end = line_count.min(visible_start + visible_lines);
+            let visible_cols = self.visible_col_limit().max(1);
+            let fallback_visible_start = view.scroll_line.min(line_count.saturating_sub(1));
+            let rows: Vec<WrappedVisualRow> = if appearance.word_wrap {
+                wrapped_visual_rows(buffer, view.wrap_scroll_row, visible_lines, visible_cols)
+            } else {
+                let visible_end = line_count.min(fallback_visible_start + visible_lines);
+                (fallback_visible_start..visible_end)
+                    .map(|source_line| WrappedVisualRow {
+                        source_line,
+                        wrap_start_col: view.scroll_col,
+                        wrap_cols: visible_cols,
+                        show_line_number: true,
+                    })
+                    .collect()
+            };
+            let visible_start = rows
+                .first()
+                .map(|row| row.source_line)
+                .unwrap_or(fallback_visible_start);
+            let visible_end = rows
+                .last()
+                .map(|row| row.source_line + 1)
+                .unwrap_or(visible_start);
             let highlight_spans = match (view.lang_id, view.tree.as_ref(), buffer_text.as_deref()) {
                 (Some(lang_id), Some(tree), Some(text)) => self.editor.syntax.highlights_for_range(
                     lang_id,
@@ -755,14 +790,29 @@ impl EditorPrototype {
                 ),
                 _ => vec![Vec::new(); visible_end.saturating_sub(visible_start)],
             };
-            let lines = (visible_start..visible_end)
-                .enumerate()
-                .map(|(idx, line)| EditorLineSnapshot {
-                    number: line + 1,
-                    text: buffer.line(line).to_string(),
-                    highlights: highlight_spans.get(idx).cloned().unwrap_or_default(),
-                    search_matches: search_matches_for_line(&self.editor_search, line),
-                    diagnostic: diagnostic_for_line(&diagnostics, line),
+            let lines = rows
+                .into_iter()
+                .map(|row| {
+                    let highlight_idx = row.source_line.saturating_sub(visible_start);
+                    EditorLineSnapshot {
+                        number: row.source_line + 1,
+                        text: buffer.line(row.source_line).to_string(),
+                        wrap_start_col: row.wrap_start_col,
+                        wrap_cols: appearance.word_wrap.then_some(row.wrap_cols),
+                        show_line_number: row.show_line_number,
+                        highlights: highlight_spans
+                            .get(highlight_idx)
+                            .cloned()
+                            .unwrap_or_default(),
+                        search_matches: search_matches_for_line(
+                            &self.editor_search,
+                            row.source_line,
+                        ),
+                        diagnostic: row
+                            .show_line_number
+                            .then(|| diagnostic_for_line(&diagnostics, row.source_line))
+                            .flatten(),
+                    }
                 })
                 .collect();
 
@@ -788,7 +838,11 @@ impl EditorPrototype {
                 cursor: Some(view.cursor.pos),
                 cursor_visible,
                 selection: view.cursor.selection(),
-                scroll_col: view.scroll_col,
+                scroll_col: if appearance.word_wrap {
+                    0
+                } else {
+                    view.scroll_col
+                },
                 total_lines: line_count,
                 total_chars: buffer.len_chars(),
                 modified: buffer.is_modified(),
@@ -837,6 +891,9 @@ impl EditorPrototype {
                 .map(|(idx, line)| EditorLineSnapshot {
                     number: self.sample_scroll_line + idx + 1,
                     text: line.to_string(),
+                    wrap_start_col: 0,
+                    wrap_cols: None,
+                    show_line_number: true,
                     highlights: Vec::new(),
                     search_matches: Vec::new(),
                     diagnostic: None,
@@ -917,6 +974,7 @@ impl EditorPrototype {
     ) {
         let visible_cols = self.visible_col_limit();
         let visible_lines = self.visible_line_limit();
+        let word_wrap = self.active_appearance().word_wrap;
         let active = self.editor.active;
         if active >= self.editor.buffers.len() || active >= self.editor.views.len() {
             return;
@@ -930,7 +988,7 @@ impl EditorPrototype {
             let view = &mut self.editor.views[active];
             edit(buffer, view);
             view.cursor.clamp(buffer);
-            reveal_cursor(view, buffer.line_count(), visible_cols, visible_lines);
+            reveal_cursor(view, buffer, visible_cols, visible_lines, word_wrap);
         }
 
         let buffer_edit = self.editor.buffers[active].take_last_edit();
@@ -1345,6 +1403,9 @@ struct EditorImagePreviewSnapshot {
 struct EditorLineSnapshot {
     number: usize,
     text: String,
+    wrap_start_col: usize,
+    wrap_cols: Option<usize>,
+    show_line_number: bool,
     highlights: Vec<HighlightSpan>,
     search_matches: Vec<EditorSearchLineMatch>,
     diagnostic: Option<EditorDiagnosticSnapshot>,

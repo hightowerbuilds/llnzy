@@ -239,13 +239,15 @@ fn editor_source_body(
                     .filter(|cursor| cursor.line + 1 == line.number),
                 snapshot.cursor_visible,
                 snapshot.selection,
-                snapshot.scroll_col,
+                line.wrap_start_col,
+                line.wrap_cols,
+                line.show_line_number,
                 &snapshot.appearance,
             ))
         });
     // Rulers mark code-style column boundaries. They are opt-in so the
     // default workspace editor does not show stray vertical divider lines.
-    let ruler_layer = if snapshot.markdown {
+    let ruler_layer = if snapshot.markdown || snapshot.appearance.word_wrap {
         div()
     } else {
         editor_ruler_layer(&snapshot.appearance, snapshot.scroll_col)

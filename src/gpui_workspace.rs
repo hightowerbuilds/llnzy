@@ -193,7 +193,17 @@ fn appearance_config_from_preferences(
             config.syntax_colors = theme.colors_map();
         }
     }
+    if let Some(word_wrap) = preferences.editor_word_wrap {
+        apply_editor_word_wrap_preference(&mut config, word_wrap);
+    }
     config
+}
+
+fn apply_editor_word_wrap_preference(config: &mut Config, word_wrap: bool) {
+    config.editor.word_wrap = word_wrap;
+    for language in config.editor.languages.values_mut() {
+        language.word_wrap = Some(word_wrap);
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -632,6 +642,18 @@ impl WorkspacePrototype {
 
     fn tab_join_limit(&self) -> usize {
         self.preferences.joined_tab_limit()
+    }
+
+    fn editor_word_wrap_enabled(&self) -> bool {
+        self.appearance_config.editor.word_wrap
+    }
+
+    pub(super) fn toggle_editor_word_wrap(&mut self, cx: &mut Context<Self>) {
+        let enabled = !self.editor_word_wrap_enabled();
+        self.preferences.editor_word_wrap = Some(enabled);
+        self.preferences.save();
+        apply_editor_word_wrap_preference(&mut self.appearance_config, enabled);
+        self.apply_appearance_config(cx);
     }
 
     pub(super) fn toggle_show_explorer_button(&mut self, cx: &mut Context<Self>) {
@@ -1908,6 +1930,7 @@ impl Render for WorkspacePrototype {
                     appearance_page,
                     terminal_background_import_error,
                     show_explorer_button: self.preferences.show_explorer_button,
+                    editor_word_wrap: self.editor_word_wrap_enabled(),
                     joined_tab_limit: self.tab_join_limit(),
                     error_log_expanded: self.error_log_expanded,
                     error_log_filter: self.error_log_filter,

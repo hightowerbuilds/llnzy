@@ -864,16 +864,21 @@ impl EditorPrototype {
                     let col = col as usize;
                     let visible_cols = self.visible_col_limit();
                     let visible_lines = self.visible_line_limit();
+                    let word_wrap = self
+                        .editor
+                        .views
+                        .get(index)
+                        .map(|view| self.appearance_config.for_language(view.lang_id).word_wrap)
+                        .unwrap_or(false);
                     if let Some(buffer) = self.editor.buffers.get(index) {
-                        let line_count = buffer.line_count();
-                        let target_line = line.min(line_count.saturating_sub(1));
+                        let target_line = line.min(buffer.line_count().saturating_sub(1));
                         let target =
                             Position::new(target_line, col.min(buffer.line_len(target_line)));
                         if let Some(view) = self.editor.views.get_mut(index) {
                             view.cursor.pos = target;
                             view.cursor.clear_selection();
                             view.cursor.desired_col = None;
-                            reveal_cursor(view, line_count, visible_cols, visible_lines);
+                            reveal_cursor(view, buffer, visible_cols, visible_lines, word_wrap);
                         }
                     }
                 }
