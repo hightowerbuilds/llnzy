@@ -131,7 +131,7 @@ impl Element for EffectsElement {
             window.paint_surface(bounds, buffer);
         }
 
-        if should_continue_animating {
+        if should_continue_animating && window.is_window_active() {
             window.request_animation_frame();
         }
     }

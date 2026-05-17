@@ -702,8 +702,11 @@ impl EditorPrototype {
             } else {
                 MarkdownViewMode::Source
             };
-            let markdown_preview = (markdown && markdown_mode != MarkdownViewMode::Source)
-                .then(|| markdown_preview_blocks(&buffer.text()));
+            let want_markdown_preview = markdown && markdown_mode != MarkdownViewMode::Source;
+            let want_highlights = view.lang_id.is_some() && view.tree.is_some();
+            let buffer_text = (want_markdown_preview || want_highlights).then(|| buffer.text());
+            let markdown_preview = want_markdown_preview
+                .then(|| markdown_preview_blocks(buffer_text.as_deref().unwrap_or_default()));
             let line_count = buffer.line_count();
             let degraded_notice =
                 perf::LargeFileDegradation::for_line_count(line_count).status_label();
@@ -721,11 +724,11 @@ impl EditorPrototype {
             let visible_lines = self.visible_line_limit();
             let visible_start = view.scroll_line.min(line_count.saturating_sub(1));
             let visible_end = line_count.min(visible_start + visible_lines);
-            let highlight_spans = match (view.lang_id, view.tree.as_ref()) {
-                (Some(lang_id), Some(tree)) => self.editor.syntax.highlights_for_range(
+            let highlight_spans = match (view.lang_id, view.tree.as_ref(), buffer_text.as_deref()) {
+                (Some(lang_id), Some(tree), Some(text)) => self.editor.syntax.highlights_for_range(
                     lang_id,
                     tree,
-                    buffer.text().as_bytes(),
+                    text.as_bytes(),
                     visible_start,
                     visible_end,
                 ),

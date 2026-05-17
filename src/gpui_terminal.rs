@@ -2,7 +2,9 @@ mod effects;
 mod render;
 mod text;
 
-use std::{ops::Range, path::PathBuf, sync::Arc, time::Duration};
+use std::{cell::RefCell, ops::Range, path::PathBuf, sync::Arc, time::Duration};
+
+use rustc_hash::FxHashMap;
 
 use self::effects::{
     terminal_background_image, terminal_background_image_path, terminal_cursor_effects,
@@ -21,9 +23,10 @@ use gpui::prelude::*;
 use gpui::{
     actions, div, fill, point, px, relative, rgb, rgba, size, App, Bounds, ClipboardItem,
     ContentMask, Context, DispatchPhase, Element, ElementId, ElementInputHandler, Entity,
-    EntityInputHandler, FocusHandle, Focusable, FutureExt, GlobalElementId, KeyBinding, LayoutId,
-    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point, Render,
-    ScrollWheelEvent, ShapedLine, SharedString, Style, UTF16Selection, Window,
+    EntityInputHandler, FocusHandle, Focusable, FutureExt, GlobalElementId, Hsla, KeyBinding,
+    LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point,
+    Render, ScrollWheelEvent, ShapedLine, SharedString, StrikethroughStyle, Style, UTF16Selection,
+    UnderlineStyle, Window,
 };
 
 use crate::config::{Config, CursorStyle, TerminalLayoutMode};
@@ -196,9 +199,31 @@ pub(crate) fn bind_terminal_keys(cx: &mut App) {
     ]);
 }
 
+/// Cap on the shaped-glyph cache. Default ASCII printable × a few colors
+/// fits comfortably; this bounds memory for pathological inputs.
+const GLYPH_SHAPE_CACHE_CAPACITY: usize = 4096;
+
+#[derive(Clone, Hash, PartialEq, Eq)]
+struct GlyphShapeKey {
+    ch: char,
+    color: Hsla,
+    background_color: Option<Hsla>,
+    underline: Option<UnderlineStyle>,
+    strikethrough: Option<StrikethroughStyle>,
+}
+
+struct CachedTerminalEffects {
+    width: Pixels,
+    height: Pixels,
+    underlay: Vec<PaintQuad>,
+    overlay: Vec<PaintQuad>,
+}
+
 pub(crate) struct TerminalSurface {
     focus_handle: FocusHandle,
     config: Arc<Config>,
+    glyph_shape_cache: RefCell<FxHashMap<GlyphShapeKey, ShapedLine>>,
+    cached_effects: RefCell<Option<CachedTerminalEffects>>,
     session: Option<Session>,
     launch_error: Option<String>,
     last_bounds: Option<Bounds<Pixels>>,
@@ -225,6 +250,8 @@ impl TerminalSurface {
         let surface = Self {
             focus_handle: cx.focus_handle(),
             config,
+            glyph_shape_cache: RefCell::new(FxHashMap::default()),
+            cached_effects: RefCell::new(None),
             session,
             launch_error,
             last_bounds: None,
@@ -240,6 +267,8 @@ impl TerminalSurface {
 
     pub(crate) fn set_config(&mut self, config: Arc<Config>, cx: &mut Context<Self>) {
         self.config = config;
+        self.glyph_shape_cache.borrow_mut().clear();
+        self.cached_effects.borrow_mut().take();
         cx.notify();
     }
 
@@ -887,8 +916,22 @@ impl Element for TerminalElement {
         let mut selection = Vec::new();
         let mut cursor_effects = Vec::new();
         let mut cursor = None;
-        let effect_underlay = terminal_effect_underlay(bounds, &terminal_config);
-        let effect_overlay = terminal_effect_overlay(bounds, &terminal_config);
+        let (effect_underlay, effect_overlay) = {
+            let mut cache = surface.cached_effects.borrow_mut();
+            let matches = cache
+                .as_ref()
+                .is_some_and(|c| c.width == bounds.size.width && c.height == bounds.size.height);
+            if !matches {
+                *cache = Some(CachedTerminalEffects {
+                    width: bounds.size.width,
+                    height: bounds.size.height,
+                    underlay: terminal_effect_underlay(bounds, &terminal_config),
+                    overlay: terminal_effect_overlay(bounds, &terminal_config),
+                });
+            }
+            let entry = cache.as_ref().expect("populated above");
+            (entry.underlay.clone(), entry.overlay.clone())
+        };
 
         let mut row_offsets_cache: Option<Vec<Vec<f32>>> = None;
         if let Some(session) = &surface.session {
@@ -908,6 +951,7 @@ impl Element for TerminalElement {
                     // GPUI's proportional layout drift cells out of grid alignment
                     // even with monospace fonts, which breaks cursor placement,
                     // selection rectangles, ASCII art, and TUI box drawing.
+                    let mut cache = surface.glyph_shape_cache.borrow_mut();
                     for row in 0..rows {
                         for glyph in terminal_row_glyphs(
                             session,
@@ -917,15 +961,30 @@ impl Element for TerminalElement {
                             block_cursor,
                             &base_font,
                         ) {
-                            let mut buf = [0u8; 4];
-                            let text: SharedString =
-                                glyph.ch.encode_utf8(&mut buf).to_string().into();
-                            let shaped = window.text_system().shape_line(
-                                text,
-                                font_size,
-                                &[glyph.run],
-                                None,
-                            );
+                            let key = GlyphShapeKey {
+                                ch: glyph.ch,
+                                color: glyph.run.color,
+                                background_color: glyph.run.background_color,
+                                underline: glyph.run.underline,
+                                strikethrough: glyph.run.strikethrough,
+                            };
+                            let shaped = if let Some(cached) = cache.get(&key) {
+                                cached.clone()
+                            } else {
+                                let mut buf = [0u8; 4];
+                                let text: SharedString =
+                                    glyph.ch.encode_utf8(&mut buf).to_string().into();
+                                let shaped = window.text_system().shape_line(
+                                    text,
+                                    font_size,
+                                    &[glyph.run],
+                                    None,
+                                );
+                                if cache.len() < GLYPH_SHAPE_CACHE_CAPACITY {
+                                    cache.insert(key, shaped.clone());
+                                }
+                                shaped
+                            };
                             lines.push(TerminalPaintLine {
                                 line: shaped,
                                 row,
@@ -933,6 +992,7 @@ impl Element for TerminalElement {
                             });
                         }
                     }
+                    drop(cache);
 
                     selection = session
                         .terminal
