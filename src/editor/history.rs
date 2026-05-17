@@ -25,6 +25,11 @@ pub struct UndoHistory {
     redo_stack: Vec<EditOp>,
     /// Maximum undo depth.
     max_depth: usize,
+    /// Soft cap on the total bytes of `old_text + new_text` retained across
+    /// the undo stack. When exceeded, oldest entries are dropped.
+    max_bytes: usize,
+    /// Running total of `old_text + new_text` bytes in the undo stack.
+    undo_bytes: usize,
     /// Timestamp of the last push, for coalescing.
     last_push: Instant,
     /// Index in undo_stack that corresponds to the saved state.
@@ -34,6 +39,15 @@ pub struct UndoHistory {
 
 /// Maximum time between edits that can be coalesced into a single undo entry.
 const COALESCE_WINDOW_MS: u128 = 800;
+
+/// Default soft cap on undo-stack byte size. A 10MB paste produces one ~20MB
+/// op (old_text + new_text); the count cap of 1000 alone could let undo
+/// retain tens of GB worth of text, so we also bound by total bytes.
+const DEFAULT_MAX_UNDO_BYTES: usize = 64 * 1024 * 1024;
+
+fn op_bytes(op: &EditOp) -> usize {
+    op.old_text.len() + op.new_text.len()
+}
 
 impl UndoHistory {
     pub fn new() -> Self {
@@ -45,6 +59,8 @@ impl UndoHistory {
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             max_depth,
+            max_bytes: DEFAULT_MAX_UNDO_BYTES,
+            undo_bytes: 0,
             last_push: Instant::now() - std::time::Duration::from_secs(60),
             saved_at: Some(0), // empty buffer is the saved state
         }
@@ -53,15 +69,32 @@ impl UndoHistory {
     /// Push a new edit operation. Clears the redo stack.
     pub fn push(&mut self, op: EditOp) {
         self.redo_stack.clear();
+        self.undo_bytes += op_bytes(&op);
         self.undo_stack.push(op);
         self.last_push = Instant::now();
 
         // Enforce depth limit
         if self.undo_stack.len() > self.max_depth {
             let excess = self.undo_stack.len() - self.max_depth;
-            self.undo_stack.drain(0..excess);
+            let drained = self.undo_stack.drain(0..excess);
+            for evicted in drained {
+                self.undo_bytes = self.undo_bytes.saturating_sub(op_bytes(&evicted));
+            }
             // Adjust saved_at
             self.saved_at = self.saved_at.and_then(|s| s.checked_sub(excess));
+        }
+
+        // Enforce byte cap by dropping oldest entries. Always keep at least
+        // one op so the most recent edit can be undone even if it alone
+        // exceeds the cap.
+        let mut dropped = 0usize;
+        while self.undo_bytes > self.max_bytes && self.undo_stack.len() > 1 {
+            let evicted = self.undo_stack.remove(0);
+            self.undo_bytes = self.undo_bytes.saturating_sub(op_bytes(&evicted));
+            dropped += 1;
+        }
+        if dropped > 0 {
+            self.saved_at = self.saved_at.and_then(|s| s.checked_sub(dropped));
         }
     }
 
@@ -96,6 +129,7 @@ impl UndoHistory {
         // Coalesce: extend the previous op
         prev.new_text.push_str(text);
         prev.end_after = end_pos;
+        self.undo_bytes += text.len();
         self.last_push = now;
         self.redo_stack.clear();
         true
@@ -104,6 +138,7 @@ impl UndoHistory {
     /// Undo the last operation. Returns the operation to reverse.
     pub fn undo(&mut self) -> Option<EditOp> {
         let op = self.undo_stack.pop()?;
+        self.undo_bytes = self.undo_bytes.saturating_sub(op_bytes(&op));
         self.redo_stack.push(op.clone());
         Some(op)
     }
@@ -111,6 +146,7 @@ impl UndoHistory {
     /// Redo the last undone operation. Returns the operation to reapply.
     pub fn redo(&mut self) -> Option<EditOp> {
         let op = self.redo_stack.pop()?;
+        self.undo_bytes += op_bytes(&op);
         self.undo_stack.push(op.clone());
         Some(op)
     }
@@ -137,6 +173,7 @@ impl UndoHistory {
     pub fn clear(&mut self) {
         self.undo_stack.clear();
         self.redo_stack.clear();
+        self.undo_bytes = 0;
         self.saved_at = Some(0);
     }
 }
@@ -256,6 +293,27 @@ mod tests {
         assert!(!h.is_at_saved());
         h.undo();
         assert!(h.is_at_saved());
+    }
+
+    #[test]
+    fn byte_cap_drops_oldest_entries() {
+        let mut h = UndoHistory::with_depth(1000);
+        // Force a small cap so we can exercise the eviction path with a few
+        // ops instead of allocating tens of MiB in a test.
+        h.max_bytes = 32;
+        h.push(insert_op(0, 0, "aaaaaaaaaa")); // 10 bytes
+        h.push(insert_op(0, 10, "bbbbbbbbbb")); // 20 bytes total
+        h.push(insert_op(0, 20, "cccccccccc")); // 30 bytes total
+        assert_eq!(h.undo_stack.len(), 3);
+        // This push exceeds the 32-byte cap; the oldest ("aaa…") should go.
+        h.push(insert_op(0, 30, "dddddddddd")); // would push to 40 bytes
+        assert_eq!(h.undo_stack.len(), 3);
+        assert_eq!(h.undo_stack[0].new_text, "bbbbbbbbbb");
+        // Cap is exceeded after a single very large op, but we always retain
+        // the most recent so the user can still undo it.
+        h.clear();
+        h.push(insert_op(0, 0, "x".repeat(64).as_str()));
+        assert_eq!(h.undo_stack.len(), 1);
     }
 
     #[test]

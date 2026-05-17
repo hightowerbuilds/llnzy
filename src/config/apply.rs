@@ -114,6 +114,9 @@ impl Config {
             if let Some(copy_on_select) = terminal.copy_on_select {
                 self.terminal.copy_on_select = copy_on_select;
             }
+            if let Some(scrollback_lines) = terminal.scrollback_lines {
+                self.terminal.scrollback_lines = scrollback_lines.max(64);
+            }
         }
 
         if let Some(shell) = file.shell {

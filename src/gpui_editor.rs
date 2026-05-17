@@ -219,6 +219,12 @@ pub(crate) struct EditorPrototype {
     is_selecting: bool,
     cursor_blink_anchor: Instant,
     cursor_blink_visible: bool,
+    /// Whether the most recent `snapshot()` saw the editor as focused.
+    /// Used to skip cursor-blink updates and their accompanying `notify`
+    /// cascade for blurred editors (the cursor is invisible when unfocused
+    /// regardless of `cursor_blink_visible`, so toggling it produces a
+    /// redundant render).
+    last_render_was_focused: bool,
     show_chrome: bool,
     /// Region of the active buffer currently held as IME composition /
     /// dictation preview. `None` outside an active composition. Set by
@@ -599,6 +605,7 @@ impl EditorPrototype {
             is_selecting: false,
             cursor_blink_anchor: Instant::now(),
             cursor_blink_visible: true,
+            last_render_was_focused: false,
             show_chrome,
             marked_range: None,
         };
@@ -615,6 +622,7 @@ impl EditorPrototype {
     }
 
     fn snapshot(&mut self, is_focused: bool) -> EditorSnapshot {
+        self.last_render_was_focused = is_focused;
         refresh_active_syntax(&mut self.editor);
         if self.editor_search.active {
             let active = self.editor.active;
@@ -959,6 +967,9 @@ impl EditorPrototype {
     }
 
     fn refresh_cursor_blink(&mut self) -> bool {
+        if !self.last_render_was_focused {
+            return false;
+        }
         let visible = cursor_visible_for_elapsed(self.cursor_blink_anchor.elapsed());
         if self.cursor_blink_visible == visible {
             return false;

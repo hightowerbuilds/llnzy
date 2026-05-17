@@ -114,9 +114,22 @@ pub struct Config {
     pub(super) config_mtime: Option<SystemTime>,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct TerminalConfig {
     pub copy_on_select: bool,
+    /// Maximum scrollback history per terminal grid, in lines. Bounds the
+    /// memory each `Terminal` retains for scroll-back. `10000` matches the
+    /// alacritty_terminal default that LLNZY previously hard-coded.
+    pub scrollback_lines: usize,
+}
+
+impl Default for TerminalConfig {
+    fn default() -> Self {
+        Self {
+            copy_on_select: false,
+            scrollback_lines: 10_000,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

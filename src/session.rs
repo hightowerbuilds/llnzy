@@ -24,7 +24,7 @@ impl Session {
         config: &Config,
         cwd: Option<&str>,
     ) -> std::io::Result<Self> {
-        let terminal = Terminal::new(cols, rows);
+        let terminal = Terminal::with_scrollback(cols, rows, config.terminal.scrollback_lines);
         let shell_profile = ShellProfile::interactive_default(&config.shell, cwd);
         let launch_spec = TerminalLaunchSpec::interactive_shell(&shell_profile, cols, rows);
         let pty = Pty::spawn_with_spec(launch_spec)?;

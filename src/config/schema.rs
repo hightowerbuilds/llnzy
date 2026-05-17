@@ -74,6 +74,7 @@ pub(super) struct ScrollConfig {
 #[derive(Deserialize)]
 pub(super) struct TerminalFileConfig {
     pub(super) copy_on_select: Option<bool>,
+    pub(super) scrollback_lines: Option<usize>,
 }
 
 #[derive(Deserialize)]
