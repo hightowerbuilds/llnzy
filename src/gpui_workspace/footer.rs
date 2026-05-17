@@ -124,12 +124,6 @@ fn footer_queue_chip(
         .child(preview)
 }
 
-pub(super) fn load_workspace_queue() -> Vec<crate::stacker::queue::QueuedPrompt> {
-    let mut queued_prompts = crate::stacker::load_stacker_queue();
-    crate::stacker::queue::sanitize_prompt_queue(&mut queued_prompts);
-    queued_prompts
-}
-
 fn footer_button(
     label: &'static str,
     surface: WorkspaceSurface,

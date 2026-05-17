@@ -2,7 +2,7 @@ mod effects;
 mod render;
 mod text;
 
-use std::{ops::Range, path::PathBuf, time::Duration};
+use std::{ops::Range, path::PathBuf, sync::Arc, time::Duration};
 
 use self::effects::{
     terminal_background_image, terminal_background_image_path, terminal_cursor_effects,
@@ -198,7 +198,7 @@ pub(crate) fn bind_terminal_keys(cx: &mut App) {
 
 pub(crate) struct TerminalSurface {
     focus_handle: FocusHandle,
-    config: Config,
+    config: Arc<Config>,
     session: Option<Session>,
     launch_error: Option<String>,
     last_bounds: Option<Bounds<Pixels>>,
@@ -219,7 +219,7 @@ pub(crate) struct TerminalSurface {
 
 impl TerminalSurface {
     pub(crate) fn new_with_cwd(cwd: Option<PathBuf>, cx: &mut Context<Self>) -> Self {
-        let config = Config::default();
+        let config = Arc::new(Config::default());
         let cwd_str = cwd.as_ref().and_then(|p| p.to_str());
         let (session, launch_error) = launch_session(&config, cwd_str);
         let surface = Self {
@@ -238,7 +238,7 @@ impl TerminalSurface {
         surface
     }
 
-    pub(crate) fn set_config(&mut self, config: Config, cx: &mut Context<Self>) {
+    pub(crate) fn set_config(&mut self, config: Arc<Config>, cx: &mut Context<Self>) {
         self.config = config;
         cx.notify();
     }

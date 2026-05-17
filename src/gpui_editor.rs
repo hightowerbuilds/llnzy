@@ -2,6 +2,7 @@ use std::collections::HashMap;
 #[cfg(test)]
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::config::{Config, CursorStyle as ConfigCursorStyle, EditorConfig};
@@ -244,7 +245,7 @@ struct EditorAppearanceConfig {
     selection_alpha: f32,
     cursor_style: ConfigCursorStyle,
     editor: EditorConfig,
-    syntax_colors: FxHashMap<HighlightGroup, [u8; 3]>,
+    syntax_colors: Arc<FxHashMap<HighlightGroup, [u8; 3]>>,
 }
 
 impl EditorAppearanceConfig {
@@ -259,7 +260,7 @@ impl EditorAppearanceConfig {
             selection_alpha: config.colors.selection_alpha,
             cursor_style: config.cursor_style,
             editor: config.editor.clone(),
-            syntax_colors: config.syntax_colors.clone(),
+            syntax_colors: Arc::new(config.syntax_colors.clone()),
         }
     }
 
@@ -299,7 +300,7 @@ impl EditorAppearanceConfig {
             highlight_current_line: effective.highlight_current_line,
             visible_whitespace: effective.visible_whitespace,
             rulers: effective.rulers,
-            syntax_colors: self.syntax_colors.clone(),
+            syntax_colors: Arc::clone(&self.syntax_colors),
         }
     }
 }
@@ -335,7 +336,7 @@ struct EditorAppearance {
     highlight_current_line: bool,
     visible_whitespace: bool,
     rulers: Vec<usize>,
-    syntax_colors: FxHashMap<HighlightGroup, [u8; 3]>,
+    syntax_colors: Arc<FxHashMap<HighlightGroup, [u8; 3]>>,
 }
 
 impl EditorAppearance {

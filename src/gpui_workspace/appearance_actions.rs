@@ -14,12 +14,13 @@ use super::{
 impl WorkspacePrototype {
     pub(super) fn apply_appearance_config(&mut self, cx: &mut Context<Self>) {
         let config = self.appearance_config.clone();
+        let shared_config = std::sync::Arc::new(config);
         for editor in self.editor_entities() {
-            let config = config.clone();
+            let config = (*shared_config).clone();
             editor.update(cx, |editor, cx| editor.set_appearance_config(config, cx));
         }
         for terminal in self.terminals.values() {
-            let config = config.clone();
+            let config = std::sync::Arc::clone(&shared_config);
             terminal.update(cx, |terminal, cx| terminal.set_config(config, cx));
         }
         cx.notify();

@@ -135,6 +135,11 @@ impl StackerPrototype {
     }
 
     #[cfg(feature = "gpui-workspace")]
+    pub(crate) fn queued_prompts(&self) -> &[QueuedPrompt] {
+        &self.queued_prompts
+    }
+
+    #[cfg(feature = "gpui-workspace")]
     pub(crate) fn embedded(cx: &mut Context<Self>) -> Self {
         Self::with_chrome(cx, false)
     }

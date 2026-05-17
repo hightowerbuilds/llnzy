@@ -1,4 +1,8 @@
-use std::{collections::BTreeMap, path::PathBuf};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::PathBuf,
+    time::{Duration, Instant},
+};
 
 use gpui::prelude::*;
 use gpui::{
@@ -26,7 +30,7 @@ use crate::gpui_stacker::{bind_stacker_keys, StackerPrototype};
 use crate::gpui_tabs::{GpuiTabChoice, GpuiTabManager};
 use crate::gpui_terminal::{bind_terminal_keys, TerminalSurface};
 
-use self::footer::{load_workspace_queue, workspace_footer};
+use self::footer::workspace_footer;
 use self::panes::{workspace_content, WorkspaceSurfaceContext};
 use self::recovery::{
     plan_restore, recovery_file, save_snapshot, WorkspaceRecoveryAxis,
@@ -36,8 +40,8 @@ use self::recovery::{
 };
 use self::sidebar::{
     collect_explorer_entries, sidebar_bumper, workspace_sidebar, workspace_sidebar_context_menu,
-    ExplorerState, SidebarContextMenuState, SidebarNewEntryState, SidebarRenameState,
-    WorkspaceSidebarContext,
+    ExplorerEntry, ExplorerState, SidebarContextMenuState, SidebarNewEntryState,
+    SidebarRenameState, WorkspaceSidebarContext,
 };
 use self::tabs::{
     reorder_workspace_tab_block, workspace_tab_bar, workspace_tab_context_menu,
@@ -122,6 +126,8 @@ const SIDEBAR_TEXT: u32 = 0xabb2bf;
 const FOLDER_BLUE: u32 = 0x64b4ff;
 const ACCENT: u32 = 0x214966;
 const QUEUE_GREEN: u32 = 0x6aff90;
+
+const RECOVERY_PERSIST_INTERVAL: Duration = Duration::from_secs(5);
 
 const FOOTER_HEIGHT: f32 = 48.0;
 const JOINED_TAB_DIVIDER_WIDTH: f32 = 8.0;
@@ -514,6 +520,9 @@ struct WorkspacePrototype {
     preferences: crate::preferences::WorkspacePreferences,
     recovery_enabled: bool,
     last_recovery_snapshot: Option<WorkspaceRecoverySnapshot>,
+    last_recovery_persist_attempt: Option<Instant>,
+    cached_explorer_signature: Option<(Option<PathBuf>, BTreeSet<PathBuf>)>,
+    cached_explorer_entries: Vec<ExplorerEntry>,
     error_log_expanded: bool,
     error_log_filter: ErrorLogFilter,
     pending_clear_error_log: bool,
@@ -603,6 +612,9 @@ impl WorkspacePrototype {
             preferences,
             recovery_enabled,
             last_recovery_snapshot: None,
+            last_recovery_persist_attempt: None,
+            cached_explorer_signature: None,
+            cached_explorer_entries: Vec::new(),
             error_log_expanded: false,
             error_log_filter: ErrorLogFilter::All,
             pending_clear_error_log: false,
@@ -804,10 +816,36 @@ impl WorkspacePrototype {
         self.tab_manager.retain_tabs(&valid_tabs);
     }
 
+    fn explorer_entries(&mut self) -> Vec<ExplorerEntry> {
+        let signature = (
+            self.workspace_root.clone(),
+            self.sidebar_explorer.expanded_dirs.clone(),
+        );
+        if self.cached_explorer_signature.as_ref() == Some(&signature) {
+            return self.cached_explorer_entries.clone();
+        }
+        let entries = signature
+            .0
+            .as_ref()
+            .map(|root| collect_explorer_entries(root, &signature.1))
+            .unwrap_or_default();
+        self.cached_explorer_signature = Some(signature);
+        self.cached_explorer_entries = entries.clone();
+        entries
+    }
+
     fn persist_workspace_recovery(&mut self, clean_shutdown: bool) {
         if !self.recovery_enabled {
             return;
         }
+        if !clean_shutdown
+            && self
+                .last_recovery_persist_attempt
+                .is_some_and(|t| t.elapsed() < RECOVERY_PERSIST_INTERVAL)
+        {
+            return;
+        }
+        self.last_recovery_persist_attempt = Some(Instant::now());
         let Some(path) = recovery_file() else {
             return;
         };
@@ -1614,7 +1652,7 @@ impl WorkspacePrototype {
     fn new_terminal_surface(&self, cx: &mut Context<Self>) -> Entity<TerminalSurface> {
         let cwd = self.workspace_root.clone();
         let terminal = cx.new(|cx| TerminalSurface::new_with_cwd(cwd, cx));
-        let config = self.appearance_config.clone();
+        let config = std::sync::Arc::new(self.appearance_config.clone());
         terminal.update(cx, |terminal, cx| terminal.set_config(config, cx));
         terminal
     }
@@ -1826,15 +1864,11 @@ impl Render for WorkspacePrototype {
         let sidebar_context_menu = self.sidebar_context_menu.clone();
         let sidebar_rename = self.sidebar_rename.clone();
         let sidebar_new_entry = self.sidebar_new_entry.clone();
-        let queued_prompts = load_workspace_queue();
+        let queued_prompts = self.stacker.read(cx).queued_prompts().to_vec();
         let appearance_config = self.appearance_config.clone();
         let appearance_page = self.appearance_page;
         let terminal_background_import_error = self.terminal_background_import_error.clone();
-        let explorer_entries = self
-            .workspace_root
-            .as_ref()
-            .map(|root| collect_explorer_entries(root, &self.sidebar_explorer.expanded_dirs))
-            .unwrap_or_default();
+        let explorer_entries = self.explorer_entries();
         let selected_path = self.sidebar_explorer.selected_path.clone();
         let workspace_root = self.workspace_root.clone();
         let recent_projects = self.recent_projects.clone();
