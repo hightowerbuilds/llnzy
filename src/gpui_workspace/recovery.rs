@@ -301,10 +301,7 @@ pub(super) fn plan_restore(snapshot: WorkspaceRecoverySnapshot) -> Option<Worksp
 }
 
 fn is_multi_instance_surface(surface: WorkspaceRecoverySurface) -> bool {
-    matches!(
-        surface,
-        WorkspaceRecoverySurface::Terminal | WorkspaceRecoverySurface::Explorer
-    )
+    matches!(surface, WorkspaceRecoverySurface::Terminal)
 }
 
 fn sanitize_sidebar_width(width: f32) -> f32 {
@@ -433,6 +430,29 @@ mod tests {
         let plan = plan_restore(snapshot).unwrap();
         assert_eq!(plan.joined_groups.len(), 1);
         assert_eq!(plan.joined_groups[0].members, vec![1, 2]);
+    }
+
+    #[test]
+    fn restore_plan_keeps_only_one_explorer_tab() {
+        let mut snapshot = snapshot(None, false);
+        snapshot.tabs.push(WorkspaceRecoveryTab {
+            id: 3,
+            surface: WorkspaceRecoverySurface::Explorer,
+            file_path: None,
+        });
+        snapshot.tabs.push(WorkspaceRecoveryTab {
+            id: 4,
+            surface: WorkspaceRecoverySurface::Explorer,
+            file_path: None,
+        });
+
+        let plan = plan_restore(snapshot).unwrap();
+        let explorer_count = plan
+            .tabs
+            .iter()
+            .filter(|tab| tab.surface == WorkspaceRecoverySurface::Explorer)
+            .count();
+        assert_eq!(explorer_count, 1);
     }
 
     #[test]

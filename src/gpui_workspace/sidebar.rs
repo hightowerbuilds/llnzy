@@ -234,7 +234,14 @@ pub(super) fn workspace_sidebar(
                     .child(root_label),
             ),
         )
-        .child(sidebar_close_project_button(has_project, cx));
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_1()
+                .child(sidebar_pop_out_button(has_project, cx))
+                .child(sidebar_close_project_button(has_project, cx)),
+        );
 
     if let Some(root) = workspace_root.clone() {
         let explorer_drop_target = root.clone();
@@ -655,6 +662,36 @@ fn sidebar_close_project_button(
             cx.listener(|this, _: &MouseDownEvent, _window, cx| {
                 cx.stop_propagation();
                 this.close_project(cx);
+            }),
+        )
+    } else {
+        button
+    }
+}
+
+fn sidebar_pop_out_button(
+    has_project: bool,
+    cx: &mut Context<WorkspacePrototype>,
+) -> impl IntoElement {
+    let button = div()
+        .h(px(22.0))
+        .px_2()
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded_sm()
+        .border_1()
+        .border_color(rgb(if has_project { 0x3a3f4c } else { 0x2c303a }))
+        .text_size(px(11.0))
+        .text_color(rgb(if has_project { MUTED_TEXT } else { 0x545965 }))
+        .child("Pop Out");
+
+    if has_project {
+        button.cursor_pointer().on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|this, _: &MouseDownEvent, window, cx| {
+                cx.stop_propagation();
+                this.pop_out_sidebar_explorer(window, cx);
             }),
         )
     } else {

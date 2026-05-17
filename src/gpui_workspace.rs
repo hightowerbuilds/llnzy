@@ -656,12 +656,6 @@ impl WorkspacePrototype {
         self.apply_appearance_config(cx);
     }
 
-    pub(super) fn toggle_show_explorer_button(&mut self, cx: &mut Context<Self>) {
-        self.preferences.show_explorer_button = !self.preferences.show_explorer_button;
-        self.preferences.save();
-        cx.notify();
-    }
-
     pub(super) fn set_joined_tab_limit(&mut self, limit: u8, cx: &mut Context<Self>) {
         let limit = limit.clamp(2, 4);
         if self.preferences.joined_tab_limit == limit {
@@ -1736,30 +1730,32 @@ impl WorkspacePrototype {
         cx.notify();
     }
 
-    fn open_new_explorer_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.explorers.is_empty() {
-            let parked_id = WorkspaceTabId(self.next_tab_id);
-            self.next_tab_id += 1;
-            self.tabs
-                .push(WorkspaceTab::new(parked_id, WorkspaceSurface::Explorer));
-            self.explorers
-                .insert(parked_id.0, self.sidebar_explorer.clone());
-            if self.sidebar_visible {
-                self.last_sidebar_width = self.sidebar_width;
-            }
-            self.sidebar_visible = false;
-        }
+    pub(super) fn pop_out_sidebar_explorer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let tab_id = self
+            .tabs
+            .iter()
+            .find(|tab| tab.surface == WorkspaceSurface::Explorer)
+            .map(|tab| tab.id)
+            .unwrap_or_else(|| {
+                let tab_id = WorkspaceTabId(self.next_tab_id);
+                self.next_tab_id += 1;
+                self.tabs
+                    .push(WorkspaceTab::new(tab_id, WorkspaceSurface::Explorer));
+                tab_id
+            });
 
-        let fresh_id = WorkspaceTabId(self.next_tab_id);
-        self.next_tab_id += 1;
-        self.tabs
-            .push(WorkspaceTab::new(fresh_id, WorkspaceSurface::Explorer));
-        self.explorers.insert(
-            fresh_id.0,
-            ExplorerState::for_root(self.workspace_root.as_deref()),
-        );
-        self.active_tab_id = fresh_id;
-        self.tab_manager.set_active_tab(fresh_id.0);
+        self.explorers
+            .insert(tab_id.0, self.sidebar_explorer.clone());
+        if self.sidebar_visible {
+            self.last_sidebar_width = self.sidebar_width;
+        }
+        self.sidebar_visible = false;
+        self.sidebar_context_menu = None;
+        self.sidebar_rename = None;
+        self.sidebar_new_entry = None;
+        self.active_tab_id = tab_id;
+        self.tab_manager.set_active_tab(tab_id.0);
+        self.tab_overflow_open = false;
         self.focus_surface(WorkspaceSurface::Explorer, window, cx);
         cx.notify();
     }
@@ -1772,8 +1768,6 @@ impl WorkspacePrototype {
     ) {
         if surface == WorkspaceSurface::Terminal {
             self.open_new_terminal_tab(window, cx);
-        } else if surface == WorkspaceSurface::Explorer {
-            self.open_new_explorer_tab(window, cx);
         } else {
             self.open_or_activate_surface(surface, window, cx);
         }
@@ -1820,7 +1814,10 @@ impl WorkspacePrototype {
                 if let Some(state) = removed {
                     self.sidebar_explorer = state;
                 }
-                self.sidebar_visible = true;
+                if self.sidebar_visible {
+                    self.last_sidebar_width = self.sidebar_width;
+                }
+                self.sidebar_visible = false;
                 self.sidebar_width = self
                     .last_sidebar_width
                     .clamp(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH);
@@ -1929,7 +1926,6 @@ impl Render for WorkspacePrototype {
                     appearance_config,
                     appearance_page,
                     terminal_background_import_error,
-                    show_explorer_button: self.preferences.show_explorer_button,
                     editor_word_wrap: self.editor_word_wrap_enabled(),
                     joined_tab_limit: self.tab_join_limit(),
                     error_log_expanded: self.error_log_expanded,
@@ -2023,12 +2019,7 @@ impl Render for WorkspacePrototype {
                 cx,
             ))
             .child(main)
-            .child(workspace_footer(
-                active_surface,
-                queued_prompts,
-                self.preferences.show_explorer_button,
-                cx,
-            ))
+            .child(workspace_footer(active_surface, queued_prompts, cx))
             .when_some(tab_context_menu, |root, menu| {
                 root.child(workspace_tab_context_menu(
                     menu,

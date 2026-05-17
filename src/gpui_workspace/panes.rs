@@ -37,7 +37,6 @@ pub(super) struct WorkspaceSurfaceContext {
     pub(super) appearance_config: Config,
     pub(super) appearance_page: AppearancePage,
     pub(super) terminal_background_import_error: Option<String>,
-    pub(super) show_explorer_button: bool,
     pub(super) editor_word_wrap: bool,
     pub(super) joined_tab_limit: usize,
     pub(super) error_log_expanded: bool,
@@ -349,7 +348,6 @@ pub(super) fn workspace_surface_pane(
         appearance_config,
         appearance_page,
         terminal_background_import_error,
-        show_explorer_button,
         editor_word_wrap,
         joined_tab_limit,
         error_log_expanded,
@@ -454,7 +452,6 @@ pub(super) fn workspace_surface_pane(
         )),
         WorkspaceSurface::Home => pane.child(home_surface(workspace_root, recent_projects, cx)),
         WorkspaceSurface::Settings => pane.child(settings_surface(
-            show_explorer_button,
             editor_word_wrap,
             joined_tab_limit,
             error_log_expanded,

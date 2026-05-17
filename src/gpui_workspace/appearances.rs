@@ -1319,7 +1319,6 @@ fn background_image_display_name(reference: &str) -> String {
 }
 
 pub(super) fn settings_surface(
-    show_explorer_button: bool,
     editor_word_wrap: bool,
     joined_tab_limit: usize,
     error_log_expanded: bool,
@@ -1347,15 +1346,6 @@ pub(super) fn settings_surface(
                 .text_color(rgb(ACTIVE_TEXT))
                 .child("Settings"),
         )
-        .child(settings_subheader("Footer"))
-        .child(settings_section(vec![settings_toggle_row(
-            "Show Explorer button",
-            "Adds an Explorer entry to the footer nav bar next to Home.",
-            show_explorer_button,
-            cx,
-            |this, cx| this.toggle_show_explorer_button(cx),
-        )
-        .into_any_element()]))
         .child(settings_subheader("Editor"))
         .child(settings_section(vec![settings_toggle_row(
             "Word wrap",

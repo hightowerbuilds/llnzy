@@ -14,11 +14,6 @@ use serde::{Deserialize, Serialize};
 // that round-trip these structs.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct WorkspacePreferences {
-    /// When true, the Explorer button appears in the footer nav bar.
-    /// Defaults to false — users opt-in from Settings.
-    #[serde(default)]
-    pub show_explorer_button: bool,
-
     /// Library reference (file name under the backgrounds/ dir, or an
     /// absolute path for legacy entries) of the terminal background image
     /// last selected by the user. None when no image is active. Persisted so
@@ -126,11 +121,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_hides_explorer_button() {
-        assert!(!WorkspacePreferences::default().show_explorer_button);
-    }
-
-    #[test]
     fn load_missing_file_returns_default() {
         let dir = std::env::temp_dir().join("llnzy-prefs-test-missing");
         let _ = std::fs::remove_dir_all(&dir);
@@ -147,7 +137,6 @@ mod tests {
         let path = dir.join("preferences.json");
 
         let prefs = WorkspacePreferences {
-            show_explorer_button: true,
             terminal_background_image: Some("forest.png".to_string()),
             terminal_background_image_fit: "fit".to_string(),
             terminal_palette: Some([[16, 9, 20], [77, 31, 79], [197, 122, 200]]),
@@ -171,16 +160,19 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("preferences.json");
-        std::fs::write(&path, r#"{"show_explorer_button": true}"#).unwrap();
+        std::fs::write(
+            &path,
+            r#"{"show_explorer_button": true, "terminal_layout": "display"}"#,
+        )
+        .unwrap();
 
         let loaded = WorkspacePreferences::load_from(&path);
-        assert!(loaded.show_explorer_button);
         assert!(loaded.terminal_background_image.is_none());
         assert!(loaded.terminal_background_image_fit.is_empty());
         assert!(loaded.terminal_palette.is_none());
         assert!(loaded.terminal_background_intensity.is_none());
         assert!(loaded.terminal_font_family.is_none());
-        assert!(loaded.terminal_layout.is_empty());
+        assert_eq!(loaded.terminal_layout, "display");
         assert!(loaded.editor_syntax_theme.is_none());
         assert!(loaded.editor_word_wrap.is_none());
         assert_eq!(loaded.joined_tab_limit(), 2);
