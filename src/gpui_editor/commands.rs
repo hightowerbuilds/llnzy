@@ -344,10 +344,13 @@ impl EditorPrototype {
             return;
         }
 
-        if let Some(text) = self.selected_text_or_current_line() {
-            if !text.is_empty() {
-                cx.write_to_clipboard(ClipboardItem::new_string(text));
-            }
+        let Some(text) = self.selected_text_or_current_line() else {
+            self.status_message = Some("No active buffer to copy".to_string());
+            cx.notify();
+            return;
+        };
+        if !text.is_empty() {
+            cx.write_to_clipboard(ClipboardItem::new_string(text));
         }
     }
 
@@ -389,6 +392,12 @@ impl EditorPrototype {
             return;
         }
 
+        if self.editor.active_buffer_view().is_none() {
+            self.status_message = Some("No active buffer to paste into".to_string());
+            cx.notify();
+            return;
+        }
+
         if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
             self.replace_selection_or_range(cx, None, &text);
         }
@@ -396,6 +405,12 @@ impl EditorPrototype {
 
     pub(crate) fn undo_edit(&mut self, cx: &mut Context<Self>) {
         if self.image_preview_active {
+            return;
+        }
+
+        if self.editor.active_buffer_view().is_none() {
+            self.status_message = Some("No active buffer to undo".to_string());
+            cx.notify();
             return;
         }
 
@@ -410,6 +425,12 @@ impl EditorPrototype {
 
     pub(crate) fn redo_edit(&mut self, cx: &mut Context<Self>) {
         if self.image_preview_active {
+            return;
+        }
+
+        if self.editor.active_buffer_view().is_none() {
+            self.status_message = Some("No active buffer to redo".to_string());
+            cx.notify();
             return;
         }
 

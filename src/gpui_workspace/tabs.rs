@@ -430,6 +430,43 @@ pub(super) fn reorder_workspace_tab_block(
     true
 }
 
+pub(super) fn place_workspace_tabs_together(
+    tabs: &mut Vec<WorkspaceTab>,
+    ordered_ids: &[WorkspaceTabId],
+) -> bool {
+    if ordered_ids.len() < 2 {
+        return false;
+    }
+
+    let Some(insert_anchor) = tabs.iter().position(|tab| ordered_ids.contains(&tab.id)) else {
+        return false;
+    };
+
+    let grouped = ordered_ids
+        .iter()
+        .filter_map(|id| tabs.iter().find(|tab| tab.id == *id).cloned())
+        .collect::<Vec<_>>();
+    if grouped.len() != ordered_ids.len() {
+        return false;
+    }
+
+    let mut remaining = Vec::with_capacity(tabs.len() - grouped.len());
+    for tab in tabs.drain(..) {
+        if !ordered_ids.contains(&tab.id) {
+            remaining.push(tab);
+        }
+    }
+
+    let insert_index = remaining
+        .iter()
+        .take(insert_anchor)
+        .filter(|tab| !ordered_ids.contains(&tab.id))
+        .count();
+    remaining.splice(insert_index..insert_index, grouped);
+    *tabs = remaining;
+    true
+}
+
 pub(super) fn workspace_tab_context_menu(
     menu: GpuiTabContextMenu,
     tabs: Vec<GpuiTabChoice>,
@@ -849,6 +886,25 @@ mod tests {
         assert_eq!(
             tabs.iter().map(|tab| tab.id.0).collect::<Vec<_>>(),
             vec![1, 4, 2, 3]
+        );
+    }
+
+    #[test]
+    fn tab_place_together_uses_requested_order() {
+        let mut tabs = vec![
+            WorkspaceTab::new(WorkspaceTabId(1), WorkspaceSurface::Home),
+            WorkspaceTab::new(WorkspaceTabId(2), WorkspaceSurface::Stacker),
+            WorkspaceTab::new(WorkspaceTabId(3), WorkspaceSurface::Terminal),
+            WorkspaceTab::new(WorkspaceTabId(4), WorkspaceSurface::Sketch),
+        ];
+
+        assert!(place_workspace_tabs_together(
+            &mut tabs,
+            &[WorkspaceTabId(3), WorkspaceTabId(2)]
+        ));
+        assert_eq!(
+            tabs.iter().map(|tab| tab.id.0).collect::<Vec<_>>(),
+            vec![1, 3, 2, 4]
         );
     }
 }

@@ -703,6 +703,16 @@ impl EditorPrototype {
     }
 
     pub(super) fn open_lsp_rename(&mut self, cx: &mut Context<Self>) {
+        let Some((_, _, _, _, line_count)) = self.active_lsp_context() else {
+            self.status_message = Some("No language server for this buffer".to_string());
+            cx.notify();
+            return;
+        };
+        if !perf::live_lsp_enabled(line_count) {
+            self.status_message = Some("LSP disabled for this large file".to_string());
+            cx.notify();
+            return;
+        }
         let seed = self
             .editor
             .active_buffer_view()

@@ -7,7 +7,7 @@ use super::{
 };
 
 pub(super) fn workspace_footer(
-    active_surface: WorkspaceSurface,
+    active_surface: Option<WorkspaceSurface>,
     queued_prompts: Vec<crate::stacker::queue::QueuedPrompt>,
     show_explorer_button: bool,
     cx: &mut Context<WorkspacePrototype>,
@@ -72,7 +72,7 @@ pub(super) fn workspace_footer(
 }
 
 fn footer_queue_tray(
-    active_surface: WorkspaceSurface,
+    active_surface: Option<WorkspaceSurface>,
     queued_prompts: Vec<crate::stacker::queue::QueuedPrompt>,
     cx: &mut Context<WorkspacePrototype>,
 ) -> gpui::Div {
@@ -82,7 +82,7 @@ fn footer_queue_tray(
         .items_center()
         .justify_end()
         .gap_1();
-    if active_surface != WorkspaceSurface::Terminal || queued_prompts.is_empty() {
+    if active_surface != Some(WorkspaceSurface::Terminal) || queued_prompts.is_empty() {
         return tray;
     }
 
@@ -127,10 +127,10 @@ fn footer_queue_chip(
 fn footer_button(
     label: &'static str,
     surface: WorkspaceSurface,
-    active_surface: WorkspaceSurface,
+    active_surface: Option<WorkspaceSurface>,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
-    let active = surface == active_surface;
+    let active = active_surface == Some(surface);
     div()
         .h(px(36.0))
         .flex()

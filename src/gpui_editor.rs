@@ -454,13 +454,26 @@ impl EditorPrototype {
             cx.notify();
             return;
         }
+        if self.go_to_line_active || self.editor_search.active || self.rename_active {
+            self.status_message = Some("Close the active editor input first".to_string());
+            cx.notify();
+            return;
+        }
         let visible_cols = self.visible_col_limit();
         let visible_lines = self.visible_line_limit();
         if let Some((buffer, view)) = self.active_buffer_and_view() {
             view.cursor.select_all(buffer);
             reveal_cursor(view, buffer.line_count(), visible_cols, visible_lines);
             cx.notify();
+        } else {
+            self.status_message = Some("No active buffer to select".to_string());
+            cx.notify();
         }
+    }
+
+    #[cfg(feature = "gpui-workspace")]
+    pub(crate) fn paste_from_workspace(&mut self, cx: &mut Context<Self>) {
+        self.paste_from_clipboard_respecting_editor_overlay(cx);
     }
 
     pub(crate) fn cycle_markdown_preview_from_workspace(&mut self, cx: &mut Context<Self>) {
@@ -964,6 +977,22 @@ impl EditorPrototype {
     fn wake_cursor_blink(&mut self) {
         self.cursor_blink_anchor = Instant::now();
         self.cursor_blink_visible = true;
+    }
+
+    fn paste_from_clipboard_respecting_editor_overlay(&mut self, cx: &mut Context<Self>) {
+        if self.rename_active {
+            if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
+                self.push_lsp_rename_text(&text.replace(['\n', '\r'], ""), cx);
+            }
+            return;
+        }
+        if self.editor_search.active {
+            if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
+                self.push_search_text(&text.replace('\n', " "), cx);
+            }
+            return;
+        }
+        self.dispatch_editor_command(EditorCommand::Paste, cx);
     }
 
     fn refresh_cursor_blink(&mut self) -> bool {

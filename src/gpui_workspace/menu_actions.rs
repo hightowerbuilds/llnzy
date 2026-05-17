@@ -331,7 +331,7 @@ impl WorkspacePrototype {
     pub(super) fn menu_paste(&mut self, _: &MenuPaste, _: &mut Window, cx: &mut Context<Self>) {
         if self.active_surface() == WorkspaceSurface::Editor {
             self.active_editor_entity()
-                .update(cx, |editor, cx| editor.paste_from_clipboard(cx));
+                .update(cx, |editor, cx| editor.paste_from_workspace(cx));
         }
     }
 

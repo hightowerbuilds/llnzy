@@ -55,11 +55,15 @@ const IDLE_FALLBACK_MS: u64 = 500;
 
 /// Cell geometry computed from the actual font and font size, replacing the
 /// previous hardcoded `CELL_WIDTH = 9.0` / `LINE_HEIGHT = 20.0` pair. The font
-/// advance comes from `TextSystem::em_advance`; the line height comes from the
-/// configured `terminal.line_height` multiplier applied to the font size.
+/// advance comes from the same text shaping path used for rendering; the line
+/// height comes from the configured `terminal.line_height` multiplier applied
+/// to the font size.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct CellMetrics {
+    /// Fixed grid column width for classic monospace terminal rendering.
     pub(super) advance: f32,
+    /// Average natural glyph width used only for display-mode PTY sizing.
+    pub(super) display_advance: f32,
     pub(super) line_height: f32,
 }
 
@@ -67,6 +71,7 @@ impl CellMetrics {
     fn fallback() -> Self {
         Self {
             advance: FALLBACK_CELL_WIDTH,
+            display_advance: FALLBACK_CELL_WIDTH,
             line_height: FALLBACK_LINE_HEIGHT,
         }
     }
@@ -297,7 +302,7 @@ impl TerminalSurface {
     ) {
         self.last_bounds = Some(bounds);
         self.last_metrics = metrics;
-        let (cols, rows) = terminal_grid_size(bounds, metrics);
+        let (cols, rows) = terminal_grid_size(bounds, metrics, self.config.terminal_layout);
         let Some(session) = &mut self.session else {
             return;
         };

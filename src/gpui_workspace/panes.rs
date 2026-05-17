@@ -62,7 +62,7 @@ impl Render for JoinedPaneResizeDrag {
 
 pub(super) fn workspace_content(
     context: WorkspaceSurfaceContext,
-    active_surface: WorkspaceSurface,
+    active_surface: Option<WorkspaceSurface>,
     active_tab_id: WorkspaceTabId,
     joined_panes: Option<JoinedWorkspacePanes>,
     cx: &mut Context<WorkspacePrototype>,
@@ -73,6 +73,10 @@ pub(super) fn workspace_content(
         .flex()
         .overflow_hidden()
         .bg(rgb(EDITOR_BG));
+
+    let Some(active_surface) = active_surface else {
+        return content.child(empty_workspace_surface(&context.appearance_config));
+    };
 
     if let Some(joined) = joined_panes {
         let ratio = joined.ratio.clamp(0.18, 0.82);
@@ -281,6 +285,33 @@ pub(super) fn workspace_content(
 
     content.child(
         workspace_surface_pane(context, active_surface, Some(active_tab_id), false, cx).flex_1(),
+    )
+}
+
+fn empty_workspace_surface(config: &Config) -> gpui::Div {
+    let mut surface = div()
+        .relative()
+        .size_full()
+        .overflow_hidden()
+        .bg(rgb(EDITOR_BG));
+
+    if let Some(background) = terminal_background_layer(config) {
+        surface = surface.child(background);
+    }
+    if let Some(shader_layer) = terminal_shader_effect_layer(config) {
+        surface = surface.child(shader_layer);
+    }
+
+    surface.child(
+        div()
+            .absolute()
+            .inset_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .text_size(px(24.0))
+            .text_color(rgb(0x9aa2b2))
+            .child("llnzy"),
     )
 }
 

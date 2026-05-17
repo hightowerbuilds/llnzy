@@ -262,15 +262,10 @@ impl WorkspacePrototype {
             return;
         };
         let source = rename.path;
-        let new_name = rename.text.trim();
-        if let Err(message) = validate_sidebar_entry_name(new_name) {
-            self.sidebar_explorer.status = Some(message);
-            self.sidebar_rename = Some(SidebarRenameState {
-                path: source,
-                text: new_name.to_string(),
-                replace_on_input: false,
-            });
-            cx.notify();
+        let requested_name = rename.text;
+        let new_name = requested_name.trim().to_string();
+        if let Err(message) = validate_sidebar_entry_name(&new_name) {
+            self.restore_failed_sidebar_rename(source, new_name, message, cx);
             return;
         }
         let Some(parent) = source.parent().map(Path::to_path_buf) else {
@@ -278,26 +273,33 @@ impl WorkspacePrototype {
             cx.notify();
             return;
         };
-        let destination = parent.join(new_name);
+        let destination = parent.join(&new_name);
         if same_path(&source, &destination) {
             self.close_sidebar_context_menu(cx);
             return;
         }
         if destination.exists() {
-            self.sidebar_explorer.status = Some(format!("{new_name} already exists"));
-            cx.notify();
+            self.restore_failed_sidebar_rename(
+                source,
+                new_name.clone(),
+                format!("{new_name} already exists"),
+                cx,
+            );
             return;
         }
         let is_dir = source.is_dir();
         let moved_sources = vec![(source.clone(), is_dir)];
         if let Some(message) = self.modified_open_editor_path_for_move(&moved_sources, cx) {
-            self.sidebar_explorer.status = Some(message);
-            cx.notify();
+            self.restore_failed_sidebar_rename(source, new_name, message, cx);
             return;
         }
         if let Err(error) = fs::rename(&source, &destination) {
-            self.sidebar_explorer.status = Some(format!("Rename failed: {error}"));
-            cx.notify();
+            self.restore_failed_sidebar_rename(
+                source,
+                new_name,
+                format!("Rename failed: {error}"),
+                cx,
+            );
             return;
         }
 
@@ -313,6 +315,22 @@ impl WorkspacePrototype {
         self.sidebar_context_menu = None;
         self.sidebar_explorer.status =
             Some(format!("Renamed to {}", display_path_name(&destination)));
+        cx.notify();
+    }
+
+    fn restore_failed_sidebar_rename(
+        &mut self,
+        source: PathBuf,
+        text: String,
+        message: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.sidebar_explorer.status = Some(message);
+        self.sidebar_rename = Some(SidebarRenameState {
+            path: source,
+            text,
+            replace_on_input: false,
+        });
         cx.notify();
     }
 
@@ -582,7 +600,9 @@ impl WorkspacePrototype {
         }
         let valid_tabs = self.tab_ids();
         self.tab_manager.retain_tabs(&valid_tabs);
-        if !valid_tabs.contains(&self.active_tab_id.0) {
+        if valid_tabs.is_empty() {
+            self.select_empty_workspace();
+        } else if !valid_tabs.contains(&self.active_tab_id.0) {
             self.active_tab_id = self
                 .tabs
                 .iter()
@@ -850,11 +870,8 @@ impl WorkspacePrototype {
             .retain(|tab| tab.surface != WorkspaceSurface::Editor);
         self.file_editors.clear();
         if self.tabs.is_empty() {
-            self.tabs.push(WorkspaceTab::new(
-                WorkspaceTabId(self.next_tab_id),
-                WorkspaceSurface::Home,
-            ));
-            self.next_tab_id += 1;
+            self.select_empty_workspace();
+            return;
         }
         let active_tab_still_exists = self.tabs.iter().any(|tab| tab.id == self.active_tab_id);
         if active_was_editor || !active_tab_still_exists {

@@ -594,19 +594,7 @@ impl EditorPrototype {
     }
 
     pub(super) fn paste(&mut self, _: &Paste, _: &mut Window, cx: &mut Context<Self>) {
-        if self.rename_active {
-            if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
-                self.push_lsp_rename_text(&text.replace(['\n', '\r'], ""), cx);
-            }
-            return;
-        }
-        if self.editor_search.active {
-            if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
-                self.push_search_text(&text.replace('\n', " "), cx);
-            }
-            return;
-        }
-        self.dispatch_editor_command(EditorCommand::Paste, cx);
+        self.paste_from_clipboard_respecting_editor_overlay(cx);
     }
 
     pub(super) fn save(&mut self, _: &Save, _: &mut Window, cx: &mut Context<Self>) {

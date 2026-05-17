@@ -44,9 +44,10 @@ use self::sidebar::{
     SidebarRenameState, WorkspaceSidebarContext,
 };
 use self::tabs::{
-    reorder_workspace_tab_block, workspace_tab_bar, workspace_tab_context_menu,
-    workspace_tab_label, workspace_tab_layouts, workspace_tab_menu_anchor, TabRenameState,
-    WorkspaceTab, WorkspaceTabId, WorkspaceTabMenuAnchor,
+    place_workspace_tabs_together, reorder_workspace_tab_block, workspace_tab_bar,
+    workspace_tab_context_menu, workspace_tab_label, workspace_tab_layouts,
+    workspace_tab_menu_anchor, TabRenameState, WorkspaceTab, WorkspaceTabId,
+    WorkspaceTabMenuAnchor,
 };
 
 actions!(
@@ -138,6 +139,7 @@ const BUMPER_WIDTH: f32 = 20.0;
 const BUMPER_RESIZE_WIDTH: f32 = 6.0;
 const EXPLORER_ENTRY_LIMIT: usize = 260;
 const GPUI_TERMINAL_BACKGROUND_MAX_EDGE: u32 = 2048;
+const EMPTY_WORKSPACE_TAB_ID: WorkspaceTabId = WorkspaceTabId(0);
 const SIDEBAR_ROW_BG: u32 = CHROME_BG;
 const SIDEBAR_ROW_HOVER_BG: u32 = 0x2b2e36;
 const SIDEBAR_ROW_SELECTED_BG: u32 = 0x303440;
@@ -297,6 +299,7 @@ pub fn run_workspace_prototype() {
             KeyBinding::new("cmd-w", MenuCloseTab, None),
             KeyBinding::new("cmd-]", MenuNextTab, None),
             KeyBinding::new("cmd-[", MenuPreviousTab, None),
+            KeyBinding::new("cmd-b", MenuToggleSidebar, None),
             // Cmd+1..Cmd+9: activate the Nth tab by position. If the index
             // is out of range (fewer tabs than N) the action is a no-op.
             KeyBinding::new("cmd-1", MenuActivateTab1, None),
@@ -331,7 +334,7 @@ pub fn run_workspace_prototype() {
             }
         };
         if let Err(error) = window.update(cx, |view, window, cx| {
-            view.focus_surface(view.active_surface(), window, cx);
+            view.focus_active_surface(window, cx);
         }) {
             log::error!("failed to focus workspace window: {error:?}");
             cx.quit();
@@ -366,7 +369,7 @@ pub fn run_workspace_prototype() {
                 }
             };
             if let Err(error) = window.update(cx, |view, window, cx| {
-                view.focus_surface(view.active_surface(), window, cx);
+                view.focus_active_surface(window, cx);
             }) {
                 log::error!("failed to focus new workspace window: {error:?}");
             }
@@ -993,13 +996,24 @@ impl WorkspacePrototype {
         });
     }
 
-    fn active_surface(&self) -> WorkspaceSurface {
+    fn active_surface_if_present(&self) -> Option<WorkspaceSurface> {
         self.tabs
             .iter()
             .find(|tab| tab.id == self.active_tab_id)
             .or_else(|| self.tabs.first())
             .map(|tab| tab.surface)
+    }
+
+    fn active_surface(&self) -> WorkspaceSurface {
+        self.active_surface_if_present()
             .unwrap_or(WorkspaceSurface::Home)
+    }
+
+    fn select_empty_workspace(&mut self) {
+        self.active_tab_id = EMPTY_WORKSPACE_TAB_ID;
+        self.tab_overflow_open = false;
+        self.sidebar_explorer.selected_path = None;
+        self.tab_manager.retain_tabs(&[]);
     }
 
     fn tab_ids(&self) -> Vec<u64> {
@@ -1434,37 +1448,7 @@ impl WorkspacePrototype {
     }
 
     fn place_joined_tabs_together(&mut self, group_ids: &[WorkspaceTabId]) {
-        if group_ids.len() < 2 {
-            return;
-        }
-
-        let Some(insert_anchor) = self.tabs.iter().position(|tab| group_ids.contains(&tab.id))
-        else {
-            return;
-        };
-
-        let grouped = group_ids
-            .iter()
-            .filter_map(|id| self.tabs.iter().find(|tab| tab.id == *id).cloned())
-            .collect::<Vec<_>>();
-        if grouped.len() != group_ids.len() {
-            return;
-        }
-
-        let mut remaining = Vec::with_capacity(self.tabs.len() - grouped.len());
-        for tab in self.tabs.drain(..) {
-            if !group_ids.contains(&tab.id) {
-                remaining.push(tab);
-            }
-        }
-
-        let insert_index = remaining
-            .iter()
-            .take(insert_anchor)
-            .filter(|tab| !group_ids.contains(&tab.id))
-            .count();
-        remaining.splice(insert_index..insert_index, grouped);
-        self.tabs = remaining;
+        place_workspace_tabs_together(&mut self.tabs, group_ids);
     }
 
     fn separate_tab_by_id(&mut self, tab_id: WorkspaceTabId, cx: &mut Context<Self>) {
@@ -1476,6 +1460,8 @@ impl WorkspacePrototype {
 
     fn swap_tabs_by_id(&mut self, tab_id: WorkspaceTabId, cx: &mut Context<Self>) {
         if self.tab_manager.swap_tabs_for_tab(tab_id.0) {
+            let group_ids = self.joined_tab_ids_for(tab_id);
+            self.place_joined_tabs_together(&group_ids);
             cx.notify();
         }
     }
@@ -1595,6 +1581,14 @@ impl WorkspacePrototype {
         }
     }
 
+    fn focus_active_surface(&self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(surface) = self.active_surface_if_present() {
+            self.focus_surface(surface, window, cx);
+        } else {
+            window.focus(&self.focus_handle);
+        }
+    }
+
     fn activate_tab(
         &mut self,
         tab_id: WorkspaceTabId,
@@ -1622,7 +1616,7 @@ impl WorkspacePrototype {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.active_surface() == surface {
+        if self.active_surface_if_present() == Some(surface) {
             self.focus_surface(surface, window, cx);
             cx.notify();
             return;
@@ -1683,6 +1677,10 @@ impl WorkspacePrototype {
         cx: &mut Context<Self>,
     ) {
         let primary_id = self.active_tab_id;
+        if self.tab_by_id(primary_id).is_none() {
+            self.open_new_terminal_tab(window, cx);
+            return;
+        }
         if self.tab_manager.joined_member_count(primary_id.0) >= self.tab_join_limit() {
             return;
         }
@@ -1818,14 +1816,13 @@ impl WorkspacePrototype {
         let valid_tabs = self.tab_ids();
         self.tab_manager.retain_tabs(&valid_tabs);
         if self.tabs.is_empty() {
-            self.tabs.push(WorkspaceTab::new(
-                WorkspaceTabId(self.next_tab_id),
-                WorkspaceSurface::Home,
-            ));
-            self.next_tab_id += 1;
+            self.select_empty_workspace();
+            window.focus(&self.focus_handle);
+            cx.notify();
+            return;
         }
 
-        if was_active {
+        if was_active || !valid_tabs.contains(&self.active_tab_id.0) {
             let next_index = index.min(self.tabs.len().saturating_sub(1));
             self.active_tab_id = self.tabs[next_index].id;
             let tab = self.tabs[next_index].clone();
@@ -1853,10 +1850,13 @@ impl Render for WorkspacePrototype {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.persist_workspace_recovery(false);
 
-        let active_surface = self.active_surface();
+        let active_surface = self.active_surface_if_present();
         let active_tab_id = self.active_tab_id;
         let tabs = self.tabs.clone();
-        let joined_panes = self.joined_panes_for_active();
+        let joined_panes = active_surface
+            .is_some()
+            .then(|| self.joined_panes_for_active())
+            .flatten();
         let tab_context_menu = self.tab_manager.context_menu();
         let tab_overflow_open = self.tab_overflow_open;
         let tab_name_overrides = self.tab_name_overrides.clone();

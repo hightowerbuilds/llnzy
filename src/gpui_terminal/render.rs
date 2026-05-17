@@ -9,7 +9,7 @@ use super::{
     CellMetrics, FALLBACK_CELL_WIDTH, TERMINAL_ACCENT, TERMINAL_BORDER, TERMINAL_MUTED,
     TERMINAL_PADDING,
 };
-use crate::config::{Config, CursorStyle};
+use crate::config::{Config, CursorStyle, TerminalLayoutMode};
 use crate::session::Session;
 
 pub(super) fn terminal_header(
@@ -59,10 +59,19 @@ pub(super) fn terminal_header(
         )
 }
 
-pub(super) fn terminal_grid_size(bounds: Bounds<Pixels>, metrics: CellMetrics) -> (u16, u16) {
-    let width = (bounds.size.width - px(TERMINAL_PADDING * 2.0)).max(px(metrics.advance));
+pub(super) fn terminal_grid_size(
+    bounds: Bounds<Pixels>,
+    metrics: CellMetrics,
+    layout_mode: TerminalLayoutMode,
+) -> (u16, u16) {
+    let grid_advance = match layout_mode {
+        TerminalLayoutMode::Monospace => metrics.advance,
+        TerminalLayoutMode::Display => metrics.display_advance,
+    }
+    .max(1.0);
+    let width = (bounds.size.width - px(TERMINAL_PADDING * 2.0)).max(px(grid_advance));
     let height = (bounds.size.height - px(TERMINAL_PADDING * 2.0)).max(px(metrics.line_height));
-    let cols = (width / px(metrics.advance))
+    let cols = (width / px(grid_advance))
         .floor()
         .max(1.0)
         .min(u16::MAX as f32) as u16;
@@ -306,29 +315,41 @@ pub(super) fn display_mode_decoration_rects(
 }
 
 /// Compute the per-frame cell geometry from the actual terminal font and the
-/// configured line-height multiplier. Advance width is measured by shaping the
-/// probe character `M` through the same `TextSystem::shape_line` path that
-/// renders the actual terminal rows, so the metric matches the rendered
-/// glyph width even when font resolution falls back (e.g. Berkeley Mono is
-/// not installed and the renderer drops to a system monospace). Line height
-/// is `font_size * terminal.line_height`, matching the existing config
-/// semantics. Falls back to the legacy 9.0/20.0 pair if shaping fails.
+/// configured line-height multiplier. Monospace advance is measured from `M`
+/// for stable fixed-grid placement; display advance is an average natural text
+/// width used only when sizing the PTY in display layout so proportional text
+/// does not wrap far before the terminal body's right edge. Line height is
+/// `font_size * terminal.line_height`, matching the existing config semantics.
 pub(super) fn compute_cell_metrics(
     window: &Window,
     base_font: &Font,
     font_size: Pixels,
     config: &Config,
 ) -> CellMetrics {
-    let advance = measure_cell_advance(window, base_font, font_size);
+    let advance = measure_average_advance(window, base_font, font_size, MONOSPACE_WIDTH_PROBE)
+        .unwrap_or(FALLBACK_CELL_WIDTH);
+    let display_advance =
+        measure_average_advance(window, base_font, font_size, DISPLAY_WIDTH_PROBE)
+            .unwrap_or(advance);
     let line_height_multiplier = config.line_height.max(1.0);
     let line_height = (f32::from(font_size) * line_height_multiplier).max(1.0);
     CellMetrics {
         advance,
+        display_advance,
         line_height,
     }
 }
 
-fn measure_cell_advance(window: &Window, base_font: &Font, font_size: Pixels) -> f32 {
+const MONOSPACE_WIDTH_PROBE: &str = "MMMMMMMMMM";
+const DISPLAY_WIDTH_PROBE: &str =
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789     /._-";
+
+fn measure_average_advance(
+    window: &Window,
+    base_font: &Font,
+    font_size: Pixels,
+    probe: &'static str,
+) -> Option<f32> {
     // Shape a multi-character probe through the same pipeline that paints
     // terminal rows, then divide by the probe length. This averages out any
     // per-glyph offset (kerning, hinting) and matches the per-cell advance
@@ -336,10 +357,9 @@ fn measure_cell_advance(window: &Window, base_font: &Font, font_size: Pixels) ->
     // on the probe font so contextual alternates cannot compress the probe
     // string into a shorter measured width than the real, mostly
     // non-ligaturable content rendered by terminal output.
-    const PROBE: &str = "MMMMMMMMMM";
     let mut probe_font = base_font.clone();
     probe_font.features = gpui::FontFeatures::disable_ligatures();
-    let probe_string: SharedString = PROBE.into();
+    let probe_string: SharedString = probe.into();
     let run = TextRun {
         len: probe_string.len(),
         font: probe_font,
@@ -352,10 +372,34 @@ fn measure_cell_advance(window: &Window, base_font: &Font, font_size: Pixels) ->
         .text_system()
         .shape_line(probe_string, font_size, &[run], None);
     let total_width = f32::from(shaped.width);
-    let per_char = total_width / PROBE.len() as f32;
+    let per_char = total_width / probe.chars().count() as f32;
     if per_char > 0.0 {
-        per_char
+        Some(per_char)
     } else {
-        FALLBACK_CELL_WIDTH
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn grid_size_uses_display_advance_only_for_display_layout() {
+        let bounds = Bounds::new(point(px(0.0), px(0.0)), size(px(224.0), px(124.0)));
+        let metrics = CellMetrics {
+            advance: 10.0,
+            display_advance: 5.0,
+            line_height: 20.0,
+        };
+
+        assert_eq!(
+            terminal_grid_size(bounds, metrics, TerminalLayoutMode::Monospace),
+            (20, 5)
+        );
+        assert_eq!(
+            terminal_grid_size(bounds, metrics, TerminalLayoutMode::Display),
+            (40, 5)
+        );
     }
 }
