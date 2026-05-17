@@ -40,7 +40,7 @@ pub(super) fn editor_line(
         appearance.visible_whitespace,
     );
     let visible_text_cols = visible_text.chars().count();
-    let visible_end_col = scroll_col + visible_text_cols;
+    let visible_end_col = scroll_col.saturating_add(visible_text_cols);
     let line_cols = text.chars().count();
     let diagnostic_range = diagnostic.and_then(|diagnostic| {
         diagnostic_line_range(
@@ -52,10 +52,7 @@ pub(super) fn editor_line(
         )
     });
     let visible_cursor = cursor.and_then(|cursor| {
-        let in_segment = cursor.col >= scroll_col
-            && (cursor.col < visible_end_col
-                || (cursor.col == line_cols && cursor.col == visible_end_col));
-        in_segment.then_some(Position::new(line, cursor.col - scroll_col))
+        visible_cursor_for_segment(cursor, line, scroll_col, visible_end_col, line_cols)
     });
     let line_selection =
         selection.and_then(|(start, end)| selection_for_line(start, end, line, text));
@@ -424,6 +421,24 @@ fn selection_for_line(
     })
 }
 
+fn visible_cursor_for_segment(
+    cursor: Position,
+    line: usize,
+    scroll_col: usize,
+    visible_end_col: usize,
+    line_cols: usize,
+) -> Option<Position> {
+    let in_segment = cursor.col >= scroll_col
+        && (cursor.col < visible_end_col
+            || (cursor.col == line_cols && cursor.col == visible_end_col));
+
+    if in_segment {
+        Some(Position::new(line, cursor.col.saturating_sub(scroll_col)))
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -471,6 +486,30 @@ mod tests {
                 end_col: 4,
                 includes_line_break: false,
             }
+        );
+    }
+
+    #[test]
+    fn visible_cursor_ignores_cursor_before_wrapped_segment() {
+        assert_eq!(
+            visible_cursor_for_segment(Position::new(0, 2), 0, 8, 12, 20),
+            None
+        );
+    }
+
+    #[test]
+    fn visible_cursor_offsets_cursor_inside_wrapped_segment() {
+        assert_eq!(
+            visible_cursor_for_segment(Position::new(0, 10), 0, 8, 12, 20),
+            Some(Position::new(0, 2))
+        );
+    }
+
+    #[test]
+    fn visible_cursor_keeps_line_end_on_final_wrapped_segment() {
+        assert_eq!(
+            visible_cursor_for_segment(Position::new(0, 20), 0, 16, 20, 20),
+            Some(Position::new(0, 4))
         );
     }
 }
