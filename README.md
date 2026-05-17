@@ -8,7 +8,7 @@ A native GPU terminal emulator in Rust, with a coding workbench built around it.
 
 llnzy is a terminal emulator first. The terminal is the headline surface: a GPU-rendered ANSI/VT emulator running your shell, with the rest of the app organized to support the work you do around it.
 
-The other surfaces orbit the terminal. The code editor handles source files adjacent to the shell session. The project sidebar scopes the workspace to whatever directory the terminal is operating on. Stacker manages prompts you hand off to agents and CLIs running inside the terminal. Appearances, Tabs, Settings, and the Error Log exist to keep that loop tunable and observable.
+The other surfaces orbit the terminal. The code editor handles source files adjacent to the shell session. The project sidebar scopes the workspace to whatever directory the terminal is operating on. Stacker manages prompts you hand off to agents and CLIs running inside the terminal. Sketch is a drawing canvas for the visual artifacts that come up around agentic coding -- wireframes, annotated screenshots, diagrams traded with agents. Appearances, Tabs, Settings, and the Error Log exist to keep that loop tunable and observable.
 
 Vim mode was removed on purpose: if you want vim, run it in the terminal.
 
@@ -59,7 +59,7 @@ Requires Rust 1.75+. macOS is the active release target.
 
 **Themes** -- Built-in presets plus persistent background image management through the GPUI appearances workflow.
 
-**Sketch** -- A side surface. Drawing canvas with marker, rectangle, symbol, image, and text tools. Supports selection, moving/resizing, undo/redo, save, export, and saved appearance settings. Not part of the core coding loop; it exists if you want it.
+**Sketch** -- A drawing canvas for the visual artifacts that come up while coding with agents: wireframes you draw before writing code, screenshots you annotate, diagrams and images you exchange with agents. Marker, rectangle, symbol, image, and text tools, with selection, moving/resizing, undo/redo, save, export, and persisted appearance settings. Less central than the terminal or editor, but a core surface because visual artifacts matter for agentic workflows.
 
 ## Keyboard Shortcuts
 
@@ -98,6 +98,9 @@ llnzy reads `config.toml` from the platform config directory and auto-reloads ch
 background = "smoke"
 bloom_enabled = true
 crt_enabled = true
+
+[terminal]
+scrollback_lines = 10000  # per-terminal scrollback history; lower to save memory
 
 [editor]
 tab_size = 4
