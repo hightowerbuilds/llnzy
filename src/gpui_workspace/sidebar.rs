@@ -19,8 +19,8 @@ use crate::sidebar_move::{
 };
 
 use super::{
-    WorkspacePrototype, ACCENT, ACTIVE_TEXT, BORDER, BUMPER_BG, BUMPER_RESIZE_WIDTH, BUMPER_WIDTH,
-    CHROME_BG, EXPLORER_ENTRY_LIMIT, FOLDER_BLUE, MUTED_TEXT, QUEUE_GREEN, SIDEBAR_DROP_INVALID_BG,
+    WorkspacePalette, WorkspacePrototype, ACCENT, ACTIVE_TEXT, BUMPER_RESIZE_WIDTH, BUMPER_WIDTH,
+    EXPLORER_ENTRY_LIMIT, FOLDER_BLUE, MUTED_TEXT, QUEUE_GREEN, SIDEBAR_DROP_INVALID_BG,
     SIDEBAR_DROP_VALID_BG, SIDEBAR_ROW_BG, SIDEBAR_ROW_HOVER_BG, SIDEBAR_ROW_SELECTED_BG,
     SIDEBAR_ROW_SELECTED_HOVER_BG, SIDEBAR_TEXT,
 };
@@ -60,6 +60,7 @@ pub(super) struct WorkspaceSidebarContext {
     pub(super) recent_projects_open: bool,
     pub(super) sidebar_width: f32,
     pub(super) explorer_status: Option<String>,
+    pub(super) palette: WorkspacePalette,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -203,6 +204,7 @@ pub(super) fn workspace_sidebar(
         recent_projects_open,
         sidebar_width,
         explorer_status,
+        palette,
     } = context;
 
     let root_label = workspace_root
@@ -220,17 +222,17 @@ pub(super) fn workspace_sidebar(
         .items_center()
         .justify_between()
         .border_b_1()
-        .border_color(rgb(0x343743))
+        .border_color(rgb(palette.border))
         .text_size(px(13.0))
-        .text_color(rgb(ACTIVE_TEXT))
+        .text_color(rgb(palette.active_text))
         .child(
             div().flex().items_center().gap_2().child("FILES").child(
                 div()
                     .rounded_sm()
-                    .bg(rgb(0x303440))
+                    .bg(rgb(palette.sidebar_row_selected_bg))
                     .px_1()
                     .text_size(px(10.0))
-                    .text_color(rgb(MUTED_TEXT))
+                    .text_color(rgb(palette.muted_text))
                     .child(root_label),
             ),
         )
@@ -271,8 +273,8 @@ pub(super) fn workspace_sidebar(
         .flex()
         .flex_col()
         .border_r_1()
-        .border_color(rgb(BORDER))
-        .bg(rgb(CHROME_BG))
+        .border_color(rgb(palette.border))
+        .bg(rgb(palette.chrome_bg))
         .child(header)
         .child(sidebar_project_controls(
             workspace_root.clone(),
@@ -317,9 +319,9 @@ pub(super) fn workspace_sidebar(
                 .flex()
                 .items_center()
                 .border_t_1()
-                .border_color(rgb(0x343743))
+                .border_color(rgb(palette.border))
                 .text_size(px(11.0))
-                .text_color(rgb(MUTED_TEXT))
+                .text_color(rgb(palette.muted_text))
                 .child(explorer_status.unwrap_or_else(|| format!("{}px", sidebar_width.round()))),
         );
     sidebar
@@ -1139,6 +1141,7 @@ fn explorer_row_id(path: &Path) -> u64 {
 
 pub(super) fn sidebar_bumper(
     sidebar_visible: bool,
+    palette: WorkspacePalette,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     div()
@@ -1148,9 +1151,9 @@ pub(super) fn sidebar_bumper(
         .flex()
         .justify_between()
         .gap_0()
-        .bg(rgb(BUMPER_BG))
+        .bg(rgb(palette.bumper_bg))
         .border_r_1()
-        .border_color(rgb(BORDER))
+        .border_color(rgb(palette.border))
         .child(
             div()
                 .id("workspace-sidebar-resize-handle")

@@ -94,6 +94,15 @@ impl SketchAppearanceSettings {
     }
 }
 
+impl SketchGridMode {
+    pub fn toggled_visibility(self) -> Self {
+        match self {
+            Self::Hidden => Self::Lines,
+            Self::Lines | Self::Dots => Self::Hidden,
+        }
+    }
+}
+
 pub fn appearance_settings_path() -> Option<PathBuf> {
     crate::platform::paths::current_paths()
         .map(|paths| paths.sketches_dir().join("appearance.json"))

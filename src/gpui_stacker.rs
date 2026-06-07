@@ -37,6 +37,46 @@ const SELECTED_BG: u32 = 0x313846;
 const QUEUE_GREEN: u32 = 0x6aff90;
 const PROMPT_REFRESH_TICK: Duration = Duration::from_millis(1000);
 
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct StackerPalette {
+    chrome_bg: u32,
+    content_bg: u32,
+    panel_bg: u32,
+    border: u32,
+    text: u32,
+    muted_text: u32,
+    selected_bg: u32,
+    button_bg: u32,
+}
+
+impl StackerPalette {
+    fn for_light_mode(light_mode: bool) -> Self {
+        if light_mode {
+            Self {
+                chrome_bg: 0xf0e3d1,
+                content_bg: 0xfaf2e2,
+                panel_bg: 0xfffbf2,
+                border: 0xd8c6ad,
+                text: 0x3e372f,
+                muted_text: 0x7d7064,
+                selected_bg: 0xe2d0ed,
+                button_bg: 0xeadcc8,
+            }
+        } else {
+            Self {
+                chrome_bg: CHROME_BG,
+                content_bg: CONTENT_BG,
+                panel_bg: CONTENT_PANEL_BG,
+                border: BORDER,
+                text: TEXT,
+                muted_text: MUTED_TEXT,
+                selected_bg: SELECTED_BG,
+                button_bg: 0x242632,
+            }
+        }
+    }
+}
+
 actions!(
     stacker_gpui,
     [
@@ -127,6 +167,7 @@ pub(crate) struct StackerPrototype {
     prompt_list_ratio: f32,
     /// True when the "?" help modal explaining the Stacker CLI is visible.
     cli_help_open: bool,
+    light_mode: bool,
 }
 
 impl StackerPrototype {
@@ -162,7 +203,19 @@ impl StackerPrototype {
             pending_delete: None,
             prompt_list_ratio: 0.34,
             cli_help_open: false,
+            light_mode: false,
         }
+    }
+
+    #[cfg(feature = "gpui-workspace")]
+    pub(crate) fn set_light_mode(&mut self, light_mode: bool, cx: &mut Context<Self>) {
+        if self.light_mode == light_mode {
+            return;
+        }
+        self.light_mode = light_mode;
+        self.editor
+            .update(cx, |editor, cx| editor.set_light_mode(light_mode, cx));
+        cx.notify();
     }
 
     pub(crate) fn toggle_cli_help(&mut self, cx: &mut Context<Self>) {
@@ -419,6 +472,7 @@ impl Focusable for StackerPrototype {
 
 impl Render for StackerPrototype {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let palette = StackerPalette::for_light_mode(self.light_mode);
         let content = stacker_workbench(
             &self.prompts,
             &self.queued_prompts,
@@ -426,15 +480,16 @@ impl Render for StackerPrototype {
             self.editor.clone(),
             self.show_chrome,
             self.prompt_list_ratio,
+            palette,
             cx,
         );
         let mut frame = div().size_full().flex().flex_col();
         if self.show_chrome {
-            frame = frame.child(header());
+            frame = frame.child(header(palette));
         }
         frame = frame.child(content);
         if self.show_chrome {
-            frame = frame.child(status_bar(self.editor.read(cx)));
+            frame = frame.child(status_bar(self.editor.read(cx), palette));
         }
 
         let pending_delete = self.pending_delete;
@@ -446,8 +501,8 @@ impl Render for StackerPrototype {
         div()
             .relative()
             .size_full()
-            .bg(rgb(CONTENT_BG))
-            .text_color(rgb(TEXT))
+            .bg(rgb(palette.content_bg))
+            .text_color(rgb(palette.text))
             .font_family("Inter")
             .child(frame)
             .when_some(pending_label, |root, label| {
@@ -466,6 +521,7 @@ struct StackerTextInput {
     content_height: Pixels,
     is_selecting: bool,
     font_size: f32,
+    light_mode: bool,
 }
 
 impl StackerTextInput {
@@ -481,6 +537,14 @@ impl StackerTextInput {
             content_height: px(0.0),
             is_selecting: false,
             font_size: 16.0,
+            light_mode: false,
+        }
+    }
+
+    fn set_light_mode(&mut self, light_mode: bool, cx: &mut Context<Self>) {
+        if self.light_mode != light_mode {
+            self.light_mode = light_mode;
+            cx.notify();
         }
     }
 
@@ -773,6 +837,7 @@ impl Focusable for StackerTextInput {
 
 impl Render for StackerTextInput {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let palette = StackerPalette::for_light_mode(self.light_mode);
         div()
             .size_full()
             .key_context("StackerTextInput")
@@ -798,12 +863,12 @@ impl Render for StackerTextInput {
             .on_mouse_move(cx.listener(Self::on_mouse_move))
             .line_height(px(self.font_size * 1.6))
             .text_size(px(self.font_size))
-            .text_color(rgb(0xf4f4f8))
+            .text_color(rgb(palette.text))
             .child(
                 div()
                     .size_full()
                     .p(px(16.0))
-                    .bg(rgb(CONTENT_BG))
+                    .bg(rgb(palette.content_bg))
                     .child(StackerTextElement { input: cx.entity() }),
             )
     }

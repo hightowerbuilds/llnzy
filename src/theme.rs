@@ -27,7 +27,7 @@ impl VisualTheme {
 
 /// All built-in theme presets.
 pub fn builtin_themes() -> Vec<VisualTheme> {
-    vec![minimalist(), buzz()]
+    vec![minimalist(), light_mode()]
 }
 
 /// Clean terminal, no effects.
@@ -69,65 +69,95 @@ fn minimalist() -> VisualTheme {
     }
 }
 
-/// Green/amber on black, CRT scanlines, smoky retro terminal feel.
-fn buzz() -> VisualTheme {
+/// Beige and pastel light theme for the full app appearance config.
+fn light_mode() -> VisualTheme {
     VisualTheme {
-        name: "Buzz".to_string(),
-        description: "Green phosphor CRT with smoke and scanlines".to_string(),
+        name: "Light Mode".to_string(),
+        description: "Warm beige surface with pastel accents".to_string(),
         colors: ColorScheme {
             ansi: [
-                [10, 10, 8],     // black
-                [180, 60, 40],   // red
-                [40, 200, 60],   // green — phosphor green
-                [200, 180, 40],  // yellow — amber
-                [60, 120, 180],  // blue
-                [160, 80, 160],  // magenta
-                [40, 180, 160],  // cyan
-                [160, 200, 160], // white — greenish
-                [40, 60, 40],    // bright black
-                [220, 80, 60],   // bright red
-                [80, 255, 100],  // bright green — bright phosphor
-                [240, 220, 80],  // bright yellow
-                [100, 160, 220], // bright blue
-                [200, 120, 200], // bright magenta
-                [80, 220, 200],  // bright cyan
-                [200, 240, 200], // bright white
+                [84, 77, 68],
+                [214, 108, 117],
+                [116, 170, 139],
+                [216, 168, 80],
+                [117, 157, 215],
+                [198, 140, 184],
+                [110, 184, 178],
+                [247, 239, 223],
+                [126, 116, 104],
+                [229, 129, 136],
+                [139, 190, 157],
+                [229, 187, 104],
+                [144, 178, 228],
+                [214, 160, 202],
+                [136, 202, 196],
+                [255, 251, 242],
             ],
-            foreground: [60, 220, 80], // phosphor green
-            background: [8, 12, 8],    // nearly black with green tint
-            cursor: [80, 255, 100],
-            selection: [30, 80, 30],
-            selection_alpha: 0.4,
+            foreground: [62, 55, 49],
+            background: [250, 242, 226],
+            cursor: [117, 157, 215],
+            selection: [219, 200, 238],
+            selection_alpha: 0.38,
         },
         effects: EffectsConfig {
             enabled: true,
             fps_target: 60,
-            background: "smoke".to_string(),
-            background_intensity: 0.25,
-            background_speed: 0.6,
-            background_color: Some([30, 80, 30]),
-            background_color2: Some([70, 150, 60]),
-            background_color3: Some([160, 130, 55]),
+            background: "none".to_string(),
+            background_intensity: 0.0,
+            background_speed: 1.0,
+            background_color: None,
+            background_color2: None,
+            background_color3: None,
             background_image: None,
             background_image_fit: Default::default(),
-            bloom_enabled: true,
-            bloom_threshold: 0.25,
-            bloom_intensity: 0.5,
-            bloom_radius: 1.5,
+            bloom_enabled: false,
+            bloom_threshold: 0.4,
+            bloom_intensity: 0.4,
+            bloom_radius: 1.2,
             particles_enabled: false,
             particles_count: 0,
             particles_speed: 1.0,
-            cursor_glow: true,
+            cursor_glow: false,
             cursor_trail: false,
             text_animation: false,
-            crt_enabled: true,
-            scanline_intensity: 0.2,
+            crt_enabled: false,
+            scanline_intensity: 0.0,
             curvature: 0.0,
-            vignette_strength: 0.5,
-            chromatic_aberration: 0.3,
-            grain_intensity: 0.03,
-            effects_on_ui: false,
+            vignette_strength: 0.0,
+            chromatic_aberration: 0.0,
+            grain_intensity: 0.0,
+            effects_on_ui: true,
         },
-        cursor_style: CursorStyle::Block,
+        cursor_style: CursorStyle::Beam,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::builtin_themes;
+
+    #[test]
+    fn builtins_expose_light_mode_without_buzz() {
+        let names = builtin_themes()
+            .into_iter()
+            .map(|theme| theme.name)
+            .collect::<Vec<_>>();
+
+        assert!(names.iter().any(|name| name == "Light Mode"));
+        assert!(!names.iter().any(|name| name == "Buzz"));
+    }
+
+    #[test]
+    fn light_mode_uses_beige_background_and_pastel_accents() {
+        let theme = builtin_themes()
+            .into_iter()
+            .find(|theme| theme.name == "Light Mode")
+            .expect("Light Mode theme should exist");
+
+        assert_eq!(theme.colors.background, [250, 242, 226]);
+        assert_eq!(theme.colors.foreground, [62, 55, 49]);
+        assert_eq!(theme.colors.ansi[4], [117, 157, 215]);
+        assert_eq!(theme.colors.ansi[5], [198, 140, 184]);
+        assert_eq!(theme.effects.background, "none");
     }
 }

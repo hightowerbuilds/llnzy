@@ -611,7 +611,7 @@ impl WorkspacePrototype {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.menu_show_surface(WorkspaceSurface::Appearances, window, cx);
+        self.menu_show_surface(WorkspaceSurface::Settings, window, cx);
     }
 
     pub(super) fn menu_zoom_in(&mut self, _: &MenuZoomIn, _: &mut Window, cx: &mut Context<Self>) {

@@ -6,8 +6,8 @@ use gpui::{div, px, rgb, App, Context, MouseButton, MouseDownEvent, Render, Wind
 use crate::gpui_tabs::{GpuiTabChoice, GpuiTabContextMenu, GpuiTabContextMenuView, GpuiTabManager};
 
 use super::{
-    sidebar::project_display_name, WorkspacePrototype, WorkspaceSurface, ACTIVE_TAB_BG,
-    ACTIVE_TEXT, BORDER, CHROME_BG, INACTIVE_TAB_BG, MUTED_TEXT, QUEUE_GREEN, SIDEBAR_TEXT,
+    sidebar::project_display_name, WorkspacePalette, WorkspacePrototype, WorkspaceSurface,
+    ACTIVE_TEXT, MUTED_TEXT, QUEUE_GREEN, SIDEBAR_TEXT,
 };
 
 const TAB_BAR_HEIGHT: f32 = 44.0;
@@ -115,6 +115,7 @@ pub(super) fn workspace_tab_bar(
     tab_name_overrides: BTreeMap<u64, String>,
     tab_manager: &GpuiTabManager,
     overflow_open: bool,
+    palette: WorkspacePalette,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     let tab_items = tabs
@@ -138,8 +139,8 @@ pub(super) fn workspace_tab_bar(
         .px_2()
         .py_1()
         .border_b_1()
-        .border_color(rgb(BORDER))
-        .bg(rgb(CHROME_BG))
+        .border_color(rgb(palette.border))
+        .bg(rgb(palette.chrome_bg))
         .overflow_hidden();
 
     let mut tab_strip = div()
@@ -161,6 +162,7 @@ pub(super) fn workspace_tab_bar(
             width,
             tab_manager.is_joined(tab.id.0),
             menu_anchor,
+            palette,
             cx,
         ));
     }
@@ -174,14 +176,22 @@ pub(super) fn workspace_tab_bar(
         .justify_center()
         .rounded_sm()
         .border_1()
-        .border_color(rgb(if overflow_open { 0x325c44 } else { BORDER }))
-        .bg(rgb(if overflow_open { 0x102c20 } else { 0x141416 }))
+        .border_color(rgb(if overflow_open {
+            palette.queue_green
+        } else {
+            palette.border
+        }))
+        .bg(rgb(if overflow_open {
+            palette.sidebar_row_selected_bg
+        } else {
+            palette.inactive_tab_bg
+        }))
         .px_2()
         .text_size(px(12.0))
         .text_color(rgb(if overflow_open {
-            QUEUE_GREEN
+            palette.queue_green
         } else {
-            MUTED_TEXT
+            palette.muted_text
         }))
         .cursor_pointer()
         .on_mouse_down(
@@ -278,6 +288,7 @@ fn workspace_tab(
     width: f32,
     joined: bool,
     menu_anchor: WorkspaceTabMenuAnchor,
+    palette: WorkspacePalette,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     let active = tab.id == active_tab_id;
@@ -299,13 +310,21 @@ fn workspace_tab(
         .px_3()
         .rounded_sm()
         .border_1()
-        .border_color(rgb(if joined { 0x325c44 } else { BORDER }))
-        .bg(rgb(if active {
-            ACTIVE_TAB_BG
+        .border_color(rgb(if joined {
+            palette.queue_green
         } else {
-            INACTIVE_TAB_BG
+            palette.border
         }))
-        .text_color(rgb(if active { ACTIVE_TEXT } else { MUTED_TEXT }))
+        .bg(rgb(if active {
+            palette.active_tab_bg
+        } else {
+            palette.inactive_tab_bg
+        }))
+        .text_color(rgb(if active {
+            palette.active_text
+        } else {
+            palette.muted_text
+        }))
         .text_size(px(14.0))
         .cursor_move()
         .on_drag(
@@ -355,7 +374,11 @@ fn workspace_tab(
                 .justify_center()
                 .rounded_sm()
                 .text_size(px(13.0))
-                .text_color(rgb(if active { 0xc8c8d2 } else { 0x646973 }))
+                .text_color(rgb(if active {
+                    palette.muted_text
+                } else {
+                    palette.sidebar_text
+                }))
                 .cursor_pointer()
                 .on_mouse_down(
                     MouseButton::Left,

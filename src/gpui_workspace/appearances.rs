@@ -13,8 +13,8 @@ use crate::{
 };
 
 use super::{
-    AppearancePage, ErrorLogFilter, WorkspacePrototype, ACTIVE_TEXT, BORDER, EDITOR_BG,
-    GPUI_TERMINAL_BACKGROUND_MAX_EDGE, MUTED_TEXT, PANEL_BG, QUEUE_GREEN, SIDEBAR_TEXT,
+    AppearancePage, ErrorLogFilter, WorkspacePalette, WorkspacePrototype, ACTIVE_TEXT, BORDER,
+    EDITOR_BG, GPUI_TERMINAL_BACKGROUND_MAX_EDGE, MUTED_TEXT, PANEL_BG, QUEUE_GREEN, SIDEBAR_TEXT,
 };
 
 // Monospace families. `None` means "use the system default", which is what
@@ -108,14 +108,11 @@ fn appearance_page_nav(
     page: AppearancePage,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
-    div()
-        .flex()
-        .items_center()
-        .gap_1()
-        .child(appearance_page_button(AppearancePage::Terminal, page, cx))
-        .child(appearance_page_button(AppearancePage::Editor, page, cx))
-        .child(appearance_page_button(AppearancePage::Markdown, page, cx))
-        .child(appearance_page_button(AppearancePage::Sketch, page, cx))
+    let mut nav = div().flex().items_center().gap_1();
+    for target in AppearancePage::ALL {
+        nav = nav.child(appearance_page_button(target, page, cx));
+    }
+    nav
 }
 
 fn appearance_page_button(
@@ -207,6 +204,92 @@ fn appearance_theme_column(
     themes
 }
 
+fn app_theme_section(
+    content: gpui::Div,
+    config: &Config,
+    palette: WorkspacePalette,
+    cx: &mut Context<WorkspacePrototype>,
+) -> gpui::Div {
+    let mut section = div()
+        .w_full()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .child(
+            div()
+                .text_size(px(13.0))
+                .text_color(rgb(palette.muted_text))
+                .child("THEMES"),
+        )
+        .child(color_strip([
+            config.colors.background,
+            config.colors.foreground,
+            config.colors.cursor,
+            config.colors.selection,
+            config.colors.ansi[1],
+            config.colors.ansi[2],
+            config.colors.ansi[4],
+            config.colors.ansi[5],
+        ]));
+
+    for theme in builtin_themes() {
+        let active = theme.colors.background == config.colors.background
+            && theme.colors.foreground == config.colors.foreground
+            && theme.colors.cursor == config.colors.cursor;
+        let theme_name = theme.name.clone();
+        section = section.child(
+            div()
+                .w_full()
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap_3()
+                .rounded_sm()
+                .border_1()
+                .border_color(rgb(if active {
+                    palette.queue_green
+                } else {
+                    palette.border
+                }))
+                .bg(rgb(palette.panel_bg))
+                .p_3()
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .child(
+                            div()
+                                .text_size(px(13.0))
+                                .text_color(rgb(palette.active_text))
+                                .child(theme.name.clone()),
+                        )
+                        .child(color_strip([
+                            theme.colors.background,
+                            theme.colors.foreground,
+                            theme.colors.cursor,
+                            theme.colors.ansi[1],
+                        ])),
+                )
+                .child(appearance_button_palette(
+                    if active {
+                        "Applied".to_string()
+                    } else {
+                        "Apply".to_string()
+                    },
+                    active,
+                    palette,
+                    cx,
+                    move |this, cx| {
+                        this.apply_builtin_theme(&theme_name, cx);
+                    },
+                )),
+        );
+    }
+
+    content.child(section)
+}
+
 fn appearance_controls_column(
     config: Config,
     page: AppearancePage,
@@ -236,8 +319,15 @@ fn appearance_controls_column(
             terminal_appearance_controls(content, config, terminal_background_import_error, cx)
         }
         AppearancePage::Editor => editor_appearance_controls(content, config, cx),
-        AppearancePage::Markdown => markdown_appearance_controls(content, config, cx),
+        AppearancePage::Stacker => stacker_settings_controls(content),
         AppearancePage::Sketch => sketch_appearance_controls(content, sketch_toolbar_position, cx),
+        AppearancePage::App => {
+            let palette = WorkspacePalette::from_config(&config);
+            app_settings_controls(content, config, 2, palette, cx)
+        }
+        AppearancePage::Advanced => {
+            advanced_settings_controls(content, false, ErrorLogFilter::All, Vec::new(), cx)
+        }
     };
 
     content
@@ -304,13 +394,6 @@ fn terminal_appearance_controls(
     }
 
     content
-        .child(metric_row(
-            "App Font Size",
-            format!("{:.0}px", config.font_size),
-            cx,
-            |this, cx| this.adjust_font_size(-1.0, cx),
-            |this, cx| this.adjust_font_size(1.0, cx),
-        ))
         .child(metric_row(
             "Terminal Line Height",
             format!("{:.2}x", config.line_height),
@@ -407,12 +490,6 @@ fn terminal_appearance_controls(
                     |this, cx| this.set_background_mode("trees", cx),
                 ))
                 .child(appearance_button(
-                    "Rain".to_string(),
-                    config.effects.background == "rain",
-                    cx,
-                    |this, cx| this.set_background_mode("rain", cx),
-                ))
-                .child(appearance_button(
                     "Image".to_string(),
                     config.effects.background == "image",
                     cx,
@@ -473,30 +550,6 @@ fn terminal_appearance_controls(
                     config.effects.text_animation,
                     cx,
                     |this, cx| this.toggle_text_animation(cx),
-                )),
-        )
-        .child(metric_row(
-            "Selection Alpha",
-            format!("{:.0}%", config.colors.selection_alpha * 100.0),
-            cx,
-            |this, cx| this.adjust_selection_alpha(-0.05, cx),
-            |this, cx| this.adjust_selection_alpha(0.05, cx),
-        ))
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .gap_2()
-                .child(control_label("Time-of-Day Warmth"))
-                .child(appearance_button(
-                    if config.time_of_day_enabled {
-                        "On".to_string()
-                    } else {
-                        "Off".to_string()
-                    },
-                    config.time_of_day_enabled,
-                    cx,
-                    |this, cx| this.toggle_time_of_day(cx),
                 )),
         )
 }
@@ -693,6 +746,27 @@ fn editor_appearance_controls(
         ))
 }
 
+fn editor_settings_controls(
+    content: gpui::Div,
+    config: Config,
+    editor_word_wrap: bool,
+    cx: &mut Context<WorkspacePrototype>,
+) -> gpui::Div {
+    editor_appearance_controls(content, config.clone(), cx)
+        .child(settings_toggle_row(
+            "Word wrap",
+            "Wraps long source lines in JavaScript, Markdown, and other text files.",
+            editor_word_wrap,
+            cx,
+            |this, cx| this.toggle_editor_word_wrap(cx),
+        ))
+        .child(markdown_appearance_controls(
+            div().flex().flex_col().gap_3(),
+            config,
+            cx,
+        ))
+}
+
 fn editor_syntax_theme_controls(
     config: &Config,
     cx: &mut Context<WorkspacePrototype>,
@@ -844,6 +918,12 @@ const FIRE_PALETTES: &[ShaderPalette] = &[
         [0x4c, 0x1c, 0x09],
         [0xe6, 0x84, 0x3c],
     ),
+    (
+        "Blackfire",
+        [0x09, 0x0c, 0x10],
+        [0x24, 0x2a, 0x33],
+        [0x9a, 0xa6, 0xb8],
+    ),
 ];
 
 const AURORA_PALETTES: &[ShaderPalette] = &[
@@ -900,41 +980,17 @@ const TREES_PALETTES: &[ShaderPalette] = &[
     ),
 ];
 
-const RAIN_PALETTES: &[ShaderPalette] = &[
-    (
-        "Storm",
-        [0x08, 0x0e, 0x18],
-        [0x2e, 0x46, 0x60],
-        [0xbe, 0xd7, 0xf0],
-    ),
-    (
-        "Twilight",
-        [0x1c, 0x14, 0x2e],
-        [0x58, 0x48, 0x78],
-        [0xdc, 0xcd, 0xeb],
-    ),
-    (
-        "Overcast",
-        [0x18, 0x1c, 0x20],
-        [0x5a, 0x62, 0x6c],
-        [0xd7, 0xde, 0xe6],
-    ),
-    (
-        "Neon Rain",
-        [0x0a, 0x08, 0x18],
-        [0x3c, 0x1e, 0x6e],
-        [0xff, 0x5a, 0xdc],
-    ),
-];
-
 fn shader_palettes_for_mode(mode: &str) -> &'static [ShaderPalette] {
     match mode {
         "fire" => FIRE_PALETTES,
         "aurora" => AURORA_PALETTES,
         "trees" => TREES_PALETTES,
-        "rain" => RAIN_PALETTES,
         _ => SMOKE_PALETTES,
     }
+}
+
+fn visible_shader_mode(mode: &str) -> bool {
+    matches!(mode, "smoke" | "fire" | "aurora" | "trees")
 }
 
 fn shader_palette_label(mode: &str) -> &'static str {
@@ -942,7 +998,6 @@ fn shader_palette_label(mode: &str) -> &'static str {
         "fire" => "Fire Palette",
         "aurora" => "Aurora Palette",
         "trees" => "Canopy Palette",
-        "rain" => "Rain Palette",
         _ => "Smoke Palette",
     }
 }
@@ -952,13 +1007,13 @@ fn shader_intensity_label(mode: &str) -> &'static str {
         "fire" => "Fire Intensity",
         "aurora" => "Aurora Intensity",
         "trees" => "Canopy Intensity",
-        "rain" => "Rain Intensity",
         _ => "Smoke Intensity",
     }
 }
 
 /// Per-effect controls: palette presets + intensity slider + live preview.
-/// Shown for any shader-driven background mode (smoke / fire / aurora);
+/// Shown for any visible shader-driven background mode (smoke / fire /
+/// aurora / trees).
 /// renders an empty div otherwise so the Terminal tab's row layout doesn't
 /// shift when None or Image is selected.
 fn terminal_smoke_controls(
@@ -966,6 +1021,9 @@ fn terminal_smoke_controls(
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     let mode = config.effects.background.as_str();
+    if !visible_shader_mode(mode) {
+        return div();
+    }
     let kind = match crate::effects::EffectKind::from_background_mode(mode) {
         Some(k) => k,
         None => return div(),
@@ -1096,6 +1154,76 @@ fn sketch_appearance_controls(
     )
 }
 
+fn app_settings_controls(
+    content: gpui::Div,
+    config: Config,
+    joined_tab_limit: usize,
+    palette: WorkspacePalette,
+    cx: &mut Context<WorkspacePrototype>,
+) -> gpui::Div {
+    app_theme_section(content, &config, palette, cx)
+        .child(metric_row_palette(
+            "App Font Size",
+            format!("{:.0}px", config.font_size),
+            palette,
+            cx,
+            |this, cx| this.adjust_font_size(-1.0, cx),
+            |this, cx| this.adjust_font_size(1.0, cx),
+        ))
+        .child(metric_row_palette(
+            "Selection Alpha",
+            format!("{:.0}%", config.colors.selection_alpha * 100.0),
+            palette,
+            cx,
+            |this, cx| this.adjust_selection_alpha(-0.05, cx),
+            |this, cx| this.adjust_selection_alpha(0.05, cx),
+        ))
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(control_label_palette("Time-of-Day Warmth", palette))
+                .child(appearance_button_palette(
+                    if config.time_of_day_enabled {
+                        "On".to_string()
+                    } else {
+                        "Off".to_string()
+                    },
+                    config.time_of_day_enabled,
+                    palette,
+                    cx,
+                    |this, cx| this.toggle_time_of_day(cx),
+                )),
+        )
+        .child(settings_join_limit_row_palette(
+            joined_tab_limit,
+            palette,
+            cx,
+        ))
+}
+
+fn stacker_settings_controls(content: gpui::Div) -> gpui::Div {
+    content
+        .child(metric_readout("Prompt Queue", "Default".to_string()))
+        .child(metric_readout("Formatting", "Default".to_string()))
+}
+
+fn advanced_settings_controls(
+    content: gpui::Div,
+    error_log_expanded: bool,
+    error_log_filter: ErrorLogFilter,
+    error_entries: Vec<crate::error_log::LogEntry>,
+    cx: &mut Context<WorkspacePrototype>,
+) -> gpui::Div {
+    content.child(settings_error_log_row(
+        error_log_expanded,
+        error_log_filter,
+        error_entries,
+        cx,
+    ))
+}
+
 fn markdown_appearance_controls(
     content: gpui::Div,
     config: Config,
@@ -1187,11 +1315,64 @@ fn metric_row(
         .child(appearance_button("+".to_string(), false, cx, increment))
 }
 
+fn metric_row_palette(
+    label: &'static str,
+    value: String,
+    palette: WorkspacePalette,
+    cx: &mut Context<WorkspacePrototype>,
+    decrement: impl Fn(&mut WorkspacePrototype, &mut Context<WorkspacePrototype>) + 'static,
+    increment: impl Fn(&mut WorkspacePrototype, &mut Context<WorkspacePrototype>) + 'static,
+) -> impl IntoElement {
+    div()
+        .w_full()
+        .flex()
+        .items_center()
+        .gap_2()
+        .child(control_label_palette(label, palette))
+        .child(appearance_button_palette(
+            "-".to_string(),
+            false,
+            palette,
+            cx,
+            decrement,
+        ))
+        .child(
+            div()
+                .w(px(72.0))
+                .h(px(30.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded_sm()
+                .border_1()
+                .border_color(rgb(palette.border))
+                .bg(rgb(palette.panel_bg))
+                .text_size(px(13.0))
+                .text_color(rgb(palette.active_text))
+                .child(value),
+        )
+        .child(appearance_button_palette(
+            "+".to_string(),
+            false,
+            palette,
+            cx,
+            increment,
+        ))
+}
+
 fn control_label(label: &'static str) -> impl IntoElement {
     div()
         .w(px(150.0))
         .text_size(px(12.0))
         .text_color(rgb(MUTED_TEXT))
+        .child(label)
+}
+
+fn control_label_palette(label: &'static str, palette: WorkspacePalette) -> impl IntoElement {
+    div()
+        .w(px(150.0))
+        .text_size(px(12.0))
+        .text_color(rgb(palette.muted_text))
         .child(label)
 }
 
@@ -1231,6 +1412,47 @@ fn appearance_button(
         .bg(rgb(if active { 0x183725 } else { 0x242632 }))
         .text_size(px(12.0))
         .text_color(rgb(if active { QUEUE_GREEN } else { SIDEBAR_TEXT }))
+        .cursor_pointer()
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, _: &MouseDownEvent, _window, cx| {
+                on_click(this, cx);
+            }),
+        )
+        .child(label)
+}
+
+fn appearance_button_palette(
+    label: String,
+    active: bool,
+    palette: WorkspacePalette,
+    cx: &mut Context<WorkspacePrototype>,
+    on_click: impl Fn(&mut WorkspacePrototype, &mut Context<WorkspacePrototype>) + 'static,
+) -> impl IntoElement {
+    div()
+        .h(px(30.0))
+        .flex()
+        .items_center()
+        .justify_center()
+        .px_2()
+        .rounded_sm()
+        .border_1()
+        .border_color(rgb(if active {
+            palette.queue_green
+        } else {
+            palette.border
+        }))
+        .bg(rgb(if active {
+            palette.sidebar_row_selected_bg
+        } else {
+            palette.inactive_tab_bg
+        }))
+        .text_size(px(12.0))
+        .text_color(rgb(if active {
+            palette.queue_green
+        } else {
+            palette.sidebar_text
+        }))
         .cursor_pointer()
         .on_mouse_down(
             MouseButton::Left,
@@ -1319,6 +1541,10 @@ fn background_image_display_name(reference: &str) -> String {
 }
 
 pub(super) fn settings_surface(
+    config: Config,
+    page: AppearancePage,
+    sketch_toolbar_position: SketchToolbarPosition,
+    terminal_background_import_error: Option<String>,
     editor_word_wrap: bool,
     joined_tab_limit: usize,
     error_log_expanded: bool,
@@ -1326,51 +1552,57 @@ pub(super) fn settings_surface(
     pending_clear_error_log: bool,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
+    let palette = WorkspacePalette::from_config(&config);
     let error_entries = crate::error_log::global().recent(1000);
 
-    let scroll = div()
+    let content = settings_controls_column(
+        config.clone(),
+        page,
+        sketch_toolbar_position,
+        terminal_background_import_error,
+        editor_word_wrap,
+        joined_tab_limit,
+        error_log_expanded,
+        error_log_filter,
+        error_entries,
+        cx,
+    );
+
+    let root_content = div()
         .id("settings-surface")
         .flex_1()
         .h_full()
         .flex()
         .flex_col()
-        .overflow_y_scroll()
-        .scrollbar_width(px(8.0))
-        .bg(rgb(EDITOR_BG))
+        .bg(rgb(palette.editor_bg))
         .child(
             div()
-                .px_6()
-                .pt_8()
-                .pb_4()
-                .text_size(px(18.0))
-                .text_color(rgb(ACTIVE_TEXT))
-                .child("Settings"),
+                .h(px(52.0))
+                .w_full()
+                .flex()
+                .items_center()
+                .justify_between()
+                .px_4()
+                .border_b_1()
+                .border_color(rgb(palette.border))
+                .child(
+                    div().flex().items_center().gap_2().child(
+                        div()
+                            .text_size(px(18.0))
+                            .text_color(rgb(palette.active_text))
+                            .child("Settings"),
+                    ),
+                )
+                .child(appearance_page_nav(page, cx)),
         )
-        .child(settings_subheader("Editor"))
-        .child(settings_section(vec![settings_toggle_row(
-            "Word wrap",
-            "Wraps long source lines in JavaScript, Markdown, and other text files.",
-            editor_word_wrap,
-            cx,
-            |this, cx| this.toggle_editor_word_wrap(cx),
-        )
-        .into_any_element()]))
-        .child(settings_subheader("Tabs"))
-        .child(settings_section(vec![settings_join_limit_row(
-            joined_tab_limit,
-            cx,
-        )
-        .into_any_element()]))
-        .child(settings_subheader("Diagnostics"))
-        .child(settings_section(vec![settings_error_log_row(
-            error_log_expanded,
-            error_log_filter,
-            error_entries,
-            cx,
-        )
-        .into_any_element()]));
+        .child(content);
 
-    let mut root = div().relative().size_full().flex().flex_col().child(scroll);
+    let mut root = div()
+        .relative()
+        .size_full()
+        .flex()
+        .flex_col()
+        .child(root_content);
 
     if pending_clear_error_log {
         root = root.child(error_log_clear_modal(cx));
@@ -1379,41 +1611,105 @@ pub(super) fn settings_surface(
     root
 }
 
-fn settings_subheader(label: &'static str) -> impl IntoElement {
-    div()
-        .px_6()
-        .pb_3()
-        .text_size(px(11.0))
-        .text_color(rgb(MUTED_TEXT))
-        .child(label)
-}
+fn settings_controls_column(
+    config: Config,
+    page: AppearancePage,
+    sketch_toolbar_position: SketchToolbarPosition,
+    terminal_background_import_error: Option<String>,
+    editor_word_wrap: bool,
+    joined_tab_limit: usize,
+    error_log_expanded: bool,
+    error_log_filter: ErrorLogFilter,
+    error_entries: Vec<crate::error_log::LogEntry>,
+    cx: &mut Context<WorkspacePrototype>,
+) -> impl IntoElement {
+    let palette = WorkspacePalette::from_config(&config);
+    let body = div()
+        .flex_1()
+        .h_full()
+        .flex()
+        .gap_3()
+        .p_4()
+        .overflow_hidden();
 
-fn settings_section(rows: Vec<gpui::AnyElement>) -> impl IntoElement {
-    let mut section = div()
-        .mx_6()
-        .mb_6()
+    if page == AppearancePage::App {
+        let content = div()
+            .flex_1()
+            .h_full()
+            .flex()
+            .flex_col()
+            .gap_4()
+            .p_4()
+            .child(
+                div()
+                    .text_size(px(18.0))
+                    .text_color(rgb(palette.active_text))
+                    .child(page.title()),
+            );
+        let content = app_settings_controls(content, config, joined_tab_limit, palette, cx);
+        return body.child(
+            content
+                .id("settings-controls-scroll")
+                .overflow_y_scroll()
+                .scrollbar_width(px(8.0)),
+        );
+    }
+
+    let content = div()
+        .flex_1()
+        .h_full()
         .flex()
         .flex_col()
-        .rounded_md()
+        .gap_3()
         .border_1()
-        .border_color(rgb(BORDER))
-        .bg(rgb(PANEL_BG))
-        .overflow_hidden();
-    for row in rows {
-        section = section.child(row);
-    }
-    section
+        .border_color(rgb(palette.border))
+        .bg(rgb(palette.panel_bg))
+        .p_4()
+        .child(
+            div()
+                .text_size(px(18.0))
+                .text_color(rgb(palette.active_text))
+                .child(page.title()),
+        );
+
+    let content = match page {
+        AppearancePage::Terminal => {
+            terminal_appearance_controls(content, config, terminal_background_import_error, cx)
+        }
+        AppearancePage::Editor => editor_settings_controls(content, config, editor_word_wrap, cx),
+        AppearancePage::Stacker => stacker_settings_controls(content),
+        AppearancePage::Sketch => sketch_appearance_controls(content, sketch_toolbar_position, cx),
+        AppearancePage::App => {
+            app_settings_controls(content, config, joined_tab_limit, palette, cx)
+        }
+        AppearancePage::Advanced => advanced_settings_controls(
+            content,
+            error_log_expanded,
+            error_log_filter,
+            error_entries,
+            cx,
+        ),
+    };
+
+    body.child(
+        content
+            .id("settings-controls-scroll")
+            .overflow_y_scroll()
+            .scrollbar_width(px(8.0)),
+    )
 }
 
-fn settings_join_limit_row(
+fn settings_join_limit_row_palette(
     current_limit: usize,
+    palette: WorkspacePalette,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     let mut choices = div().flex().items_center().gap_1();
     for limit in [2_u8, 3, 4] {
-        choices = choices.child(appearance_button(
+        choices = choices.child(appearance_button_palette(
             limit.to_string(),
             current_limit == limit as usize,
+            palette,
             cx,
             move |this, cx| this.set_joined_tab_limit(limit, cx),
         ));
@@ -1434,13 +1730,16 @@ fn settings_join_limit_row(
                 .child(
                     div()
                         .text_size(px(13.0))
-                        .text_color(rgb(ACTIVE_TEXT))
+                        .text_color(rgb(palette.active_text))
                         .child("Joined tab limit"),
                 )
                 .child(
-                    div().text_size(px(12.0)).text_color(rgb(MUTED_TEXT)).child(
-                        "Choose whether joined tab groups can hold two, three, or four tabs.",
-                    ),
+                    div()
+                        .text_size(px(12.0))
+                        .text_color(rgb(palette.muted_text))
+                        .child(
+                            "Choose whether joined tab groups can hold two, three, or four tabs.",
+                        ),
                 ),
         )
         .child(choices)
@@ -1831,4 +2130,47 @@ fn error_log_clear_modal(cx: &mut Context<WorkspacePrototype>) -> impl IntoEleme
         );
 
     scrim.child(card)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{shader_palettes_for_mode, visible_shader_mode, FIRE_PALETTES, SMOKE_PALETTES};
+
+    #[test]
+    fn fire_palettes_include_blackfire_with_smoke_slate_colors() {
+        let (_, slate_c1, slate_c2, slate_c3) = SMOKE_PALETTES
+            .iter()
+            .find(|(label, _, _, _)| *label == "Slate")
+            .copied()
+            .expect("smoke Slate palette should exist");
+        let (_, blackfire_c1, blackfire_c2, blackfire_c3) = FIRE_PALETTES
+            .iter()
+            .find(|(label, _, _, _)| *label == "Blackfire")
+            .copied()
+            .expect("fire Blackfire palette should exist");
+
+        assert_eq!(
+            (blackfire_c1, blackfire_c2, blackfire_c3),
+            (slate_c1, slate_c2, slate_c3)
+        );
+    }
+
+    #[test]
+    fn shader_palette_options_do_not_expose_rain_palettes() {
+        for mode in ["smoke", "fire", "aurora", "trees"] {
+            assert!(
+                shader_palettes_for_mode(mode)
+                    .iter()
+                    .all(|(label, _, _, _)| !label.contains("Rain")),
+                "{mode} should not expose rain palette labels"
+            );
+        }
+    }
+
+    #[test]
+    fn rain_is_not_a_visible_shader_mode() {
+        assert!(visible_shader_mode("smoke"));
+        assert!(visible_shader_mode("fire"));
+        assert!(!visible_shader_mode("rain"));
+    }
 }

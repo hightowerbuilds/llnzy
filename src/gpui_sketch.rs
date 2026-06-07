@@ -31,6 +31,52 @@ const SKETCH_SELECTION: u32 = 0x3c82ffff;
 const SKETCH_EXPORT_BOUNDARY: u32 = 0x6aff9033;
 const SKETCH_SCROLL_ZOOM_DIVISOR: f32 = 360.0;
 
+#[derive(Clone, Copy, Debug)]
+struct SketchPalette {
+    bg: u32,
+    panel_bg: u32,
+    canvas_bg: u32,
+    header_bg: u32,
+    border: u32,
+    text: u32,
+    muted: u32,
+    accent: u32,
+    active_bg: u32,
+    button_bg: u32,
+}
+
+impl SketchPalette {
+    fn for_light_mode(light_mode: bool) -> Self {
+        if light_mode {
+            Self {
+                bg: 0xf0e3d1,
+                panel_bg: 0xfffbf2,
+                canvas_bg: 0xfaf2e2,
+                header_bg: 0xf0e3d1,
+                border: 0xd8c6ad,
+                text: 0x3e372f,
+                muted: 0x7d7064,
+                accent: 0x5f9f79,
+                active_bg: 0xe2d0ed,
+                button_bg: 0xeadcc8,
+            }
+        } else {
+            Self {
+                bg: SKETCH_BG,
+                panel_bg: SKETCH_PANEL_BG,
+                canvas_bg: SKETCH_CANVAS_BG,
+                header_bg: 0x121217,
+                border: SKETCH_BORDER,
+                text: SKETCH_TEXT,
+                muted: SKETCH_MUTED,
+                accent: SKETCH_ACCENT,
+                active_bg: SKETCH_ACTIVE_BG,
+                button_bg: SKETCH_BUTTON_BG,
+            }
+        }
+    }
+}
+
 actions!(
     sketch_gpui,
     [
@@ -61,6 +107,7 @@ pub(crate) struct SketchSurface {
     is_dragging: bool,
     pad_drag: Option<SketchPadDrag>,
     status_message: Option<String>,
+    light_mode: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -79,6 +126,15 @@ impl SketchSurface {
             is_dragging: false,
             pad_drag: None,
             status_message: None,
+            light_mode: false,
+        }
+    }
+
+    #[cfg(feature = "gpui-workspace")]
+    pub(crate) fn set_light_mode(&mut self, light_mode: bool, cx: &mut Context<Self>) {
+        if self.light_mode != light_mode {
+            self.light_mode = light_mode;
+            cx.notify();
         }
     }
 
@@ -116,13 +172,13 @@ impl SketchSurface {
         cx.notify();
     }
 
-    fn cycle_grid(&mut self, cx: &mut Context<Self>) {
-        self.state.appearance.grid_mode = match self.state.appearance.grid_mode {
-            SketchGridMode::Hidden => SketchGridMode::Lines,
-            SketchGridMode::Lines => SketchGridMode::Dots,
-            SketchGridMode::Dots => SketchGridMode::Hidden,
-        };
+    fn toggle_grid(&mut self, cx: &mut Context<Self>) {
+        self.state.appearance.grid_mode = self.state.appearance.grid_mode.toggled_visibility();
         let _ = save_appearance_settings(&self.state.appearance);
+        self.status_message = Some(match self.state.appearance.grid_mode {
+            SketchGridMode::Hidden => "Grid off".into(),
+            SketchGridMode::Lines | SketchGridMode::Dots => "Grid on".into(),
+        });
         cx.notify();
     }
 
@@ -563,12 +619,13 @@ impl Focusable for SketchSurface {
 
 impl Render for SketchSurface {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let palette = SketchPalette::for_light_mode(self.light_mode);
         div()
             .size_full()
             .flex()
             .flex_col()
-            .bg(rgb(SKETCH_BG))
-            .text_color(rgb(SKETCH_TEXT))
+            .bg(rgb(palette.bg))
+            .text_color(rgb(palette.text))
             .font_family("Inter")
             .key_context("SketchSurface")
             .track_focus(&self.focus_handle(cx))
@@ -584,11 +641,13 @@ impl Render for SketchSurface {
 
 fn sketch_body(surface: &SketchSurface, cx: &mut Context<SketchSurface>) -> gpui::Div {
     let position = surface.state.appearance.toolbar_position;
+    let palette = SketchPalette::for_light_mode(surface.light_mode);
     let toolbar = sketch_toolbar(
         surface.state.tool,
         surface.state.appearance.grid_mode,
         surface.state.selected_image_scale(),
         position,
+        palette,
         cx,
     );
     let canvas = sketch_canvas(surface, cx);
@@ -619,6 +678,7 @@ fn sketch_body(surface: &SketchSurface, cx: &mut Context<SketchSurface>) -> gpui
 }
 
 fn sketch_canvas(surface: &SketchSurface, cx: &mut Context<SketchSurface>) -> gpui::Div {
+    let palette = SketchPalette::for_light_mode(surface.light_mode);
     div()
         .relative()
         .flex_1()
@@ -627,14 +687,14 @@ fn sketch_canvas(surface: &SketchSurface, cx: &mut Context<SketchSurface>) -> gp
         .overflow_hidden()
         .border_2()
         .border_color(rgba(0x00000000))
-        .bg(rgb(SKETCH_PANEL_BG))
+        .bg(rgb(palette.panel_bg))
         .can_drop(|drag, _window, _cx| {
             drag.downcast_ref::<ExternalPaths>()
                 .is_some_and(external_paths_contain_sketch_images)
         })
-        .drag_over::<ExternalPaths>(|style, paths, _window, _cx| {
+        .drag_over::<ExternalPaths>(move |style, paths, _window, _cx| {
             if external_paths_contain_sketch_images(paths) {
-                style.border_color(rgb(SKETCH_ACCENT))
+                style.border_color(rgb(palette.accent))
             } else {
                 style.border_color(rgb(0xff7a7a))
             }
@@ -675,6 +735,7 @@ fn is_sketch_image_path(path: &Path) -> bool {
 }
 
 fn sketch_header(surface: &SketchSurface) -> impl IntoElement {
+    let palette = SketchPalette::for_light_mode(surface.light_mode);
     let status = surface.status_message.clone().unwrap_or_else(|| {
         if surface.state.is_dirty() {
             "Unsaved sketch".into()
@@ -696,8 +757,8 @@ fn sketch_header(surface: &SketchSurface) -> impl IntoElement {
         .justify_between()
         .px_3()
         .border_b_1()
-        .border_color(rgb(SKETCH_BORDER))
-        .bg(rgb(0x121217))
+        .border_color(rgb(palette.border))
+        .bg(rgb(palette.header_bg))
         .child(
             div()
                 .flex()
@@ -707,7 +768,7 @@ fn sketch_header(surface: &SketchSurface) -> impl IntoElement {
                 .child(
                     div()
                         .text_size(px(11.0))
-                        .text_color(rgb(SKETCH_MUTED))
+                        .text_color(rgb(palette.muted))
                         .child(format!(
                             "{} elements | {}",
                             surface.state.document.elements.len(),
@@ -722,7 +783,7 @@ fn sketch_header(surface: &SketchSurface) -> impl IntoElement {
         .child(
             div()
                 .text_size(px(11.0))
-                .text_color(rgb(SKETCH_ACCENT))
+                .text_color(rgb(palette.accent))
                 .child(status),
         )
 }
@@ -732,6 +793,7 @@ fn sketch_toolbar(
     grid_mode: SketchGridMode,
     selected_image_scale: Option<f32>,
     position: SketchToolbarPosition,
+    palette: SketchPalette,
     cx: &mut Context<SketchSurface>,
 ) -> impl IntoElement {
     let vertical = position != SketchToolbarPosition::Top;
@@ -739,8 +801,8 @@ fn sketch_toolbar(
         .id("sketch-toolbar")
         .flex()
         .gap_1()
-        .border_color(rgb(SKETCH_BORDER))
-        .bg(rgb(SKETCH_BG));
+        .border_color(rgb(palette.border))
+        .bg(rgb(palette.bg));
 
     toolbar = match position {
         SketchToolbarPosition::Top => toolbar
@@ -772,6 +834,7 @@ fn sketch_toolbar(
             "Select",
             active_tool == SketchTool::Select,
             vertical,
+            palette,
             cx,
             |this, cx| {
                 this.set_tool(SketchTool::Select, cx);
@@ -781,6 +844,7 @@ fn sketch_toolbar(
             "Grab",
             active_tool == SketchTool::Grab,
             vertical,
+            palette,
             cx,
             |this, cx| {
                 this.set_tool(SketchTool::Grab, cx);
@@ -790,6 +854,7 @@ fn sketch_toolbar(
             "Marker",
             active_tool == SketchTool::Marker,
             vertical,
+            palette,
             cx,
             |this, cx| {
                 this.set_tool(SketchTool::Marker, cx);
@@ -799,41 +864,65 @@ fn sketch_toolbar(
             "Rectangle",
             active_tool == SketchTool::Rectangle,
             vertical,
+            palette,
             cx,
             |this, cx| {
                 this.set_tool(SketchTool::Rectangle, cx);
             },
         ))
-        .child(toolbar_separator(position))
+        .child(toolbar_separator(position, palette))
         .child(tool_button(
-            grid_label(grid_mode),
+            grid_toggle_label(grid_mode),
             grid_mode != SketchGridMode::Hidden,
             vertical,
+            palette,
             cx,
             |this, cx| {
-                this.cycle_grid(cx);
+                this.toggle_grid(cx);
             },
         ))
-        .child(tool_button("Undo", false, vertical, cx, |this, cx| {
-            this.undo_from_workspace(cx);
-        }))
-        .child(tool_button("Redo", false, vertical, cx, |this, cx| {
-            this.redo_from_workspace(cx);
-        }))
-        .child(toolbar_separator(position))
-        .child(tool_button("Import", false, vertical, cx, |this, cx| {
-            this.import_image(cx);
-        }));
+        .child(tool_button(
+            "Undo",
+            false,
+            vertical,
+            palette,
+            cx,
+            |this, cx| {
+                this.undo_from_workspace(cx);
+            },
+        ))
+        .child(tool_button(
+            "Redo",
+            false,
+            vertical,
+            palette,
+            cx,
+            |this, cx| {
+                this.redo_from_workspace(cx);
+            },
+        ))
+        .child(toolbar_separator(position, palette))
+        .child(tool_button(
+            "Import",
+            false,
+            vertical,
+            palette,
+            cx,
+            |this, cx| {
+                this.import_image(cx);
+            },
+        ));
 
     if let Some(scale) = selected_image_scale {
         let smaller = (scale * 0.8).max(0.05);
         let larger = (scale * 1.25).min(2.0);
         toolbar = toolbar
-            .child(toolbar_separator(position))
+            .child(toolbar_separator(position, palette))
             .child(tool_button(
                 "Image -",
                 false,
                 vertical,
+                palette,
                 cx,
                 move |this, cx| {
                     this.resize_selected_image(smaller, cx);
@@ -843,6 +932,7 @@ fn sketch_toolbar(
                 "Image 100%",
                 (scale - 1.0).abs() < 0.01,
                 vertical,
+                palette,
                 cx,
                 |this, cx| {
                     this.resize_selected_image(1.0, cx);
@@ -852,6 +942,7 @@ fn sketch_toolbar(
                 "Image +",
                 false,
                 vertical,
+                palette,
                 cx,
                 move |this, cx| {
                     this.resize_selected_image(larger, cx);
@@ -861,16 +952,31 @@ fn sketch_toolbar(
 
     toolbar
         .child(div().flex_1())
-        .child(tool_button("Clear", false, vertical, cx, |this, cx| {
-            this.clear_canvas(cx);
-        }))
-        .child(tool_button("Save", false, vertical, cx, |this, cx| {
-            this.save_from_workspace(cx);
-        }))
+        .child(tool_button(
+            "Clear",
+            false,
+            vertical,
+            palette,
+            cx,
+            |this, cx| {
+                this.clear_canvas(cx);
+            },
+        ))
+        .child(tool_button(
+            "Save",
+            false,
+            vertical,
+            palette,
+            cx,
+            |this, cx| {
+                this.save_from_workspace(cx);
+            },
+        ))
         .child(tool_button(
             "Export JPG",
             false,
             vertical,
+            palette,
             cx,
             |this, cx| {
                 this.export_jpeg(cx);
@@ -878,11 +984,10 @@ fn sketch_toolbar(
         ))
 }
 
-fn grid_label(grid_mode: SketchGridMode) -> &'static str {
+fn grid_toggle_label(grid_mode: SketchGridMode) -> &'static str {
     match grid_mode {
-        SketchGridMode::Hidden => "Grid",
-        SketchGridMode::Lines => "Lines",
-        SketchGridMode::Dots => "Dots",
+        SketchGridMode::Hidden => "Grid Off",
+        SketchGridMode::Lines | SketchGridMode::Dots => "Grid On",
     }
 }
 
@@ -894,11 +999,11 @@ fn toolbar_position_label(position: SketchToolbarPosition) -> &'static str {
     }
 }
 
-fn toolbar_separator(position: SketchToolbarPosition) -> gpui::Div {
+fn toolbar_separator(position: SketchToolbarPosition, palette: SketchPalette) -> gpui::Div {
     if position == SketchToolbarPosition::Top {
-        div().w(px(1.0)).h(px(24.0)).bg(rgb(SKETCH_BORDER))
+        div().w(px(1.0)).h(px(24.0)).bg(rgb(palette.border))
     } else {
-        div().h(px(1.0)).w_full().bg(rgb(SKETCH_BORDER))
+        div().h(px(1.0)).w_full().bg(rgb(palette.border))
     }
 }
 
@@ -906,6 +1011,7 @@ fn tool_button(
     label: impl Into<SharedString>,
     active: bool,
     full_width: bool,
+    palette: SketchPalette,
     cx: &mut Context<SketchSurface>,
     on_click: impl Fn(&mut SketchSurface, &mut Context<SketchSurface>) + 'static,
 ) -> gpui::Div {
@@ -918,14 +1024,18 @@ fn tool_button(
         .px_2()
         .rounded_sm()
         .border_1()
-        .border_color(rgb(if active { 0x47785f } else { SKETCH_BORDER }))
-        .bg(rgb(if active {
-            SKETCH_ACTIVE_BG
+        .border_color(rgb(if active {
+            palette.accent
         } else {
-            SKETCH_BUTTON_BG
+            palette.border
+        }))
+        .bg(rgb(if active {
+            palette.active_bg
+        } else {
+            palette.button_bg
         }))
         .text_size(px(12.0))
-        .text_color(rgb(if active { SKETCH_ACCENT } else { SKETCH_TEXT }))
+        .text_color(rgb(if active { palette.accent } else { palette.text }))
         .cursor_pointer()
         .on_mouse_down(
             MouseButton::Left,
@@ -1028,7 +1138,13 @@ impl Element for SketchCanvasElement {
         cx: &mut App,
     ) -> Self::PrepaintState {
         let surface = self.surface.read(cx);
-        build_canvas_paint(&surface.state, bounds, self.layer, window)
+        build_canvas_paint(
+            &surface.state,
+            bounds,
+            self.layer,
+            surface.light_mode,
+            window,
+        )
     }
 
     fn paint(
@@ -1086,6 +1202,7 @@ fn build_canvas_paint(
     state: &SketchState,
     bounds: Bounds<Pixels>,
     layer: SketchCanvasLayer,
+    light_mode: bool,
     window: &mut Window,
 ) -> SketchPrepaintState {
     let frame = SketchCanvasFrame {
@@ -1101,8 +1218,9 @@ fn build_canvas_paint(
 
     match layer {
         SketchCanvasLayer::Background => {
+            let palette = SketchPalette::for_light_mode(light_mode);
             let canvas_bg = match state.appearance.canvas_background_mode {
-                SketchCanvasBackgroundMode::Theme => rgb(SKETCH_CANVAS_BG),
+                SketchCanvasBackgroundMode::Theme => rgb(palette.canvas_bg),
                 SketchCanvasBackgroundMode::Solid => {
                     rgba(rgba_u32(state.appearance.canvas_background_color))
                 }
@@ -1137,7 +1255,8 @@ fn build_canvas_paint(
     paint_export_boundary(&mut paint, frame, state);
 
     if state.appearance.canvas_border_visible {
-        paint_rect_outline(&mut paint.quads, bounds, 1.0, SKETCH_BORDER);
+        let palette = SketchPalette::for_light_mode(light_mode);
+        paint_rect_outline(&mut paint.quads, bounds, 1.0, palette.border);
     }
 
     paint

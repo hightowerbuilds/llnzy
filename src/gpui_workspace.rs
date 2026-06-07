@@ -147,6 +147,108 @@ const SIDEBAR_ROW_SELECTED_HOVER_BG: u32 = 0x3a4050;
 const SIDEBAR_DROP_VALID_BG: u32 = 0x1f3a2b;
 const SIDEBAR_DROP_INVALID_BG: u32 = 0x3d2428;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct WorkspacePalette {
+    pub(super) is_light: bool,
+    pub(super) chrome_bg: u32,
+    pub(super) bumper_bg: u32,
+    pub(super) panel_bg: u32,
+    pub(super) editor_bg: u32,
+    pub(super) border: u32,
+    pub(super) active_tab_bg: u32,
+    pub(super) inactive_tab_bg: u32,
+    pub(super) active_text: u32,
+    pub(super) muted_text: u32,
+    pub(super) sidebar_text: u32,
+    pub(super) accent: u32,
+    pub(super) queue_green: u32,
+    pub(super) sidebar_row_selected_bg: u32,
+    pub(super) sidebar_row_hover_bg: u32,
+}
+
+impl WorkspacePalette {
+    pub(super) fn from_config(config: &Config) -> Self {
+        if config
+            .colors
+            .background
+            .iter()
+            .map(|channel| *channel as u16)
+            .sum::<u16>()
+            > 600
+        {
+            Self::light()
+        } else {
+            Self::dark()
+        }
+    }
+
+    fn dark() -> Self {
+        Self {
+            is_light: false,
+            chrome_bg: CHROME_BG,
+            bumper_bg: BUMPER_BG,
+            panel_bg: PANEL_BG,
+            editor_bg: EDITOR_BG,
+            border: BORDER,
+            active_tab_bg: ACTIVE_TAB_BG,
+            inactive_tab_bg: INACTIVE_TAB_BG,
+            active_text: ACTIVE_TEXT,
+            muted_text: MUTED_TEXT,
+            sidebar_text: SIDEBAR_TEXT,
+            accent: ACCENT,
+            queue_green: QUEUE_GREEN,
+            sidebar_row_selected_bg: SIDEBAR_ROW_SELECTED_BG,
+            sidebar_row_hover_bg: SIDEBAR_ROW_HOVER_BG,
+        }
+    }
+
+    fn light() -> Self {
+        Self {
+            is_light: true,
+            chrome_bg: 0xf0e3d1,
+            bumper_bg: 0xe8d8c1,
+            panel_bg: 0xfffbf2,
+            editor_bg: 0xfaf2e2,
+            border: 0xd8c6ad,
+            active_tab_bg: 0xfffbf2,
+            inactive_tab_bg: 0xe9d8bf,
+            active_text: 0x3e372f,
+            muted_text: 0x7d7064,
+            sidebar_text: 0x5f554b,
+            accent: 0xb7d8d4,
+            queue_green: 0x5f9f79,
+            sidebar_row_selected_bg: 0xe2d0ed,
+            sidebar_row_hover_bg: 0xeadcc8,
+        }
+    }
+}
+
+#[cfg(test)]
+mod workspace_palette_tests {
+    use super::{WorkspacePalette, CHROME_BG};
+    use crate::config::Config;
+
+    #[test]
+    fn palette_switches_to_light_for_light_config_background() {
+        let mut config = Config::default();
+        config.colors.background = [250, 242, 226];
+
+        let palette = WorkspacePalette::from_config(&config);
+
+        assert_eq!(palette.editor_bg, 0xfaf2e2);
+        assert_ne!(palette.chrome_bg, CHROME_BG);
+    }
+
+    #[test]
+    fn palette_keeps_dark_defaults_for_dark_config_background() {
+        let config = Config::default();
+
+        let palette = WorkspacePalette::from_config(&config);
+
+        assert_eq!(palette.chrome_bg, CHROME_BG);
+    }
+}
+
 /// Build the initial appearance config for a new workspace session, honoring
 /// the user's last persisted background image selection. Any image-related
 /// preferences are applied on top of the config-file defaults so a user who
@@ -267,17 +369,30 @@ impl From<WorkspaceSurface> for WorkspaceRecoverySurface {
 enum AppearancePage {
     Terminal,
     Editor,
-    Markdown,
+    Stacker,
     Sketch,
+    App,
+    Advanced,
 }
 
 impl AppearancePage {
+    const ALL: [Self; 6] = [
+        Self::Terminal,
+        Self::Editor,
+        Self::Stacker,
+        Self::Sketch,
+        Self::App,
+        Self::Advanced,
+    ];
+
     fn title(self) -> &'static str {
         match self {
             AppearancePage::Terminal => "Terminal",
             AppearancePage::Editor => "Editor",
-            AppearancePage::Markdown => "Markdown",
+            AppearancePage::Stacker => "Stacker",
             AppearancePage::Sketch => "Sketch",
+            AppearancePage::App => "App",
+            AppearancePage::Advanced => "Advanced",
         }
     }
 }
@@ -470,7 +585,7 @@ fn install_workspace_menu_bar(cx: &mut App) {
                 MenuItem::action("Terminal", MenuShowTerminal),
                 MenuItem::action("Stacker", MenuShowStacker),
                 MenuItem::action("Sketch Pad", MenuShowSketch),
-                MenuItem::action("Appearances", MenuShowAppearances),
+                MenuItem::action("Settings", MenuShowAppearances),
             ],
         },
         Menu {
@@ -587,7 +702,14 @@ impl WorkspacePrototype {
 
         let preferences = crate::preferences::WorkspacePreferences::load();
         let appearance_config = appearance_config_from_preferences(&preferences);
+        let initial_light_mode = WorkspacePalette::from_config(&appearance_config).is_light;
         let stacker = cx.new(StackerPrototype::embedded);
+        stacker.update(cx, |stacker, cx| {
+            stacker.set_light_mode(initial_light_mode, cx);
+        });
+        sketch.update(cx, |sketch, cx| {
+            sketch.set_light_mode(initial_light_mode, cx);
+        });
         let editor = cx.new(EditorPrototype::new);
         editor.update(cx, |editor, cx| {
             editor.set_appearance_config(appearance_config.clone(), cx);
@@ -1885,6 +2007,7 @@ impl Render for WorkspacePrototype {
         let sidebar_new_entry = self.sidebar_new_entry.clone();
         let queued_prompts = self.stacker.read(cx).queued_prompts().to_vec();
         let appearance_config = self.appearance_config.clone();
+        let workspace_palette = WorkspacePalette::from_config(&appearance_config);
         let appearance_page = self.appearance_page;
         let terminal_background_import_error = self.terminal_background_import_error.clone();
         let explorer_entries = self.explorer_entries();
@@ -1907,12 +2030,13 @@ impl Render for WorkspacePrototype {
                     recent_projects_open,
                     sidebar_width,
                     explorer_status,
+                    palette: workspace_palette,
                 },
                 cx,
             ));
         }
         main = main
-            .child(sidebar_bumper(sidebar_visible, cx))
+            .child(sidebar_bumper(sidebar_visible, workspace_palette, cx))
             .child(workspace_content(
                 WorkspaceSurfaceContext {
                     stacker: self.stacker.clone(),
@@ -1942,8 +2066,8 @@ impl Render for WorkspacePrototype {
             .size_full()
             .flex()
             .flex_col()
-            .bg(rgb(CHROME_BG))
-            .text_color(rgb(SIDEBAR_TEXT))
+            .bg(rgb(workspace_palette.chrome_bg))
+            .text_color(rgb(workspace_palette.sidebar_text))
             .font_family("Atkinson Hyperlegible")
             .key_context("Workspace")
             .track_focus(&self.focus_handle(cx))
@@ -2016,10 +2140,16 @@ impl Render for WorkspacePrototype {
                 tab_name_overrides,
                 &self.tab_manager,
                 tab_overflow_open,
+                workspace_palette,
                 cx,
             ))
             .child(main)
-            .child(workspace_footer(active_surface, queued_prompts, cx))
+            .child(workspace_footer(
+                active_surface,
+                queued_prompts,
+                workspace_palette,
+                cx,
+            ))
             .when_some(tab_context_menu, |root, menu| {
                 root.child(workspace_tab_context_menu(
                     menu,

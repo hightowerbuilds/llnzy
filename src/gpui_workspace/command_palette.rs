@@ -147,7 +147,7 @@ pub(super) fn palette_entries() -> Vec<CommandEntry> {
             build_action: || Box::new(MenuShowSketch),
         },
         CommandEntry {
-            label: "View: Show Appearances",
+            label: "View: Show Settings",
             shortcut: None,
             build_action: || Box::new(MenuShowAppearances),
         },

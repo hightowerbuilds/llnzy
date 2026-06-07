@@ -8,13 +8,18 @@ use crate::{
 
 use super::{
     appearances::{gpui_terminal_background_reference, is_display_font},
-    AppearancePage, WorkspacePrototype,
+    AppearancePage, WorkspacePalette, WorkspacePrototype,
 };
 
 impl WorkspacePrototype {
     pub(super) fn apply_appearance_config(&mut self, cx: &mut Context<Self>) {
         let config = self.appearance_config.clone();
+        let light_mode = WorkspacePalette::from_config(&config).is_light;
         let shared_config = std::sync::Arc::new(config);
+        self.stacker
+            .update(cx, |stacker, cx| stacker.set_light_mode(light_mode, cx));
+        self.sketch
+            .update(cx, |sketch, cx| sketch.set_light_mode(light_mode, cx));
         for editor in self.editor_entities() {
             let config = (*shared_config).clone();
             editor.update(cx, |editor, cx| editor.set_appearance_config(config, cx));
@@ -46,7 +51,12 @@ impl WorkspacePrototype {
             .into_iter()
             .find(|theme| theme.name == theme_name)
         {
+            let terminal_effects = self.appearance_config.effects.clone();
+            let preserve_terminal_effects = theme.name == "Light Mode";
             theme.apply_to(&mut self.appearance_config);
+            if preserve_terminal_effects {
+                self.appearance_config.effects = terminal_effects;
+            }
             self.apply_appearance_config(cx);
         }
     }

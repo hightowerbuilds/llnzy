@@ -425,6 +425,22 @@ fn sketch_appearance_normalizes_numeric_controls() {
 }
 
 #[test]
+fn grid_mode_visibility_toggle_switches_on_and_off() {
+    assert_eq!(
+        SketchGridMode::Hidden.toggled_visibility(),
+        SketchGridMode::Lines
+    );
+    assert_eq!(
+        SketchGridMode::Lines.toggled_visibility(),
+        SketchGridMode::Hidden
+    );
+    assert_eq!(
+        SketchGridMode::Dots.toggled_visibility(),
+        SketchGridMode::Hidden
+    );
+}
+
+#[test]
 fn sketch_appearance_settings_round_trip_via_path() {
     let dir = std::env::temp_dir().join("llnzy_test_sketch_appearance");
     let _ = std::fs::create_dir_all(&dir);

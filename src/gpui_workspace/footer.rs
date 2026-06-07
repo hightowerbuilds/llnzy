@@ -1,14 +1,12 @@
 use gpui::prelude::*;
 use gpui::{div, px, rgb, ClipboardItem, Context, MouseButton, MouseDownEvent};
 
-use super::{
-    WorkspacePrototype, WorkspaceSurface, ACCENT, ACTIVE_TEXT, BORDER, CHROME_BG, FOOTER_HEIGHT,
-    QUEUE_GREEN, SIDEBAR_TEXT,
-};
+use super::{WorkspacePalette, WorkspacePrototype, WorkspaceSurface, FOOTER_HEIGHT};
 
 pub(super) fn workspace_footer(
     active_surface: Option<WorkspaceSurface>,
     queued_prompts: Vec<crate::stacker::queue::QueuedPrompt>,
+    palette: WorkspacePalette,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     div()
@@ -20,42 +18,41 @@ pub(super) fn workspace_footer(
         .px_3()
         .py_1()
         .border_t_1()
-        .border_color(rgb(BORDER))
-        .bg(rgb(CHROME_BG))
+        .border_color(rgb(palette.border))
+        .bg(rgb(palette.chrome_bg))
         .child(footer_button(
             "Home",
             WorkspaceSurface::Home,
             active_surface,
+            palette,
             cx,
         ))
         .child(footer_button(
             "Terminal",
             WorkspaceSurface::Terminal,
             active_surface,
+            palette,
             cx,
         ))
         .child(footer_button(
             "Stacker",
             WorkspaceSurface::Stacker,
             active_surface,
+            palette,
             cx,
         ))
         .child(footer_button(
             "Sketch",
             WorkspaceSurface::Sketch,
             active_surface,
-            cx,
-        ))
-        .child(footer_button(
-            "Appearances",
-            WorkspaceSurface::Appearances,
-            active_surface,
+            palette,
             cx,
         ))
         .child(footer_button(
             "Settings",
             WorkspaceSurface::Settings,
             active_surface,
+            palette,
             cx,
         ))
         .child(div().flex_1())
@@ -102,7 +99,7 @@ fn footer_queue_chip(
         .bg(rgb(0x14261b))
         .px_2()
         .text_size(px(12.0))
-        .text_color(rgb(QUEUE_GREEN))
+        .text_color(rgb(0x6aff90))
         .overflow_hidden()
         .whitespace_nowrap()
         .cursor_pointer()
@@ -119,6 +116,7 @@ fn footer_button(
     label: &'static str,
     surface: WorkspaceSurface,
     active_surface: Option<WorkspaceSurface>,
+    palette: WorkspacePalette,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     let active = active_surface == Some(surface);
@@ -128,8 +126,16 @@ fn footer_button(
         .items_center()
         .px_3()
         .rounded_sm()
-        .bg(rgb(if active { ACCENT } else { CHROME_BG }))
-        .text_color(rgb(if active { ACTIVE_TEXT } else { SIDEBAR_TEXT }))
+        .bg(rgb(if active {
+            palette.accent
+        } else {
+            palette.chrome_bg
+        }))
+        .text_color(rgb(if active {
+            palette.active_text
+        } else {
+            palette.sidebar_text
+        }))
         .text_size(px(14.0))
         .cursor_pointer()
         .on_mouse_down(

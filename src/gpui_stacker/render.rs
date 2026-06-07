@@ -11,8 +11,8 @@ use crate::stacker::{
 };
 
 use super::{
-    StackerPrototype, StackerTextInput, BORDER, CHROME_BG, CONTENT_BG, CONTENT_PANEL_BG,
-    MUTED_TEXT, QUEUE_GREEN, SELECTED_BG, TEXT,
+    StackerPalette, StackerPrototype, StackerTextInput, BORDER, CHROME_BG, CONTENT_PANEL_BG,
+    MUTED_TEXT, QUEUE_GREEN, TEXT,
 };
 
 /// Small floating preview rendered next to the cursor while the user is
@@ -33,6 +33,7 @@ pub(super) fn stacker_workbench(
     editor: Entity<StackerTextInput>,
     show_chrome: bool,
     prompt_list_ratio: f32,
+    palette: StackerPalette,
     cx: &mut Context<StackerPrototype>,
 ) -> impl IntoElement {
     let ratio = prompt_list_ratio.clamp(0.12, 0.85);
@@ -62,20 +63,26 @@ pub(super) fn stacker_workbench(
                 .h(relative(ratio))
                 .min_h(px(80.0))
                 .flex()
-                .child(prompt_list(prompts, queued_prompts, active_prompt, cx)),
+                .child(prompt_list(
+                    prompts,
+                    queued_prompts,
+                    active_prompt,
+                    palette,
+                    cx,
+                )),
         )
-        .child(stacker_split_handle())
+        .child(stacker_split_handle(palette))
         // editor_panel's outer div already has `flex_1` + `min_h`, so it
         // grows correctly inside the workbench's flex_col. An extra
         // wrapper here would be a non-flex parent and would collapse the
         // editor body's flex chain (rendering the editor at zero height).
-        .child(editor_panel(editor, show_chrome, cx))
+        .child(editor_panel(editor, show_chrome, palette, cx))
 }
 
 /// Draggable divider between the prompt list and the editor. Click+drag
 /// resizes the split; the cursor switches to row-resize and a small drag
 /// preview follows the pointer via the StackerSplitDrag entity.
-fn stacker_split_handle() -> impl IntoElement {
+fn stacker_split_handle(palette: StackerPalette) -> impl IntoElement {
     div()
         .id("stacker-split-handle")
         .w_full()
@@ -87,10 +94,10 @@ fn stacker_split_handle() -> impl IntoElement {
         .on_drag(StackerSplitDrag, |_drag, _offset, _window, cx: &mut App| {
             cx.new(|_| StackerSplitDrag)
         })
-        .child(div().w_full().h(px(1.0)).bg(rgb(BORDER)))
+        .child(div().w_full().h(px(1.0)).bg(rgb(palette.border)))
 }
 
-pub(super) fn header() -> impl IntoElement {
+pub(super) fn header(palette: StackerPalette) -> impl IntoElement {
     div()
         .h(px(36.0))
         .w_full()
@@ -99,8 +106,8 @@ pub(super) fn header() -> impl IntoElement {
         .justify_between()
         .px_3()
         .border_b_1()
-        .border_color(rgb(BORDER))
-        .bg(rgb(CHROME_BG))
+        .border_color(rgb(palette.border))
+        .bg(rgb(palette.chrome_bg))
         .child(
             div()
                 .font_weight(FontWeight::BOLD)
@@ -110,7 +117,7 @@ pub(super) fn header() -> impl IntoElement {
         .child(
             div()
                 .text_size(px(11.0))
-                .text_color(rgb(MUTED_TEXT))
+                .text_color(rgb(palette.muted_text))
                 .child("Workspace-ready prompt editor"),
         )
 }
@@ -119,6 +126,7 @@ fn prompt_list(
     prompts: &[StackerPrompt],
     queued_prompts: &[QueuedPrompt],
     active_prompt: Option<usize>,
+    palette: StackerPalette,
     cx: &mut Context<StackerPrototype>,
 ) -> impl IntoElement {
     let mut list = prompts.iter().enumerate().take(24).fold(
@@ -139,9 +147,9 @@ fn prompt_list(
                     .py_1()
                     .rounded_sm()
                     .bg(if selected {
-                        rgb(SELECTED_BG)
+                        rgb(palette.selected_bg)
                     } else {
-                        rgb(CONTENT_PANEL_BG)
+                        rgb(palette.panel_bg)
                     })
                     .cursor_pointer()
                     .on_mouse_up(
@@ -154,11 +162,16 @@ fn prompt_list(
                         div()
                             .flex_1()
                             .overflow_hidden()
-                            .child(div().text_size(px(12.0)).text_color(rgb(TEXT)).child(title))
+                            .child(
+                                div()
+                                    .text_size(px(12.0))
+                                    .text_color(rgb(palette.text))
+                                    .child(title),
+                            )
                             .child(
                                 div()
                                     .text_size(px(10.0))
-                                    .text_color(rgb(MUTED_TEXT))
+                                    .text_color(rgb(palette.muted_text))
                                     .child(category),
                             ),
                     )
@@ -171,10 +184,14 @@ fn prompt_list(
                             .justify_center()
                             .rounded_sm()
                             .border_1()
-                            .border_color(rgb(if queued { 0x3fd663 } else { BORDER }))
-                            .bg(rgb(if queued { 0x183a20 } else { 0x242632 }))
+                            .border_color(rgb(if queued { 0x3fd663 } else { palette.border }))
+                            .bg(rgb(if queued { 0x183a20 } else { palette.button_bg }))
                             .text_size(px(10.0))
-                            .text_color(rgb(if queued { QUEUE_GREEN } else { MUTED_TEXT }))
+                            .text_color(rgb(if queued {
+                                QUEUE_GREEN
+                            } else {
+                                palette.muted_text
+                            }))
                             .cursor_pointer()
                             .on_mouse_down(
                                 MouseButton::Left,
@@ -195,7 +212,7 @@ fn prompt_list(
                             .justify_center()
                             .rounded_sm()
                             .text_size(px(14.0))
-                            .text_color(rgb(MUTED_TEXT))
+                            .text_color(rgb(palette.muted_text))
                             .cursor_pointer()
                             .on_mouse_down(
                                 MouseButton::Left,
@@ -214,7 +231,7 @@ fn prompt_list(
             div()
                 .p_3()
                 .text_size(px(12.0))
-                .text_color(rgb(MUTED_TEXT))
+                .text_color(rgb(palette.muted_text))
                 .child("No saved prompts yet."),
         );
     }
@@ -225,8 +242,8 @@ fn prompt_list(
         .flex()
         .flex_col()
         .border_1()
-        .border_color(rgb(BORDER))
-        .bg(rgb(CHROME_BG))
+        .border_color(rgb(palette.border))
+        .bg(rgb(palette.chrome_bg))
         .child(
             div()
                 .h(px(30.0))
@@ -235,7 +252,7 @@ fn prompt_list(
                 .justify_between()
                 .px_2()
                 .text_size(px(12.0))
-                .text_color(rgb(MUTED_TEXT))
+                .text_color(rgb(palette.muted_text))
                 .child("SAVED PROMPTS")
                 .child(
                     div()
@@ -252,9 +269,10 @@ fn prompt_list(
 fn editor_panel(
     editor: Entity<StackerTextInput>,
     show_chrome: bool,
+    palette: StackerPalette,
     cx: &mut Context<StackerPrototype>,
 ) -> impl IntoElement {
-    let toolbar = formatting_toolbar(cx);
+    let toolbar = formatting_toolbar(palette, cx);
 
     // Always pad around the editor entity so the text container has
     // breathing room from the surrounding border. Standalone mode keeps a
@@ -267,15 +285,15 @@ fn editor_panel(
         .flex()
         .flex_col()
         .border_1()
-        .border_color(rgb(BORDER))
-        .bg(rgb(CONTENT_BG))
+        .border_color(rgb(palette.border))
+        .bg(rgb(palette.content_bg))
         .child(toolbar)
         .child(editor_body);
 
     let panel = div()
         .flex_1()
         .min_h(px(320.0))
-        .bg(rgb(CONTENT_BG))
+        .bg(rgb(palette.content_bg))
         .child(body);
 
     if show_chrome {
@@ -287,7 +305,10 @@ fn editor_panel(
 
 /// Minimalist formatting toolbar. Six buttons: H1, H2, H3, bullet list,
 /// numbered list, plus an A−/A+ pair for editor font size.
-fn formatting_toolbar(cx: &mut Context<StackerPrototype>) -> impl IntoElement {
+fn formatting_toolbar(
+    palette: StackerPalette,
+    cx: &mut Context<StackerPrototype>,
+) -> impl IntoElement {
     div()
         .h(px(38.0))
         .w_full()
@@ -296,39 +317,70 @@ fn formatting_toolbar(cx: &mut Context<StackerPrototype>) -> impl IntoElement {
         .gap_1()
         .px_2()
         .border_b_1()
-        .border_color(rgb(BORDER))
-        .bg(rgb(CHROME_BG))
-        .child(toolbar_command_button("H1", StackerCommandId::Heading1, cx))
-        .child(toolbar_command_button("H2", StackerCommandId::Heading2, cx))
-        .child(toolbar_command_button("H3", StackerCommandId::Heading3, cx))
-        .child(toolbar_separator())
+        .border_color(rgb(palette.border))
+        .bg(rgb(palette.chrome_bg))
+        .child(toolbar_command_button(
+            "H1",
+            StackerCommandId::Heading1,
+            palette,
+            cx,
+        ))
+        .child(toolbar_command_button(
+            "H2",
+            StackerCommandId::Heading2,
+            palette,
+            cx,
+        ))
+        .child(toolbar_command_button(
+            "H3",
+            StackerCommandId::Heading3,
+            palette,
+            cx,
+        ))
+        .child(toolbar_separator(palette))
         .child(toolbar_command_button(
             "• List",
             StackerCommandId::UnorderedList,
+            palette,
             cx,
         ))
         .child(toolbar_command_button(
             "1. List",
             StackerCommandId::OrderedList,
+            palette,
             cx,
         ))
-        .child(toolbar_separator())
-        .child(toolbar_command_button("B", StackerCommandId::Bold, cx))
-        .child(toolbar_command_button("I", StackerCommandId::Italic, cx))
+        .child(toolbar_separator(palette))
+        .child(toolbar_command_button(
+            "B",
+            StackerCommandId::Bold,
+            palette,
+            cx,
+        ))
+        .child(toolbar_command_button(
+            "I",
+            StackerCommandId::Italic,
+            palette,
+            cx,
+        ))
         .child(toolbar_command_button(
             "Code",
             StackerCommandId::CodeBlock,
+            palette,
             cx,
         ))
         .child(div().flex_1())
-        .child(new_prompt_button(cx))
+        .child(new_prompt_button(palette, cx))
         .child(save_button(cx))
-        .child(toolbar_separator())
-        .child(font_size_button("A−", -1.0, cx))
-        .child(font_size_button("A+", 1.0, cx))
+        .child(toolbar_separator(palette))
+        .child(font_size_button("A−", -1.0, palette, cx))
+        .child(font_size_button("A+", 1.0, palette, cx))
 }
 
-fn new_prompt_button(cx: &mut Context<StackerPrototype>) -> impl IntoElement {
+fn new_prompt_button(
+    palette: StackerPalette,
+    cx: &mut Context<StackerPrototype>,
+) -> impl IntoElement {
     div()
         .h(px(26.0))
         .px_3()
@@ -337,10 +389,10 @@ fn new_prompt_button(cx: &mut Context<StackerPrototype>) -> impl IntoElement {
         .justify_center()
         .rounded_sm()
         .border_1()
-        .border_color(rgb(BORDER))
-        .bg(rgb(0x242632))
+        .border_color(rgb(palette.border))
+        .bg(rgb(palette.button_bg))
         .text_size(px(12.0))
-        .text_color(rgb(TEXT))
+        .text_color(rgb(palette.text))
         .cursor_pointer()
         .on_mouse_down(
             MouseButton::Left,
@@ -379,6 +431,7 @@ fn save_button(cx: &mut Context<StackerPrototype>) -> impl IntoElement {
 fn toolbar_command_button(
     label: &'static str,
     id: StackerCommandId,
+    palette: StackerPalette,
     cx: &mut Context<StackerPrototype>,
 ) -> impl IntoElement {
     div()
@@ -390,10 +443,10 @@ fn toolbar_command_button(
         .justify_center()
         .rounded_sm()
         .border_1()
-        .border_color(rgb(BORDER))
-        .bg(rgb(0x242632))
+        .border_color(rgb(palette.border))
+        .bg(rgb(palette.button_bg))
         .text_size(px(12.0))
-        .text_color(rgb(TEXT))
+        .text_color(rgb(palette.text))
         .cursor_pointer()
         .on_mouse_down(
             MouseButton::Left,
@@ -407,6 +460,7 @@ fn toolbar_command_button(
 fn font_size_button(
     label: &'static str,
     delta: f32,
+    palette: StackerPalette,
     cx: &mut Context<StackerPrototype>,
 ) -> impl IntoElement {
     div()
@@ -417,10 +471,10 @@ fn font_size_button(
         .justify_center()
         .rounded_sm()
         .border_1()
-        .border_color(rgb(BORDER))
-        .bg(rgb(0x242632))
+        .border_color(rgb(palette.border))
+        .bg(rgb(palette.button_bg))
         .text_size(px(12.0))
-        .text_color(rgb(TEXT))
+        .text_color(rgb(palette.text))
         .cursor_pointer()
         .on_mouse_down(
             MouseButton::Left,
@@ -431,11 +485,11 @@ fn font_size_button(
         .child(label)
 }
 
-fn toolbar_separator() -> impl IntoElement {
-    div().w(px(1.0)).h(px(20.0)).mx_1().bg(rgb(BORDER))
+fn toolbar_separator(palette: StackerPalette) -> impl IntoElement {
+    div().w(px(1.0)).h(px(20.0)).mx_1().bg(rgb(palette.border))
 }
 
-pub(super) fn status_bar(editor: &StackerTextInput) -> impl IntoElement {
+pub(super) fn status_bar(editor: &StackerTextInput, palette: StackerPalette) -> impl IntoElement {
     div()
         .h(px(28.0))
         .w_full()
@@ -444,10 +498,10 @@ pub(super) fn status_bar(editor: &StackerTextInput) -> impl IntoElement {
         .justify_between()
         .px_3()
         .border_t_1()
-        .border_color(rgb(BORDER))
-        .bg(rgb(CHROME_BG))
+        .border_color(rgb(palette.border))
+        .bg(rgb(palette.chrome_bg))
         .text_size(px(11.0))
-        .text_color(rgb(MUTED_TEXT))
+        .text_color(rgb(palette.muted_text))
         .child(format!(
             "{} chars | {} words | {} lines",
             editor.session.char_count(),

@@ -19,8 +19,8 @@ use super::{
     home::home_surface,
     sidebar::{collect_explorer_entries, explorer_tree_panel, ExplorerState},
     tabs::WorkspaceTabId,
-    AppearancePage, ErrorLogFilter, JoinedWorkspacePanes, WorkspacePrototype, WorkspaceSurface,
-    BORDER, EDITOR_BG, JOINED_TAB_DIVIDER_WIDTH, PANEL_BG,
+    AppearancePage, ErrorLogFilter, JoinedWorkspacePanes, WorkspacePalette, WorkspacePrototype,
+    WorkspaceSurface, BORDER, JOINED_TAB_DIVIDER_WIDTH,
 };
 use crate::tab_groups::PartitionAxis;
 
@@ -67,12 +67,13 @@ pub(super) fn workspace_content(
     joined_panes: Option<JoinedWorkspacePanes>,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
+    let palette = WorkspacePalette::from_config(&context.appearance_config);
     let content = div()
         .flex_1()
         .h_full()
         .flex()
         .overflow_hidden()
-        .bg(rgb(EDITOR_BG));
+        .bg(rgb(palette.editor_bg));
 
     let Some(active_surface) = active_surface else {
         return content.child(empty_workspace_surface(&context.appearance_config));
@@ -289,11 +290,12 @@ pub(super) fn workspace_content(
 }
 
 fn empty_workspace_surface(config: &Config) -> gpui::Div {
+    let palette = WorkspacePalette::from_config(config);
     let mut surface = div()
         .relative()
         .size_full()
         .overflow_hidden()
-        .bg(rgb(EDITOR_BG));
+        .bg(rgb(palette.editor_bg));
 
     if let Some(background) = terminal_background_layer(config) {
         surface = surface.child(background);
@@ -310,7 +312,7 @@ fn empty_workspace_surface(config: &Config) -> gpui::Div {
             .items_center()
             .justify_center()
             .text_size(px(24.0))
-            .text_color(rgb(0x9aa2b2))
+            .text_color(rgb(palette.muted_text))
             .child("llnzy"),
     )
 }
@@ -354,11 +356,12 @@ pub(super) fn workspace_surface_pane(
         error_log_filter,
         pending_clear_error_log,
     } = context;
+    let palette = WorkspacePalette::from_config(&appearance_config);
     let sketch_toolbar_position = sketch.read(cx).toolbar_position();
 
     let mut pane = div().h_full().overflow_hidden();
     if !(surface == WorkspaceSurface::Terminal && shared_terminal_background) {
-        pane = pane.bg(rgb(EDITOR_BG));
+        pane = pane.bg(rgb(palette.editor_bg));
     }
 
     let pane = if let Some(tab_id) = tab_id {
@@ -376,7 +379,7 @@ pub(super) fn workspace_surface_pane(
         WorkspaceSurface::Stacker => pane.child(
             div()
                 .size_full()
-                .bg(rgb(PANEL_BG))
+                .bg(rgb(palette.panel_bg))
                 .overflow_hidden()
                 .child(stacker),
         ),
@@ -432,15 +435,20 @@ pub(super) fn workspace_surface_pane(
                 "workspace-explorer-tab-tree",
                 tab_id.map(|id| id.0).unwrap_or(0),
             );
-            pane.child(div().size_full().flex().flex_col().bg(rgb(PANEL_BG)).child(
-                explorer_tree_panel(
-                    panel_id,
-                    entries,
-                    state.selected_path.clone(),
-                    has_project,
-                    cx,
-                ),
-            ))
+            pane.child(
+                div()
+                    .size_full()
+                    .flex()
+                    .flex_col()
+                    .bg(rgb(palette.panel_bg))
+                    .child(explorer_tree_panel(
+                        panel_id,
+                        entries,
+                        state.selected_path.clone(),
+                        has_project,
+                        cx,
+                    )),
+            )
         }
         WorkspaceSurface::Sketch => pane.child(sketch),
         WorkspaceSurface::Appearances => pane.child(appearances_surface(
@@ -450,8 +458,17 @@ pub(super) fn workspace_surface_pane(
             terminal_background_import_error,
             cx,
         )),
-        WorkspaceSurface::Home => pane.child(home_surface(workspace_root, recent_projects, cx)),
+        WorkspaceSurface::Home => pane.child(home_surface(
+            workspace_root,
+            recent_projects,
+            &appearance_config,
+            cx,
+        )),
         WorkspaceSurface::Settings => pane.child(settings_surface(
+            appearance_config,
+            appearance_page,
+            sketch_toolbar_position,
+            terminal_background_import_error,
             editor_word_wrap,
             joined_tab_limit,
             error_log_expanded,
