@@ -19,10 +19,9 @@ use crate::sidebar_move::{
 };
 
 use super::{
-    WorkspacePalette, WorkspacePrototype, ACCENT, ACTIVE_TEXT, BUMPER_RESIZE_WIDTH, BUMPER_WIDTH,
+    WorkspacePalette, WorkspacePrototype, ACTIVE_TEXT, BUMPER_RESIZE_WIDTH, BUMPER_WIDTH,
     EXPLORER_ENTRY_LIMIT, FOLDER_BLUE, MUTED_TEXT, QUEUE_GREEN, SIDEBAR_DROP_INVALID_BG,
-    SIDEBAR_DROP_VALID_BG, SIDEBAR_ROW_BG, SIDEBAR_ROW_HOVER_BG, SIDEBAR_ROW_SELECTED_BG,
-    SIDEBAR_ROW_SELECTED_HOVER_BG, SIDEBAR_TEXT,
+    SIDEBAR_DROP_VALID_BG,
 };
 
 #[derive(Clone, Debug)]
@@ -280,6 +279,7 @@ pub(super) fn workspace_sidebar(
             workspace_root.clone(),
             recent_projects,
             recent_projects_open,
+            palette,
             cx,
         ));
 
@@ -310,6 +310,7 @@ pub(super) fn workspace_sidebar(
             entries,
             selected_path,
             has_project,
+            palette,
             cx,
         ))
         .child(
@@ -332,6 +333,7 @@ pub(super) fn explorer_tree_panel(
     entries: Vec<ExplorerEntry>,
     selected_path: Option<PathBuf>,
     has_project: bool,
+    palette: WorkspacePalette,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     let mut tree = div()
@@ -347,7 +349,7 @@ pub(super) fn explorer_tree_panel(
             div()
                 .p_3()
                 .text_size(px(12.0))
-                .text_color(rgb(MUTED_TEXT))
+                .text_color(rgb(palette.muted_text))
                 .child("Open a project to show its files."),
         );
     }
@@ -356,13 +358,13 @@ pub(super) fn explorer_tree_panel(
             div()
                 .p_3()
                 .text_size(px(12.0))
-                .text_color(rgb(MUTED_TEXT))
+                .text_color(rgb(palette.muted_text))
                 .child("No readable project files."),
         );
     }
     for entry in entries {
         let selected = selected_path.as_ref() == Some(&entry.path);
-        tree = tree.child(sidebar_tree_row(entry, selected, cx));
+        tree = tree.child(sidebar_tree_row(entry, selected, palette, cx));
     }
     tree
 }
@@ -372,6 +374,7 @@ pub(super) fn workspace_sidebar_context_menu(
     workspace_root: Option<PathBuf>,
     rename: Option<SidebarRenameState>,
     new_entry: Option<SidebarNewEntryState>,
+    palette: WorkspacePalette,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     let menu_width = match menu.view {
@@ -390,8 +393,8 @@ pub(super) fn workspace_sidebar_context_menu(
         .gap_1()
         .rounded_sm()
         .border_1()
-        .border_color(rgb(0x454a56))
-        .bg(rgb(0x202229))
+        .border_color(rgb(palette.border))
+        .bg(rgb(palette.panel_bg))
         .p_1()
         .text_size(px(13.0))
         .shadow_lg()
@@ -413,35 +416,60 @@ pub(super) fn workspace_sidebar_context_menu(
             let has_relative_path = workspace_root
                 .as_ref()
                 .is_some_and(|root| menu.path.strip_prefix(root).is_ok());
-            panel = panel.child(sidebar_menu_header(menu.name.clone(), menu.is_dir));
+            panel = panel.child(sidebar_menu_header(menu.name.clone(), menu.is_dir, palette));
             if menu.is_dir {
                 panel = panel
-                    .child(sidebar_menu_button("New File".to_string(), false, cx, {
-                        let path = menu.path.clone();
-                        move |this, _window, cx| {
-                            this.start_sidebar_new_entry(path.clone(), NewEntryKind::File, cx)
-                        }
-                    }))
-                    .child(sidebar_menu_button("New Folder".to_string(), false, cx, {
-                        let path = menu.path.clone();
-                        move |this, _window, cx| {
-                            this.start_sidebar_new_entry(path.clone(), NewEntryKind::Folder, cx)
-                        }
-                    }));
+                    .child(sidebar_menu_button(
+                        "New File".to_string(),
+                        false,
+                        palette,
+                        cx,
+                        {
+                            let path = menu.path.clone();
+                            move |this, _window, cx| {
+                                this.start_sidebar_new_entry(path.clone(), NewEntryKind::File, cx)
+                            }
+                        },
+                    ))
+                    .child(sidebar_menu_button(
+                        "New Folder".to_string(),
+                        false,
+                        palette,
+                        cx,
+                        {
+                            let path = menu.path.clone();
+                            move |this, _window, cx| {
+                                this.start_sidebar_new_entry(path.clone(), NewEntryKind::Folder, cx)
+                            }
+                        },
+                    ));
             }
             panel = panel
-                .child(sidebar_menu_button("Rename".to_string(), false, cx, {
-                    let path = menu.path.clone();
-                    move |this, _window, cx| this.start_sidebar_rename(path.clone(), cx)
-                }))
-                .child(sidebar_menu_button("Copy Path".to_string(), false, cx, {
-                    let path = menu.path.clone();
-                    move |this, _window, cx| this.copy_sidebar_path(path.clone(), false, cx)
-                }));
+                .child(sidebar_menu_button(
+                    "Rename".to_string(),
+                    false,
+                    palette,
+                    cx,
+                    {
+                        let path = menu.path.clone();
+                        move |this, _window, cx| this.start_sidebar_rename(path.clone(), cx)
+                    },
+                ))
+                .child(sidebar_menu_button(
+                    "Copy Path".to_string(),
+                    false,
+                    palette,
+                    cx,
+                    {
+                        let path = menu.path.clone();
+                        move |this, _window, cx| this.copy_sidebar_path(path.clone(), false, cx)
+                    },
+                ));
             if has_relative_path {
                 panel = panel.child(sidebar_menu_button(
                     "Copy Relative Path".to_string(),
                     false,
+                    palette,
                     cx,
                     {
                         let path = menu.path.clone();
@@ -453,6 +481,7 @@ pub(super) fn workspace_sidebar_context_menu(
                 .child(sidebar_menu_button(
                     "Move...".to_string(),
                     false,
+                    palette,
                     cx,
                     |_this, _window, cx| {
                         _this.show_sidebar_move_targets(cx);
@@ -461,6 +490,7 @@ pub(super) fn workspace_sidebar_context_menu(
                 .child(sidebar_menu_button(
                     "Delete...".to_string(),
                     false,
+                    palette,
                     cx,
                     |_this, _window, cx| {
                         _this.show_sidebar_delete_confirm(cx);
@@ -483,12 +513,16 @@ pub(super) fn workspace_sidebar_context_menu(
                 rename_text
             };
             let field_color = if field_text == "Type name" {
-                MUTED_TEXT
+                palette.muted_text
             } else {
-                ACTIVE_TEXT
+                palette.active_text
             };
             panel = panel
-                .child(sidebar_menu_header("Rename".to_string(), menu.is_dir))
+                .child(sidebar_menu_header(
+                    "Rename".to_string(),
+                    menu.is_dir,
+                    palette,
+                ))
                 .child(
                     div()
                         .w_full()
@@ -497,8 +531,12 @@ pub(super) fn workspace_sidebar_context_menu(
                         .items_center()
                         .rounded_sm()
                         .border_1()
-                        .border_color(rgb(0x4f5666))
-                        .bg(rgb(if replace_on_input { 0x253044 } else { 0x15171d }))
+                        .border_color(rgb(palette.border))
+                        .bg(rgb(if replace_on_input {
+                            palette.sidebar_row_selected_bg
+                        } else {
+                            palette.inactive_tab_bg
+                        }))
                         .px_2()
                         .text_size(px(13.0))
                         .text_color(rgb(field_color))
@@ -509,6 +547,7 @@ pub(super) fn workspace_sidebar_context_menu(
                 .child(sidebar_menu_button(
                     "Save".to_string(),
                     false,
+                    palette,
                     cx,
                     |this, _window, cx| {
                         this.commit_sidebar_rename(cx);
@@ -517,6 +556,7 @@ pub(super) fn workspace_sidebar_context_menu(
                 .child(sidebar_menu_button(
                     "Cancel".to_string(),
                     false,
+                    palette,
                     cx,
                     |this, _window, cx| {
                         this.close_sidebar_context_menu(cx);
@@ -533,14 +573,15 @@ pub(super) fn workspace_sidebar_context_menu(
                 typed
             };
             let field_color = if field_text == "Type name" {
-                MUTED_TEXT
+                palette.muted_text
             } else {
-                ACTIVE_TEXT
+                palette.active_text
             };
             panel = panel
                 .child(sidebar_menu_header(
                     kind.header_label().to_string(),
                     kind.is_dir(),
+                    palette,
                 ))
                 .child(
                     div()
@@ -550,8 +591,8 @@ pub(super) fn workspace_sidebar_context_menu(
                         .items_center()
                         .rounded_sm()
                         .border_1()
-                        .border_color(rgb(0x4f5666))
-                        .bg(rgb(0x15171d))
+                        .border_color(rgb(palette.border))
+                        .bg(rgb(palette.inactive_tab_bg))
                         .px_2()
                         .text_size(px(13.0))
                         .text_color(rgb(field_color))
@@ -562,6 +603,7 @@ pub(super) fn workspace_sidebar_context_menu(
                 .child(sidebar_menu_button(
                     "Create".to_string(),
                     false,
+                    palette,
                     cx,
                     |this, _window, cx| {
                         this.commit_sidebar_new_entry(cx);
@@ -570,6 +612,7 @@ pub(super) fn workspace_sidebar_context_menu(
                 .child(sidebar_menu_button(
                     "Cancel".to_string(),
                     false,
+                    palette,
                     cx,
                     |this, _window, cx| {
                         this.close_sidebar_context_menu(cx);
@@ -581,10 +624,12 @@ pub(super) fn workspace_sidebar_context_menu(
                 .child(sidebar_menu_header(
                     format!("Move {}", menu.name),
                     menu.is_dir,
+                    palette,
                 ))
                 .child(sidebar_menu_button(
                     "Back".to_string(),
                     false,
+                    palette,
                     cx,
                     |this, _window, cx| {
                         this.show_sidebar_main_menu(cx);
@@ -608,12 +653,16 @@ pub(super) fn workspace_sidebar_context_menu(
                 .gap_1();
 
             if destinations.is_empty() {
-                list = list.child(sidebar_menu_note("No move destinations".to_string()));
+                list = list.child(sidebar_menu_note(
+                    "No move destinations".to_string(),
+                    palette,
+                ));
             } else {
                 for destination in destinations {
                     list = list.child(sidebar_move_destination_row(
                         destination,
                         menu.path.clone(),
+                        palette,
                         cx,
                     ));
                 }
@@ -623,15 +672,25 @@ pub(super) fn workspace_sidebar_context_menu(
         SidebarContextMenuView::DeleteConfirm => {
             let noun = if menu.is_dir { "folder" } else { "file" };
             panel = panel
-                .child(sidebar_menu_header(format!("Delete {noun}?"), menu.is_dir))
-                .child(sidebar_menu_note(menu.name.clone()))
-                .child(sidebar_danger_button(format!("Delete {noun}"), cx, {
-                    let path = menu.path.clone();
-                    move |this, _window, cx| this.delete_sidebar_entry(path.clone(), cx)
-                }))
+                .child(sidebar_menu_header(
+                    format!("Delete {noun}?"),
+                    menu.is_dir,
+                    palette,
+                ))
+                .child(sidebar_menu_note(menu.name.clone(), palette))
+                .child(sidebar_danger_button(
+                    format!("Delete {noun}"),
+                    palette,
+                    cx,
+                    {
+                        let path = menu.path.clone();
+                        move |this, _window, cx| this.delete_sidebar_entry(path.clone(), cx)
+                    },
+                ))
                 .child(sidebar_menu_button(
                     "Cancel".to_string(),
                     false,
+                    palette,
                     cx,
                     |this, _window, cx| {
                         this.close_sidebar_context_menu(cx);
@@ -705,6 +764,7 @@ fn sidebar_project_controls(
     workspace_root: Option<PathBuf>,
     recent_projects: Vec<PathBuf>,
     recent_projects_open: bool,
+    palette: WorkspacePalette,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     let mut controls = div()
@@ -713,13 +773,25 @@ fn sidebar_project_controls(
         .gap_1()
         .p_2()
         .border_b_1()
-        .border_color(rgb(0x343743))
-        .child(project_button("Open Project", true, cx, |this, cx| {
-            this.pick_open_project(cx);
-        }))
-        .child(project_button("Open Recent", false, cx, |this, cx| {
-            this.toggle_recent_projects(cx);
-        }));
+        .border_color(rgb(palette.border))
+        .child(project_button(
+            "Open Project",
+            true,
+            palette,
+            cx,
+            |this, cx| {
+                this.pick_open_project(cx);
+            },
+        ))
+        .child(project_button(
+            "Open Recent",
+            false,
+            palette,
+            cx,
+            |this, cx| {
+                this.toggle_recent_projects(cx);
+            },
+        ));
 
     if let Some(root) = workspace_root {
         controls = controls.child(
@@ -731,12 +803,14 @@ fn sidebar_project_controls(
                     "New File",
                     NewEntryKind::File,
                     root.clone(),
+                    palette,
                     cx,
                 ))
                 .child(quick_create_button(
                     "New Folder",
                     NewEntryKind::Folder,
                     root,
+                    palette,
                     cx,
                 )),
         );
@@ -750,12 +824,12 @@ fn sidebar_project_controls(
                     .px_2()
                     .py_1()
                     .text_size(px(12.0))
-                    .text_color(rgb(MUTED_TEXT))
+                    .text_color(rgb(palette.muted_text))
                     .child("No recent projects"),
             );
         } else {
             for project in recent {
-                controls = controls.child(recent_project_row(project, cx));
+                controls = controls.child(recent_project_row(project, palette, cx));
             }
         }
     }
@@ -766,6 +840,7 @@ fn sidebar_project_controls(
 fn project_button(
     label: &'static str,
     primary: bool,
+    palette: WorkspacePalette,
     cx: &mut Context<WorkspacePrototype>,
     on_click: impl Fn(&mut WorkspacePrototype, &mut Context<WorkspacePrototype>) + 'static,
 ) -> impl IntoElement {
@@ -776,8 +851,12 @@ fn project_button(
         .items_center()
         .px_2()
         .rounded_sm()
-        .bg(rgb(if primary { ACCENT } else { 0x303440 }))
-        .text_color(rgb(0xe1e6ee))
+        .bg(rgb(if primary {
+            palette.accent
+        } else {
+            palette.inactive_tab_bg
+        }))
+        .text_color(rgb(palette.active_text))
         .text_size(px(13.0))
         .cursor_pointer()
         .on_mouse_down(
@@ -793,6 +872,7 @@ fn quick_create_button(
     label: &'static str,
     kind: NewEntryKind,
     root: PathBuf,
+    palette: WorkspacePalette,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     div()
@@ -802,8 +882,8 @@ fn quick_create_button(
         .items_center()
         .justify_center()
         .rounded_sm()
-        .bg(rgb(0x303440))
-        .text_color(rgb(0xe1e6ee))
+        .bg(rgb(palette.inactive_tab_bg))
+        .text_color(rgb(palette.active_text))
         .text_size(px(12.0))
         .cursor_pointer()
         .on_mouse_down(
@@ -821,7 +901,11 @@ fn quick_create_button(
         .child(label)
 }
 
-fn recent_project_row(project: PathBuf, cx: &mut Context<WorkspacePrototype>) -> impl IntoElement {
+fn recent_project_row(
+    project: PathBuf,
+    palette: WorkspacePalette,
+    cx: &mut Context<WorkspacePrototype>,
+) -> impl IntoElement {
     let label = project_display_name(&project);
     let path = project;
     div()
@@ -832,7 +916,7 @@ fn recent_project_row(project: PathBuf, cx: &mut Context<WorkspacePrototype>) ->
         .px_2()
         .rounded_sm()
         .text_size(px(12.0))
-        .text_color(rgb(SIDEBAR_TEXT))
+        .text_color(rgb(palette.sidebar_text))
         .cursor_pointer()
         .on_mouse_down(
             MouseButton::Left,
@@ -853,6 +937,7 @@ pub(super) fn project_display_name(path: &Path) -> String {
 fn sidebar_tree_row(
     entry: ExplorerEntry,
     selected: bool,
+    palette: WorkspacePalette,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     let depth = entry.depth;
@@ -879,19 +964,23 @@ fn sidebar_tree_row(
         .pr_2()
         .rounded_sm()
         .bg(rgb(if selected {
-            SIDEBAR_ROW_SELECTED_BG
+            palette.sidebar_row_selected_bg
         } else {
-            SIDEBAR_ROW_BG
+            palette.chrome_bg
         }))
         .hover(move |style| {
             style.bg(rgb(if selected {
-                SIDEBAR_ROW_SELECTED_HOVER_BG
+                palette.sidebar_row_selected_bg
             } else {
-                SIDEBAR_ROW_HOVER_BG
+                palette.sidebar_row_hover_bg
             }))
         })
         .text_size(px(13.0))
-        .text_color(rgb(if is_dir { FOLDER_BLUE } else { SIDEBAR_TEXT }))
+        .text_color(rgb(if is_dir {
+            FOLDER_BLUE
+        } else {
+            palette.sidebar_text
+        }))
         .cursor_move()
         .on_drag(
             drag_payload,
@@ -945,7 +1034,11 @@ fn sidebar_tree_row(
         div()
             .w(px(16.0))
             .text_size(px(11.0))
-            .text_color(rgb(if is_dir { FOLDER_BLUE } else { 0x646973 }))
+            .text_color(rgb(if is_dir {
+                FOLDER_BLUE
+            } else {
+                palette.muted_text
+            }))
             .child(icon),
     )
     .child(
@@ -957,7 +1050,7 @@ fn sidebar_tree_row(
     )
 }
 
-fn sidebar_menu_header(label: String, is_dir: bool) -> impl IntoElement {
+fn sidebar_menu_header(label: String, is_dir: bool, palette: WorkspacePalette) -> impl IntoElement {
     div()
         .w_full()
         .h(px(28.0))
@@ -965,10 +1058,14 @@ fn sidebar_menu_header(label: String, is_dir: bool) -> impl IntoElement {
         .items_center()
         .gap_2()
         .rounded_sm()
-        .bg(rgb(0x17191f))
+        .bg(rgb(palette.inactive_tab_bg))
         .px_2()
         .text_size(px(12.0))
-        .text_color(rgb(if is_dir { FOLDER_BLUE } else { ACTIVE_TEXT }))
+        .text_color(rgb(if is_dir {
+            FOLDER_BLUE
+        } else {
+            palette.active_text
+        }))
         .overflow_hidden()
         .whitespace_nowrap()
         .child(if is_dir { "DIR" } else { "FILE" })
@@ -981,7 +1078,7 @@ fn sidebar_menu_header(label: String, is_dir: bool) -> impl IntoElement {
         )
 }
 
-fn sidebar_menu_note(label: String) -> impl IntoElement {
+fn sidebar_menu_note(label: String, palette: WorkspacePalette) -> impl IntoElement {
     div()
         .w_full()
         .min_h(px(28.0))
@@ -990,7 +1087,7 @@ fn sidebar_menu_note(label: String) -> impl IntoElement {
         .rounded_sm()
         .px_2()
         .text_size(px(12.0))
-        .text_color(rgb(MUTED_TEXT))
+        .text_color(rgb(palette.muted_text))
         .overflow_hidden()
         .whitespace_nowrap()
         .child(label)
@@ -999,6 +1096,7 @@ fn sidebar_menu_note(label: String) -> impl IntoElement {
 fn sidebar_menu_button(
     label: String,
     active: bool,
+    palette: WorkspacePalette,
     cx: &mut Context<WorkspacePrototype>,
     on_click: impl Fn(&mut WorkspacePrototype, &mut Window, &mut Context<WorkspacePrototype>) + 'static,
 ) -> impl IntoElement {
@@ -1008,12 +1106,16 @@ fn sidebar_menu_button(
         .flex()
         .items_center()
         .rounded_sm()
-        .bg(rgb(if active { 0x303644 } else { 0x202229 }))
+        .bg(rgb(if active {
+            palette.sidebar_row_selected_bg
+        } else {
+            palette.panel_bg
+        }))
         .px_2()
         .text_size(px(13.0))
-        .text_color(rgb(SIDEBAR_TEXT))
+        .text_color(rgb(palette.sidebar_text))
         .cursor_pointer()
-        .hover(|style| style.bg(rgb(0x303644)))
+        .hover(move |style| style.bg(rgb(palette.sidebar_row_hover_bg)))
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |this, _: &MouseDownEvent, window, cx| {
@@ -1026,6 +1128,7 @@ fn sidebar_menu_button(
 
 fn sidebar_danger_button(
     label: String,
+    palette: WorkspacePalette,
     cx: &mut Context<WorkspacePrototype>,
     on_click: impl Fn(&mut WorkspacePrototype, &mut Window, &mut Context<WorkspacePrototype>) + 'static,
 ) -> impl IntoElement {
@@ -1035,12 +1138,12 @@ fn sidebar_danger_button(
         .flex()
         .items_center()
         .rounded_sm()
-        .bg(rgb(0x3d2428))
+        .bg(rgb(if palette.is_light { 0xf3d5d1 } else { 0x3d2428 }))
         .px_2()
         .text_size(px(13.0))
-        .text_color(rgb(0xffb4b4))
+        .text_color(rgb(if palette.is_light { 0xa64141 } else { 0xffb4b4 }))
         .cursor_pointer()
-        .hover(|style| style.bg(rgb(0x4a2a30)))
+        .hover(move |style| style.bg(rgb(if palette.is_light { 0xeebfba } else { 0x4a2a30 })))
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |this, _: &MouseDownEvent, window, cx| {
@@ -1054,6 +1157,7 @@ fn sidebar_danger_button(
 fn sidebar_move_destination_row(
     destination: SidebarMoveDestination,
     source_path: PathBuf,
+    palette: WorkspacePalette,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     let label = if destination.is_valid {
@@ -1077,9 +1181,9 @@ fn sidebar_move_destination_row(
         .pr_2()
         .text_size(px(12.0))
         .text_color(rgb(if destination.is_valid {
-            SIDEBAR_TEXT
+            palette.sidebar_text
         } else {
-            0x686d79
+            palette.muted_text
         }))
         .overflow_hidden()
         .whitespace_nowrap()
@@ -1088,7 +1192,7 @@ fn sidebar_move_destination_row(
     if destination.is_valid {
         let destination_path = destination.path;
         row.cursor_pointer()
-            .hover(|style| style.bg(rgb(0x303644)))
+            .hover(move |style| style.bg(rgb(palette.sidebar_row_hover_bg)))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _: &MouseDownEvent, _window, cx| {
@@ -1172,7 +1276,13 @@ pub(super) fn sidebar_bumper(
                         this.resize_sidebar_from_x(event.event.position.x, cx);
                     },
                 ))
-                .child(div().w(px(2.0)).h(px(40.0)).rounded_sm().bg(rgb(0x343743))),
+                .child(
+                    div()
+                        .w(px(2.0))
+                        .h(px(40.0))
+                        .rounded_sm()
+                        .bg(rgb(palette.border)),
+                ),
         )
         .child(
             div()

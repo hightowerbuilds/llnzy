@@ -140,10 +140,8 @@ const BUMPER_RESIZE_WIDTH: f32 = 6.0;
 const EXPLORER_ENTRY_LIMIT: usize = 260;
 const GPUI_TERMINAL_BACKGROUND_MAX_EDGE: u32 = 2048;
 const EMPTY_WORKSPACE_TAB_ID: WorkspaceTabId = WorkspaceTabId(0);
-const SIDEBAR_ROW_BG: u32 = CHROME_BG;
 const SIDEBAR_ROW_HOVER_BG: u32 = 0x2b2e36;
 const SIDEBAR_ROW_SELECTED_BG: u32 = 0x303440;
-const SIDEBAR_ROW_SELECTED_HOVER_BG: u32 = 0x3a4050;
 const SIDEBAR_DROP_VALID_BG: u32 = 0x1f3a2b;
 const SIDEBAR_DROP_INVALID_BG: u32 = 0x3d2428;
 
@@ -2174,6 +2172,7 @@ impl Render for WorkspacePrototype {
                     self.workspace_root.clone(),
                     sidebar_rename,
                     sidebar_new_entry,
+                    workspace_palette,
                     cx,
                 ))
             })

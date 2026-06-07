@@ -446,6 +446,7 @@ pub(super) fn workspace_surface_pane(
                         entries,
                         state.selected_path.clone(),
                         has_project,
+                        palette,
                         cx,
                     )),
             )
