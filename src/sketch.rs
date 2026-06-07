@@ -26,6 +26,10 @@ pub use export::{
     default_export_file_name, default_jpeg_export_file_name, export_jpeg_to_path,
     export_svg_to_path, JpegExportResult,
 };
+pub(crate) use geometry::{
+    canvas_to_sketch_point, export_frame_size, normalize_zoom_scale, pad_offset_for_zoom_anchor,
+    sketch_to_canvas_point, DEFAULT_SKETCH_ZOOM_SCALE,
+};
 pub use media::{import_sketch_image, sketch_screenshot_drop_dir};
 pub use model::{
     DraftElement, ImageElement, MoveDraft, RectElement, ResizeDraft, ResizeHandle, SketchDocument,

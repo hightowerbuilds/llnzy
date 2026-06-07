@@ -15,7 +15,7 @@ impl SketchState {
         self.draft = None;
         self.move_draft = None;
         self.resize_draft = None;
-        if tool != SketchTool::Select {
+        if !matches!(tool, SketchTool::Select | SketchTool::Grab) {
             self.selected = None;
         }
     }

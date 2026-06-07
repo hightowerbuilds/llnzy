@@ -1,3 +1,7 @@
+use super::geometry::{
+    canvas_to_sketch_point, export_frame_size, normalize_zoom_scale, pad_offset_for_zoom_anchor,
+    sketch_to_canvas_point,
+};
 use super::serialization::sanitize_sketch_name;
 use super::*;
 
@@ -237,6 +241,62 @@ fn image_resize_handle_can_be_hit_tested() {
         state.selected_resize_handle_at(point(212.0, 114.0)),
         Some(ResizeHandle::BottomRight)
     );
+}
+
+#[test]
+fn grab_tool_preserves_current_selection() {
+    let mut state = SketchState::default();
+    let index = state.add_symbol(SketchSymbolKind::Database, point(30.0, 40.0));
+
+    state.set_tool(SketchTool::Grab);
+
+    assert_eq!(state.selected, Some(index));
+    assert_eq!(state.tool, SketchTool::Grab);
+}
+
+#[test]
+fn pad_offset_converts_between_canvas_and_sketch_coordinates() {
+    let offset = point(120.0, -45.0);
+    let screen = point(200.0, 80.0);
+    let sketch = canvas_to_sketch_point(screen, offset, 1.0);
+
+    assert_eq!(sketch, point(80.0, 125.0));
+    assert_eq!(sketch_to_canvas_point(sketch, offset, 1.0), screen);
+}
+
+#[test]
+fn zoom_scale_converts_between_canvas_and_sketch_coordinates() {
+    let offset = point(120.0, -45.0);
+    let screen = point(320.0, 155.0);
+    let sketch = canvas_to_sketch_point(screen, offset, 2.0);
+
+    assert_eq!(sketch, point(100.0, 100.0));
+    assert_eq!(sketch_to_canvas_point(sketch, offset, 2.0), screen);
+}
+
+#[test]
+fn zoom_anchor_keeps_same_sketch_point_under_cursor() {
+    let offset = point(120.0, -45.0);
+    let anchor = point(320.0, 155.0);
+    let sketch_before = canvas_to_sketch_point(anchor, offset, 2.0);
+    let next_offset = pad_offset_for_zoom_anchor(offset, anchor, 2.0, 3.0);
+    let sketch_after = canvas_to_sketch_point(anchor, next_offset, 3.0);
+
+    assert_eq!(sketch_before, point(100.0, 100.0));
+    assert_eq!(sketch_after, sketch_before);
+}
+
+#[test]
+fn zoom_scale_is_clamped_to_supported_range() {
+    assert_eq!(normalize_zoom_scale(0.01), 0.25);
+    assert_eq!(normalize_zoom_scale(8.0), 4.0);
+    assert_eq!(normalize_zoom_scale(f32::NAN), 1.0);
+}
+
+#[test]
+fn export_frame_size_is_fixed_full_hd() {
+    assert_eq!(export_frame_size([1400.0, 700.0]), [1920.0, 1080.0]);
+    assert_eq!(export_frame_size([0.0, -10.0]), [1920.0, 1080.0]);
 }
 
 #[test]

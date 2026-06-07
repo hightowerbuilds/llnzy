@@ -3,6 +3,7 @@ use super::CURRENT_VERSION;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum SketchTool {
     Select,
+    Grab,
     Marker,
     Rectangle,
     Text,

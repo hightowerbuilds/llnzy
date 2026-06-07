@@ -1,6 +1,7 @@
 use super::{
     load_appearance_settings, load_document_from_path, sketch_path, DraftElement, MoveDraft,
-    ResizeDraft, SketchAppearanceSettings, SketchDocument, SketchStyle, SketchTool, TextDraft,
+    ResizeDraft, SketchAppearanceSettings, SketchDocument, SketchPoint, SketchStyle, SketchTool,
+    TextDraft, DEFAULT_SKETCH_ZOOM_SCALE,
 };
 
 pub struct SketchState {
@@ -25,6 +26,13 @@ pub struct SketchState {
     pub saved_sketch_names: Vec<String>,
     /// Saved sketch waiting for delete confirmation from the browser.
     pub pending_delete_sketch_name: Option<String>,
+    /// Session-only viewport offset for moving the sketch pad inside the
+    /// visible canvas. This is not serialized and does not alter element
+    /// coordinates or exports.
+    pub pad_offset: SketchPoint,
+    /// Session-only viewport zoom. This is intentionally not serialized so
+    /// saved sketch coordinates and exports remain stable.
+    pub zoom_scale: f32,
     pub last_canvas_size: [f32; 2],
     pub status_message: Option<String>,
     pub clipboard_in: Option<String>,
@@ -51,6 +59,8 @@ impl Default for SketchState {
             browser_open: false,
             saved_sketch_names: Vec::new(),
             pending_delete_sketch_name: None,
+            pad_offset: SketchPoint::default(),
+            zoom_scale: DEFAULT_SKETCH_ZOOM_SCALE,
             last_canvas_size: [1200.0, 800.0],
             status_message: None,
             clipboard_in: None,
