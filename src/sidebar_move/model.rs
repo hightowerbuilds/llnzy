@@ -45,13 +45,4 @@ impl SidebarMovePlan {
         self.items.is_empty()
     }
 
-    pub fn refresh_paths(&self) -> Vec<PathBuf> {
-        let mut paths = vec![self.destination_folder.clone()];
-        paths.extend(
-            self.items
-                .iter()
-                .filter_map(|item| item.source.parent().map(|parent| parent.to_path_buf())),
-        );
-        paths
-    }
 }

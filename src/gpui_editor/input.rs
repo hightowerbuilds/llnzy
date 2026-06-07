@@ -970,7 +970,7 @@ fn wrapped_row_count(line_len: usize, wrap_cols: usize) -> usize {
 
 fn wrapped_row_index_for_col(line_len: usize, col: usize, wrap_cols: usize) -> usize {
     let wrap_cols = wrap_cols.max(1);
-    if col > 0 && col == line_len && col % wrap_cols == 0 {
+    if col > 0 && col == line_len && col.is_multiple_of(wrap_cols) {
         col / wrap_cols - 1
     } else {
         col / wrap_cols
@@ -1020,7 +1020,7 @@ fn bounds_for_position(
             }
             let start = line.wrap_start_col;
             let end = start + line.visible_text.chars().count();
-            position.col >= start && (position.col < end || position.col == end)
+            position.col >= start && position.col <= end
         })
     }) {
         let visible_col = position.col.saturating_sub(line.wrap_start_col);

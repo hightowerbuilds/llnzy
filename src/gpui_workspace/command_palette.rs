@@ -331,8 +331,7 @@ pub(super) fn filter_entries(entries: &[CommandEntry], query: &str) -> Vec<usize
         .collect()
 }
 
-/// Cap on how many project files the file-finder will index. Mirrors the
-/// limit in `editor::project_search`.
+/// Cap on how many project files the file-finder will index.
 pub(super) const FILE_FINDER_MAX: usize = 5000;
 
 const FILE_FINDER_IGNORED_DIRS: &[&str] = &[

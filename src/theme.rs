@@ -8,6 +8,7 @@ pub struct VisualTheme {
     pub colors: ColorScheme,
     pub effects: EffectsConfig,
     pub cursor_style: CursorStyle,
+    pub preserve_terminal_effects: bool,
 }
 
 impl VisualTheme {
@@ -66,6 +67,7 @@ fn minimalist() -> VisualTheme {
             effects_on_ui: true,
         },
         cursor_style: CursorStyle::Block,
+        preserve_terminal_effects: false,
     }
 }
 
@@ -129,6 +131,7 @@ fn light_mode() -> VisualTheme {
             effects_on_ui: true,
         },
         cursor_style: CursorStyle::Beam,
+        preserve_terminal_effects: true,
     }
 }
 

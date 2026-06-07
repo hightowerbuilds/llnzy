@@ -4,7 +4,6 @@ mod indent;
 mod io;
 mod kind;
 mod model;
-mod recovery;
 
 #[cfg(test)]
 mod tests;

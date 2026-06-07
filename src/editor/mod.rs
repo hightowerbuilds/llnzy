@@ -4,7 +4,6 @@ pub mod editorconfig;
 pub mod git_gutter;
 pub mod history;
 pub mod perf;
-pub mod project_search;
 pub mod recovery;
 pub mod search;
 pub mod snippet;
@@ -56,15 +55,9 @@ pub struct BufferView {
     pending_tree_edit: Option<InputEdit>,
     last_parse_used_incremental: bool,
     pub folded_ranges: Vec<FoldRange>,
-    pub pending_key_chord: Option<EditorKeyChord>,
     pub git_gutter: Option<git_gutter::GitGutter>,
     /// Markdown source/preview state for markdown buffers.
     pub markdown_mode: MarkdownViewMode,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum EditorKeyChord {
-    CmdK,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -103,7 +96,6 @@ impl Default for BufferView {
             pending_tree_edit: None,
             last_parse_used_incremental: false,
             folded_ranges: Vec::new(),
-            pending_key_chord: None,
             git_gutter: None,
             markdown_mode: MarkdownViewMode::Source,
         }
@@ -129,7 +121,6 @@ impl Clone for BufferView {
             pending_tree_edit: None,
             last_parse_used_incremental: false,
             folded_ranges: self.folded_ranges.clone(),
-            pending_key_chord: self.pending_key_chord,
             git_gutter: None, // Git gutter reloaded on open
             markdown_mode: self.markdown_mode,
         }
@@ -242,13 +233,6 @@ impl EditorState {
         Ok(buffer_id)
     }
 
-    /// Switch to the buffer at the given index.
-    pub fn switch_to(&mut self, idx: usize) {
-        if idx < self.buffers.len() {
-            self.active = idx;
-        }
-    }
-
     pub fn switch_to_id(&mut self, id: BufferId) -> bool {
         let Some(idx) = self.index_for_id(id) else {
             return false;
@@ -303,11 +287,6 @@ impl EditorState {
             .collect()
     }
 
-    pub fn buffer_view_for_id(&self, id: BufferId) -> Option<(&Buffer, &BufferView)> {
-        let idx = self.index_for_id(id)?;
-        Some((self.buffers.get(idx)?, self.views.get(idx)?))
-    }
-
     /// Close the buffer at the given index. Returns true if closed.
     pub fn close(&mut self, idx: usize) -> bool {
         if idx >= self.buffers.len() {
@@ -334,15 +313,6 @@ impl EditorState {
             return false;
         };
         self.close(idx)
-    }
-
-    /// Get the active buffer and its view.
-    pub fn active_buf_view(&mut self) -> Option<(&mut Buffer, &mut BufferView)> {
-        if self.active < self.buffers.len() {
-            Some((&mut self.buffers[self.active], &mut self.views[self.active]))
-        } else {
-            None
-        }
     }
 
     pub fn active_buffer_view(&self) -> Option<(BufferId, &Buffer, &BufferView)> {
@@ -505,14 +475,6 @@ impl EditorState {
         id
     }
 
-    /// Tab titles for rendering: (name, is_active, is_modified).
-    pub fn tab_info(&self) -> Vec<(&str, bool, bool)> {
-        self.buffers
-            .iter()
-            .enumerate()
-            .map(|(i, buf)| (buf.file_name(), i == self.active, buf.is_modified()))
-            .collect()
-    }
 }
 
 impl Default for EditorState {

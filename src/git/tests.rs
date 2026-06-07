@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 
 use super::command::{is_large_repository, parse_count_objects, parse_git_bool};
-use super::detail::parse_commit_detail;
 use super::error::classify_git_failure;
 use super::log::{parse_log, parse_worktree_list};
 use super::status::{parse_renamed_status, parse_status};
@@ -145,19 +144,6 @@ fn parses_log_records_and_graph_lanes() {
     assert_eq!(commits[0].refs, vec!["HEAD -> main"]);
     assert_eq!(commits[0].edges.len(), 2);
     assert_eq!(commits[2].refs, vec!["tag: v1"]);
-}
-
-#[test]
-fn parses_commit_detail_files() {
-    let meta = format!(
-        "abc{fs}parent{fs}Ada <ada@example.com>{fs}Ada <ada@example.com>{fs}2026-05-01{fs}2026-05-01{fs}Subject{fs}Body",
-        fs = FIELD_SEP
-    );
-    let detail = parse_commit_detail(&meta, "M\tsrc/main.rs\nR100\told.rs\tnew.rs\n");
-    assert_eq!(detail.oid, "abc");
-    assert_eq!(detail.subject, "Subject");
-    assert_eq!(detail.files.len(), 2);
-    assert_eq!(detail.files[1].old_path, Some(PathBuf::from("old.rs")));
 }
 
 #[test]

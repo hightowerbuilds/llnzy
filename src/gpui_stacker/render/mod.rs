@@ -1,19 +1,27 @@
 use gpui::prelude::*;
 use gpui::{
     div, px, relative, rgb, rgba, App, Context, DragMoveEvent, Entity, FontWeight, MouseButton,
-    MouseDownEvent, MouseUpEvent, Render, SharedString, Window,
+    MouseDownEvent, MouseUpEvent, Render, Window,
 };
 
 use crate::stacker::{
-    commands::StackerCommandId,
     queue::{self, QueuedPrompt},
     StackerPrompt,
 };
 
 use super::{
-    StackerPalette, StackerPrototype, StackerTextInput, BORDER, CHROME_BG, CONTENT_PANEL_BG,
+    StackerPalette, StackerPrototype, StackerTextInput, BORDER, CHROME_BG,
     MUTED_TEXT, QUEUE_GREEN, TEXT,
 };
+
+mod cli_help;
+mod toolbar;
+
+use cli_help::{
+    cli_help_agent_instructions_button, cli_help_button, cli_help_command_block, cli_help_header,
+    cli_help_inbox_button_row, cli_help_paragraph, cli_help_section_title,
+};
+use toolbar::formatting_toolbar;
 
 /// Small floating preview rendered next to the cursor while the user is
 /// dragging the prompt/editor divider. Mirrors the workspace's
@@ -26,6 +34,10 @@ impl Render for StackerSplitDrag {
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "GPUI render helper receives immutable view model fields explicitly"
+)]
 pub(super) fn stacker_workbench(
     prompts: &[StackerPrompt],
     queued_prompts: &[QueuedPrompt],
@@ -303,193 +315,14 @@ fn editor_panel(
     }
 }
 
-/// Minimalist formatting toolbar. Six buttons: H1, H2, H3, bullet list,
-/// numbered list, plus an A−/A+ pair for editor font size.
-fn formatting_toolbar(
+pub(super) fn status_bar(
+    editor: &StackerTextInput,
+    status_message: Option<&str>,
     palette: StackerPalette,
-    cx: &mut Context<StackerPrototype>,
 ) -> impl IntoElement {
-    div()
-        .h(px(38.0))
-        .w_full()
-        .flex()
-        .items_center()
-        .gap_1()
-        .px_2()
-        .border_b_1()
-        .border_color(rgb(palette.border))
-        .bg(rgb(palette.chrome_bg))
-        .child(toolbar_command_button(
-            "H1",
-            StackerCommandId::Heading1,
-            palette,
-            cx,
-        ))
-        .child(toolbar_command_button(
-            "H2",
-            StackerCommandId::Heading2,
-            palette,
-            cx,
-        ))
-        .child(toolbar_command_button(
-            "H3",
-            StackerCommandId::Heading3,
-            palette,
-            cx,
-        ))
-        .child(toolbar_separator(palette))
-        .child(toolbar_command_button(
-            "• List",
-            StackerCommandId::UnorderedList,
-            palette,
-            cx,
-        ))
-        .child(toolbar_command_button(
-            "1. List",
-            StackerCommandId::OrderedList,
-            palette,
-            cx,
-        ))
-        .child(toolbar_separator(palette))
-        .child(toolbar_command_button(
-            "B",
-            StackerCommandId::Bold,
-            palette,
-            cx,
-        ))
-        .child(toolbar_command_button(
-            "I",
-            StackerCommandId::Italic,
-            palette,
-            cx,
-        ))
-        .child(toolbar_command_button(
-            "Code",
-            StackerCommandId::CodeBlock,
-            palette,
-            cx,
-        ))
-        .child(div().flex_1())
-        .child(new_prompt_button(palette, cx))
-        .child(save_button(cx))
-        .child(toolbar_separator(palette))
-        .child(font_size_button("A−", -1.0, palette, cx))
-        .child(font_size_button("A+", 1.0, palette, cx))
-}
-
-fn new_prompt_button(
-    palette: StackerPalette,
-    cx: &mut Context<StackerPrototype>,
-) -> impl IntoElement {
-    div()
-        .h(px(26.0))
-        .px_3()
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded_sm()
-        .border_1()
-        .border_color(rgb(palette.border))
-        .bg(rgb(palette.button_bg))
-        .text_size(px(12.0))
-        .text_color(rgb(palette.text))
-        .cursor_pointer()
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(|this, _: &MouseDownEvent, _window, cx| {
-                this.start_new_prompt(cx);
-            }),
-        )
-        .child("+ New")
-}
-
-fn save_button(cx: &mut Context<StackerPrototype>) -> impl IntoElement {
-    // Save gets a tinted background to stand out from the formatting
-    // buttons — it's the primary mutation in the toolbar.
-    div()
-        .h(px(26.0))
-        .px_4()
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded_sm()
-        .border_1()
-        .border_color(rgb(0x3fd663))
-        .bg(rgb(0x183a20))
-        .text_size(px(12.0))
-        .text_color(rgb(QUEUE_GREEN))
-        .cursor_pointer()
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(|this, _: &MouseDownEvent, _window, cx| {
-                this.save_active_prompt(cx);
-            }),
-        )
-        .child("Save")
-}
-
-fn toolbar_command_button(
-    label: &'static str,
-    id: StackerCommandId,
-    palette: StackerPalette,
-    cx: &mut Context<StackerPrototype>,
-) -> impl IntoElement {
-    div()
-        .h(px(26.0))
-        .min_w(px(40.0))
-        .px_3()
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded_sm()
-        .border_1()
-        .border_color(rgb(palette.border))
-        .bg(rgb(palette.button_bg))
-        .text_size(px(12.0))
-        .text_color(rgb(palette.text))
-        .cursor_pointer()
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |this, _: &MouseDownEvent, _window, cx| {
-                this.run_stacker_command(id, cx);
-            }),
-        )
-        .child(label)
-}
-
-fn font_size_button(
-    label: &'static str,
-    delta: f32,
-    palette: StackerPalette,
-    cx: &mut Context<StackerPrototype>,
-) -> impl IntoElement {
-    div()
-        .h(px(26.0))
-        .w(px(30.0))
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded_sm()
-        .border_1()
-        .border_color(rgb(palette.border))
-        .bg(rgb(palette.button_bg))
-        .text_size(px(12.0))
-        .text_color(rgb(palette.text))
-        .cursor_pointer()
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |this, _: &MouseDownEvent, _window, cx| {
-                this.adjust_stacker_font_size(delta, cx);
-            }),
-        )
-        .child(label)
-}
-
-fn toolbar_separator(palette: StackerPalette) -> impl IntoElement {
-    div().w(px(1.0)).h(px(20.0)).mx_1().bg(rgb(palette.border))
-}
-
-pub(super) fn status_bar(editor: &StackerTextInput, palette: StackerPalette) -> impl IntoElement {
+    let right_label = status_message
+        .unwrap_or("Cmd+Z/Y, Cmd+A/C/X/V, Wispr/IME path")
+        .to_string();
     div()
         .h(px(28.0))
         .w_full()
@@ -508,7 +341,7 @@ pub(super) fn status_bar(editor: &StackerTextInput, palette: StackerPalette) -> 
             editor.session.word_count(),
             editor.session.line_count()
         ))
-        .child("Cmd+Z/Y, Cmd+A/C/X/V, Wispr/IME path")
+        .child(right_label)
 }
 
 /// Full-pane scrim + centered card asking the user to confirm a delete.
@@ -641,30 +474,6 @@ fn modal_destructive_button(
         .child(label)
 }
 
-fn cli_help_button(cx: &mut Context<StackerPrototype>) -> impl IntoElement {
-    div()
-        .id("stacker-cli-help")
-        .h(px(24.0))
-        .px_2()
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded_sm()
-        .border_1()
-        .border_color(rgb(BORDER))
-        .bg(rgb(0x242632))
-        .text_size(px(11.0))
-        .text_color(rgb(TEXT))
-        .cursor_pointer()
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(|this, _: &MouseDownEvent, _window, cx| {
-                this.toggle_cli_help(cx);
-            }),
-        )
-        .child("What is Stacker CLI?")
-}
-
 /// Full-pane scrim + centered card explaining the Stacker CLI: what it
 /// is, how to install it, what commands exist, and how to hand it to an
 /// agent. Triggered by the "What is Stacker CLI?" button in the
@@ -770,201 +579,6 @@ pub(super) fn cli_help_modal(cx: &mut Context<StackerPrototype>) -> impl IntoEle
         .child(cli_help_agent_instructions_button(cx));
 
     scrim.child(card)
-}
-
-fn cli_help_header(cx: &mut Context<StackerPrototype>) -> impl IntoElement {
-    div()
-        .flex()
-        .items_center()
-        .justify_between()
-        .child(
-            div()
-                .text_size(px(16.0))
-                .font_weight(FontWeight::BOLD)
-                .text_color(rgb(TEXT))
-                .child("Stacker CLI"),
-        )
-        .child(
-            div()
-                .id("stacker-cli-help-close")
-                .w(px(24.0))
-                .h(px(24.0))
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded_sm()
-                .text_size(px(16.0))
-                .text_color(rgb(MUTED_TEXT))
-                .cursor_pointer()
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _: &MouseDownEvent, _window, cx| {
-                        this.close_cli_help(cx);
-                    }),
-                )
-                .child("×"),
-        )
-}
-
-fn cli_help_section_title(label: &'static str) -> impl IntoElement {
-    div()
-        .pt_2()
-        .text_size(px(11.0))
-        .font_weight(FontWeight::BOLD)
-        .text_color(rgb(MUTED_TEXT))
-        .child(label.to_uppercase())
-}
-
-fn cli_help_paragraph(body: &'static str) -> impl IntoElement {
-    div()
-        .text_size(px(13.0))
-        .line_height(px(20.0))
-        .text_color(rgb(TEXT))
-        .child(body)
-}
-
-/// Paste-ready Markdown block a user can drop into a fresh agent's
-/// context. The agent reads this and knows enough to use the Stacker
-/// CLI: the inbox path, the four mutation commands, the JSON list
-/// shape, the field limits, and the exit-code map.
-const AGENT_INSTRUCTIONS_TEMPLATE: &str = r##"# Stacker CLI instructions
-
-You can queue work for me through the Stacker CLI. Each item becomes a
-Markdown file in my inbox that I'll review and edit.
-
-## Inbox
-~/Library/Application Support/llnzy/prompts/inbox/
-
-Files are plain Markdown with YAML frontmatter. One prompt per file.
-
-## Commands
-
-Add a prompt (body on stdin OR via --file):
-  echo "<body>" | llnzy stacker add --label "<title>"
-  llnzy stacker add --label "<title>" --file <path>
-
-List inbox in machine-readable form:
-  llnzy stacker list --state inbox --format json
-
-Each list item has `id`, `label`, `category`, `body_path`, `created_at`,
-and other frontmatter fields. Use `id` for edit/delete.
-
-Edit (any subset of flags is fine):
-  llnzy stacker edit <id> --state inbox --label "<new title>"
-  llnzy stacker edit <id> --state inbox --body "<new body>"
-
-Delete:
-  llnzy stacker delete <id> --state inbox
-
-## Limits
-- Body: max 256 KB
-- Label: max 256 chars
-- Category: max 64 chars
-- Inbox quota: 1000 files, 50 MB total
-
-## Exit codes
-0 = success, 1 = usage error, 2 = bad input, 3 = quota exceeded
-"##;
-
-fn cli_help_inbox_button_row(cx: &mut Context<StackerPrototype>) -> impl IntoElement {
-    div().flex().gap_2().child(
-        div()
-            .id("stacker-cli-reveal-inbox")
-            .h(px(28.0))
-            .px_3()
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded_sm()
-            .border_1()
-            .border_color(rgb(BORDER))
-            .bg(rgb(0x242632))
-            .text_size(px(11.0))
-            .text_color(rgb(TEXT))
-            .cursor_pointer()
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _: &MouseDownEvent, _window, cx| {
-                    this.reveal_inbox_in_finder(cx);
-                }),
-            )
-            .child("Reveal in Finder"),
-    )
-}
-
-fn cli_help_agent_instructions_button(cx: &mut Context<StackerPrototype>) -> impl IntoElement {
-    div().flex().child(
-        div()
-            .id("stacker-cli-copy-agent-instructions")
-            .h(px(28.0))
-            .px_3()
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded_sm()
-            .border_1()
-            .border_color(rgb(0x3fd663))
-            .bg(rgb(0x183a20))
-            .text_size(px(11.0))
-            .text_color(rgb(QUEUE_GREEN))
-            .cursor_pointer()
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _: &MouseDownEvent, _window, cx| {
-                    this.copy_cli_snippet(AGENT_INSTRUCTIONS_TEMPLATE.to_string(), cx);
-                }),
-            )
-            .child("Copy Agent Instructions"),
-    )
-}
-
-fn cli_help_command_block(
-    id: &'static str,
-    snippet: String,
-    cx: &mut Context<StackerPrototype>,
-) -> impl IntoElement {
-    let snippet_for_copy = snippet.clone();
-    div()
-        .flex()
-        .items_center()
-        .gap_2()
-        .child(
-            div()
-                .flex_1()
-                .px_3()
-                .py_2()
-                .rounded_sm()
-                .border_1()
-                .border_color(rgb(BORDER))
-                .bg(rgb(CONTENT_PANEL_BG))
-                .font_family("Menlo")
-                .text_size(px(12.0))
-                .text_color(rgb(TEXT))
-                .child(snippet),
-        )
-        .child(
-            div()
-                .id(SharedString::from(format!("stacker-cli-copy-{id}")))
-                .h(px(28.0))
-                .px_3()
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded_sm()
-                .border_1()
-                .border_color(rgb(BORDER))
-                .bg(rgb(0x242632))
-                .text_size(px(11.0))
-                .text_color(rgb(MUTED_TEXT))
-                .cursor_pointer()
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _: &MouseDownEvent, _window, cx| {
-                        this.copy_cli_snippet(snippet_for_copy.clone(), cx);
-                    }),
-                )
-                .child("Copy"),
-        )
 }
 
 fn prompt_title(prompt: &StackerPrompt) -> String {

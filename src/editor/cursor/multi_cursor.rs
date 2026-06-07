@@ -1,6 +1,6 @@
 use super::model::{CursorRange, EditorCursor};
 use super::word::{char_kind, CharKind};
-use crate::editor::buffer::{Buffer, Position};
+use crate::editor::buffer::Buffer;
 
 impl EditorCursor {
     /// Clamp the cursor position to valid bounds within the buffer.
@@ -30,25 +30,6 @@ impl EditorCursor {
                 true
             }
         });
-    }
-
-    /// Clear all extra cursors.
-    pub fn clear_extra_cursors(&mut self) {
-        self.extra_cursors.clear();
-    }
-
-    /// Get all cursor positions (primary + extras), sorted in reverse document order
-    /// for safe editing (edits from bottom to top preserve positions).
-    pub fn all_positions_reverse(&self) -> Vec<(Position, Option<Position>)> {
-        let mut positions: Vec<(Position, Option<Position>)> =
-            Vec::with_capacity(1 + self.extra_cursors.len());
-        positions.push((self.pos, self.anchor));
-        for extra in &self.extra_cursors {
-            positions.push((extra.pos, extra.anchor));
-        }
-        positions.sort_by(|a, b| b.0.cmp(&a.0));
-        positions.dedup_by(|a, b| a.0 == b.0);
-        positions
     }
 
     /// Get the selected text for the primary cursor, or the word under the cursor.

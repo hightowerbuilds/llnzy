@@ -281,6 +281,10 @@ pub(super) fn workspace_tab_menu_anchor(
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Tab renderer receives precomputed layout, state, and callbacks for one tab"
+)]
 fn workspace_tab(
     tab: WorkspaceTab,
     active_tab_id: WorkspaceTabId,

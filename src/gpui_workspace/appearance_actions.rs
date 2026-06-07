@@ -51,12 +51,15 @@ impl WorkspacePrototype {
             .into_iter()
             .find(|theme| theme.name == theme_name)
         {
+            let theme_name = theme.name.clone();
             let terminal_effects = self.appearance_config.effects.clone();
-            let preserve_terminal_effects = theme.name == "Light Mode";
+            let preserve_terminal_effects = theme.preserve_terminal_effects;
             theme.apply_to(&mut self.appearance_config);
             if preserve_terminal_effects {
                 self.appearance_config.effects = terminal_effects;
             }
+            self.preferences.app_theme = Some(theme_name);
+            self.preferences.save();
             self.apply_appearance_config(cx);
         }
     }

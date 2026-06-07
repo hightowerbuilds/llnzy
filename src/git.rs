@@ -1,7 +1,6 @@
 use std::path::{Path, PathBuf};
 
 mod command;
-mod detail;
 mod error;
 mod log;
 mod model;
@@ -13,15 +12,13 @@ mod tests;
 
 pub use error::{GitError, GitErrorKind};
 pub use model::{
-    CommitDetail, CommitFileChange, GitCommitNode, GitFileState, GitGraphEdge, GitHeadState,
-    GitLogOptions, GitReflogEntry, GitRepositoryState, GitSnapshot, GitStashEntry, GitStatusEntry,
-    GitWorktreeEntry,
+    GitCommitNode, GitFileState, GitGraphEdge, GitHeadState, GitLogOptions, GitReflogEntry,
+    GitRepositoryState, GitSnapshot, GitStashEntry, GitStatusEntry, GitWorktreeEntry,
 };
 pub use status::file_state_label;
 pub use watcher::GitRepoWatcher;
 
 use command::{detect_repository_state, is_bare_repository, run_git_in, run_git_in_owned};
-use detail::parse_commit_detail;
 use error::bare_repository_error;
 use log::{parse_log, parse_reflog, parse_stash_list, parse_worktree_list};
 use status::parse_status;
@@ -165,26 +162,4 @@ fn normalized_file_history_path(repo_root: &Path, path: Option<&Path>) -> Option
     } else {
         Some(path.to_path_buf())
     }
-}
-
-pub fn load_commit_detail(repo_root: &Path, oid: &str) -> Result<CommitDetail, GitError> {
-    let format = format!(
-        "%H{fs}%P{fs}%an <%ae>{fs}%cn <%ce>{fs}%ai{fs}%ci{fs}%s{fs}%b",
-        fs = FIELD_SEP
-    );
-    let meta = run_git_in(
-        repo_root,
-        &["show", "-s", &format!("--format={format}"), oid],
-    )?;
-    let files_text = run_git_in(
-        repo_root,
-        &["show", "--name-status", "--format=", "--find-renames", oid],
-    )?;
-    let patch = run_git_in(
-        repo_root,
-        &["show", "--format=", "--patch", "--find-renames", oid],
-    )?;
-    let mut detail = parse_commit_detail(&meta, &files_text);
-    detail.patch = patch;
-    Ok(detail)
 }

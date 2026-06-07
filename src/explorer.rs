@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 const MAX_RECENT: usize = 5;
 
@@ -52,13 +52,6 @@ fn insert_recent_project(projects: &mut Vec<PathBuf>, path: PathBuf) {
     projects.retain(|project| project != &path);
     projects.insert(0, path);
     projects.truncate(MAX_RECENT);
-}
-
-/// Get the display name for a project path.
-pub fn project_name(path: &Path) -> &str {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("unknown")
 }
 
 #[cfg(test)]

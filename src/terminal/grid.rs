@@ -68,40 +68,6 @@ impl Terminal {
         self.term.grid().history_size()
     }
 
-    pub fn searchable_rows(&self) -> usize {
-        let (_, rows) = self.size();
-        self.history_size() + rows
-    }
-
-    pub fn visible_search_row_start(&self) -> usize {
-        self.history_size().saturating_sub(self.display_offset())
-    }
-
-    pub fn search_cell_char(&self, row: usize, col: usize) -> char {
-        let history_offset = self.history_size();
-        let point = term::viewport_to_point(history_offset, Point::new(row, Column(col)));
-        self.term.grid()[point].c
-    }
-
-    pub fn search_row_text(&self, row: usize) -> String {
-        let (cols, _) = self.size();
-        (0..cols)
-            .map(|col| self.search_cell_char(row, col))
-            .collect()
-    }
-
-    pub fn scroll_to_search_row(&mut self, row: usize) {
-        let (_, rows) = self.size();
-        let history_size = self.history_size();
-        let target_top = row.saturating_sub(rows / 2).min(history_size);
-        self.term.scroll_display(Scroll::Top);
-        if target_top > 0 {
-            let delta = -(target_top.min(i32::MAX as usize) as i32);
-            self.term.scroll_display(Scroll::Delta(delta));
-        }
-        self.bump_selection_revision_if_visible();
-    }
-
     /// Get the cell flags (bold, italic, underline, etc.)
     pub fn cell_flags(&self, row: usize, col: usize) -> Flags {
         self.cell(row, col).flags
@@ -190,33 +156,10 @@ impl Terminal {
         rects
     }
 
-    /// Get the hyperlink URI for a cell, if any (OSC 8).
-    pub fn cell_hyperlink(&self, row: usize, col: usize) -> Option<String> {
-        self.cell(row, col).hyperlink().map(|h| h.uri().to_string())
-    }
-
     /// Collect the text content of a viewport row as a string.
     pub fn row_text(&self, row: usize) -> String {
         let (cols, _) = self.size();
         (0..cols).map(|c| self.cell_char(row, c)).collect()
-    }
-
-    /// Get the word-like run under the given viewport position.
-    pub fn word_at(&self, row: usize, col: usize) -> String {
-        let (cols, _) = self.size();
-        let is_word_char = |c: char| !c.is_whitespace() && c != '\0';
-
-        let mut start = col;
-        while start > 0 && is_word_char(self.cell_char(row, start - 1)) {
-            start -= 1;
-        }
-
-        let mut end = col;
-        while end + 1 < cols && is_word_char(self.cell_char(row, end + 1)) {
-            end += 1;
-        }
-
-        (start..=end).map(|col| self.cell_char(row, col)).collect()
     }
 
     pub fn mouse_mode(&self) -> bool {

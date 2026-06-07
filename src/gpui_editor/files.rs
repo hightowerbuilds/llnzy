@@ -164,6 +164,22 @@ impl EditorPrototype {
     }
 
     #[cfg(feature = "gpui-workspace")]
+    pub(crate) fn modified_open_path_for_workspace_transition(
+        &self,
+        action: &str,
+    ) -> Option<String> {
+        self.editor.buffers.iter().find_map(|buffer| {
+            if !buffer.is_modified() {
+                return None;
+            }
+            Some(format!(
+                "Save or close {} before {action}.",
+                buffer.file_name()
+            ))
+        })
+    }
+
+    #[cfg(feature = "gpui-workspace")]
     pub(crate) fn close_clean_paths_for_delete(
         &mut self,
         deleted_sources: &[(PathBuf, bool)],

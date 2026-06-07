@@ -97,27 +97,6 @@ pub struct GitGraphEdge {
     pub to_lane: usize,
 }
 
-#[derive(Clone, Debug, Default)]
-pub struct CommitDetail {
-    pub oid: String,
-    pub parents: Vec<String>,
-    pub author: String,
-    pub committer: String,
-    pub author_date: String,
-    pub commit_date: String,
-    pub subject: String,
-    pub body: String,
-    pub files: Vec<CommitFileChange>,
-    pub patch: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CommitFileChange {
-    pub path: PathBuf,
-    pub old_path: Option<PathBuf>,
-    pub status: GitFileState,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GitStashEntry {
     pub selector: String,

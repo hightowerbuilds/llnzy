@@ -109,14 +109,6 @@ pub fn is_available(command: &str) -> bool {
     result
 }
 
-/// Find the server config for a language, if the server is installed.
-pub fn find_server(lang_id: &str) -> Option<ServerConfig> {
-    match resolve_server(lang_id) {
-        ServerLookup::Available(config) => Some(config),
-        ServerLookup::MissingCommand(_) | ServerLookup::UnsupportedLanguage => None,
-    }
-}
-
 pub fn resolve_server(lang_id: &str) -> ServerLookup {
     resolve_server_with(lang_id, is_available)
 }

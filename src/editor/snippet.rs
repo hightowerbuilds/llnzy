@@ -53,15 +53,6 @@ impl ActiveSnippet {
         }
     }
 
-    /// Get the current tab stop selection range (for highlighting).
-    pub fn current_range(&self) -> Option<(Position, Position)> {
-        let (line, col, end_col) = *self.stops.get(self.current)?;
-        if col == end_col {
-            None // cursor position only, no selection
-        } else {
-            Some((Position::new(line, col), Position::new(line, end_col)))
-        }
-    }
 }
 
 /// Parse a snippet string in VS Code snippet syntax.

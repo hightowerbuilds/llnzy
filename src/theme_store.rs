@@ -456,6 +456,7 @@ fn load_user_themes_from_dir(dir: &Path) -> Vec<(VisualTheme, ThemeViewFlags)> {
                 effects_on_ui: tf.effects_on_ui,
             },
             cursor_style: str_to_cursor_style(&tf.cursor_style),
+            preserve_terminal_effects: false,
         };
 
         let flags = ThemeViewFlags {

@@ -1,4 +1,5 @@
 use std::{
+    cell::RefCell,
     collections::{BTreeMap, BTreeSet},
     path::PathBuf,
     time::{Duration, Instant},
@@ -145,6 +146,11 @@ const SIDEBAR_ROW_SELECTED_BG: u32 = 0x303440;
 const SIDEBAR_DROP_VALID_BG: u32 = 0x1f3a2b;
 const SIDEBAR_DROP_INVALID_BG: u32 = 0x3d2428;
 
+thread_local! {
+    static WORKSPACE_REGISTRY: RefCell<Vec<gpui::WeakEntity<WorkspacePrototype>>> =
+        const { RefCell::new(Vec::new()) };
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct WorkspacePalette {
     pub(super) is_light: bool,
@@ -255,6 +261,19 @@ fn appearance_config_from_preferences(
     preferences: &crate::preferences::WorkspacePreferences,
 ) -> Config {
     let mut config = Config::load();
+    if let Some(theme_name) = preferences.app_theme.as_deref() {
+        if let Some(theme) = crate::theme::builtin_themes()
+            .into_iter()
+            .find(|theme| theme.name == theme_name)
+        {
+            let terminal_effects = config.effects.clone();
+            let preserve_terminal_effects = theme.preserve_terminal_effects;
+            theme.apply_to(&mut config);
+            if preserve_terminal_effects {
+                config.effects = terminal_effects;
+            }
+        }
+    }
     if let Some(image_ref) = preferences.terminal_background_image.as_deref() {
         if !image_ref.is_empty() {
             config.effects.enabled = true;
@@ -463,17 +482,8 @@ pub fn run_workspace_prototype() {
             cx.quit();
             return;
         }
-        // Capture the window handle (Copy) so the Quit action can reach
-        // the workspace entity and persist pending Stacker drafts before
-        // the app tears down. Save errors are logged but never block the
-        // quit — the user pressed Cmd+Q and wants to leave.
-        let window_for_quit = window;
-        cx.on_action(move |_: &Quit, cx| {
-            if let Err(error) = window_for_quit.update(cx, |view, _window, cx| {
-                view.save_drafts_before_quit(cx);
-            }) {
-                log::error!("failed to save drafts before quit: {error:?}");
-            }
+        cx.on_action(|_: &Quit, cx| {
+            save_registered_workspaces_before_quit(cx);
             cx.quit();
         });
         cx.on_action(|_: &MenuNewWindow, cx| {
@@ -654,6 +664,41 @@ struct WorkspacePrototype {
     pending_clear_error_log: bool,
 }
 
+fn register_workspace(workspace: gpui::WeakEntity<WorkspacePrototype>) {
+    WORKSPACE_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        registry.retain(|workspace| workspace.upgrade().is_some());
+        if !registry.iter().any(|registered| registered == &workspace) {
+            registry.push(workspace);
+        }
+    });
+}
+
+fn save_registered_workspaces_before_quit(cx: &mut App) {
+    let workspaces = WORKSPACE_REGISTRY.with(|registry| registry.borrow().clone());
+    let mut live_workspaces = Vec::new();
+
+    for workspace in workspaces {
+        if workspace.upgrade().is_none() {
+            continue;
+        }
+        match workspace.update(cx, |workspace, cx| workspace.save_drafts_before_quit(cx)) {
+            Ok(Ok(())) => live_workspaces.push(workspace),
+            Ok(Err(error)) => {
+                log::error!("failed to save drafts before quit: {error}");
+                live_workspaces.push(workspace);
+            }
+            Err(error) => {
+                log::warn!("workspace released before quit save: {error:?}");
+            }
+        }
+    }
+
+    WORKSPACE_REGISTRY.with(|registry| {
+        *registry.borrow_mut() = live_workspaces;
+    });
+}
+
 /// Which severity levels the Settings → Error Log panel should display.
 /// Session-only state; not persisted.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -755,8 +800,9 @@ impl WorkspacePrototype {
 
         if recovery_enabled {
             workspace.restore_after_unclean_shutdown(cx);
-            workspace.persist_workspace_recovery(false);
+            let _ = workspace.persist_workspace_recovery(false);
         }
+        register_workspace(cx.weak_entity());
         workspace
     }
 
@@ -795,11 +841,24 @@ impl WorkspacePrototype {
     /// Best-effort save of any in-flight Stacker draft. Invoked from the
     /// app-level Quit handler before `cx.quit()` so closing the app
     /// doesn't drop pending work or leave the recovery snapshot marked dirty.
-    pub(crate) fn save_drafts_before_quit(&mut self, cx: &mut Context<Self>) {
-        self.stacker
-            .update(cx, |stacker, cx| stacker.save_active_prompt(cx));
-        self.persist_workspace_recovery(true);
+    pub(crate) fn save_drafts_before_quit(&mut self, cx: &mut Context<Self>) -> Result<(), String> {
+        let mut errors = Vec::new();
+        match self
+            .stacker
+            .update(cx, |stacker, cx| stacker.save_active_prompt(cx))
+        {
+            Ok(()) => {}
+            Err(error) => errors.push(format!("stacker save failed: {error}")),
+        }
+        if let Err(error) = self.persist_workspace_recovery(true) {
+            errors.push(error);
+        }
         self.recovery_enabled = false;
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors.join("; "))
+        }
     }
 
     fn restore_after_unclean_shutdown(&mut self, cx: &mut Context<Self>) {
@@ -973,30 +1032,31 @@ impl WorkspacePrototype {
         entries
     }
 
-    fn persist_workspace_recovery(&mut self, clean_shutdown: bool) {
+    fn persist_workspace_recovery(&mut self, clean_shutdown: bool) -> Result<(), String> {
         if !self.recovery_enabled {
-            return;
+            return Ok(());
         }
         if !clean_shutdown
             && self
                 .last_recovery_persist_attempt
                 .is_some_and(|t| t.elapsed() < RECOVERY_PERSIST_INTERVAL)
         {
-            return;
+            return Ok(());
         }
         self.last_recovery_persist_attempt = Some(Instant::now());
         let Some(path) = recovery_file() else {
-            return;
+            return Ok(());
         };
         let snapshot = self.workspace_recovery_snapshot(clean_shutdown);
         if self.last_recovery_snapshot.as_ref() == Some(&snapshot) {
-            return;
+            return Ok(());
         }
         if let Err(err) = save_snapshot(&path, &snapshot) {
             log::warn!("{err}");
-            return;
+            return Err(err);
         }
         self.last_recovery_snapshot = Some(snapshot);
+        Ok(())
     }
 
     fn workspace_recovery_snapshot(&self, clean_shutdown: bool) -> WorkspaceRecoverySnapshot {
@@ -1922,8 +1982,15 @@ impl WorkspacePrototype {
         // is "closing the tab = closing the work" — so we save here so
         // nothing is lost between sessions.
         if self.tabs[index].surface == WorkspaceSurface::Stacker {
-            self.stacker
-                .update(cx, |stacker, cx| stacker.save_active_prompt(cx));
+            match self
+                .stacker
+                .update(cx, |stacker, cx| stacker.save_active_prompt(cx))
+            {
+                Ok(()) => {}
+                Err(error) => {
+                    log::warn!("failed to save stacker draft before closing tab: {error}")
+                }
+            }
         }
         if self.tabs[index].surface == WorkspaceSurface::Terminal {
             self.terminals.remove(&tab_id.0);
@@ -1987,7 +2054,7 @@ impl Focusable for WorkspacePrototype {
 
 impl Render for WorkspacePrototype {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.persist_workspace_recovery(false);
+        let _ = self.persist_workspace_recovery(false);
 
         let active_surface = self.active_surface_if_present();
         let active_tab_id = self.active_tab_id;

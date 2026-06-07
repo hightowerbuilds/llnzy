@@ -24,12 +24,6 @@ pub fn write_diagnostic(
     std::fs::write(path, contents)
 }
 
-pub fn export_diagnostics_report(log: Option<&ErrorLog>) -> std::io::Result<PathBuf> {
-    let path = diagnostics_path(DIAGNOSTICS_REPORT_FILENAME);
-    write_diagnostics_report_to(&path, log)?;
-    Ok(path)
-}
-
 pub fn write_diagnostics_report_to(
     path: impl AsRef<Path>,
     log: Option<&ErrorLog>,

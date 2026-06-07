@@ -50,12 +50,6 @@ impl Modifiers {
         alt: false,
         shift: false,
     };
-    pub const ALT: Self = Self {
-        super_key: false,
-        ctrl: false,
-        alt: true,
-        shift: false,
-    };
     pub const SHIFT: Self = Self {
         super_key: false,
         ctrl: false,

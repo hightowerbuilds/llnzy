@@ -11,20 +11,6 @@ pub struct RecoverySnapshot {
     pub content: String,
 }
 
-pub fn save_or_clear_buffer_snapshot(buffer: &Buffer) -> Result<Option<PathBuf>, String> {
-    let Some(dir) = recovery_dir() else {
-        return Ok(None);
-    };
-    save_or_clear_buffer_snapshot_in(&dir, buffer)
-}
-
-pub fn clear_buffer_snapshot(buffer: &Buffer) -> Result<(), String> {
-    let Some(path) = buffer.path() else {
-        return Ok(());
-    };
-    clear_path_snapshot(path)
-}
-
 pub fn clear_path_snapshot(path: &Path) -> Result<(), String> {
     let Some(dir) = recovery_dir() else {
         return Ok(());

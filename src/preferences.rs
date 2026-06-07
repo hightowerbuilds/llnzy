@@ -61,6 +61,11 @@ pub struct WorkspacePreferences {
     #[serde(default)]
     pub editor_word_wrap: Option<bool>,
 
+    /// Name of the app-wide built-in theme selected from Settings > App.
+    /// `None` means "use config.toml defaults".
+    #[serde(default)]
+    pub app_theme: Option<String>,
+
     /// Maximum number of tabs a joined tab group may contain. Missing / zero
     /// keeps the historical two-tab behavior; Settings can raise this to 3
     /// or 4.
@@ -145,6 +150,7 @@ mod tests {
             terminal_layout: "display".to_string(),
             editor_syntax_theme: Some("Dracula".to_string()),
             editor_word_wrap: Some(true),
+            app_theme: Some("Light Mode".to_string()),
             joined_tab_limit: 4,
         };
         prefs.save_to(&path).unwrap();
@@ -175,6 +181,7 @@ mod tests {
         assert_eq!(loaded.terminal_layout, "display");
         assert!(loaded.editor_syntax_theme.is_none());
         assert!(loaded.editor_word_wrap.is_none());
+        assert!(loaded.app_theme.is_none());
         assert_eq!(loaded.joined_tab_limit(), 2);
         let _ = std::fs::remove_dir_all(&dir);
     }

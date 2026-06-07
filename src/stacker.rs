@@ -130,21 +130,6 @@ pub fn load_saved_prompts() -> Vec<StackerPrompt> {
     )
 }
 
-/// Load pending agent suggestions from `$config/prompts/inbox/`.
-pub fn load_inbox_prompts() -> Vec<StackerPrompt> {
-    let Some(paths) = crate::platform::paths::current_paths() else {
-        return Vec::new();
-    };
-    load_inbox_prompts_filtered_at(
-        &paths.prompts_inbox_dir(),
-        &[paths.prompts_saved_dir(), paths.prompts_archive_dir()],
-    )
-}
-
-pub fn load_inbox_prompts_at(inbox_dir: &Path) -> Vec<StackerPrompt> {
-    load_inbox_prompts_filtered_at(inbox_dir, &[])
-}
-
 pub fn load_inbox_prompts_filtered_at(
     inbox_dir: &Path,
     suppressed_hash_dirs: &[PathBuf],
@@ -208,9 +193,12 @@ pub fn load_saved_prompts_at(
 /// last successful `load_saved_prompts` / `persist_prompt_library` call.
 /// Diff against `previous` decides which files to write, leave alone, or
 /// archive. New prompts have an id assigned on first write.
-pub fn persist_prompt_library(current: &mut [StackerPrompt], previous: &[StackerPrompt]) {
+pub fn persist_prompt_library(
+    current: &mut [StackerPrompt],
+    previous: &[StackerPrompt],
+) -> Result<(), String> {
     let Some(paths) = crate::platform::paths::current_paths() else {
-        return;
+        return Err("could not resolve config paths".to_string());
     };
     persist_prompt_library_at(
         current,
@@ -218,7 +206,7 @@ pub fn persist_prompt_library(current: &mut [StackerPrompt], previous: &[Stacker
         &paths.prompts_saved_dir(),
         &paths.prompts_archive_dir(),
         &paths.prompts_tmp_dir(),
-    );
+    )
 }
 
 /// Path-explicit variant of [`persist_prompt_library`].
@@ -228,13 +216,14 @@ pub fn persist_prompt_library_at(
     saved_dir: &Path,
     archive_dir: &Path,
     tmp_dir: &Path,
-) {
+) -> Result<(), String> {
     let prev_by_id: FxHashMap<&str, &StackerPrompt> = previous
         .iter()
         .filter_map(|p| p.id.as_deref().map(|id| (id, p)))
         .collect();
 
     let mut kept_ids: FxHashSet<String> = FxHashSet::default();
+    let mut errors = Vec::new();
 
     for prompt in current.iter_mut() {
         match prompt.id.clone() {
@@ -250,7 +239,9 @@ pub fn persist_prompt_library_at(
                 }
                 let record = record_for_persist(id.clone(), prompt, saved_dir);
                 if let Err(err) = storage::write_atomic(&record, saved_dir, tmp_dir) {
-                    log::warn!("failed to update saved prompt {id}: {err}");
+                    let message = format!("failed to update saved prompt {id}: {err}");
+                    log::warn!("{message}");
+                    errors.push(message);
                 }
             }
             None => {
@@ -261,7 +252,11 @@ pub fn persist_prompt_library_at(
                         prompt.id = Some(id.clone());
                         kept_ids.insert(id);
                     }
-                    Err(err) => log::warn!("failed to write new saved prompt: {err}"),
+                    Err(err) => {
+                        let message = format!("failed to write new saved prompt: {err}");
+                        log::warn!("{message}");
+                        errors.push(message);
+                    }
                 }
             }
         }
@@ -280,8 +275,16 @@ pub fn persist_prompt_library_at(
         }
         let archive_path = archive_dir.join(format!("{id}.md"));
         if let Err(err) = storage::rename_state(&saved_path, &archive_path) {
-            log::warn!("failed to archive deleted prompt {id}: {err}");
+            let message = format!("failed to archive deleted prompt {id}: {err}");
+            log::warn!("{message}");
+            errors.push(message);
         }
+    }
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("; "))
     }
 }
 
@@ -305,20 +308,6 @@ fn record_to_inbox_prompt(record: storage::PromptRecord) -> StackerPrompt {
         inbox: true,
         source_agent: record.frontmatter.source_agent,
     }
-}
-
-/// Promote one inbox prompt into the saved library, preserving its id and
-/// creation timestamp while clearing inbox-only provenance from the saved row.
-pub fn promote_inbox_prompt(prompt: &StackerPrompt) -> Result<StackerPrompt, String> {
-    let Some(paths) = crate::platform::paths::current_paths() else {
-        return Err("could not resolve config paths".to_string());
-    };
-    promote_inbox_prompt_at(
-        prompt,
-        &paths.prompts_inbox_dir(),
-        &paths.prompts_saved_dir(),
-        &paths.prompts_tmp_dir(),
-    )
 }
 
 pub fn promote_inbox_prompt_at(
@@ -363,30 +352,6 @@ pub fn promote_inbox_prompt_at(
         );
     }
     Ok(saved)
-}
-
-pub fn archive_inbox_prompt(prompt: &StackerPrompt) -> Result<(), String> {
-    let Some(paths) = crate::platform::paths::current_paths() else {
-        return Err("could not resolve config paths".to_string());
-    };
-    archive_inbox_prompt_at(
-        prompt,
-        &paths.prompts_inbox_dir(),
-        &paths.prompts_archive_dir(),
-        &paths.prompts_tmp_dir(),
-    )
-}
-
-pub fn archive_saved_prompt(prompt: &StackerPrompt) -> Result<(), String> {
-    let Some(paths) = crate::platform::paths::current_paths() else {
-        return Err("could not resolve config paths".to_string());
-    };
-    archive_saved_prompt_at(
-        prompt,
-        &paths.prompts_saved_dir(),
-        &paths.prompts_archive_dir(),
-        &paths.prompts_tmp_dir(),
-    )
 }
 
 pub fn archive_saved_prompt_at(
@@ -508,11 +473,6 @@ pub fn save_stacker_queue(queue: &[QueuedPrompt]) {
         return;
     };
     let _ = save_queue_to_path(queue, &path);
-}
-
-/// Import prompts from a JSON file, returning the loaded prompts.
-pub fn import_prompts(path: &Path) -> Result<Vec<StackerPrompt>, String> {
-    load_prompts_from_path(path)
 }
 
 #[cfg(test)]
@@ -728,7 +688,8 @@ mod tests {
         let mut current = vec![prompt("hello world", "dev")];
         assert!(current[0].id.is_none());
 
-        persist_prompt_library_at(&mut current, &[], &dirs.saved, &dirs.archive, &dirs.tmp);
+        persist_prompt_library_at(&mut current, &[], &dirs.saved, &dirs.archive, &dirs.tmp)
+            .unwrap();
 
         assert!(
             current[0].id.is_some(),
@@ -749,7 +710,8 @@ mod tests {
     fn persist_prompt_library_overwrites_edited_prompts_at_same_id() {
         let dirs = LibraryDirs::new("persist-edit");
         let mut current = vec![prompt("v1 text", "dev")];
-        persist_prompt_library_at(&mut current, &[], &dirs.saved, &dirs.archive, &dirs.tmp);
+        persist_prompt_library_at(&mut current, &[], &dirs.saved, &dirs.archive, &dirs.tmp)
+            .unwrap();
         let id = current[0].id.clone().unwrap();
         let previous = current.clone();
 
@@ -768,7 +730,8 @@ mod tests {
             &dirs.saved,
             &dirs.archive,
             &dirs.tmp,
-        );
+        )
+        .unwrap();
 
         assert_eq!(current[0].id.as_deref(), Some(id.as_str()));
         let record = storage::read(&dirs.saved.join(format!("{id}.md"))).unwrap();
@@ -784,7 +747,8 @@ mod tests {
     fn persist_prompt_library_archives_removed_prompts() {
         let dirs = LibraryDirs::new("persist-delete");
         let mut current = vec![prompt("keep me", "dev"), prompt("delete me", "dev")];
-        persist_prompt_library_at(&mut current, &[], &dirs.saved, &dirs.archive, &dirs.tmp);
+        persist_prompt_library_at(&mut current, &[], &dirs.saved, &dirs.archive, &dirs.tmp)
+            .unwrap();
         let previous = current.clone();
         let removed_id = current[1].id.clone().unwrap();
 
@@ -796,7 +760,8 @@ mod tests {
             &dirs.saved,
             &dirs.archive,
             &dirs.tmp,
-        );
+        )
+        .unwrap();
 
         let saved_path = dirs.saved.join(format!("{removed_id}.md"));
         let archive_path = dirs.archive.join(format!("{removed_id}.md"));
@@ -813,7 +778,8 @@ mod tests {
         // so file mtimes stay stable for tools like the watcher.
         let dirs = LibraryDirs::new("persist-noop");
         let mut current = vec![prompt("stable", "dev")];
-        persist_prompt_library_at(&mut current, &[], &dirs.saved, &dirs.archive, &dirs.tmp);
+        persist_prompt_library_at(&mut current, &[], &dirs.saved, &dirs.archive, &dirs.tmp)
+            .unwrap();
         let id = current[0].id.clone().unwrap();
         let path = dirs.saved.join(format!("{id}.md"));
         let mtime_before = std::fs::metadata(&path).unwrap().modified().unwrap();
@@ -828,7 +794,8 @@ mod tests {
             &dirs.saved,
             &dirs.archive,
             &dirs.tmp,
-        );
+        )
+        .unwrap();
         let mtime_after = std::fs::metadata(&path).unwrap().modified().unwrap();
         assert_eq!(mtime_before, mtime_after);
     }

@@ -4,7 +4,6 @@ use super::perf;
 
 pub const LARGE_SYNTAX_LINE_COUNT: usize = perf::SYNTAX_LINE_LIMIT + 1;
 pub const LARGE_MINIMAP_LINE_COUNT: usize = perf::MINIMAP_LINE_LIMIT + 1;
-pub const STRESS_MATCH_COUNT: usize = 1_200;
 
 pub fn rust_lines(line_count: usize) -> String {
     let mut text = String::with_capacity(line_count * 24);
@@ -14,18 +13,6 @@ pub fn rust_lines(line_count: usize) -> String {
         text.push_str(" = ");
         text.push_str(&(idx % 97).to_string());
         text.push_str(";\n");
-    }
-    text
-}
-
-pub fn search_lines(line_count: usize, needle: &str) -> String {
-    let mut text = String::with_capacity(line_count * (needle.len() + 24));
-    for idx in 0..line_count {
-        text.push_str("line ");
-        text.push_str(&idx.to_string());
-        text.push(' ');
-        text.push_str(needle);
-        text.push('\n');
     }
     text
 }

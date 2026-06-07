@@ -41,12 +41,6 @@ impl EditorSearch {
         self.replace_mode = false;
     }
 
-    /// Open the find & replace bar.
-    pub fn open_replace(&mut self) {
-        self.active = true;
-        self.replace_mode = true;
-    }
-
     /// Close the search bar and clear matches.
     pub fn close(&mut self) {
         self.active = false;

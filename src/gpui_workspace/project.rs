@@ -825,8 +825,36 @@ impl WorkspacePrototype {
         .detach();
     }
 
+    fn modified_open_editor_message_for_project_change(
+        &self,
+        action: &'static str,
+        cx: &mut Context<Self>,
+    ) -> Option<String> {
+        self.editor_entities().into_iter().find_map(|editor| {
+            editor
+                .read(cx)
+                .modified_open_path_for_workspace_transition(action)
+        })
+    }
+
+    fn guard_project_editor_closure(
+        &mut self,
+        action: &'static str,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(message) = self.modified_open_editor_message_for_project_change(action, cx) else {
+            return true;
+        };
+        self.sidebar_explorer.status = Some(message);
+        cx.notify();
+        false
+    }
+
     pub(super) fn open_project(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         if !path.is_dir() {
+            return;
+        }
+        if !self.guard_project_editor_closure("opening another project", cx) {
             return;
         }
         crate::explorer::add_recent_project(&mut self.recent_projects, path.clone());
@@ -845,6 +873,9 @@ impl WorkspacePrototype {
     }
 
     pub(super) fn close_project(&mut self, cx: &mut Context<Self>) {
+        if !self.guard_project_editor_closure("closing the project", cx) {
+            return;
+        }
         self.workspace_root = None;
         self.sketch
             .update(cx, |sketch, _cx| sketch.set_workspace_root(None));
