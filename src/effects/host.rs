@@ -41,12 +41,16 @@ use core_foundation::{
     base::{CFType, TCFType},
     boolean::CFBoolean,
     dictionary::CFDictionary,
+    number::CFNumber,
     string::CFString,
 };
 use core_video::pixel_buffer::{
-    kCVPixelBufferIOSurfacePropertiesKey, kCVPixelBufferMetalCompatibilityKey,
+    kCVPixelBufferHeightKey, kCVPixelBufferIOSurfacePropertiesKey,
+    kCVPixelBufferMetalCompatibilityKey, kCVPixelBufferPixelFormatTypeKey, kCVPixelBufferWidthKey,
     kCVPixelFormatType_420YpCbCr8BiPlanarFullRange, CVPixelBuffer,
 };
+use core_video::pixel_buffer_pool::{kCVPixelBufferPoolAllocationThresholdKey, CVPixelBufferPool};
+use core_video::r#return::kCVReturnWouldExceedAllocationThreshold;
 use pollster::FutureExt as _;
 
 /// wgpu requires that `bytes_per_row` for a buffer-image copy be a multiple
@@ -73,6 +77,12 @@ const SMOKE_UNIFORM_BYTES: usize = 16 * 4;
 /// that is likely to trigger device loss.
 const MAX_EFFECT_EDGE: u32 = 8192;
 const MAX_EFFECT_PIXELS: u64 = 24_000_000;
+
+/// Hard cap on pixel buffers simultaneously alive from one pool. GPUI's
+/// compositor holds the current frame (plus in-flight ones) briefly, so
+/// steady state needs 2-3; hitting the cap means the consumer stopped
+/// releasing frames, and we skip frames instead of growing without bound.
+const PIXEL_BUFFER_POOL_THRESHOLD: i32 = 8;
 
 /// User-facing render parameters threaded into every smoke frame.
 #[derive(Clone, Copy, Debug)]
@@ -160,6 +170,13 @@ struct CachedRenderResources {
     texture: wgpu::Texture,
     view: wgpu::TextureView,
     staging: wgpu::Buffer,
+    /// Recycles IOSurface-backed pixel buffers instead of allocating a
+    /// fresh one per frame. Critical for more than allocation churn: GPUI's
+    /// blade renderer wraps each frame's planes in Metal textures through a
+    /// `CVMetalTextureCache` it never flushes, so a stream of brand-new
+    /// IOSurfaces makes that cache grow until the effect (and eventually
+    /// the app) degrades. Recycled buffers hit the cache instead.
+    pixel_buffer_pool: CVPixelBufferPool,
     /// True if the staging buffer is currently mapped. We must `unmap()`
     /// before the next `map_async`, even if a previous frame returned
     /// early after mapping but before reading.
@@ -171,7 +188,10 @@ struct CachedRenderResources {
 /// the per-frame path only does the per-frame work (uniform write, encode,
 /// submit, map, copy).
 pub struct EffectsHost {
-    pixel_buffer_attrs: CFDictionary<CFString, CFType>,
+    /// Aux attributes for every pool allocation: the alive-buffer threshold
+    /// that turns a stalled consumer into skipped frames instead of
+    /// unbounded pool growth.
+    pool_aux_attrs: CFDictionary<CFString, CFType>,
     _instance: wgpu::Instance,
     _adapter: wgpu::Adapter,
     device: wgpu::Device,
@@ -289,7 +309,7 @@ impl EffectsHost {
         let rain_pipeline = build_pipeline(4)?;
 
         Ok(Self {
-            pixel_buffer_attrs: build_pixel_buffer_attrs(),
+            pool_aux_attrs: build_pool_aux_attrs(),
             _instance: instance,
             _adapter: adapter,
             device,
@@ -391,7 +411,7 @@ impl EffectsHost {
         //    match. wgpu types are Arc-backed and cheap to clone. The cache
         //    is rebuilt on resize; in steady state nothing allocates per
         //    frame here.
-        let (render_texture, render_view, staging_buffer) = {
+        let (render_texture, render_view, staging_buffer, pixel_buffer_pool) = {
             let mut cache = self.cache.borrow_mut();
             let dimensions_match = cache
                 .as_ref()
@@ -400,6 +420,15 @@ impl EffectsHost {
                 // Drop the previous entry before creating new ones so we
                 // don't hold double the memory mid-replace.
                 *cache = None;
+                let pixel_buffer_pool = match build_pixel_buffer_pool(width_u, height_u) {
+                    Ok(pool) => pool,
+                    Err(code) => {
+                        self.disable_after_error(format!(
+                            "shader CVPixelBufferPool creation failed: CVReturn {code}"
+                        ));
+                        return None;
+                    }
+                };
                 let texture = self.device.create_texture(&wgpu::TextureDescriptor {
                     label: Some("effects-host-render"),
                     size: wgpu::Extent3d {
@@ -427,6 +456,7 @@ impl EffectsHost {
                     texture,
                     view,
                     staging,
+                    pixel_buffer_pool,
                     mapped: false,
                 });
             }
@@ -444,6 +474,7 @@ impl EffectsHost {
                 entry.texture.clone(),
                 entry.view.clone(),
                 entry.staging.clone(),
+                entry.pixel_buffer_pool.clone(),
             )
         };
 
@@ -544,21 +575,28 @@ impl EffectsHost {
         // before exit, or the pooled buffer will fail the next map_async.
         self.mark_cached_mapped(true);
 
-        // 5. Allocate the destination CVPixelBuffer. Done after the GPU
-        //    work succeeds so we don't burn an allocation if the readback
-        //    fails.
-        let buffer = match CVPixelBuffer::new(
-            kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
-            width,
-            height,
-            Some(&self.pixel_buffer_attrs),
-        ) {
+        // 5. Take the destination CVPixelBuffer from the pool (recycled
+        //    IOSurfaces; see `CachedRenderResources::pixel_buffer_pool`).
+        //    Done after the GPU work succeeds so we don't burn an
+        //    allocation if the readback fails.
+        let buffer = match pixel_buffer_pool
+            .create_pixel_buffer_with_aux_attributes(Some(&self.pool_aux_attrs))
+        {
             Ok(buffer) => buffer,
-            Err(error) => {
+            Err(code) if code == kCVReturnWouldExceedAllocationThreshold => {
+                // The consumer is holding every pooled buffer (compositor
+                // stall, window occluded mid-flight). Transient: skip this
+                // frame without disabling; the pool recovers as buffers
+                // are released.
+                staging_buffer.unmap();
+                self.mark_cached_mapped(false);
+                return None;
+            }
+            Err(code) => {
                 staging_buffer.unmap();
                 self.mark_cached_mapped(false);
                 self.disable_after_error(format!(
-                    "shader CVPixelBuffer allocation failed: {error:?}"
+                    "shader pooled CVPixelBuffer allocation failed: CVReturn {code}"
                 ));
                 return None;
             }
@@ -635,8 +673,16 @@ impl EffectsHost {
 // so we can't use `static OnceLock`. GPUI's render path lives on the main
 // thread, so a thread-local is the right shape: one EffectsHost per render
 // thread, reused across every paint of every EffectsElement.
+//
+// The host is deliberately LEAKED (`&'static` via `Box::leak`), never
+// dropped. Dropping it from a thread-local destructor at process exit runs
+// wgpu buffer teardown during TLS destruction, and wgpu's drop path touches
+// its own already-destroyed thread-locals -- a panic inside a destructor,
+// which aborts the process (this was the recurring "panic in a destructor
+// during cleanup" crash.log on quit). The host is process-lifetime state;
+// the OS reclaims the GPU resources at exit.
 thread_local! {
-    static SHARED_HOST: OnceCell<Result<EffectsHost, String>> = const { OnceCell::new() };
+    static SHARED_HOST: OnceCell<Result<&'static EffectsHost, String>> = const { OnceCell::new() };
 }
 /// Process-wide animation clock. Read by `EffectsElement::paint` so every
 /// instance of the element sees the same wall-clock time, which means a new
@@ -663,11 +709,12 @@ impl EffectsHost {
                 if let Err(error) = &result {
                     log::warn!("Disabling shader effects: {error}");
                 }
-                result
+                // Leak on purpose; see the SHARED_HOST comment.
+                result.map(|host| &*Box::leak(Box::new(host)))
             })
             .as_ref()
             .ok()
-            .map(f)
+            .map(|host| f(host))
         })
     }
 }
@@ -782,22 +829,47 @@ fn builtin_shader_sources() -> [(&'static str, &'static str); 5] {
     ]
 }
 
-/// Build the CFDictionary of pixel-buffer creation attributes: IOSurface
-/// backing (required for `CVMetalTextureCacheCreateTextureFromImage` in
-/// GPUI's blade renderer) and Metal-compatibility (so the IOSurface can be
-/// wrapped as an MTLTexture without extra copies).
-fn build_pixel_buffer_attrs() -> CFDictionary<CFString, CFType> {
+/// Aux attributes handed to every pool allocation: cap the number of alive
+/// buffers so a consumer that stops releasing frames degrades to skipped
+/// frames instead of unbounded IOSurface growth.
+fn build_pool_aux_attrs() -> CFDictionary<CFString, CFType> {
+    // SAFETY: process-lifetime CFString singleton owned by CoreVideo;
+    // `wrap_under_get_rule` must not release it.
+    let threshold_key =
+        unsafe { CFString::wrap_under_get_rule(kCVPixelBufferPoolAllocationThresholdKey) };
+    CFDictionary::from_CFType_pairs(&[(
+        threshold_key,
+        CFNumber::from(PIXEL_BUFFER_POOL_THRESHOLD).as_CFType(),
+    )])
+}
+
+/// Build a CVPixelBufferPool for one frame size. The pixel-buffer template
+/// carries the NV12 format, dimensions, IOSurface backing (required for
+/// `CVMetalTextureCacheCreateTextureFromImage` in GPUI's blade renderer)
+/// and Metal-compatibility (so the IOSurface wraps as an MTLTexture without
+/// extra copies).
+fn build_pixel_buffer_pool(width: u32, height: u32) -> Result<CVPixelBufferPool, i32> {
     let io_surface_props = CFDictionary::<CFString, CFType>::from_CFType_pairs(&[]);
     // SAFETY: these CoreVideo constants are process-lifetime CFString
     // singletons. `wrap_under_get_rule` is correct because ownership remains
     // with CoreVideo and the wrapper must not release the constants.
+    let format_key = unsafe { CFString::wrap_under_get_rule(kCVPixelBufferPixelFormatTypeKey) };
+    let width_key = unsafe { CFString::wrap_under_get_rule(kCVPixelBufferWidthKey) };
+    let height_key = unsafe { CFString::wrap_under_get_rule(kCVPixelBufferHeightKey) };
     let io_surface_key =
         unsafe { CFString::wrap_under_get_rule(kCVPixelBufferIOSurfacePropertiesKey) };
     let metal_key = unsafe { CFString::wrap_under_get_rule(kCVPixelBufferMetalCompatibilityKey) };
-    CFDictionary::from_CFType_pairs(&[
+    let pixel_buffer_attrs = CFDictionary::from_CFType_pairs(&[
+        (
+            format_key,
+            CFNumber::from(kCVPixelFormatType_420YpCbCr8BiPlanarFullRange as i64).as_CFType(),
+        ),
+        (width_key, CFNumber::from(width as i64).as_CFType()),
+        (height_key, CFNumber::from(height as i64).as_CFType()),
         (io_surface_key, io_surface_props.as_CFType()),
         (metal_key, CFBoolean::true_value().as_CFType()),
-    ])
+    ]);
+    CVPixelBufferPool::new(None, Some(&pixel_buffer_attrs))
 }
 
 /// Convert the wgpu staging-buffer RGBA8 readback into NV12 YCbCr full-range

@@ -24,4 +24,4 @@ Near-term fixes and improvements, in no particular order.
 
 ## Rendering
 
-- [ ] **Shader problems** — sort through the options for addressing the current shader/effects issues.
+- [x] **Shader problems** — sort through the options for addressing the current shader/effects issues. *(Done: two fixes. Effects broke down after minutes because a fresh IOSurface-backed CVPixelBuffer per frame made GPUI's never-flushed CVMetalTextureCache grow without bound — frames now come from a CVPixelBufferPool (recycled IOSurfaces, alive-buffer cap of 8). Separately, quitting with shaders enabled aborted the process (wgpu buffer teardown during TLS destruction — the recurring "panic in a destructor" crash.log); the effects host is now leaked as process-lifetime state so quit is clean.)*
