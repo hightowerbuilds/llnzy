@@ -10,8 +10,8 @@ use crate::stacker::{
 };
 
 use super::{
-    StackerPalette, StackerPrototype, StackerTextInput, BORDER, CHROME_BG,
-    MUTED_TEXT, QUEUE_GREEN, TEXT,
+    StackerPalette, StackerPrototype, StackerTextInput, BORDER, CHROME_BG, MUTED_TEXT, QUEUE_GREEN,
+    TEXT,
 };
 
 mod cli_help;

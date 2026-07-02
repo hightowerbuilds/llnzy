@@ -2,7 +2,8 @@ use gpui::prelude::*;
 use gpui::{div, px, rgb, Context, MouseButton, MouseDownEvent};
 
 use crate::gpui_workspace::{
-    WorkspacePalette, WorkspacePrototype, ACTIVE_TEXT, BORDER, MUTED_TEXT, QUEUE_GREEN, SIDEBAR_TEXT,
+    WorkspacePalette, WorkspacePrototype, ACTIVE_TEXT, BORDER, MUTED_TEXT, QUEUE_GREEN,
+    SIDEBAR_TEXT,
 };
 
 pub(super) fn metric_readout(label: &'static str, value: String) -> impl IntoElement {

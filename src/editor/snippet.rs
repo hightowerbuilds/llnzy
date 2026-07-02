@@ -52,7 +52,6 @@ impl ActiveSnippet {
             None
         }
     }
-
 }
 
 /// Parse a snippet string in VS Code snippet syntax.

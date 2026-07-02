@@ -396,4 +396,3 @@ fn editor_ruler_layer(appearance: &EditorAppearance, scroll_col: usize) -> gpui:
 
     layer
 }
-

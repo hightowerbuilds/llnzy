@@ -1,9 +1,7 @@
 use gpui::prelude::*;
 use gpui::{div, px, rgb, Context, FontWeight, MouseButton, MouseDownEvent, SharedString};
 
-use super::super::{
-    StackerPrototype, BORDER, CONTENT_PANEL_BG, MUTED_TEXT, QUEUE_GREEN, TEXT,
-};
+use super::super::{StackerPrototype, BORDER, CONTENT_PANEL_BG, MUTED_TEXT, QUEUE_GREEN, TEXT};
 
 pub(super) fn cli_help_button(cx: &mut Context<StackerPrototype>) -> impl IntoElement {
     div()
@@ -149,7 +147,9 @@ pub(super) fn cli_help_inbox_button_row(cx: &mut Context<StackerPrototype>) -> i
     )
 }
 
-pub(super) fn cli_help_agent_instructions_button(cx: &mut Context<StackerPrototype>) -> impl IntoElement {
+pub(super) fn cli_help_agent_instructions_button(
+    cx: &mut Context<StackerPrototype>,
+) -> impl IntoElement {
     div().flex().child(
         div()
             .id("stacker-cli-copy-agent-instructions")

@@ -3,10 +3,10 @@ use std::ops::Range;
 use gpui::prelude::*;
 use gpui::{
     div, fill, hsla, px, relative, rgb, rgba, App, Bounds, ClipboardItem, ContentMask, Context,
-    CursorStyle, DispatchPhase, Element, ElementId, ElementInputHandler, Entity, EntityInputHandler,
-    FocusHandle, Focusable, GlobalElementId, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, PaintQuad, Pixels, Point, Render, ScrollWheelEvent, SharedString, Style,
-    TextAlign, TextRun, UTF16Selection, Window,
+    CursorStyle, DispatchPhase, Element, ElementId, ElementInputHandler, Entity,
+    EntityInputHandler, FocusHandle, Focusable, GlobalElementId, LayoutId, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point, Render,
+    ScrollWheelEvent, SharedString, Style, TextAlign, TextRun, UTF16Selection, Window,
 };
 
 use crate::stacker::{

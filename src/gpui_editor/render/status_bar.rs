@@ -145,4 +145,3 @@ fn editor_mode_label(snapshot: &EditorSnapshot) -> &'static str {
     }
     "Source"
 }
-

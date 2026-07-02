@@ -148,7 +148,10 @@ pub(super) fn external_change_overlay(
         }))
 }
 
-pub(super) fn find_overlay(snapshot: &EditorSnapshot, cx: &mut Context<EditorPrototype>) -> impl IntoElement {
+pub(super) fn find_overlay(
+    snapshot: &EditorSnapshot,
+    cx: &mut Context<EditorPrototype>,
+) -> impl IntoElement {
     let height = if snapshot.search_replace_mode {
         px(66.0)
     } else {
@@ -421,4 +424,3 @@ fn find_button(
         )
         .child(label)
 }
-

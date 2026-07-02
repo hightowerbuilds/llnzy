@@ -10,9 +10,7 @@ use crate::gpui_workspace::{
 
 use super::shader_palettes::terminal_smoke_controls;
 use super::widgets::{appearance_button, control_label, effect_toggle_button, metric_row};
-use super::{
-    TERMINAL_DISPLAY_FONT_CHOICES, TERMINAL_MONO_FONT_CHOICES,
-};
+use super::{TERMINAL_DISPLAY_FONT_CHOICES, TERMINAL_MONO_FONT_CHOICES};
 
 pub(super) fn terminal_appearance_controls(
     content: gpui::Div,

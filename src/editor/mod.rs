@@ -474,7 +474,6 @@ impl EditorState {
         self.next_buffer_id = self.next_buffer_id.saturating_add(1).max(1);
         id
     }
-
 }
 
 impl Default for EditorState {

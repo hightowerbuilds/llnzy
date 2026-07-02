@@ -56,5 +56,4 @@ impl SketchState {
         self.redo_stack.clear();
         self.dirty = true;
     }
-
 }

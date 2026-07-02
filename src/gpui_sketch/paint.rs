@@ -10,7 +10,9 @@ use crate::sketch::{
     SketchCanvasBackgroundMode, SketchElement, SketchGridMode, SketchPoint, SketchState,
 };
 
-use super::canvas_element::{SketchCanvasFrame, SketchCanvasLayer, SketchPaintText, SketchPrepaintState};
+use super::canvas_element::{
+    SketchCanvasFrame, SketchCanvasLayer, SketchPaintText, SketchPrepaintState,
+};
 use super::{SketchPalette, SKETCH_EXPORT_BOUNDARY, SKETCH_SELECTION};
 
 pub(super) fn build_canvas_paint(

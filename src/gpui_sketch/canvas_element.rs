@@ -7,7 +7,9 @@ use gpui::{
     ScrollWheelEvent, Style, StyledImage, TextAlign, Window, WrappedLine,
 };
 
-use crate::sketch::{normalize_zoom_scale, sketch_to_canvas_point, ImageElement, SketchPoint, SketchState};
+use crate::sketch::{
+    normalize_zoom_scale, sketch_to_canvas_point, ImageElement, SketchPoint, SketchState,
+};
 
 use super::paint::build_canvas_paint;
 use super::SketchSurface;

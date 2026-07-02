@@ -535,4 +535,3 @@ impl Render for StackerPrototype {
             .when(cli_help_open, |root| root.child(render::cli_help_modal(cx)))
     }
 }
-
