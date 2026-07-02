@@ -8,6 +8,7 @@ mod colors;
 mod events;
 mod grid;
 mod links;
+mod mouse;
 mod osc;
 mod selection;
 
@@ -19,6 +20,7 @@ use osc::Osc7Parser;
 
 pub use events::TerminalEvent;
 pub use links::detect_urls;
+pub use mouse::{encode_alternate_scroll, encode_wheel_reports, route_wheel, WheelRoute};
 
 /// Size information for the terminal.
 #[derive(Clone, Copy)]

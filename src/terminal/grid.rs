@@ -178,6 +178,14 @@ impl Terminal {
         self.term.mode().contains(TermMode::APP_CURSOR)
     }
 
+    pub fn alt_screen(&self) -> bool {
+        self.term.mode().contains(TermMode::ALT_SCREEN)
+    }
+
+    pub fn alternate_scroll(&self) -> bool {
+        self.term.mode().contains(TermMode::ALTERNATE_SCROLL)
+    }
+
     /// Get the cursor position in viewport coordinates, or None if not visible.
     pub fn cursor_point(&self) -> Option<(usize, usize)> {
         let cursor = self.term.grid().cursor.point;

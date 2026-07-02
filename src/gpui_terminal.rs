@@ -32,6 +32,7 @@ use gpui::{
 use crate::config::{Config, CursorStyle, TerminalLayoutMode};
 use crate::session::Session;
 use crate::stacker::utf16::{char_index_to_utf16_index, utf16_index_to_char_index};
+use crate::terminal::{encode_alternate_scroll, encode_wheel_reports, route_wheel, WheelRoute};
 
 const TERMINAL_BG: u32 = 0x080808;
 const TERMINAL_PANEL_BG: u32 = 0x0d0d10;
@@ -239,6 +240,10 @@ pub(crate) struct TerminalSurface {
     /// monospace mode (use `metrics.advance`) or no paint has happened yet.
     last_row_offsets: Option<Vec<Vec<f32>>>,
     is_selecting: bool,
+    /// Fractional wheel lines carried between scroll events so precise
+    /// trackpad deltas smaller than one line accumulate instead of being
+    /// rounded away.
+    wheel_accumulator: f32,
     status_message: Option<String>,
     /// IME composition / dictation preview. Buffered locally so that
     /// intermediate composition steps are NOT forwarded to the PTY; only
@@ -263,6 +268,7 @@ impl TerminalSurface {
             last_metrics: CellMetrics::fallback(),
             last_row_offsets: None,
             is_selecting: false,
+            wheel_accumulator: 0.0,
             status_message: None,
             ime_preedit: String::new(),
         };
@@ -454,6 +460,55 @@ impl TerminalSurface {
         if let Some(session) = &mut self.session {
             session.terminal.scroll(lines);
             cx.notify();
+        }
+    }
+
+    /// Deliver a wheel event where the running application expects it:
+    /// as mouse reports when mouse reporting is active (Claude Code, htop),
+    /// as arrow keys under alternate-screen alternate scroll (less, vim),
+    /// and as local scrollback movement otherwise. Shift bypasses the app
+    /// and always scrolls scrollback.
+    fn handle_scroll_wheel(&mut self, event: &ScrollWheelEvent, cx: &mut Context<Self>) {
+        let line_height = px(self.last_metrics.line_height);
+        let delta = event.delta.pixel_delta(line_height);
+        self.wheel_accumulator += delta.y / line_height;
+        let lines = self.wheel_accumulator as i32;
+        if lines == 0 {
+            return;
+        }
+        self.wheel_accumulator -= lines as f32;
+
+        let Some(session) = &self.session else {
+            return;
+        };
+        let terminal = &session.terminal;
+        let route = route_wheel(
+            terminal.mouse_mode(),
+            terminal.alt_screen(),
+            terminal.alternate_scroll(),
+            event.modifiers.shift,
+        );
+        let payload = match route {
+            WheelRoute::Scrollback => {
+                self.scroll_by(lines, cx);
+                return;
+            }
+            WheelRoute::MouseReport => {
+                let Some((row, col)) = self.point_to_grid(event.position) else {
+                    return;
+                };
+                encode_wheel_reports(lines, col, row, terminal.sgr_mouse())
+            }
+            WheelRoute::AlternateScroll => encode_alternate_scroll(lines, terminal.app_cursor()),
+        };
+        if payload.is_empty() {
+            return;
+        }
+        if let Some(session) = &mut self.session {
+            // Straight to the PTY: unlike keyboard input, wheel reports and
+            // alternate-scroll arrows must not snap the display to the
+            // bottom (Session::write does).
+            session.pty.write(&payload);
         }
     }
 
@@ -1228,12 +1283,9 @@ impl Element for TerminalElement {
         });
 
         let surface = self.surface.clone();
-        let scroll_line_height = px(metrics.line_height);
         window.on_mouse_event(move |event: &ScrollWheelEvent, phase, _window, cx| {
             if phase == DispatchPhase::Bubble && bounds.contains(&event.position) {
-                let delta = event.delta.pixel_delta(scroll_line_height);
-                let lines = (delta.y / scroll_line_height).round() as i32;
-                surface.update(cx, |surface, cx| surface.scroll_by(lines, cx));
+                surface.update(cx, |surface, cx| surface.handle_scroll_wheel(event, cx));
             }
         });
     }
