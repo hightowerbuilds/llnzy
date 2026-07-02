@@ -17,6 +17,15 @@ These commands are intentionally the same checks enforced by CI:
 - all clippy warnings are treated as errors;
 - every target and enabled feature must compile and test cleanly.
 
+## Development Instance
+
+Use `./dev.sh` to run a work-in-progress build alongside the installed daily
+driver. It sets `LLNZY_PROFILE=dev`, which moves every platform path (config,
+data, cache, themes, workspaces, logs, prompts, recovery state) from the
+`llnzy` app directory to `llnzy-dev`, so the dev instance cannot read or
+corrupt production state. Arguments pass through to `cargo run`
+(`./dev.sh --release` for a release build).
+
 ## Supported Cargo Shapes
 
 The supported build shapes are:

@@ -26,12 +26,21 @@ pub struct PlatformPathSet {
 
 impl PlatformPathSet {
     pub fn current() -> Option<Self> {
-        let config_dir = dirs::config_dir()?.join("llnzy");
+        Self::for_app_dir(&app_dir_name(
+            std::env::var("LLNZY_PROFILE").ok().as_deref(),
+        ))
+    }
+
+    /// Resolve the platform path set under the given app directory name.
+    /// `llnzy` is the production layout; `llnzy-<profile>` isolates a
+    /// development instance from the daily-driver install.
+    fn for_app_dir(app_dir: &str) -> Option<Self> {
+        let config_dir = dirs::config_dir()?.join(app_dir);
         let data_dir = dirs::data_dir()
-            .map(|dir| dir.join("llnzy"))
+            .map(|dir| dir.join(app_dir))
             .unwrap_or_else(|| config_dir.clone());
         let cache_dir = dirs::cache_dir()
-            .map(|dir| dir.join("llnzy"))
+            .map(|dir| dir.join(app_dir))
             .unwrap_or_else(|| data_dir.join("cache"));
 
         Some(Self {
@@ -142,6 +151,15 @@ impl PlatformPathSet {
     }
 }
 
+/// App directory name for the given `LLNZY_PROFILE` value. Empty or
+/// whitespace-only profiles fall back to the production `llnzy` layout.
+fn app_dir_name(profile: Option<&str>) -> String {
+    match profile.map(str::trim).filter(|profile| !profile.is_empty()) {
+        Some(profile) => format!("llnzy-{profile}"),
+        None => "llnzy".to_string(),
+    }
+}
+
 pub fn current_paths() -> Option<PlatformPathSet> {
     PlatformPathSet::current()
 }
@@ -155,8 +173,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn app_dir_name_defaults_to_production_layout() {
+        assert_eq!(app_dir_name(None), "llnzy");
+        assert_eq!(app_dir_name(Some("")), "llnzy");
+        assert_eq!(app_dir_name(Some("   ")), "llnzy");
+    }
+
+    #[test]
+    fn app_dir_name_isolates_profiles() {
+        assert_eq!(app_dir_name(Some("dev")), "llnzy-dev");
+        assert_eq!(app_dir_name(Some(" dev ")), "llnzy-dev");
+    }
+
+    #[test]
     fn current_paths_keep_existing_app_owned_config_layout() {
-        let Some(paths) = PlatformPathSet::current() else {
+        let Some(paths) = PlatformPathSet::for_app_dir("llnzy") else {
             return;
         };
 

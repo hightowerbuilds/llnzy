@@ -2,6 +2,7 @@
 name = "llnzy"
 version = "0.1.0"
 edition = "2021"
+default-run = "llnzy"
 
 [features]
 default = ["gpui-workspace"]
