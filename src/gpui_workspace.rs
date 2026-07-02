@@ -128,6 +128,7 @@ const SIDEBAR_TEXT: u32 = 0xabb2bf;
 const FOLDER_BLUE: u32 = 0x64b4ff;
 const ACCENT: u32 = 0x214966;
 const QUEUE_GREEN: u32 = 0x6aff90;
+const JOINED_SECONDARY: u32 = 0x6ab8ff;
 
 const RECOVERY_PERSIST_INTERVAL: Duration = Duration::from_secs(5);
 
@@ -166,6 +167,7 @@ pub(super) struct WorkspacePalette {
     pub(super) sidebar_text: u32,
     pub(super) accent: u32,
     pub(super) queue_green: u32,
+    pub(super) joined_secondary: u32,
     pub(super) sidebar_row_selected_bg: u32,
     pub(super) sidebar_row_hover_bg: u32,
 }
@@ -201,6 +203,7 @@ impl WorkspacePalette {
             sidebar_text: SIDEBAR_TEXT,
             accent: ACCENT,
             queue_green: QUEUE_GREEN,
+            joined_secondary: JOINED_SECONDARY,
             sidebar_row_selected_bg: SIDEBAR_ROW_SELECTED_BG,
             sidebar_row_hover_bg: SIDEBAR_ROW_HOVER_BG,
         }
@@ -221,6 +224,7 @@ impl WorkspacePalette {
             sidebar_text: 0x5f554b,
             accent: 0xb7d8d4,
             queue_green: 0x5f9f79,
+            joined_secondary: 0x5f7fb0,
             sidebar_row_selected_bg: 0xe2d0ed,
             sidebar_row_hover_bg: 0xeadcc8,
         }
@@ -579,7 +583,7 @@ fn install_workspace_menu_bar(cx: &mut App) {
                 MenuItem::action("Previous Tab", MenuPreviousTab),
                 MenuItem::separator(),
                 MenuItem::action("Join Tabs", MenuJoinTabs),
-                MenuItem::action("Swap Tabs", MenuSwapTabs),
+                MenuItem::action("Swap Side", MenuSwapTabs),
                 MenuItem::action("Separate Tabs", MenuSeparateTabs),
                 MenuItem::submenu(Menu {
                     name: "Partition".into(),

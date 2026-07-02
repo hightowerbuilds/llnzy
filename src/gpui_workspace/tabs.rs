@@ -160,7 +160,7 @@ pub(super) fn workspace_tab_bar(
             active_tab_id,
             label,
             width,
-            tab_manager.is_joined(tab.id.0),
+            tab_manager.joined_member_index(tab.id.0),
             menu_anchor,
             palette,
             cx,
@@ -290,7 +290,7 @@ fn workspace_tab(
     active_tab_id: WorkspaceTabId,
     label: String,
     width: f32,
-    joined: bool,
+    joined_member: Option<usize>,
     menu_anchor: WorkspaceTabMenuAnchor,
     palette: WorkspacePalette,
     cx: &mut Context<WorkspacePrototype>,
@@ -314,10 +314,10 @@ fn workspace_tab(
         .px_3()
         .rounded_sm()
         .border_1()
-        .border_color(rgb(if joined {
-            palette.queue_green
-        } else {
-            palette.border
+        .border_color(rgb(match joined_member {
+            Some(0) => palette.queue_green,
+            Some(_) => palette.joined_secondary,
+            None => palette.border,
         }))
         .bg(rgb(if active {
             palette.active_tab_bg
@@ -603,7 +603,7 @@ pub(super) fn workspace_tab_context_menu(
             if joined {
                 if joined_count == 2 {
                     menu_panel = menu_panel.child(tab_menu_button(
-                        "Swap Tabs".to_string(),
+                        "Swap Side".to_string(),
                         false,
                         cx,
                         move |this, _window, cx| {

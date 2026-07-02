@@ -116,7 +116,7 @@ pub(super) fn palette_entries() -> Vec<CommandEntry> {
             build_action: || Box::new(MenuSeparateTabs),
         },
         CommandEntry {
-            label: "Tab: Swap Tabs",
+            label: "Tab: Swap Side",
             shortcut: None,
             build_action: || Box::new(MenuSwapTabs),
         },

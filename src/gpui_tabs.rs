@@ -72,6 +72,14 @@ impl GpuiTabManager {
         self.groups.group_for_tab(tab_id).is_some()
     }
 
+    pub fn joined_member_index(&self, tab_id: TabId) -> Option<usize> {
+        self.groups
+            .group_for_tab(tab_id)?
+            .members()
+            .iter()
+            .position(|member| *member == tab_id)
+    }
+
     pub fn joined_group_for(
         &self,
         active_tab: TabId,
