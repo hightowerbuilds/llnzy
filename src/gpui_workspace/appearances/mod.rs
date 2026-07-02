@@ -1,11 +1,11 @@
 use gpui::prelude::*;
-use gpui::{div, px, rgb, Context};
+use gpui::{div, px, rgb, Context, MouseButton, MouseDownEvent};
 
 use crate::{config::Config, sketch::SketchToolbarPosition, theme::builtin_themes};
 
 use super::{
     AppearancePage, ErrorLogFilter, WorkspacePalette, WorkspacePrototype, ACTIVE_TEXT, BORDER,
-    EDITOR_BG, MUTED_TEXT, PANEL_BG, SIDEBAR_TEXT,
+    EDITOR_BG, MUTED_TEXT, PANEL_BG, QUEUE_GREEN, SIDEBAR_TEXT,
 };
 
 mod editor_section;
@@ -463,6 +463,7 @@ pub(super) fn markdown_appearance_controls(
         .font_size
         .unwrap_or((config.font_size - 2.0).max(10.0));
     content
+        .child(markdown_preview_style_controls(&config, cx))
         .child(metric_row(
             "Preview Font Size",
             format!("{editor_font:.0}px"),
@@ -488,6 +489,52 @@ pub(super) fn markdown_appearance_controls(
                 .text_color(rgb(SIDEBAR_TEXT))
                 .child("Markdown preview uses editor font, line height, and theme colors while keeping Source, Preview, and Split mode state separate."),
         )
+}
+
+fn markdown_preview_style_controls(
+    config: &Config,
+    cx: &mut Context<WorkspacePrototype>,
+) -> impl IntoElement {
+    let active_style = config.editor.markdown_preview_style;
+    let mut buttons = div().flex().flex_wrap().gap_2();
+    for style in crate::config::MarkdownPreviewStyle::all() {
+        let active = style == active_style;
+        buttons = buttons.child(
+            div()
+                .h(px(30.0))
+                .px_3()
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded_sm()
+                .border_1()
+                .border_color(rgb(if active { 0x47785f } else { BORDER }))
+                .bg(rgb(if active { 0x183725 } else { 0x242632 }))
+                .text_size(px(12.0))
+                .text_color(rgb(if active { QUEUE_GREEN } else { SIDEBAR_TEXT }))
+                .cursor_pointer()
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _: &MouseDownEvent, _window, cx| {
+                        this.set_markdown_preview_style(style, cx);
+                    }),
+                )
+                .child(style.label()),
+        );
+    }
+
+    div()
+        .w_full()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .child(
+            div()
+                .text_size(px(12.0))
+                .text_color(rgb(MUTED_TEXT))
+                .child("Preview Style"),
+        )
+        .child(buttons)
 }
 
 #[expect(
@@ -741,4 +788,3 @@ pub(super) fn settings_toggle_row(
             "", active, palette, cx, on_click,
         ))
 }
-

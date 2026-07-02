@@ -216,6 +216,10 @@ pub(crate) struct EditorPrototype {
     status_message: Option<String>,
     last_text_bounds: Option<Bounds<gpui::Pixels>>,
     last_text_layout: Option<EditorMeasuredLayout>,
+    /// Average glyph advance measured from the real shaped font, replacing
+    /// the 0.6-em estimate in `EditorAppearance::char_width` once known.
+    /// Keyed by font family + size so appearance changes re-measure.
+    measured_char_width: Option<MeasuredCharWidth>,
     is_selecting: bool,
     cursor_blink_anchor: Instant,
     cursor_blink_visible: bool,
@@ -307,6 +311,7 @@ impl EditorAppearanceConfig {
             visible_whitespace: effective.visible_whitespace,
             word_wrap: effective.word_wrap,
             rulers: effective.rulers,
+            markdown_preview_style: self.editor.markdown_preview_style,
             syntax_colors: Arc::clone(&self.syntax_colors),
         }
     }
@@ -316,6 +321,15 @@ impl Default for EditorAppearanceConfig {
     fn default() -> Self {
         Self::from_config(&Config::default())
     }
+}
+
+/// A shaped-text measurement of the average glyph advance for one font
+/// family + size combination.
+#[derive(Clone, PartialEq)]
+pub(super) struct MeasuredCharWidth {
+    pub(super) font_family: String,
+    pub(super) font_size: gpui::Pixels,
+    pub(super) width: gpui::Pixels,
 }
 
 #[derive(Clone)]
@@ -344,6 +358,7 @@ struct EditorAppearance {
     visible_whitespace: bool,
     word_wrap: bool,
     rulers: Vec<usize>,
+    markdown_preview_style: crate::config::MarkdownPreviewStyle,
     syntax_colors: Arc<FxHashMap<HighlightGroup, [u8; 3]>>,
 }
 
@@ -394,6 +409,27 @@ impl EditorAppearance {
 
     fn ruler_color(&self) -> gpui::Rgba {
         rgba(rgba_u32(self.foreground, 0.12))
+    }
+
+    /// Body ink softened toward the background — the newspaper two-tone
+    /// convention (NYT: #363636 body under #121212 headlines) expressed
+    /// relative to the active theme.
+    fn preview_soft_foreground(&self) -> gpui::Rgba {
+        rgb(rgb_u32(mix_rgb(self.foreground, self.background, 0.15)))
+    }
+
+    /// Hairline rule ink derived from the theme (stands in for the print
+    /// #DFDFDF hairlines on white).
+    fn preview_rule_color(&self) -> gpui::Rgba {
+        rgb(rgb_u32(mix_rgb(self.background, self.foreground, 0.25)))
+    }
+
+    fn preview_code_background(&self) -> gpui::Rgba {
+        rgb(rgb_u32(mix_rgb(self.background, self.foreground, 0.05)))
+    }
+
+    fn preview_code_border(&self) -> gpui::Rgba {
+        rgb(rgb_u32(mix_rgb(self.background, self.foreground, 0.18)))
     }
 }
 
@@ -619,6 +655,7 @@ impl EditorPrototype {
             status_message: None,
             last_text_bounds: None,
             last_text_layout: None,
+            measured_char_width: None,
             is_selecting: false,
             cursor_blink_anchor: Instant::now(),
             cursor_blink_visible: true,
@@ -730,7 +767,8 @@ impl EditorPrototype {
         }
 
         if let Some((buffer_id, buffer, view)) = self.editor.active_buffer_view() {
-            let appearance = self.appearance_config.for_language(view.lang_id);
+            let mut appearance = self.appearance_config.for_language(view.lang_id);
+            self.apply_measured_char_width(&mut appearance);
             let markdown = buffer.path().is_some_and(is_markdown_path);
             let markdown_mode = if markdown {
                 view.markdown_mode
@@ -941,7 +979,30 @@ impl EditorPrototype {
             .views
             .get(self.editor.active)
             .and_then(|view| view.lang_id);
-        self.appearance_config.for_language(lang_id)
+        let mut appearance = self.appearance_config.for_language(lang_id);
+        self.apply_measured_char_width(&mut appearance);
+        appearance
+    }
+
+    fn apply_measured_char_width(&self, appearance: &mut EditorAppearance) {
+        if let Some(measured) = &self.measured_char_width {
+            if measured.font_family == appearance.font_family
+                && measured.font_size == appearance.font_size
+                && measured.width > px(0.0)
+            {
+                appearance.char_width = measured.width;
+            }
+        }
+    }
+
+    /// Store a freshly measured advance. Returns true when it changes the
+    /// effective char width, so the caller can re-render/re-wrap.
+    pub(super) fn set_measured_char_width(&mut self, measured: MeasuredCharWidth) -> bool {
+        if self.measured_char_width.as_ref() == Some(&measured) {
+            return false;
+        }
+        self.measured_char_width = Some(measured);
+        true
     }
 
     fn active_buffer_and_view(

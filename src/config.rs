@@ -9,7 +9,7 @@ mod schema;
 pub use colors::{apply_time_of_day, indexed_color, ColorTransition};
 pub use model::{
     BackgroundImageFit, ColorScheme, Config, CursorStyle, EditorConfig, EditorLanguageConfig,
-    EffectiveEditorConfig, EffectsConfig, TerminalLayoutMode,
+    EffectiveEditorConfig, EffectsConfig, MarkdownPreviewStyle, TerminalLayoutMode,
 };
 pub(crate) use presets::{editor_syntax_preset, editor_syntax_presets, EditorSyntaxPreset};
 

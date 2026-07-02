@@ -25,6 +25,7 @@ mod sidebar;
 mod tabs;
 
 use crate::config::Config;
+use crate::fs_watch::FsChangeWatcher;
 use crate::gpui_editor::{bind_editor_keys, EditorPrototype};
 use crate::gpui_sketch::{bind_sketch_keys, SketchSurface};
 use crate::gpui_stacker::{bind_stacker_keys, StackerPrototype};
@@ -131,6 +132,10 @@ const QUEUE_GREEN: u32 = 0x6aff90;
 const JOINED_SECONDARY: u32 = 0x6ab8ff;
 
 const RECOVERY_PERSIST_INTERVAL: Duration = Duration::from_secs(5);
+/// Cadence for draining the explorer filesystem watcher. Combined with the
+/// watcher's own debounce this bounds how quickly externally created files
+/// appear in the sidebar.
+const EXPLORER_WATCH_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
 const FOOTER_HEIGHT: f32 = 48.0;
 const JOINED_TAB_DIVIDER_WIDTH: f32 = 8.0;
@@ -318,6 +323,13 @@ fn appearance_config_from_preferences(
     }
     if let Some(word_wrap) = preferences.editor_word_wrap {
         apply_editor_word_wrap_preference(&mut config, word_wrap);
+    }
+    if let Some(style) = preferences
+        .markdown_preview_style
+        .as_deref()
+        .and_then(crate::config::MarkdownPreviewStyle::parse)
+    {
+        config.editor.markdown_preview_style = style;
     }
     config
 }
@@ -663,9 +675,37 @@ struct WorkspacePrototype {
     last_recovery_persist_attempt: Option<Instant>,
     cached_explorer_signature: Option<(Option<PathBuf>, BTreeSet<PathBuf>)>,
     cached_explorer_entries: Vec<ExplorerEntry>,
+    /// Watches the workspace root so files created outside the sidebar
+    /// (terminal, agents, Finder) appear without user interaction. `None`
+    /// when no project is open or the watcher could not be created.
+    explorer_watcher: Option<FsChangeWatcher>,
     error_log_expanded: bool,
     error_log_filter: ErrorLogFilter,
     pending_clear_error_log: bool,
+}
+
+/// Drives the explorer filesystem watcher. A slow poll loop (the watcher
+/// itself debounces and drops irrelevant events) that ends when the
+/// workspace entity is released.
+fn start_explorer_watch_task(cx: &mut Context<WorkspacePrototype>) {
+    cx.spawn(
+        |workspace: gpui::WeakEntity<WorkspacePrototype>, cx: &mut gpui::AsyncApp| {
+            let mut cx = cx.clone();
+            async move {
+                loop {
+                    cx.background_executor()
+                        .timer(EXPLORER_WATCH_POLL_INTERVAL)
+                        .await;
+                    let Ok(()) = workspace.update(&mut cx, |workspace, cx| {
+                        workspace.poll_explorer_watcher(cx);
+                    }) else {
+                        break;
+                    };
+                }
+            }
+        },
+    )
+    .detach();
 }
 
 fn register_workspace(workspace: gpui::WeakEntity<WorkspacePrototype>) {
@@ -797,6 +837,7 @@ impl WorkspacePrototype {
             last_recovery_persist_attempt: None,
             cached_explorer_signature: None,
             cached_explorer_entries: Vec::new(),
+            explorer_watcher: None,
             error_log_expanded: false,
             error_log_filter: ErrorLogFilter::All,
             pending_clear_error_log: false,
@@ -806,6 +847,8 @@ impl WorkspacePrototype {
             workspace.restore_after_unclean_shutdown(cx);
             let _ = workspace.persist_workspace_recovery(false);
         }
+        workspace.rebuild_explorer_watcher();
+        start_explorer_watch_task(cx);
         register_workspace(cx.weak_entity());
         workspace
     }
@@ -823,6 +866,20 @@ impl WorkspacePrototype {
         self.preferences.editor_word_wrap = Some(enabled);
         self.preferences.save();
         apply_editor_word_wrap_preference(&mut self.appearance_config, enabled);
+        self.apply_appearance_config(cx);
+    }
+
+    pub(super) fn set_markdown_preview_style(
+        &mut self,
+        style: crate::config::MarkdownPreviewStyle,
+        cx: &mut Context<Self>,
+    ) {
+        if self.appearance_config.editor.markdown_preview_style == style {
+            return;
+        }
+        self.preferences.markdown_preview_style = Some(style.as_str().to_string());
+        self.preferences.save();
+        self.appearance_config.editor.markdown_preview_style = style;
         self.apply_appearance_config(cx);
     }
 
@@ -888,6 +945,7 @@ impl WorkspacePrototype {
 
     fn apply_recovery_plan(&mut self, plan: WorkspaceRecoveryPlan, cx: &mut Context<Self>) {
         self.workspace_root = plan.workspace_root.clone();
+        self.rebuild_explorer_watcher();
         self.sketch.update(cx, |sketch, _cx| {
             sketch.set_workspace_root(plan.workspace_root.clone())
         });
@@ -1016,6 +1074,55 @@ impl WorkspacePrototype {
             restore_joined_group_shares(&mut self.tab_manager, primary, &group.shares);
         }
         self.tab_manager.retain_tabs(&valid_tabs);
+    }
+
+    /// Force `explorer_entries` to re-read the filesystem on the next
+    /// render. Call after any operation that changes directory contents
+    /// without changing the cache signature (root + expanded dirs).
+    pub(super) fn invalidate_explorer_cache(&mut self) {
+        self.cached_explorer_signature = None;
+    }
+
+    /// (Re)attach the filesystem watcher to the current workspace root.
+    /// Call whenever `workspace_root` changes.
+    pub(super) fn rebuild_explorer_watcher(&mut self) {
+        self.explorer_watcher = match self.workspace_root.as_deref() {
+            Some(root) => match FsChangeWatcher::new(root.to_path_buf()) {
+                Ok(watcher) => Some(watcher),
+                Err(error) => {
+                    log::warn!("explorer refresh degraded to manual: {error}");
+                    None
+                }
+            },
+            None => None,
+        };
+        self.invalidate_explorer_cache();
+    }
+
+    fn poll_explorer_watcher(&mut self, cx: &mut Context<Self>) {
+        let Some(watcher) = &mut self.explorer_watcher else {
+            return;
+        };
+        let changed = watcher.poll();
+        if changed.is_empty() {
+            return;
+        }
+        let Some(root) = &self.workspace_root else {
+            return;
+        };
+        let visible_in_any_tree = std::iter::once(&self.sidebar_explorer)
+            .chain(self.explorers.values())
+            .any(|explorer| {
+                crate::fs_watch::explorer_paths_need_refresh(
+                    root,
+                    &explorer.expanded_dirs,
+                    &changed,
+                )
+            });
+        if visible_in_any_tree {
+            self.invalidate_explorer_cache();
+            cx.notify();
+        }
     }
 
     fn explorer_entries(&mut self) -> Vec<ExplorerEntry> {
@@ -2057,8 +2164,9 @@ impl Focusable for WorkspacePrototype {
 }
 
 impl Render for WorkspacePrototype {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let _ = self.persist_workspace_recovery(false);
+        let viewport_size = window.viewport_size();
 
         let active_surface = self.active_surface_if_present();
         let active_tab_id = self.active_tab_id;
@@ -2244,6 +2352,7 @@ impl Render for WorkspacePrototype {
                     sidebar_rename,
                     sidebar_new_entry,
                     workspace_palette,
+                    viewport_size,
                     cx,
                 ))
             })

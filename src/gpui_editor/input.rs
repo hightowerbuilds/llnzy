@@ -680,6 +680,7 @@ impl Element for EditorInputElement {
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
+        refresh_measured_char_width(&self.input, window, cx);
         let (appearance, layout) = {
             let input = self.input.read(cx);
             let appearance = input.active_appearance();
@@ -733,6 +734,55 @@ impl Element for EditorInputElement {
             input.last_text_bounds = Some(bounds);
         });
     }
+}
+
+/// Mixed-case sample whose average advance stands in for typical text.
+/// Exact for monospace fonts; a reasonable average for proportional prose
+/// fonts, where the old 0.6-em guess made wrap width diverge badly from
+/// the rendered glyphs.
+const CHAR_WIDTH_SAMPLE: &str = "abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ 0123456789";
+
+/// Measure the active font's average glyph advance and store it on the
+/// editor. Cheap after the first call for a given font family + size: the
+/// stored key short-circuits before any shaping.
+fn refresh_measured_char_width(input: &Entity<EditorPrototype>, window: &mut Window, cx: &mut App) {
+    let (font_family, font_size, already_measured) = {
+        let editor = input.read(cx);
+        let appearance = editor.active_appearance();
+        let measured = editor.measured_char_width.as_ref().is_some_and(|measured| {
+            measured.font_family == appearance.font_family
+                && measured.font_size == appearance.font_size
+        });
+        (appearance.font_family, appearance.font_size, measured)
+    };
+    if already_measured {
+        return;
+    }
+    let sample = SharedString::from(CHAR_WIDTH_SAMPLE);
+    let run = TextRun {
+        len: sample.len(),
+        font: font(font_family.clone()),
+        color: gpui::black(),
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    };
+    let shaped = window
+        .text_system()
+        .shape_line(sample, font_size, &[run], None);
+    let width = px(f32::from(shaped.width) / CHAR_WIDTH_SAMPLE.chars().count() as f32);
+    if width <= px(0.0) {
+        return;
+    }
+    input.update(cx, |editor, cx| {
+        if editor.set_measured_char_width(MeasuredCharWidth {
+            font_family,
+            font_size,
+            width,
+        }) {
+            cx.notify();
+        }
+    });
 }
 
 /// Pure position arithmetic mirroring `Buffer::compute_end_pos_pub` but
@@ -843,6 +893,59 @@ pub(super) fn measured_position_for_point(
     Some(Position::new(line, col.min(buffer.line_len(line))))
 }
 
+/// Column offsets where each visual row of `line` begins when soft-wrapped
+/// into windows of `wrap_cols` characters. Always starts with 0. Breaks
+/// fall after the last whitespace inside the window so words stay intact;
+/// a run longer than the window is hard-broken at the column limit.
+pub(super) fn line_wrap_starts(line: &str, wrap_cols: usize) -> Vec<usize> {
+    let wrap_cols = wrap_cols.max(1);
+    let chars: Vec<char> = line.chars().collect();
+    let mut starts = vec![0usize];
+    let mut start = 0usize;
+    while chars.len() - start > wrap_cols {
+        let window_end = start + wrap_cols;
+        let next = (start..window_end)
+            .rev()
+            .find(|&i| chars[i].is_whitespace())
+            .map(|i| i + 1)
+            .unwrap_or(window_end);
+        starts.push(next);
+        start = next;
+    }
+    starts
+}
+
+/// Wrap starts for a buffer line, avoiding text materialisation for the
+/// common case of lines that fit the window.
+fn buffer_wrap_starts(buffer: &Buffer, line: usize, wrap_cols: usize) -> Vec<usize> {
+    if buffer.line_len(line) <= wrap_cols.max(1) {
+        vec![0]
+    } else {
+        line_wrap_starts(&buffer.line(line), wrap_cols)
+    }
+}
+
+fn wrapped_row_count_for(buffer: &Buffer, line: usize, wrap_cols: usize) -> usize {
+    if buffer.line_len(line) <= wrap_cols.max(1) {
+        1
+    } else {
+        line_wrap_starts(&buffer.line(line), wrap_cols).len()
+    }
+}
+
+/// Visual row index of `col` within a line whose wrap starts are `starts`.
+/// A column exactly at a break boundary belongs to the row it starts,
+/// except end-of-line which stays on the final row.
+fn wrap_index_for_col(starts: &[usize], col: usize, line_len: usize) -> usize {
+    if starts.len() <= 1 || col >= line_len {
+        return starts.len().saturating_sub(1);
+    }
+    match starts.binary_search(&col) {
+        Ok(index) => index,
+        Err(index) => index.saturating_sub(1),
+    }
+}
+
 pub(super) fn wrapped_visual_rows(
     buffer: &Buffer,
     start_visual_row: usize,
@@ -855,8 +958,8 @@ pub(super) fn wrapped_visual_rows(
     let end_visual_row = start_visual_row.saturating_add(visible_rows.max(1));
 
     for source_line in 0..buffer.line_count() {
-        let line_len = buffer.line_len(source_line);
-        let row_count = wrapped_row_count(line_len, wrap_cols);
+        let starts = buffer_wrap_starts(buffer, source_line, wrap_cols);
+        let row_count = starts.len();
         let line_end = visual_base + row_count;
         if line_end <= start_visual_row {
             visual_base = line_end;
@@ -869,10 +972,19 @@ pub(super) fn wrapped_visual_rows(
         let first_wrap = start_visual_row.saturating_sub(visual_base);
         let last_wrap = row_count.min(end_visual_row.saturating_sub(visual_base));
         for wrap_index in first_wrap..last_wrap {
+            let wrap_start_col = starts[wrap_index];
+            // Non-final rows clip to their exact segment so the next
+            // segment's characters render only on their own row; the final
+            // row keeps the full window so the cursor can sit past the last
+            // character (its segment is always <= wrap_cols).
+            let row_cols = match starts.get(wrap_index + 1) {
+                Some(next_start) => next_start - wrap_start_col,
+                None => wrap_cols,
+            };
             rows.push(WrappedVisualRow {
                 source_line,
-                wrap_start_col: wrap_index * wrap_cols,
-                wrap_cols,
+                wrap_start_col,
+                wrap_cols: row_cols,
                 show_line_number: wrap_index == 0,
             });
         }
@@ -883,9 +995,8 @@ pub(super) fn wrapped_visual_rows(
 }
 
 pub(super) fn total_wrapped_rows(buffer: &Buffer, wrap_cols: usize) -> usize {
-    let wrap_cols = wrap_cols.max(1);
     (0..buffer.line_count())
-        .map(|line| wrapped_row_count(buffer.line_len(line), wrap_cols))
+        .map(|line| wrapped_row_count_for(buffer, line, wrap_cols))
         .sum()
 }
 
@@ -894,12 +1005,12 @@ pub(super) fn visual_row_for_position(
     position: Position,
     wrap_cols: usize,
 ) -> usize {
-    let wrap_cols = wrap_cols.max(1);
     let preceding_rows = (0..position.line.min(buffer.line_count()))
-        .map(|line| wrapped_row_count(buffer.line_len(line), wrap_cols))
+        .map(|line| wrapped_row_count_for(buffer, line, wrap_cols))
         .sum::<usize>();
-    let line_len = buffer.line_len(position.line.min(buffer.line_count().saturating_sub(1)));
-    preceding_rows + wrapped_row_index_for_col(line_len, position.col, wrap_cols)
+    let line = position.line.min(buffer.line_count().saturating_sub(1));
+    let starts = buffer_wrap_starts(buffer, line, wrap_cols);
+    preceding_rows + wrap_index_for_col(&starts, position.col, buffer.line_len(line))
 }
 
 pub(super) fn move_cursor_by_wrapped_rows(
@@ -932,11 +1043,21 @@ pub(super) fn move_cursor_by_wrapped_rows(
         let Some(row) = wrapped_row_for_visual_row(buffer, target_visual_row, wrap_cols) else {
             return;
         };
+        // Clamp inside the target visual row: overshooting a short segment
+        // must not spill the cursor onto the next visual row. Only the
+        // final segment of a line may host the end-of-line column.
+        let line_len = buffer.line_len(row.source_line);
+        let segment_end = row.wrap_start_col.saturating_add(row.wrap_cols);
+        let max_col = if segment_end >= line_len {
+            line_len
+        } else {
+            segment_end.saturating_sub(1)
+        };
         Position::new(
             row.source_line,
             row.wrap_start_col
                 .saturating_add(current_visual_col)
-                .min(buffer.line_len(row.source_line)),
+                .min(max_col),
         )
     };
 
@@ -959,29 +1080,11 @@ fn wrapped_row_for_visual_row(
         .next()
 }
 
-fn wrapped_row_count(line_len: usize, wrap_cols: usize) -> usize {
-    let wrap_cols = wrap_cols.max(1);
-    if line_len == 0 {
-        1
-    } else {
-        line_len.saturating_sub(1) / wrap_cols + 1
-    }
-}
-
-fn wrapped_row_index_for_col(line_len: usize, col: usize, wrap_cols: usize) -> usize {
-    let wrap_cols = wrap_cols.max(1);
-    if col > 0 && col == line_len && col.is_multiple_of(wrap_cols) {
-        col / wrap_cols - 1
-    } else {
-        col / wrap_cols
-    }
-}
-
 fn visual_col_for_wrapped_position(buffer: &Buffer, position: Position, wrap_cols: usize) -> usize {
-    let wrap_cols = wrap_cols.max(1);
-    let line_len = buffer.line_len(position.line.min(buffer.line_count().saturating_sub(1)));
-    let wrap_index = wrapped_row_index_for_col(line_len, position.col, wrap_cols);
-    position.col.saturating_sub(wrap_index * wrap_cols)
+    let line = position.line.min(buffer.line_count().saturating_sub(1));
+    let starts = buffer_wrap_starts(buffer, line, wrap_cols);
+    let wrap_index = wrap_index_for_col(&starts, position.col, buffer.line_len(line));
+    position.col.saturating_sub(starts[wrap_index])
 }
 
 fn take_chars(text: &str, char_count: usize) -> String {
@@ -1396,6 +1499,68 @@ mod tests {
 
         assert_eq!(view.scroll_line, 100usize.saturating_sub(32 - 1));
         assert_eq!(view.scroll_col, 71);
+    }
+
+    #[test]
+    fn wrap_starts_break_at_word_boundaries() {
+        // Window of 10: "hello brave world" breaks after "hello " and
+        // "brave ", keeping words intact.
+        assert_eq!(line_wrap_starts("hello brave world", 10), vec![0, 6, 12]);
+    }
+
+    #[test]
+    fn wrap_starts_hard_break_unbroken_runs() {
+        assert_eq!(line_wrap_starts("abcdefghij", 4), vec![0, 4, 8]);
+        assert_eq!(line_wrap_starts("aaaa bbbbbbbbbb", 6), vec![0, 5, 11]);
+    }
+
+    #[test]
+    fn wrap_starts_keep_short_and_empty_lines_single_row() {
+        assert_eq!(line_wrap_starts("", 8), vec![0]);
+        assert_eq!(line_wrap_starts("short", 8), vec![0]);
+        assert_eq!(line_wrap_starts("exactfit", 8), vec![0]);
+    }
+
+    #[test]
+    fn wrap_index_maps_boundaries_to_row_starts_except_line_end() {
+        let starts = vec![0, 6, 12];
+        let line_len = 17;
+        assert_eq!(wrap_index_for_col(&starts, 0, line_len), 0);
+        assert_eq!(wrap_index_for_col(&starts, 5, line_len), 0);
+        assert_eq!(wrap_index_for_col(&starts, 6, line_len), 1);
+        assert_eq!(wrap_index_for_col(&starts, 12, line_len), 2);
+        assert_eq!(wrap_index_for_col(&starts, 17, line_len), 2);
+    }
+
+    #[test]
+    fn wrapped_rows_use_word_boundaries_and_exact_segments() {
+        let buffer = buffer_with_text("hello brave world");
+
+        let rows = wrapped_visual_rows(&buffer, 0, 4, 10);
+
+        assert_eq!(rows.len(), 3);
+        assert_eq!((rows[0].wrap_start_col, rows[0].wrap_cols), (0, 6));
+        assert_eq!((rows[1].wrap_start_col, rows[1].wrap_cols), (6, 6));
+        // Final row keeps the full window so end-of-line cursor fits.
+        assert_eq!((rows[2].wrap_start_col, rows[2].wrap_cols), (12, 10));
+        assert!(rows[0].show_line_number);
+        assert!(!rows[1].show_line_number);
+    }
+
+    #[test]
+    fn wrapped_movement_clamps_inside_short_segments() {
+        // Wrapped at 11 cols: rows are "hello12345 " (0..11), "brave "
+        // (11..17), "xxxxxxxxxxx" (17..28). Moving down from visual col 9
+        // must stay on the short middle row, not spill onto the next one.
+        let buffer = buffer_with_text("hello12345 brave xxxxxxxxxxx");
+        let mut view = BufferView::default();
+        view.cursor.pos = Position::new(0, 9);
+
+        move_cursor_by_wrapped_rows(&mut view, &buffer, 11, 1, false);
+
+        assert_eq!(view.cursor.pos.line, 0);
+        assert_eq!(view.cursor.pos.col, 16);
+        assert_eq!(view.cursor.desired_col, Some(9));
     }
 
     #[test]

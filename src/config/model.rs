@@ -145,7 +145,50 @@ pub struct EditorConfig {
     pub show_line_numbers: bool,
     pub highlight_current_line: bool,
     pub keybinding_preset: KeybindingPreset,
+    pub markdown_preview_style: MarkdownPreviewStyle,
     pub languages: HashMap<String, EditorLanguageConfig>,
+}
+
+/// Visual style of the editor's markdown preview. Selected from Settings
+/// (persisted as a workspace preference); `Default` keeps the app-native
+/// look driven by the active theme.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MarkdownPreviewStyle {
+    #[default]
+    Default,
+    Newspaper,
+    ResearchPaper,
+}
+
+impl MarkdownPreviewStyle {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "default" => Some(Self::Default),
+            "newspaper" => Some(Self::Newspaper),
+            "research-paper" | "research_paper" | "research paper" => Some(Self::ResearchPaper),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::Newspaper => "newspaper",
+            Self::ResearchPaper => "research-paper",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Default => "Default",
+            Self::Newspaper => "Newspaper",
+            Self::ResearchPaper => "Research Paper",
+        }
+    }
+
+    pub fn all() -> [Self; 3] {
+        [Self::Default, Self::Newspaper, Self::ResearchPaper]
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -184,6 +227,7 @@ impl Default for EditorConfig {
             show_line_numbers: true,
             highlight_current_line: true,
             keybinding_preset: KeybindingPreset::VsCode,
+            markdown_preview_style: MarkdownPreviewStyle::default(),
             languages: HashMap::new(),
         }
     }

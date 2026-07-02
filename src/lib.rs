@@ -7,6 +7,7 @@ pub mod editor;
 pub mod effects;
 pub mod error_log;
 pub mod explorer;
+pub mod fs_watch;
 pub mod git;
 #[cfg(feature = "gpui-editor")]
 pub mod gpui_editor;

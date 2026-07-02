@@ -61,6 +61,11 @@ pub struct WorkspacePreferences {
     #[serde(default)]
     pub editor_word_wrap: Option<bool>,
 
+    /// Markdown preview style name ("default", "newspaper",
+    /// "research-paper"). `None` means the built-in default look.
+    #[serde(default)]
+    pub markdown_preview_style: Option<String>,
+
     /// Name of the app-wide built-in theme selected from Settings > App.
     /// `None` means "use config.toml defaults".
     #[serde(default)]
@@ -150,6 +155,7 @@ mod tests {
             terminal_layout: "display".to_string(),
             editor_syntax_theme: Some("Dracula".to_string()),
             editor_word_wrap: Some(true),
+            markdown_preview_style: Some("newspaper".to_string()),
             app_theme: Some("Light Mode".to_string()),
             joined_tab_limit: 4,
         };
@@ -181,6 +187,7 @@ mod tests {
         assert_eq!(loaded.terminal_layout, "display");
         assert!(loaded.editor_syntax_theme.is_none());
         assert!(loaded.editor_word_wrap.is_none());
+        assert!(loaded.markdown_preview_style.is_none());
         assert!(loaded.app_theme.is_none());
         assert_eq!(loaded.joined_tab_limit(), 2);
         let _ = std::fs::remove_dir_all(&dir);

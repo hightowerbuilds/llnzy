@@ -313,6 +313,7 @@ impl WorkspacePrototype {
         );
         self.sidebar_explorer.expanded_dirs.insert(parent);
         self.sidebar_context_menu = None;
+        self.invalidate_explorer_cache();
         self.sidebar_explorer.status =
             Some(format!("Renamed to {}", display_path_name(&destination)));
         cx.notify();
@@ -483,6 +484,7 @@ impl WorkspacePrototype {
             .insert(state.parent.clone());
         self.sidebar_explorer.selected_path = Some(destination.clone());
         self.sidebar_context_menu = None;
+        self.invalidate_explorer_cache();
         let noun = match state.kind {
             NewEntryKind::File => "file",
             NewEntryKind::Folder => "folder",
@@ -615,6 +617,7 @@ impl WorkspacePrototype {
         self.sidebar_context_menu = None;
         self.sidebar_rename = None;
         self.sidebar_new_entry = None;
+        self.invalidate_explorer_cache();
         self.sidebar_explorer.status = Some(format!("Deleted {}", display_path_name(&path)));
         cx.notify();
     }
@@ -687,6 +690,7 @@ impl WorkspacePrototype {
                 .expanded_dirs
                 .insert(project_root.clone());
             self.sidebar_explorer.selected_path = Some(destination);
+            self.invalidate_explorer_cache();
         }
 
         self.sidebar_explorer.status = if copied_count > 0 {
@@ -752,6 +756,7 @@ impl WorkspacePrototype {
         self.sidebar_explorer
             .expanded_dirs
             .insert(plan.destination_folder.clone());
+        self.invalidate_explorer_cache();
         self.remap_after_explorer_move(&plan.items, cx);
         let moved_count = plan.len();
         self.sidebar_explorer.status = Some(if moved_count == 1 {
@@ -859,6 +864,7 @@ impl WorkspacePrototype {
         }
         crate::explorer::add_recent_project(&mut self.recent_projects, path.clone());
         self.workspace_root = Some(path.clone());
+        self.rebuild_explorer_watcher();
         self.sketch.update(cx, |sketch, _cx| {
             sketch.set_workspace_root(Some(path.clone()))
         });
@@ -877,6 +883,7 @@ impl WorkspacePrototype {
             return;
         }
         self.workspace_root = None;
+        self.rebuild_explorer_watcher();
         self.sketch
             .update(cx, |sketch, _cx| sketch.set_workspace_root(None));
         self.sidebar_explorer.expanded_dirs.clear();

@@ -114,6 +114,96 @@ pub(super) struct SidebarRenameState {
     pub(super) replace_on_input: bool,
 }
 
+/// Minimum gap kept between the context menu and the window edges.
+const MENU_EDGE_MARGIN: f32 = 8.0;
+/// Row metrics mirroring `sidebar_menu_header` / `sidebar_menu_button` /
+/// the inline text fields, plus the panel's `gap_1`, `p_1`, and `border_1`.
+const MENU_HEADER_HEIGHT: f32 = 28.0;
+const MENU_BUTTON_HEIGHT: f32 = 30.0;
+const MENU_FIELD_HEIGHT: f32 = 32.0;
+const MENU_ROW_GAP: f32 = 4.0;
+const MENU_FRAME_HEIGHT: f32 = 10.0;
+const MENU_PANEL_MAX_HEIGHT: f32 = 420.0;
+
+/// Vertical placement for the sidebar context menu.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) enum MenuVerticalPlacement {
+    /// Menu top anchored at the click point; opens downward.
+    Below { top: f32 },
+    /// Menu bottom anchored at the click point; opens upward. The value is
+    /// the distance from the bottom of the window to the click point, so it
+    /// stays exact even when the rendered menu is shorter than estimated.
+    Above { bottom: f32 },
+}
+
+/// Open downward when the menu fits below the click point, upward when it
+/// only fits above; when neither side fits, use whichever side has more
+/// room and let the panel's max-height clip the rest.
+pub(super) fn place_context_menu_vertically(
+    click_y: f32,
+    estimated_height: f32,
+    viewport_height: f32,
+) -> MenuVerticalPlacement {
+    let space_below = viewport_height - click_y;
+    let fits_below = estimated_height + MENU_EDGE_MARGIN <= space_below;
+    let fits_above = estimated_height + MENU_EDGE_MARGIN <= click_y;
+    if fits_below || (!fits_above && space_below >= click_y) {
+        MenuVerticalPlacement::Below { top: click_y }
+    } else {
+        MenuVerticalPlacement::Above {
+            bottom: viewport_height - click_y,
+        }
+    }
+}
+
+/// Keep the menu inside the window horizontally.
+pub(super) fn clamp_context_menu_left(click_x: f32, menu_width: f32, viewport_width: f32) -> f32 {
+    click_x
+        .min(viewport_width - menu_width - MENU_EDGE_MARGIN)
+        .max(MENU_EDGE_MARGIN)
+}
+
+/// Estimated rendered height of the context menu for placement. Mirrors the
+/// child rows each view stacks in `workspace_sidebar_context_menu`; the
+/// destination list in the Move view is unbounded, so it uses the panel's
+/// max height.
+pub(super) fn estimated_context_menu_height(
+    view: SidebarContextMenuView,
+    is_dir: bool,
+    has_relative_path: bool,
+) -> f32 {
+    let rows: Vec<f32> = match view {
+        SidebarContextMenuView::Main => {
+            let mut buttons = 4; // Rename, Copy Path, Move..., Delete...
+            if is_dir {
+                buttons += 2; // New File, New Folder
+            }
+            if has_relative_path {
+                buttons += 1; // Copy Relative Path
+            }
+            let mut rows = vec![MENU_HEADER_HEIGHT];
+            rows.extend(std::iter::repeat_n(MENU_BUTTON_HEIGHT, buttons));
+            rows
+        }
+        SidebarContextMenuView::Rename | SidebarContextMenuView::NewEntry => vec![
+            MENU_HEADER_HEIGHT,
+            MENU_FIELD_HEIGHT,
+            MENU_BUTTON_HEIGHT,
+            MENU_BUTTON_HEIGHT,
+        ],
+        SidebarContextMenuView::Move => return MENU_PANEL_MAX_HEIGHT,
+        SidebarContextMenuView::DeleteConfirm => vec![
+            MENU_HEADER_HEIGHT,
+            MENU_BUTTON_HEIGHT, // name note row
+            MENU_BUTTON_HEIGHT,
+            MENU_BUTTON_HEIGHT,
+        ],
+    };
+    let stacked: f32 =
+        rows.iter().sum::<f32>() + MENU_ROW_GAP * (rows.len().saturating_sub(1)) as f32;
+    (stacked + MENU_FRAME_HEIGHT).min(MENU_PANEL_MAX_HEIGHT)
+}
+
 #[derive(Clone, Copy)]
 struct SidebarResizeDrag;
 
@@ -375,16 +465,27 @@ pub(super) fn workspace_sidebar_context_menu(
     rename: Option<SidebarRenameState>,
     new_entry: Option<SidebarNewEntryState>,
     palette: WorkspacePalette,
+    viewport: gpui::Size<gpui::Pixels>,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     let menu_width = match menu.view {
         SidebarContextMenuView::Move => 300.0,
         _ => 220.0,
     };
-    let mut panel = div()
-        .absolute()
-        .left(px(menu.x))
-        .top(px(menu.y))
+    let menu_has_relative_path = workspace_root
+        .as_ref()
+        .is_some_and(|root| menu.path.strip_prefix(root).is_ok());
+    let estimated_height =
+        estimated_context_menu_height(menu.view, menu.is_dir, menu_has_relative_path);
+    let left = clamp_context_menu_left(menu.x, menu_width, f32::from(viewport.width));
+    let placement =
+        place_context_menu_vertically(menu.y, estimated_height, f32::from(viewport.height));
+    let panel = div().absolute().left(px(left));
+    let panel = match placement {
+        MenuVerticalPlacement::Below { top } => panel.top(px(top)),
+        MenuVerticalPlacement::Above { bottom } => panel.bottom(px(bottom)),
+    };
+    let mut panel = panel
         .w(px(menu_width))
         .max_h(px(420.0))
         .overflow_hidden()
@@ -1392,4 +1493,81 @@ fn should_skip_explorer_entry(name: &str) -> bool {
         name,
         ".git" | ".DS_Store" | "target" | "node_modules" | ".next" | "dist" | "build"
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn menu_opens_downward_when_it_fits_below() {
+        assert_eq!(
+            place_context_menu_vertically(100.0, 300.0, 800.0),
+            MenuVerticalPlacement::Below { top: 100.0 }
+        );
+    }
+
+    #[test]
+    fn menu_opens_upward_near_the_bottom_edge() {
+        assert_eq!(
+            place_context_menu_vertically(700.0, 300.0, 800.0),
+            MenuVerticalPlacement::Above { bottom: 100.0 }
+        );
+    }
+
+    #[test]
+    fn menu_uses_the_roomier_side_when_neither_fits() {
+        // Window shorter than the menu on both sides of the click point.
+        assert_eq!(
+            place_context_menu_vertically(150.0, 420.0, 400.0),
+            MenuVerticalPlacement::Below { top: 150.0 }
+        );
+        assert_eq!(
+            place_context_menu_vertically(250.0, 420.0, 400.0),
+            MenuVerticalPlacement::Above { bottom: 150.0 }
+        );
+    }
+
+    #[test]
+    fn menu_left_edge_is_clamped_to_the_window() {
+        assert_eq!(clamp_context_menu_left(50.0, 220.0, 1200.0), 50.0);
+        assert_eq!(
+            clamp_context_menu_left(1100.0, 220.0, 1200.0),
+            1200.0 - 220.0 - MENU_EDGE_MARGIN
+        );
+        assert_eq!(
+            clamp_context_menu_left(-20.0, 220.0, 1200.0),
+            MENU_EDGE_MARGIN
+        );
+    }
+
+    #[test]
+    fn directory_main_menu_is_taller_than_file_main_menu() {
+        let dir = estimated_context_menu_height(SidebarContextMenuView::Main, true, true);
+        let file = estimated_context_menu_height(SidebarContextMenuView::Main, false, true);
+        assert!(dir > file);
+        // 8 rows: header + 7 buttons, 7 gaps, frame.
+        assert_eq!(dir, 28.0 + 7.0 * 30.0 + 7.0 * 4.0 + 10.0);
+    }
+
+    #[test]
+    fn move_view_estimate_is_the_panel_max_height() {
+        assert_eq!(
+            estimated_context_menu_height(SidebarContextMenuView::Move, true, true),
+            MENU_PANEL_MAX_HEIGHT
+        );
+    }
+
+    #[test]
+    fn estimates_never_exceed_the_panel_max_height() {
+        for view in [
+            SidebarContextMenuView::Main,
+            SidebarContextMenuView::Rename,
+            SidebarContextMenuView::NewEntry,
+            SidebarContextMenuView::Move,
+            SidebarContextMenuView::DeleteConfirm,
+        ] {
+            assert!(estimated_context_menu_height(view, true, true) <= MENU_PANEL_MAX_HEIGHT);
+        }
+    }
 }
