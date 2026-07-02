@@ -80,6 +80,12 @@ Requires Rust 1.75+. macOS is the active release target.
 | Cmd+Shift+D | Duplicate line or selection |
 | Cmd+Shift+K | Delete line |
 | Alt+Up / Alt+Down | Move line |
+| F12 / Shift+F12 | Go to definition / find references |
+| F2 | Rename symbol |
+| Ctrl+Space | Trigger completion |
+| Cmd+. | Code actions |
+| Alt+Shift+F | Format document |
+| Cmd+Shift+O | Document symbols |
 | Shift+PageUp / Shift+PageDown | Scroll terminal page |
 | Cmd+R | Restart terminal session |
 

@@ -474,6 +474,17 @@ pub fn run_workspace_prototype() {
             // via `on_workspace_key_down` before the action system sees them.
             KeyBinding::new("cmd-shift-p", MenuShowCommandPalette, None),
             KeyBinding::new("cmd-p", MenuShowFileFinder, None),
+            // LSP actions use their conventional editor bindings (VS Code
+            // layout). They dispatch through the same workspace handlers as
+            // the command palette, which no-op unless a file editor is the
+            // active surface.
+            KeyBinding::new("f12", MenuLspDefinition, None),
+            KeyBinding::new("shift-f12", MenuLspReferences, None),
+            KeyBinding::new("f2", MenuLspRename, None),
+            KeyBinding::new("ctrl-space", MenuLspCompletion, None),
+            KeyBinding::new("cmd-.", MenuLspCodeActions, None),
+            KeyBinding::new("alt-shift-f", MenuLspFormat, None),
+            KeyBinding::new("cmd-shift-o", MenuLspSymbols, None),
         ]);
 
         let bounds = Bounds::centered(None, size(px(1320.0), px(820.0)), cx);
@@ -560,6 +571,9 @@ fn install_workspace_menu_bar(cx: &mut App) {
                 MenuItem::action("Find", MenuFind),
             ],
         },
+        // Deliberately small: everything editor-related also lives in the
+        // command palette, and the LSP actions are keyboard-driven (their
+        // popups anchor to the text cursor, which a menu-bar trip defeats).
         Menu {
             name: "Editor".into(),
             items: vec![
@@ -569,20 +583,7 @@ fn install_workspace_menu_bar(cx: &mut App) {
                 MenuItem::action("Close Other Files", MenuEditorCloseOthers),
                 MenuItem::action("Close Saved Files", MenuEditorCloseSaved),
                 MenuItem::separator(),
-                MenuItem::action("Markdown Source", MenuMarkdownSource),
-                MenuItem::action("Markdown Preview", MenuMarkdownPreview),
-                MenuItem::action("Markdown Split", MenuMarkdownSplit),
                 MenuItem::action("Cycle Markdown Mode", MenuMarkdownCycle),
-                MenuItem::separator(),
-                MenuItem::action("Hover", MenuLspHover),
-                MenuItem::action("Completion", MenuLspCompletion),
-                MenuItem::action("Go to Definition", MenuLspDefinition),
-                MenuItem::action("Find References", MenuLspReferences),
-                MenuItem::action("Signature Help", MenuLspSignatureHelp),
-                MenuItem::action("Rename Symbol", MenuLspRename),
-                MenuItem::action("Code Actions", MenuLspCodeActions),
-                MenuItem::action("Format Document", MenuLspFormat),
-                MenuItem::action("Document Symbols", MenuLspSymbols),
             ],
         },
         Menu {

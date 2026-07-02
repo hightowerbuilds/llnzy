@@ -18,7 +18,7 @@ Near-term fixes and improvements, in no particular order.
 
 ## Workspace
 
-- [ ] **Sort out desktop menu** — the app/desktop menu needs cleanup and reorganization.
+- [x] **Sort out desktop menu** — the app/desktop menu needs cleanup and reorganization. *(Done: Editor menu trimmed 15 → 5 items — explicit markdown modes collapsed into Cycle, LSP entries removed in favor of conventional keybindings (F12, Shift+F12, F2, Ctrl+Space, Cmd+., Alt+Shift+F, Cmd+Shift+O) plus existing command-palette coverage. Other menus reviewed and kept.)*
 - [x] **Flip explorer context menu upward near the bottom edge** — the dropdown on folders/files in the explorer opens downward unconditionally; when the click point is closer to the bottom edge of the window than the menu's height, it should open upward so it stays fully visible. *(Done: menu anchors its bottom edge at the click point and opens upward when the estimated per-view height doesn't fit below; horizontal position is clamped to the window too.)*
 - [x] **Resolve sidebar/explorer bugs** — files need to appear immediately (e.g. on create/change); fix stale tree state. *(Done: new `fs_watch` module watches the workspace root and invalidates the tree cache on relevant changes — terminal/agent/Finder-created files appear within ~500ms; sidebar file ops (rename, create, delete, drag-move, image import) invalidate instantly. Collapsed-directory churn like `target/` during builds is filtered out.)*
 
