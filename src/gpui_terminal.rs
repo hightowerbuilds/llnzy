@@ -322,7 +322,13 @@ impl TerminalSurface {
         let Some(session) = &mut self.session else {
             return;
         };
-        session.write(bytes);
+        // This is the chokepoint for every keystroke, paste, and control
+        // sequence the user produces. Input is never dropped silently, so a
+        // failure here is genuinely unusual and worth telling the user about
+        // rather than logging into a panel they are not looking at.
+        if let Err(err) = session.write(bytes) {
+            self.status_message = Some(format!("Terminal input not delivered: {err}"));
+        }
         cx.notify();
     }
 
@@ -508,7 +514,13 @@ impl TerminalSurface {
             // Straight to the PTY: unlike keyboard input, wheel reports and
             // alternate-scroll arrows must not snap the display to the
             // bottom (Session::write does).
-            session.pty.write(&payload);
+            //
+            // A lost wheel report is cosmetic, unlike a lost keystroke, so
+            // this path stays quiet rather than interrupting a scroll with a
+            // status message.
+            if let Err(err) = session.pty.write(&payload) {
+                log::debug!("dropping terminal wheel report: {err}");
+            }
         }
     }
 

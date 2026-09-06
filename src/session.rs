@@ -73,7 +73,13 @@ impl Session {
                 {
                     TerminalEventAction::None => {}
                     TerminalEventAction::PtyWrite(t) => {
-                        self.pty.write(t.as_bytes());
+                        // Emulator-generated replies (DSR, DA) issued from
+                        // inside the drain loop. `write` is non-blocking, so
+                        // this cannot starve the drain that feeds it. A failed
+                        // reply is not user input worth surfacing.
+                        if let Err(err) = self.pty.write(t.as_bytes()) {
+                            log::debug!("dropping terminal reply to pty: {err}");
+                        }
                     }
                     TerminalEventAction::ClipboardStore(t) => {
                         clipboard_text = Some(t);
@@ -117,9 +123,9 @@ impl Session {
         }
     }
 
-    pub fn write(&mut self, data: &[u8]) {
+    pub fn write(&mut self, data: &[u8]) -> std::io::Result<()> {
         self.terminal.scroll_to_bottom();
-        self.pty.write(data);
+        self.pty.write(data)
     }
 
     pub fn kill(&mut self) -> std::io::Result<()> {
