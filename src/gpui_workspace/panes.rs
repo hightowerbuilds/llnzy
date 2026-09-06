@@ -34,6 +34,7 @@ pub(super) struct WorkspaceSurfaceContext {
     pub(super) appearance_config: Config,
     pub(super) appearance_page: AppearancePage,
     pub(super) academy_course: Option<AcademyCourseId>,
+    pub(super) academy_progress: crate::academy_progress::AcademyProgress,
     pub(super) terminal_background_import_error: Option<String>,
     pub(super) editor_word_wrap: bool,
     pub(super) joined_tab_limit: usize,
@@ -346,6 +347,7 @@ pub(super) fn workspace_surface_pane(
         appearance_config,
         appearance_page,
         academy_course,
+        academy_progress,
         terminal_background_import_error,
         editor_word_wrap,
         joined_tab_limit,
@@ -448,6 +450,7 @@ pub(super) fn workspace_surface_pane(
             workspace_root,
             recent_projects,
             &appearance_config,
+            &academy_progress,
             cx,
         )),
         WorkspaceSurface::Settings => pane.child(settings_surface(

@@ -614,6 +614,17 @@ impl WorkspacePrototype {
         cx.notify();
     }
 
+    /// Home progress row click: select the course and open its Academy tab.
+    pub(super) fn open_academy_course(
+        &mut self,
+        course: AcademyCourseId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.academy_course = Some(course);
+        self.open_or_activate_surface(WorkspaceSurface::Academy, window, cx);
+    }
+
     /// Drop the Academy course selection, returning the surface to the
     /// course picker.
     pub(super) fn clear_academy_course_selection(&mut self, cx: &mut Context<Self>) {

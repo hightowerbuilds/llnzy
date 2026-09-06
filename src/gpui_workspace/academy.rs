@@ -6,9 +6,12 @@
 //! list. It is a picker only — no course runtime, no lessons rendered
 //! here; the panel says so explicitly.
 
-use gpui::prelude::*;
-use gpui::{div, px, rgb, Context, MouseButton, MouseDownEvent};
+use std::sync::Arc;
 
+use gpui::prelude::*;
+use gpui::{div, img, px, rgb, Context, MouseButton, MouseDownEvent, RenderImage};
+
+use crate::academy_progress::{COURSE_JS_TS, COURSE_RUST};
 use crate::config::Config;
 
 use super::{WorkspacePalette, WorkspacePrototype};
@@ -20,6 +23,29 @@ use super::{WorkspacePalette, WorkspacePrototype};
 pub(super) enum AcademyCourseId {
     JavaScriptTypeScript,
     Rust,
+}
+
+impl AcademyCourseId {
+    /// Course insignia rendered next to the title on cards and Home rows.
+    pub(super) fn logo(self) -> Option<Arc<RenderImage>> {
+        let bytes: &'static [u8] = match self {
+            AcademyCourseId::JavaScriptTypeScript => {
+                include_bytes!("../../assets/academy/javascript-logo.png")
+            }
+            AcademyCourseId::Rust => include_bytes!("../../assets/academy/rust-logo.png"),
+        };
+        render_png(bytes)
+    }
+}
+
+/// Decode an embedded PNG once per call; callers keep the returned
+/// `RenderImage` in the element tree only for the frame it is built in,
+/// which is the same lifetime model as any GPUI image source.
+fn render_png(bytes: &'static [u8]) -> Option<Arc<RenderImage>> {
+    let decoded = image::load_from_memory(bytes).ok()?;
+    let rgba = decoded.to_rgba8();
+    let frame = image::Frame::new(rgba);
+    Some(Arc::new(RenderImage::new(vec![frame])))
 }
 
 /// Everything the picker card and the preview panel need to draw one
@@ -34,6 +60,18 @@ struct AcademyCourse {
     project: &'static str,
     prerequisite: &'static str,
 }
+
+/// (id, display title, progress-store key) for the Home progress rows.
+/// Home renders from this so the picker and Home can never drift on
+/// course identity.
+pub(super) const ACADEMY_COURSE_ROWS: [(AcademyCourseId, &str, &str); 2] = [
+    (
+        AcademyCourseId::JavaScriptTypeScript,
+        "JavaScript / TypeScript",
+        COURSE_JS_TS,
+    ),
+    (AcademyCourseId::Rust, "Rust", COURSE_RUST),
+];
 
 /// The launch catalog, in display order.
 fn academy_courses() -> [AcademyCourse; 2] {
@@ -214,9 +252,21 @@ fn academy_course_card(
                 .gap_2()
                 .child(
                     div()
-                        .text_size(px(15.0))
-                        .text_color(rgb(palette.active_text))
-                        .child(course.title),
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(match course.id.logo() {
+                            Some(logo) => {
+                                div().child(img(Arc::clone(&logo)).size(px(28.0)).flex_none())
+                            }
+                            None => div(),
+                        })
+                        .child(
+                            div()
+                                .text_size(px(15.0))
+                                .text_color(rgb(palette.active_text))
+                                .child(course.title),
+                        ),
                 )
                 .child(
                     div()
