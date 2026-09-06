@@ -539,9 +539,21 @@ impl WorkspacePrototype {
         self.open_or_activate_surface(surface, window, cx);
     }
 
-    /// Home → "New Course" button: open the Academy course picker in a tab,
+    /// Home → "Open Course" button: open the Academy course picker in a tab,
     /// reusing the same surface activation path the desktop menu uses.
     pub(super) fn open_academy_from_home(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.academy_course = None;
+        self.open_or_activate_surface(WorkspaceSurface::Academy, window, cx);
+    }
+
+    /// Sidebar → "New Course" button: same Academy picker, same activation
+    /// path. Kept separate from the Home entry point so the two can diverge
+    /// (e.g. the sidebar one may later pre-select a course).
+    pub(super) fn open_academy_course_picker(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.academy_course = None;
         self.open_or_activate_surface(WorkspaceSurface::Academy, window, cx);
     }

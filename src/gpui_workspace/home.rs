@@ -150,7 +150,7 @@ fn home_new_course_button(
                 this.open_academy_from_home(window, cx);
             }),
         )
-        .child("New Course")
+        .child("Open Course")
 }
 
 fn home_recent_project_row(

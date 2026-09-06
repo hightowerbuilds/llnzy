@@ -27,6 +27,13 @@ pub(super) fn workspace_footer(
             cx,
         ))
         .child(footer_button(
+            "Courses",
+            WorkspaceSurface::Academy,
+            active_surface,
+            palette,
+            cx,
+        ))
+        .child(footer_button(
             "Terminal",
             WorkspaceSurface::Terminal,
             active_surface,

@@ -880,7 +880,7 @@ fn sidebar_project_controls(
             true,
             palette,
             cx,
-            |this, cx| {
+            |this, _window, cx| {
                 this.pick_open_project(cx);
             },
         ))
@@ -889,8 +889,17 @@ fn sidebar_project_controls(
             false,
             palette,
             cx,
-            |this, cx| {
+            |this, _window, cx| {
                 this.toggle_recent_projects(cx);
+            },
+        ))
+        .child(project_button(
+            "New Course",
+            false,
+            palette,
+            cx,
+            |this, window, cx| {
+                this.open_academy_course_picker(window, cx);
             },
         ));
 
@@ -943,7 +952,7 @@ fn project_button(
     primary: bool,
     palette: WorkspacePalette,
     cx: &mut Context<WorkspacePrototype>,
-    on_click: impl Fn(&mut WorkspacePrototype, &mut Context<WorkspacePrototype>) + 'static,
+    on_click: impl Fn(&mut WorkspacePrototype, &mut Window, &mut Context<WorkspacePrototype>) + 'static,
 ) -> impl IntoElement {
     div()
         .w_full()
@@ -962,8 +971,8 @@ fn project_button(
         .cursor_pointer()
         .on_mouse_down(
             MouseButton::Left,
-            cx.listener(move |this, _: &MouseDownEvent, _window, cx| {
-                on_click(this, cx);
+            cx.listener(move |this, _: &MouseDownEvent, window, cx| {
+                on_click(this, window, cx);
             }),
         )
         .child(label)
