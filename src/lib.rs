@@ -12,10 +12,6 @@ pub mod git;
 #[cfg(feature = "gpui-editor")]
 pub mod gpui_editor;
 #[cfg(feature = "gpui-workspace")]
-pub mod gpui_sketch;
-#[cfg(feature = "gpui-stacker")]
-pub mod gpui_stacker;
-#[cfg(feature = "gpui-workspace")]
 pub mod gpui_tabs;
 #[cfg(feature = "gpui-workspace")]
 pub mod gpui_terminal;
@@ -29,11 +25,10 @@ pub mod preferences;
 pub mod pty;
 pub mod session;
 pub mod sidebar_move;
-pub mod sketch;
-pub mod stacker;
 pub mod tab_groups;
 pub mod tasks;
 pub mod terminal;
 pub mod text_utils;
 pub mod theme;
 pub mod theme_store;
+pub mod utf16;

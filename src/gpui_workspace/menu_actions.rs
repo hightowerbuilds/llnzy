@@ -13,9 +13,8 @@ use super::{
     MenuMarkdownSource, MenuMarkdownSplit, MenuNewTab, MenuNextTab, MenuOpenProject,
     MenuPartitionHorizontal, MenuPartitionVertical, MenuPaste, MenuPreviousTab, MenuRedo, MenuSave,
     MenuSelectAll, MenuSeparateTabs, MenuShowAppearances, MenuShowCommandPalette, MenuShowEditor,
-    MenuShowFileFinder, MenuShowHome, MenuShowSketch, MenuShowStacker, MenuShowTerminal,
-    MenuSwapTabs, MenuToggleSidebar, MenuUndo, MenuZoomIn, MenuZoomOut, MenuZoomReset,
-    WorkspacePrototype, WorkspaceSurface,
+    MenuShowFileFinder, MenuShowHome, MenuShowTerminal, MenuSwapTabs, MenuToggleSidebar, MenuUndo,
+    MenuZoomIn, MenuZoomOut, MenuZoomReset, WorkspacePrototype, WorkspaceSurface,
 };
 
 impl WorkspacePrototype {
@@ -280,44 +279,23 @@ impl WorkspacePrototype {
     }
 
     pub(super) fn menu_save(&mut self, _: &MenuSave, _: &mut Window, cx: &mut Context<Self>) {
-        match self.active_surface() {
-            WorkspaceSurface::Editor => {
-                self.active_editor_entity()
-                    .update(cx, |editor, cx| editor.save_active_buffer(cx));
-            }
-            WorkspaceSurface::Sketch => {
-                self.sketch
-                    .update(cx, |sketch, cx| sketch.save_from_workspace(cx));
-            }
-            _ => {}
+        if self.active_surface() == WorkspaceSurface::Editor {
+            self.active_editor_entity()
+                .update(cx, |editor, cx| editor.save_active_buffer(cx));
         }
     }
 
     pub(super) fn menu_undo(&mut self, _: &MenuUndo, _: &mut Window, cx: &mut Context<Self>) {
-        match self.active_surface() {
-            WorkspaceSurface::Editor => {
-                self.active_editor_entity()
-                    .update(cx, |editor, cx| editor.undo_edit(cx));
-            }
-            WorkspaceSurface::Sketch => {
-                self.sketch
-                    .update(cx, |sketch, cx| sketch.undo_from_workspace(cx));
-            }
-            _ => {}
+        if self.active_surface() == WorkspaceSurface::Editor {
+            self.active_editor_entity()
+                .update(cx, |editor, cx| editor.undo_edit(cx));
         }
     }
 
     pub(super) fn menu_redo(&mut self, _: &MenuRedo, _: &mut Window, cx: &mut Context<Self>) {
-        match self.active_surface() {
-            WorkspaceSurface::Editor => {
-                self.active_editor_entity()
-                    .update(cx, |editor, cx| editor.redo_edit(cx));
-            }
-            WorkspaceSurface::Sketch => {
-                self.sketch
-                    .update(cx, |sketch, cx| sketch.redo_from_workspace(cx));
-            }
-            _ => {}
+        if self.active_surface() == WorkspaceSurface::Editor {
+            self.active_editor_entity()
+                .update(cx, |editor, cx| editor.redo_edit(cx));
         }
     }
 
@@ -578,15 +556,6 @@ impl WorkspacePrototype {
         self.menu_show_surface(WorkspaceSurface::Terminal, window, cx);
     }
 
-    pub(super) fn menu_show_stacker(
-        &mut self,
-        _: &MenuShowStacker,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.menu_show_surface(WorkspaceSurface::Stacker, window, cx);
-    }
-
     pub(super) fn menu_show_editor(
         &mut self,
         _: &MenuShowEditor,
@@ -594,15 +563,6 @@ impl WorkspacePrototype {
         cx: &mut Context<Self>,
     ) {
         self.menu_show_surface(WorkspaceSurface::Editor, window, cx);
-    }
-
-    pub(super) fn menu_show_sketch(
-        &mut self,
-        _: &MenuShowSketch,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.menu_show_surface(WorkspaceSurface::Sketch, window, cx);
     }
 
     pub(super) fn menu_show_appearances(

@@ -9,8 +9,6 @@ use gpui::{
 use crate::{
     config::Config,
     gpui_editor::EditorPrototype,
-    gpui_sketch::SketchSurface,
-    gpui_stacker::StackerPrototype,
     gpui_terminal::{terminal_background_layer, terminal_shader_effect_layer, TerminalSurface},
 };
 
@@ -26,11 +24,9 @@ use crate::tab_groups::PartitionAxis;
 
 #[derive(Clone)]
 pub(super) struct WorkspaceSurfaceContext {
-    pub(super) stacker: Entity<StackerPrototype>,
     pub(super) editor: Entity<EditorPrototype>,
     pub(super) file_editors: BTreeMap<u64, Entity<EditorPrototype>>,
     pub(super) terminals: BTreeMap<u64, Entity<TerminalSurface>>,
-    pub(super) sketch: Entity<SketchSurface>,
     pub(super) workspace_root: Option<PathBuf>,
     pub(super) recent_projects: Vec<PathBuf>,
     pub(super) explorers: BTreeMap<u64, ExplorerState>,
@@ -339,11 +335,9 @@ pub(super) fn workspace_surface_pane(
     cx: &mut Context<WorkspacePrototype>,
 ) -> gpui::Div {
     let WorkspaceSurfaceContext {
-        stacker,
         editor,
         file_editors,
         terminals,
-        sketch,
         workspace_root,
         recent_projects,
         explorers,
@@ -357,7 +351,6 @@ pub(super) fn workspace_surface_pane(
         pending_clear_error_log,
     } = context;
     let palette = WorkspacePalette::from_config(&appearance_config);
-    let sketch_toolbar_position = sketch.read(cx).toolbar_position();
 
     let mut pane = div().h_full().overflow_hidden();
     if !(surface == WorkspaceSurface::Terminal && shared_terminal_background) {
@@ -376,13 +369,6 @@ pub(super) fn workspace_surface_pane(
     };
 
     match surface {
-        WorkspaceSurface::Stacker => pane.child(
-            div()
-                .size_full()
-                .bg(rgb(palette.panel_bg))
-                .overflow_hidden()
-                .child(stacker),
-        ),
         WorkspaceSurface::Editor => pane
             .cursor_pointer()
             .on_mouse_down(
@@ -451,11 +437,9 @@ pub(super) fn workspace_surface_pane(
                     )),
             )
         }
-        WorkspaceSurface::Sketch => pane.child(sketch),
         WorkspaceSurface::Appearances => pane.child(appearances_surface(
             appearance_config,
             appearance_page,
-            sketch_toolbar_position,
             terminal_background_import_error,
             cx,
         )),
@@ -468,7 +452,6 @@ pub(super) fn workspace_surface_pane(
         WorkspaceSurface::Settings => pane.child(settings_surface(
             appearance_config,
             appearance_page,
-            sketch_toolbar_position,
             terminal_background_import_error,
             editor_word_wrap,
             joined_tab_limit,

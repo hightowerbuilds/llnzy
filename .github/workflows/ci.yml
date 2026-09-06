@@ -51,7 +51,7 @@ jobs:
 
   linux-check:
     # Non-blocking smoke check that the platform-independent library
-    # modules (editor, stacker, config, lsp, terminal model, error log,
+    # modules (editor, config, lsp, terminal model, error log,
     # etc.) still cross-compile on Linux. The GUI binary depends on
     # gpui's macos-blade backend and the macOS-only Metal effects stack,
     # so we deliberately scope this to `cargo check --lib

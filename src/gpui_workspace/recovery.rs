@@ -13,11 +13,9 @@ pub(super) const WORKSPACE_RECOVERY_VERSION: u32 = 1;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(super) enum WorkspaceRecoverySurface {
     Home,
-    Stacker,
     Editor,
     Terminal,
     Explorer,
-    Sketch,
     Appearances,
     Settings,
 }
@@ -54,6 +52,62 @@ pub(super) struct WorkspaceRecoveryTab {
     pub(super) file_path: Option<PathBuf>,
 }
 
+/// Lenient mirror of [`WorkspaceRecoverySurface`] used only while reading a
+/// snapshot. Surface kinds that no longer exist (the removed `Stacker` and
+/// `Sketch` surfaces, or anything a newer build might add) map to `Unknown`
+/// so one stale tab doesn't reject the whole snapshot.
+#[derive(Clone, Copy, Debug, Deserialize)]
+enum RawRecoverySurface {
+    Home,
+    Editor,
+    Terminal,
+    Explorer,
+    Appearances,
+    Settings,
+    #[serde(other)]
+    Unknown,
+}
+
+#[derive(Deserialize)]
+struct RawRecoveryTab {
+    id: u64,
+    surface: RawRecoverySurface,
+    #[serde(default)]
+    file_path: Option<PathBuf>,
+}
+
+fn deserialize_known_tabs<'de, D>(deserializer: D) -> Result<Vec<WorkspaceRecoveryTab>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw = Vec::<RawRecoveryTab>::deserialize(deserializer)?;
+    Ok(raw
+        .into_iter()
+        .filter_map(|tab| {
+            let surface = match tab.surface {
+                RawRecoverySurface::Home => WorkspaceRecoverySurface::Home,
+                RawRecoverySurface::Editor => WorkspaceRecoverySurface::Editor,
+                RawRecoverySurface::Terminal => WorkspaceRecoverySurface::Terminal,
+                RawRecoverySurface::Explorer => WorkspaceRecoverySurface::Explorer,
+                RawRecoverySurface::Appearances => WorkspaceRecoverySurface::Appearances,
+                RawRecoverySurface::Settings => WorkspaceRecoverySurface::Settings,
+                RawRecoverySurface::Unknown => {
+                    log::debug!(
+                        "skipping workspace recovery tab {} with unknown surface kind",
+                        tab.id
+                    );
+                    return None;
+                }
+            };
+            Some(WorkspaceRecoveryTab {
+                id: tab.id,
+                surface,
+                file_path: tab.file_path,
+            })
+        })
+        .collect())
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(super) struct WorkspaceRecoveryTabNameOverride {
     pub(super) id: u64,
@@ -76,7 +130,7 @@ pub(super) struct WorkspaceRecoverySnapshot {
     pub(super) workspace_root: Option<PathBuf>,
     pub(super) active_tab_id: u64,
     pub(super) next_tab_id: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_known_tabs")]
     pub(super) tabs: Vec<WorkspaceRecoveryTab>,
     #[serde(default)]
     pub(super) tab_name_overrides: Vec<WorkspaceRecoveryTabNameOverride>,
@@ -484,6 +538,74 @@ mod tests {
             plan.tab_name_overrides.get(&2).map(String::as_str),
             Some("Build")
         );
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn load_skips_tabs_with_removed_surface_kinds() {
+        // Snapshot written by a build that still had the Stacker and Sketch
+        // surfaces. Those tabs must be dropped without rejecting the file.
+        let dir = temp_dir("removed-surfaces");
+        let path = dir.join("last_session.toml");
+        fs::write(
+            &path,
+            r#"
+version = 1
+clean_shutdown = false
+active_tab_id = 2
+next_tab_id = 6
+sidebar_visible = true
+sidebar_width = 240.0
+last_sidebar_width = 240.0
+
+[[tabs]]
+id = 1
+surface = "Home"
+
+[[tabs]]
+id = 2
+surface = "Stacker"
+
+[[tabs]]
+id = 3
+surface = "Terminal"
+
+[[tabs]]
+id = 4
+surface = "Sketch"
+
+[[tab_name_overrides]]
+id = 2
+name = "Prompts"
+
+[[joined_groups]]
+members = [2, 3]
+shares = [0.5, 0.5]
+axis = "Vertical"
+"#,
+        )
+        .unwrap();
+
+        let loaded = load_snapshot(&path).unwrap().unwrap();
+        assert_eq!(
+            loaded
+                .tabs
+                .iter()
+                .map(|tab| tab.surface)
+                .collect::<Vec<_>>(),
+            vec![
+                WorkspaceRecoverySurface::Home,
+                WorkspaceRecoverySurface::Terminal
+            ]
+        );
+
+        let plan = plan_restore(loaded).unwrap();
+        // The active tab pointed at the removed surface, so restore falls
+        // back to Home; the joined group loses its dangling member.
+        assert_eq!(plan.active_tab_id, 1);
+        assert!(plan.tab_name_overrides.is_empty());
+        assert!(plan.joined_groups.is_empty());
 
         let _ = fs::remove_dir_all(dir);
     }

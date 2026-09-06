@@ -12,8 +12,8 @@ use super::{
     MenuLspSignatureHelp, MenuLspSymbols, MenuMarkdownCycle, MenuMarkdownPreview,
     MenuMarkdownSource, MenuMarkdownSplit, MenuNewTab, MenuNextTab, MenuOpenProject, MenuPaste,
     MenuPreviousTab, MenuRedo, MenuSave, MenuSelectAll, MenuSeparateTabs, MenuShowAppearances,
-    MenuShowEditor, MenuShowHome, MenuShowSketch, MenuShowStacker, MenuShowTerminal, MenuSwapTabs,
-    MenuToggleSidebar, MenuUndo, MenuZoomIn, MenuZoomOut, MenuZoomReset, WorkspacePrototype,
+    MenuShowEditor, MenuShowHome, MenuShowTerminal, MenuSwapTabs, MenuToggleSidebar, MenuUndo,
+    MenuZoomIn, MenuZoomOut, MenuZoomReset, WorkspacePrototype,
 };
 
 /// What kind of list the palette is currently showing.
@@ -132,19 +132,9 @@ pub(super) fn palette_entries() -> Vec<CommandEntry> {
             build_action: || Box::new(MenuShowTerminal),
         },
         CommandEntry {
-            label: "View: Show Stacker",
-            shortcut: None,
-            build_action: || Box::new(MenuShowStacker),
-        },
-        CommandEntry {
             label: "View: Show Editor",
             shortcut: None,
             build_action: || Box::new(MenuShowEditor),
-        },
-        CommandEntry {
-            label: "View: Show Sketch",
-            shortcut: None,
-            build_action: || Box::new(MenuShowSketch),
         },
         CommandEntry {
             label: "View: Show Settings",

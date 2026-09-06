@@ -31,8 +31,7 @@ cargo test --release --test performance_budgets -- --ignored --nocapture
 
 ## Test Pyramid
 
-- Unit tests: pure editor, terminal, Stacker, LSP, config, platform, sketch, and
-  parsing logic.
+- Unit tests: pure editor, terminal, LSP, config, platform, and parsing logic.
 - Invariant tests: Unicode, UTF-16, buffer position, undo/redo, storage, and
   command parsing boundaries.
 - Integration tests: PTY round trips, terminal emulation, storage workflows,

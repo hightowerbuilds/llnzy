@@ -7,8 +7,7 @@ default-run = "llnzy"
 [features]
 default = ["gpui-workspace"]
 gpui-editor = ["dep:gpui"]
-gpui-stacker = ["dep:gpui"]
-gpui-workspace = ["gpui-editor", "gpui-stacker"]
+gpui-workspace = ["gpui-editor"]
 
 [dependencies]
 alacritty_terminal = "0.26"
@@ -21,8 +20,6 @@ regex = "1"
 serde_json = "1"
 image = "0.25"
 rfd = "0.15"
-resvg = "0.45.1"
-usvg = "0.45.1"
 libc = "0.2"
 ropey = "1"
 unicode-segmentation = "1"
@@ -43,7 +40,6 @@ lsp-types = "0.97"
 tokio = { version = "1", features = ["rt-multi-thread", "process", "io-util", "sync", "time", "macros"] }
 notify = "7"
 rustc-hash = "2"
-ulid = "1"
 sha2 = "0.10"
 gpui = { version = "=0.2.2", optional = true, features = ["macos-blade"] }
 
@@ -64,11 +60,6 @@ metal = "=0.29"
 # per-frame staging-buffer map_async from EffectsHost without pulling a full
 # tokio runtime onto the render path.
 pollster = "=0.4"
-
-[[bin]]
-name = "gpui-stacker"
-path = "src/bin/gpui_stacker.rs"
-required-features = ["gpui-stacker"]
 
 [[bin]]
 name = "gpui-editor"

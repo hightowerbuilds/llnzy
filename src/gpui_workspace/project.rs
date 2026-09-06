@@ -865,9 +865,6 @@ impl WorkspacePrototype {
         crate::explorer::add_recent_project(&mut self.recent_projects, path.clone());
         self.workspace_root = Some(path.clone());
         self.rebuild_explorer_watcher();
-        self.sketch.update(cx, |sketch, _cx| {
-            sketch.set_workspace_root(Some(path.clone()))
-        });
         self.sidebar_explorer.expanded_dirs = initial_expanded_dirs(&path);
         self.sidebar_explorer.selected_path = None;
         self.close_explorer_tabs();
@@ -884,8 +881,6 @@ impl WorkspacePrototype {
         }
         self.workspace_root = None;
         self.rebuild_explorer_watcher();
-        self.sketch
-            .update(cx, |sketch, _cx| sketch.set_workspace_root(None));
         self.sidebar_explorer.expanded_dirs.clear();
         self.sidebar_explorer.selected_path = None;
         self.close_explorer_tabs();

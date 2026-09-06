@@ -16,7 +16,9 @@ positions, and LSP/AppKit-style boundaries often use UTF-16 offsets.
 
 The editor buffer stores positions as line plus character column. Buffer
 operations convert through rope character indices. UTF-16 conversion is isolated
-in `src/stacker/utf16.rs` and tested against Unicode boundary corpora.
+in `src/utf16.rs` (originally `src/stacker/utf16.rs`, relocated when the
+Stacker surface was removed in September 2026) and tested against Unicode
+boundary corpora.
 
 ## Consequences
 

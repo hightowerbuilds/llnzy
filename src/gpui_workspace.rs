@@ -27,8 +27,6 @@ mod tabs;
 use crate::config::Config;
 use crate::fs_watch::FsChangeWatcher;
 use crate::gpui_editor::{bind_editor_keys, EditorPrototype};
-use crate::gpui_sketch::{bind_sketch_keys, SketchSurface};
-use crate::gpui_stacker::{bind_stacker_keys, StackerPrototype};
 use crate::gpui_tabs::{GpuiTabChoice, GpuiTabManager};
 use crate::gpui_terminal::{bind_terminal_keys, TerminalSurface};
 
@@ -106,9 +104,7 @@ actions!(
         MenuToggleSidebar,
         MenuShowHome,
         MenuShowTerminal,
-        MenuShowStacker,
         MenuShowEditor,
-        MenuShowSketch,
         MenuShowAppearances,
         MenuZoomIn,
         MenuZoomOut,
@@ -344,11 +340,9 @@ fn apply_editor_word_wrap_preference(config: &mut Config, word_wrap: bool) {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum WorkspaceSurface {
     Home,
-    Stacker,
     Editor,
     Terminal,
     Explorer,
-    Sketch,
     Appearances,
     Settings,
 }
@@ -357,11 +351,9 @@ impl WorkspaceSurface {
     fn title(self) -> &'static str {
         match self {
             WorkspaceSurface::Home => "Home",
-            WorkspaceSurface::Stacker => "Stacker",
             WorkspaceSurface::Editor => "Editor",
             WorkspaceSurface::Terminal => "Terminal",
             WorkspaceSurface::Explorer => "Explorer",
-            WorkspaceSurface::Sketch => "Sketch Pad",
             WorkspaceSurface::Appearances => "Appearances",
             WorkspaceSurface::Settings => "Settings",
         }
@@ -372,11 +364,9 @@ impl From<WorkspaceRecoverySurface> for WorkspaceSurface {
     fn from(surface: WorkspaceRecoverySurface) -> Self {
         match surface {
             WorkspaceRecoverySurface::Home => Self::Home,
-            WorkspaceRecoverySurface::Stacker => Self::Stacker,
             WorkspaceRecoverySurface::Editor => Self::Editor,
             WorkspaceRecoverySurface::Terminal => Self::Terminal,
             WorkspaceRecoverySurface::Explorer => Self::Explorer,
-            WorkspaceRecoverySurface::Sketch => Self::Sketch,
             WorkspaceRecoverySurface::Appearances => Self::Appearances,
             WorkspaceRecoverySurface::Settings => Self::Settings,
         }
@@ -387,11 +377,9 @@ impl From<WorkspaceSurface> for WorkspaceRecoverySurface {
     fn from(surface: WorkspaceSurface) -> Self {
         match surface {
             WorkspaceSurface::Home => Self::Home,
-            WorkspaceSurface::Stacker => Self::Stacker,
             WorkspaceSurface::Editor => Self::Editor,
             WorkspaceSurface::Terminal => Self::Terminal,
             WorkspaceSurface::Explorer => Self::Explorer,
-            WorkspaceSurface::Sketch => Self::Sketch,
             WorkspaceSurface::Appearances => Self::Appearances,
             WorkspaceSurface::Settings => Self::Settings,
         }
@@ -402,28 +390,17 @@ impl From<WorkspaceSurface> for WorkspaceRecoverySurface {
 enum AppearancePage {
     Terminal,
     Editor,
-    Stacker,
-    Sketch,
     App,
     Advanced,
 }
 
 impl AppearancePage {
-    const ALL: [Self; 6] = [
-        Self::Terminal,
-        Self::Editor,
-        Self::Stacker,
-        Self::Sketch,
-        Self::App,
-        Self::Advanced,
-    ];
+    const ALL: [Self; 4] = [Self::Terminal, Self::Editor, Self::App, Self::Advanced];
 
     fn title(self) -> &'static str {
         match self {
             AppearancePage::Terminal => "Terminal",
             AppearancePage::Editor => "Editor",
-            AppearancePage::Stacker => "Stacker",
-            AppearancePage::Sketch => "Sketch",
             AppearancePage::App => "App",
             AppearancePage::Advanced => "Advanced",
         }
@@ -446,10 +423,8 @@ struct JoinedWorkspacePanes {
 
 pub fn run_workspace_prototype() {
     Application::new().run(|cx: &mut App| {
-        bind_stacker_keys(cx);
         bind_editor_keys(cx);
         bind_terminal_keys(cx);
-        bind_sketch_keys(cx);
         install_workspace_menu_bar(cx);
         cx.bind_keys([
             KeyBinding::new("cmd-q", Quit, None),
@@ -608,8 +583,6 @@ fn install_workspace_menu_bar(cx: &mut App) {
                 MenuItem::separator(),
                 MenuItem::action("Home", MenuShowHome),
                 MenuItem::action("Terminal", MenuShowTerminal),
-                MenuItem::action("Stacker", MenuShowStacker),
-                MenuItem::action("Sketch Pad", MenuShowSketch),
                 MenuItem::action("Settings", MenuShowAppearances),
             ],
         },
@@ -642,11 +615,9 @@ fn restore_joined_group_shares(tab_manager: &mut GpuiTabManager, primary: u64, s
 }
 
 struct WorkspacePrototype {
-    stacker: Entity<StackerPrototype>,
     editor: Entity<EditorPrototype>,
     file_editors: BTreeMap<u64, Entity<EditorPrototype>>,
     terminals: BTreeMap<u64, Entity<TerminalSurface>>,
-    sketch: Entity<SketchSurface>,
     focus_handle: FocusHandle,
     tabs: Vec<WorkspaceTab>,
     tab_manager: GpuiTabManager,
@@ -781,34 +752,20 @@ impl WorkspacePrototype {
         let workspace_root = std::env::current_dir().ok();
         let tabs = vec![WorkspaceTab::new(WorkspaceTabId(1), WorkspaceSurface::Home)];
         let sidebar_explorer = ExplorerState::for_root(workspace_root.as_deref());
-        let sketch = cx.new(SketchSurface::new);
-        sketch.update(cx, |sketch, _cx| {
-            sketch.set_workspace_root(workspace_root.clone());
-        });
 
         let terminals = BTreeMap::new();
 
         let preferences = crate::preferences::WorkspacePreferences::load();
         let appearance_config = appearance_config_from_preferences(&preferences);
-        let initial_light_mode = WorkspacePalette::from_config(&appearance_config).is_light;
-        let stacker = cx.new(StackerPrototype::embedded);
-        stacker.update(cx, |stacker, cx| {
-            stacker.set_light_mode(initial_light_mode, cx);
-        });
-        sketch.update(cx, |sketch, cx| {
-            sketch.set_light_mode(initial_light_mode, cx);
-        });
         let editor = cx.new(EditorPrototype::new);
         editor.update(cx, |editor, cx| {
             editor.set_appearance_config(appearance_config.clone(), cx);
         });
 
         let mut workspace = Self {
-            stacker,
             editor,
             file_editors: BTreeMap::new(),
             terminals,
-            sketch,
             focus_handle: cx.focus_handle(),
             tabs,
             tab_manager: GpuiTabManager::default(),
@@ -900,27 +857,16 @@ impl WorkspacePrototype {
         cx.notify();
     }
 
-    /// Best-effort save of any in-flight Stacker draft. Invoked from the
-    /// app-level Quit handler before `cx.quit()` so closing the app
-    /// doesn't drop pending work or leave the recovery snapshot marked dirty.
-    pub(crate) fn save_drafts_before_quit(&mut self, cx: &mut Context<Self>) -> Result<(), String> {
-        let mut errors = Vec::new();
-        match self
-            .stacker
-            .update(cx, |stacker, cx| stacker.save_active_prompt(cx))
-        {
-            Ok(()) => {}
-            Err(error) => errors.push(format!("stacker save failed: {error}")),
-        }
-        if let Err(error) = self.persist_workspace_recovery(true) {
-            errors.push(error);
-        }
+    /// Persist workspace recovery metadata as a clean shutdown. Invoked from
+    /// the app-level Quit handler before `cx.quit()` so the recovery snapshot
+    /// isn't left marked dirty.
+    pub(crate) fn save_drafts_before_quit(
+        &mut self,
+        _cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        let result = self.persist_workspace_recovery(true);
         self.recovery_enabled = false;
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(errors.join("; "))
-        }
+        result
     }
 
     fn restore_after_unclean_shutdown(&mut self, cx: &mut Context<Self>) {
@@ -947,9 +893,6 @@ impl WorkspacePrototype {
     fn apply_recovery_plan(&mut self, plan: WorkspaceRecoveryPlan, cx: &mut Context<Self>) {
         self.workspace_root = plan.workspace_root.clone();
         self.rebuild_explorer_watcher();
-        self.sketch.update(cx, |sketch, _cx| {
-            sketch.set_workspace_root(plan.workspace_root.clone())
-        });
         let restore_status = plan.status_message();
         self.sidebar_explorer = ExplorerState::for_root(plan.workspace_root.as_deref());
         self.sidebar_explorer.expanded_dirs = plan.sidebar_expanded_dirs;
@@ -1866,7 +1809,6 @@ impl WorkspacePrototype {
         cx: &mut Context<Self>,
     ) {
         match surface {
-            WorkspaceSurface::Stacker => window.focus(&self.stacker.focus_handle(cx)),
             WorkspaceSurface::Editor
             | WorkspaceSurface::Home
             | WorkspaceSurface::Appearances
@@ -1885,7 +1827,6 @@ impl WorkspacePrototype {
                 }
             }
             WorkspaceSurface::Explorer => window.focus(&self.focus_handle),
-            WorkspaceSurface::Sketch => window.focus(&self.sketch.focus_handle(cx)),
         }
     }
 
@@ -2088,22 +2029,6 @@ impl WorkspacePrototype {
                 self.sidebar_explorer.selected_path = None;
             }
         }
-        // Persist the Stacker draft when the user closes its tab. The
-        // Stacker entity itself stays alive across tab open/close cycles
-        // (it's a workspace-level singleton), but the user's mental model
-        // is "closing the tab = closing the work" — so we save here so
-        // nothing is lost between sessions.
-        if self.tabs[index].surface == WorkspaceSurface::Stacker {
-            match self
-                .stacker
-                .update(cx, |stacker, cx| stacker.save_active_prompt(cx))
-            {
-                Ok(()) => {}
-                Err(error) => {
-                    log::warn!("failed to save stacker draft before closing tab: {error}")
-                }
-            }
-        }
         if self.tabs[index].surface == WorkspaceSurface::Terminal {
             self.terminals.remove(&tab_id.0);
         }
@@ -2183,7 +2108,6 @@ impl Render for WorkspacePrototype {
         let sidebar_context_menu = self.sidebar_context_menu.clone();
         let sidebar_rename = self.sidebar_rename.clone();
         let sidebar_new_entry = self.sidebar_new_entry.clone();
-        let queued_prompts = self.stacker.read(cx).queued_prompts().to_vec();
         let appearance_config = self.appearance_config.clone();
         let workspace_palette = WorkspacePalette::from_config(&appearance_config);
         let appearance_page = self.appearance_page;
@@ -2217,11 +2141,9 @@ impl Render for WorkspacePrototype {
             .child(sidebar_bumper(sidebar_visible, workspace_palette, cx))
             .child(workspace_content(
                 WorkspaceSurfaceContext {
-                    stacker: self.stacker.clone(),
                     editor: self.editor.clone(),
                     file_editors: self.file_editors.clone(),
                     terminals: self.terminals.clone(),
-                    sketch: self.sketch.clone(),
                     workspace_root,
                     recent_projects,
                     explorers: self.explorers.clone(),
@@ -2305,9 +2227,7 @@ impl Render for WorkspacePrototype {
             .on_action(cx.listener(Self::menu_toggle_sidebar))
             .on_action(cx.listener(Self::menu_show_home))
             .on_action(cx.listener(Self::menu_show_terminal))
-            .on_action(cx.listener(Self::menu_show_stacker))
             .on_action(cx.listener(Self::menu_show_editor))
-            .on_action(cx.listener(Self::menu_show_sketch))
             .on_action(cx.listener(Self::menu_show_appearances))
             .on_action(cx.listener(Self::menu_zoom_in))
             .on_action(cx.listener(Self::menu_zoom_out))
@@ -2322,12 +2242,7 @@ impl Render for WorkspacePrototype {
                 cx,
             ))
             .child(main)
-            .child(workspace_footer(
-                active_surface,
-                queued_prompts,
-                workspace_palette,
-                cx,
-            ))
+            .child(workspace_footer(active_surface, workspace_palette, cx))
             .when_some(tab_context_menu, |root, menu| {
                 root.child(workspace_tab_context_menu(
                     menu,

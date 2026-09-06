@@ -261,10 +261,6 @@ struct ThemeFile {
     apply_to_terminal: bool,
     #[serde(default)]
     apply_to_editor: bool,
-    #[serde(default)]
-    apply_to_sketch: bool,
-    #[serde(default)]
-    apply_to_stacker: bool,
 }
 
 fn rgb_to_hex(c: [u8; 3]) -> String {
@@ -304,8 +300,6 @@ fn str_to_cursor_style(s: &str) -> CursorStyle {
 pub struct ThemeViewFlags {
     pub terminal: bool,
     pub editor: bool,
-    pub sketch: bool,
-    pub stacker: bool,
 }
 
 /// Save the current config as a named theme.
@@ -370,8 +364,6 @@ fn save_theme_to_dir(
         cursor_style: cursor_style_to_str(config.cursor_style).to_string(),
         apply_to_terminal: view_flags.terminal,
         apply_to_editor: view_flags.editor,
-        apply_to_sketch: view_flags.sketch,
-        apply_to_stacker: view_flags.stacker,
     };
 
     let toml_str =
@@ -462,8 +454,6 @@ fn load_user_themes_from_dir(dir: &Path) -> Vec<(VisualTheme, ThemeViewFlags)> {
         let flags = ThemeViewFlags {
             terminal: tf.apply_to_terminal,
             editor: tf.apply_to_editor,
-            sketch: tf.apply_to_sketch,
-            stacker: tf.apply_to_stacker,
         };
 
         themes.push((theme, flags));
@@ -672,6 +662,31 @@ mod tests {
     }
 
     #[test]
+    fn user_theme_ignores_removed_view_flags() {
+        // Themes saved before the Stacker and Sketch surfaces were removed
+        // still carry their per-view flags; they must load without error.
+        let root = test_dir("themes-stale-flags");
+        let config = Config::default();
+        let flags = ThemeViewFlags {
+            terminal: true,
+            editor: false,
+        };
+        let path = save_theme_to_dir("Old Theme", "desc", &config, &flags, &root).unwrap();
+        let mut text = std::fs::read_to_string(&path).unwrap();
+        text.push_str("apply_to_sketch = true\napply_to_stacker = true\n");
+        std::fs::write(&path, text).unwrap();
+
+        let themes = load_user_themes_from_dir(&root);
+        assert_eq!(themes.len(), 1);
+        let (theme, loaded_flags) = &themes[0];
+        assert_eq!(theme.name, "Old Theme");
+        assert!(loaded_flags.terminal);
+        assert!(!loaded_flags.editor);
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn user_theme_roundtrips_flags_and_deletes() {
         let root = test_dir("themes");
         let mut config = Config::default();
@@ -682,8 +697,6 @@ mod tests {
         let flags = ThemeViewFlags {
             terminal: true,
             editor: true,
-            sketch: false,
-            stacker: true,
         };
 
         let path = save_theme_to_dir("My Theme", "desc", &config, &flags, &root).unwrap();
@@ -706,8 +719,6 @@ mod tests {
         assert_eq!(theme.cursor_style, CursorStyle::Beam);
         assert!(loaded_flags.terminal);
         assert!(loaded_flags.editor);
-        assert!(!loaded_flags.sketch);
-        assert!(loaded_flags.stacker);
 
         delete_user_theme_from_dir("My Theme", &root).unwrap();
         assert!(load_user_themes_from_dir(&root).is_empty());

@@ -1,7 +1,7 @@
 use gpui::prelude::*;
 use gpui::{div, px, rgb, Context, MouseButton, MouseDownEvent};
 
-use crate::{config::Config, sketch::SketchToolbarPosition, theme::builtin_themes};
+use crate::{config::Config, theme::builtin_themes};
 
 use super::{
     AppearancePage, ErrorLogFilter, WorkspacePalette, WorkspacePrototype, ACTIVE_TEXT, BORDER,
@@ -20,9 +20,8 @@ use editor_section::{editor_appearance_controls, editor_settings_controls};
 use error_log::{error_log_clear_modal, settings_error_log_row};
 use terminal_section::terminal_appearance_controls;
 use widgets::{
-    appearance_button, appearance_button_palette, color_strip, control_label,
-    control_label_palette, effect_toggle_button_palette, metric_readout, metric_row,
-    metric_row_palette,
+    appearance_button, appearance_button_palette, color_strip, control_label_palette,
+    effect_toggle_button_palette, metric_readout, metric_row, metric_row_palette,
 };
 
 // Monospace families. `None` means "use the system default", which is what
@@ -54,7 +53,6 @@ pub(super) fn is_display_font(family: &str) -> bool {
 pub(super) fn appearances_surface(
     config: Config,
     page: AppearancePage,
-    sketch_toolbar_position: SketchToolbarPosition,
     terminal_background_import_error: Option<String>,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
@@ -89,7 +87,7 @@ pub(super) fn appearances_surface(
                             div()
                                 .text_size(px(12.0))
                                 .text_color(rgb(MUTED_TEXT))
-                                .child("Theme, terminal, editor, and canvas presentation"),
+                                .child("Theme, terminal, and editor presentation"),
                         ),
                 )
                 .child(appearance_page_nav(page, cx)),
@@ -105,7 +103,6 @@ pub(super) fn appearances_surface(
                 .child(appearance_controls_column(
                     config,
                     page,
-                    sketch_toolbar_position,
                     terminal_background_import_error,
                     cx,
                 )),
@@ -301,7 +298,6 @@ fn app_theme_section(
 fn appearance_controls_column(
     config: Config,
     page: AppearancePage,
-    sketch_toolbar_position: SketchToolbarPosition,
     terminal_background_import_error: Option<String>,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
@@ -327,8 +323,6 @@ fn appearance_controls_column(
             terminal_appearance_controls(content, config, terminal_background_import_error, cx)
         }
         AppearancePage::Editor => editor_appearance_controls(content, config, cx),
-        AppearancePage::Stacker => stacker_settings_controls(content),
-        AppearancePage::Sketch => sketch_appearance_controls(content, sketch_toolbar_position, cx),
         AppearancePage::App => {
             let palette = WorkspacePalette::from_config(&config);
             app_settings_controls(content, config, 2, palette, cx)
@@ -347,38 +341,6 @@ fn appearance_controls_column(
         .id("appearance-controls-scroll")
         .overflow_y_scroll()
         .scrollbar_width(px(8.0))
-}
-
-fn sketch_appearance_controls(
-    content: gpui::Div,
-    toolbar_position: SketchToolbarPosition,
-    cx: &mut Context<WorkspacePrototype>,
-) -> gpui::Div {
-    content.child(
-        div()
-            .flex()
-            .items_center()
-            .gap_2()
-            .child(control_label("Toolbar"))
-            .child(appearance_button(
-                "Top".to_string(),
-                toolbar_position == SketchToolbarPosition::Top,
-                cx,
-                |this, cx| this.set_sketch_toolbar_position(SketchToolbarPosition::Top, cx),
-            ))
-            .child(appearance_button(
-                "Left".to_string(),
-                toolbar_position == SketchToolbarPosition::Left,
-                cx,
-                |this, cx| this.set_sketch_toolbar_position(SketchToolbarPosition::Left, cx),
-            ))
-            .child(appearance_button(
-                "Right".to_string(),
-                toolbar_position == SketchToolbarPosition::Right,
-                cx,
-                |this, cx| this.set_sketch_toolbar_position(SketchToolbarPosition::Right, cx),
-            )),
-    )
 }
 
 fn app_settings_controls(
@@ -428,12 +390,6 @@ fn app_settings_controls(
             palette,
             cx,
         ))
-}
-
-fn stacker_settings_controls(content: gpui::Div) -> gpui::Div {
-    content
-        .child(metric_readout("Prompt Queue", "Default".to_string()))
-        .child(metric_readout("Formatting", "Default".to_string()))
 }
 
 fn advanced_settings_controls(
@@ -544,7 +500,6 @@ fn markdown_preview_style_controls(
 pub(super) fn settings_surface(
     config: Config,
     page: AppearancePage,
-    sketch_toolbar_position: SketchToolbarPosition,
     terminal_background_import_error: Option<String>,
     editor_word_wrap: bool,
     joined_tab_limit: usize,
@@ -559,7 +514,6 @@ pub(super) fn settings_surface(
     let content = settings_controls_column(
         config.clone(),
         page,
-        sketch_toolbar_position,
         terminal_background_import_error,
         editor_word_wrap,
         joined_tab_limit,
@@ -619,7 +573,6 @@ pub(super) fn settings_surface(
 fn settings_controls_column(
     config: Config,
     page: AppearancePage,
-    sketch_toolbar_position: SketchToolbarPosition,
     terminal_background_import_error: Option<String>,
     editor_word_wrap: bool,
     joined_tab_limit: usize,
@@ -682,8 +635,6 @@ fn settings_controls_column(
             terminal_appearance_controls(content, config, terminal_background_import_error, cx)
         }
         AppearancePage::Editor => editor_settings_controls(content, config, editor_word_wrap, cx),
-        AppearancePage::Stacker => stacker_settings_controls(content),
-        AppearancePage::Sketch => sketch_appearance_controls(content, sketch_toolbar_position, cx),
         AppearancePage::App => {
             app_settings_controls(content, config, joined_tab_limit, palette, cx)
         }

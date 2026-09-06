@@ -294,7 +294,7 @@ fn error_log_entry_row(
 }
 
 /// Scrim + centered card asking the user to confirm clearing the
-/// persisted error log. Same look-and-feel as Stacker's delete modal.
+/// persisted error log.
 pub(super) fn error_log_clear_modal(
     palette: WorkspacePalette,
     cx: &mut Context<WorkspacePrototype>,

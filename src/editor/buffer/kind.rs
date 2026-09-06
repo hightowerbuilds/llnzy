@@ -3,7 +3,7 @@
 /// Drives downstream decisions outside the buffer model itself: tree-sitter
 /// parsing, LSP attachment, gutter/minimap/line-number rendering, default
 /// font, and word-wrap behavior. A `Prose` buffer is intended for free-form
-/// text composition (the Stacker prompt surface in particular); a `Code`
+/// text composition such as markdown or notes; a `Code`
 /// buffer is the default and keeps every editor feature available.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum BufferKind {

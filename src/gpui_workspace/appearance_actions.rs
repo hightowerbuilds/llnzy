@@ -2,24 +2,18 @@ use gpui::Context;
 
 use crate::{
     config::{editor_syntax_preset, BackgroundImageFit, CursorStyle, TerminalLayoutMode},
-    sketch::SketchToolbarPosition,
     theme::builtin_themes,
 };
 
 use super::{
     appearances::{gpui_terminal_background_reference, is_display_font},
-    AppearancePage, WorkspacePalette, WorkspacePrototype,
+    AppearancePage, WorkspacePrototype,
 };
 
 impl WorkspacePrototype {
     pub(super) fn apply_appearance_config(&mut self, cx: &mut Context<Self>) {
         let config = self.appearance_config.clone();
-        let light_mode = WorkspacePalette::from_config(&config).is_light;
         let shared_config = std::sync::Arc::new(config);
-        self.stacker
-            .update(cx, |stacker, cx| stacker.set_light_mode(light_mode, cx));
-        self.sketch
-            .update(cx, |sketch, cx| sketch.set_light_mode(light_mode, cx));
         for editor in self.editor_entities() {
             let config = (*shared_config).clone();
             editor.update(cx, |editor, cx| editor.set_appearance_config(config, cx));
@@ -33,16 +27,6 @@ impl WorkspacePrototype {
 
     pub(super) fn set_appearance_page(&mut self, page: AppearancePage, cx: &mut Context<Self>) {
         self.appearance_page = page;
-        cx.notify();
-    }
-
-    pub(super) fn set_sketch_toolbar_position(
-        &mut self,
-        position: SketchToolbarPosition,
-        cx: &mut Context<Self>,
-    ) {
-        self.sketch
-            .update(cx, |sketch, cx| sketch.set_toolbar_position(position, cx));
         cx.notify();
     }
 

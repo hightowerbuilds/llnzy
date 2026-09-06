@@ -115,6 +115,33 @@ fn config_accessors_return_runtime_colors() {
 }
 
 #[test]
+fn unknown_config_keys_are_ignored() {
+    // Users may have stale keys from removed features in config.toml; they
+    // must never prevent the app from starting.
+    let file: ConfigFile = toml::from_str(
+        r##"
+            stacker_prompt_bar = true
+
+            [font]
+            size = 15.0
+
+            [sketch]
+            toolbar = "left"
+
+            [colors]
+            foreground = "#112233"
+            not_a_color = "#000000"
+        "##,
+    )
+    .unwrap();
+
+    let mut config = Config::default();
+    config.apply(file);
+    assert_eq!(config.font_size, 15.0);
+    assert_eq!(config.colors.foreground, [0x11, 0x22, 0x33]);
+}
+
+#[test]
 fn apply_color_preset_then_overrides() {
     let mut config = Config::default();
     let file: ConfigFile = toml::from_str(

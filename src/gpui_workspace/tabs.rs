@@ -871,7 +871,7 @@ mod tests {
     fn tab_reorder_moves_single_tab_by_visual_direction() {
         let mut tabs = vec![
             WorkspaceTab::new(WorkspaceTabId(1), WorkspaceSurface::Home),
-            WorkspaceTab::new(WorkspaceTabId(2), WorkspaceSurface::Stacker),
+            WorkspaceTab::new(WorkspaceTabId(2), WorkspaceSurface::Editor),
             WorkspaceTab::new(WorkspaceTabId(3), WorkspaceSurface::Terminal),
         ];
 
@@ -900,9 +900,9 @@ mod tests {
     fn tab_reorder_moves_joined_block_together() {
         let mut tabs = vec![
             WorkspaceTab::new(WorkspaceTabId(1), WorkspaceSurface::Home),
-            WorkspaceTab::new(WorkspaceTabId(2), WorkspaceSurface::Stacker),
+            WorkspaceTab::new(WorkspaceTabId(2), WorkspaceSurface::Editor),
             WorkspaceTab::new(WorkspaceTabId(3), WorkspaceSurface::Terminal),
-            WorkspaceTab::new(WorkspaceTabId(4), WorkspaceSurface::Sketch),
+            WorkspaceTab::new(WorkspaceTabId(4), WorkspaceSurface::Explorer),
         ];
 
         assert!(reorder_workspace_tab_block(
@@ -920,9 +920,9 @@ mod tests {
     fn tab_place_together_uses_requested_order() {
         let mut tabs = vec![
             WorkspaceTab::new(WorkspaceTabId(1), WorkspaceSurface::Home),
-            WorkspaceTab::new(WorkspaceTabId(2), WorkspaceSurface::Stacker),
+            WorkspaceTab::new(WorkspaceTabId(2), WorkspaceSurface::Editor),
             WorkspaceTab::new(WorkspaceTabId(3), WorkspaceSurface::Terminal),
-            WorkspaceTab::new(WorkspaceTabId(4), WorkspaceSurface::Sketch),
+            WorkspaceTab::new(WorkspaceTabId(4), WorkspaceSurface::Explorer),
         ];
 
         assert!(place_workspace_tabs_together(

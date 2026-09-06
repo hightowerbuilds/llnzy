@@ -221,7 +221,7 @@ fn input_edit_uses_byte_columns_for_unicode_text() {
 
 #[test]
 fn buffer_position_utf16_conversion_uses_character_indices() {
-    use crate::stacker::utf16::{char_index_to_utf16_index, utf16_index_to_char_index};
+    use crate::utf16::{char_index_to_utf16_index, utf16_index_to_char_index};
 
     let mut buffer = Buffer::empty();
     buffer.insert(

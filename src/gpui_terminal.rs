@@ -31,8 +31,8 @@ use gpui::{
 
 use crate::config::{Config, CursorStyle, TerminalLayoutMode};
 use crate::session::Session;
-use crate::stacker::utf16::{char_index_to_utf16_index, utf16_index_to_char_index};
 use crate::terminal::{encode_alternate_scroll, encode_wheel_reports, route_wheel, WheelRoute};
+use crate::utf16::{char_index_to_utf16_index, utf16_index_to_char_index};
 
 const TERMINAL_BG: u32 = 0x080808;
 const TERMINAL_PANEL_BG: u32 = 0x0d0d10;

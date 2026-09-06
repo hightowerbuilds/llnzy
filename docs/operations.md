@@ -17,6 +17,25 @@ The app writes `crash.log` through `src/diagnostics.rs` when the top-level panic
 hook receives an unrecoverable failure. The in-app diagnostics panel shows
 recent runtime warnings and errors.
 
+## Data From Removed Surfaces
+
+The Stacker (prompt queue) and Sketch (drawing canvas) surfaces were removed in
+September 2026. The app no longer reads or writes their data, and it does not
+delete it either. If you used an earlier build, these may still exist under the
+config directory (`~/Library/Application Support/llnzy/`, or `llnzy-dev/` when
+running with `LLNZY_PROFILE=dev`):
+
+- `stacker.json`, `stacker_queue.json`, `stacker.json.migrated`: legacy JSON
+  queue and state files.
+- `prompts/inbox/`, `prompts/saved/`, `prompts/archive/`: the portable markdown
+  prompt library with frontmatter. Readable by any editor; safe to keep, move,
+  or delete.
+- `sketches/` (including `scratch.json`): sketch documents.
+
+Saved themes may still contain `apply_to_stacker` and `apply_to_sketch` keys and
+workspace recovery snapshots may still reference `Stacker`/`Sketch` tabs; both
+are ignored on load.
+
 ## Diagnostics Report
 
 `src/diagnostics.rs` now provides a backend report export:

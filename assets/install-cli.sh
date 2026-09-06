@@ -77,4 +77,4 @@ fi
 
 trap - EXIT
 echo "Installed llnzy CLI at $LINK_PATH"
-echo "Try: llnzy stacker list"
+echo "Try: llnzy   (launches the app from your shell)"

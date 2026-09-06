@@ -1,12 +1,12 @@
 //! Conversions between UTF-16 indices (the AppKit / `NSTextInputClient`
-//! convention) and Rust character indices (the `StackerSession` /
-//! `StackerSelection` convention).
+//! convention, also the LSP default position encoding) and Rust character
+//! indices (the `Buffer` / terminal IME convention).
 //!
 //! macOS reports text positions to applications as UTF-16 code unit offsets.
-//! `StackerSelection` and `Buffer` work in Unicode scalar (`char`) offsets.
-//! These helpers do the per-call translation. They run on input-protocol
-//! callbacks, which are infrequent and bounded in size, so the linear-scan
-//! cost is fine.
+//! `Buffer` and the terminal preedit state work in Unicode scalar (`char`)
+//! offsets. These helpers do the per-call translation. They run on
+//! input-protocol callbacks, which are infrequent and bounded in size, so the
+//! linear-scan cost is fine.
 
 pub fn utf16_index_to_char_index(text: &str, utf16_index: usize) -> usize {
     let mut units = 0;

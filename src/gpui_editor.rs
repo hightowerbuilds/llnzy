@@ -13,7 +13,7 @@ use crate::editor::syntax::{group_color_with_overrides, HighlightGroup, Highligh
 use crate::editor::{BufferId, BufferView, EditorState, MarkdownViewMode};
 use crate::lsp::{DiagSeverity, LspManager};
 use crate::path_utils::{path_extension_matches, PREVIEW_IMAGE_EXTS};
-use crate::stacker::utf16::{char_index_to_utf16_index, utf16_index_to_char_index};
+use crate::utf16::{char_index_to_utf16_index, utf16_index_to_char_index};
 use gpui::prelude::*;
 use gpui::{
     actions, div, font, px, relative, rgb, rgba, size, App, Application, Bounds, Context,

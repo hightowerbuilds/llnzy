@@ -17,7 +17,7 @@ cargo test --release --test performance_budgets -- --ignored --nocapture
 
 - Launch `target/llnzy.app`.
 - Confirm the workspace opens without panic, blank window, or missing fonts.
-- Open Home, Terminal, Editor, Sketch, Stacker, Appearances, and Settings tabs.
+- Open Home, Terminal, Editor, Appearances, and Settings tabs.
 - Join, split, rename, swap, and close tabs.
 - Quit and relaunch; confirm the app still starts cleanly.
 
@@ -54,25 +54,10 @@ cargo test --release --test performance_budgets -- --ignored --nocapture
 - Kill the language server process and confirm LLNZY reports the failure without
   losing editor work.
 
-## Stacker
-
-- Create, edit, queue, copy, delete, and archive a saved prompt.
-- Add an inbox prompt with the CLI and confirm the app refreshes without
-  clobbering dirty local edits.
-- Search prompts and switch between saved, inbox, and queue views.
-- Confirm multiline prompt editing, formatting commands, and tab-stop behavior
-  remain correct.
-
-## Sketch
-
-- Draw marker strokes, rectangles, symbols, images, and text.
-- Select, move, resize, undo, redo, save, reopen, and export.
-- Confirm exported SVG/JPEG output visually matches the canvas.
-
 ## Appearances And Effects
 
-- Switch built-in themes and confirm terminal, editor, sketch, and Stacker
-  colors update coherently.
+- Switch built-in themes and confirm terminal and editor colors update
+  coherently.
 - Import a valid background image.
 - Try missing, invalid, and oversized background images and confirm the app
   rejects them without crashing.

@@ -6,11 +6,9 @@ belongs before adding logic to a large GPUI surface.
 ## App Entry Points
 
 - `src/main.rs` launches the default GPUI workspace binary.
-- `src/bin/gpui_workspace.rs`, `src/bin/gpui_editor.rs`, and
-  `src/bin/gpui_stacker.rs` are focused development entry points.
+- `src/bin/gpui_workspace.rs` and `src/bin/gpui_editor.rs` are focused
+  development entry points.
 - `src/lib.rs` exposes the shared app modules used by the binaries and tests.
-- `src/external_command.rs` defines commands that can be handed into the app
-  from external workflows.
 
 ## Workspace Shell
 
@@ -33,8 +31,8 @@ belongs before adding logic to a large GPUI surface.
 - `src/editor/` is the GPUI-independent editor model:
   - `buffer/`, `cursor.rs`, `history.rs`: text storage, selections, undo/redo,
     line endings, and edit primitives.
-  - `syntax.rs`, `search.rs`, `project_search.rs`, `git_gutter.rs`: pure or
-    mostly pure editor services.
+  - `syntax.rs`, `search.rs`, `git_gutter.rs`, `snippet.rs`,
+    `editorconfig.rs`: pure or mostly pure editor services.
   - `recovery.rs` and `perf.rs`: dirty-buffer recovery and large-file/perf
     thresholds.
 - `src/gpui_editor.rs` owns the editor entity and cross-feature orchestration.
@@ -63,36 +61,6 @@ belongs before adding logic to a large GPUI surface.
   behavior belongs in `src/pty.rs` or `src/session.rs`. GPUI terminal code
   should remain the shell that wires rendering and input to those layers.
 
-## Stacker
-
-- `src/stacker.rs` owns saved prompt loading, inbox loading, migration, and
-  prompt library persistence.
-- `src/stacker/` owns Stacker model slices:
-  - `storage.rs`: markdown/frontmatter prompt records and migrations.
-  - `queue.rs`: queue size, dedupe, clipboard payloads.
-  - `session.rs`, `input.rs`, `formatting.rs`, `commands.rs`: prose editor
-    state and formatting commands.
-  - `draft.rs`: dirty/scratch/saved/inbox draft source state.
-  - `sync.rs`: pure refresh planning for GPUI Stacker external state updates.
-  - `cli.rs` and `cli/args.rs`: headless agent CLI execution and argument
-    parsing.
-- `src/gpui_stacker.rs` owns the Stacker GPUI entity and input element.
-- `src/gpui_stacker/layout.rs` owns multiline text layout.
-- `src/gpui_stacker/render.rs` owns Stacker view construction.
-- New prompt behavior should start in `src/stacker/` with unit tests. GPUI
-  Stacker should load data, apply pure plans, and render.
-
-## Sketch
-
-- `src/sketch/` owns the app-independent sketch model:
-  - `model.rs`, `state.rs`, `tools.rs`, `commands.rs`, `geometry.rs`,
-    `hit_testing.rs`, `media.rs`, `serialization.rs`, `appearance.rs`,
-    `export.rs`.
-- `src/gpui_sketch.rs` owns the GPUI sketch surface and event wiring.
-- New geometry, selection, serialization, export, or undo behavior belongs in
-  `src/sketch/` first. GPUI sketch should only translate pointer/keyboard
-  events and render model state.
-
 ## LSP
 
 - `src/lsp/transport.rs` owns subprocess JSON-RPC transport.
@@ -115,6 +83,8 @@ belongs before adding logic to a large GPUI surface.
 - `src/platform/` owns app paths, packaging metadata, shell profiles, and
   terminal launch specs.
 - `src/effects/` owns GPUI shader/effect elements and host setup.
+- `src/utf16.rs` owns UTF-16 <-> char index conversion shared by the terminal
+  IME path and the LSP position adapter.
 - Platform-specific behavior belongs behind `src/platform/` or a tightly
   scoped platform module. Callers should receive safe Rust data or explicit
   `Result`/`Option` outcomes.

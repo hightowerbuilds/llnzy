@@ -8,7 +8,7 @@ A native GPU terminal emulator in Rust, with a coding workbench built around it.
 
 llnzy is a terminal emulator first. The terminal is the headline surface: a GPU-rendered ANSI/VT emulator running your shell, with the rest of the app organized to support the work you do around it.
 
-The other surfaces orbit the terminal. The code editor handles source files adjacent to the shell session. The project sidebar scopes the workspace to whatever directory the terminal is operating on. Stacker manages prompts you hand off to agents and CLIs running inside the terminal. Sketch is a drawing canvas for the visual artifacts that come up around agentic coding -- wireframes, annotated screenshots, diagrams traded with agents. Appearances, Tabs, Settings, and the Error Log exist to keep that loop tunable and observable.
+The other surfaces orbit the terminal. The code editor handles source files adjacent to the shell session. The project sidebar scopes the workspace to whatever directory the terminal is operating on. Appearances, Tabs, Settings, and the Error Log exist to keep that loop tunable and observable.
 
 Vim mode was removed on purpose: if you want vim, run it in the terminal.
 
@@ -29,7 +29,7 @@ To build a macOS .app bundle:
 ./bundle.sh --release
 ```
 
-To build an installer package that also installs the `llnzy` CLI into `/usr/local/bin`:
+To build an installer package that also installs a `llnzy` shell launcher into `/usr/local/bin`:
 ```sh
 ./bundle.sh --release --pkg --dmg
 ```
@@ -51,15 +51,11 @@ Requires Rust 1.75+. macOS is the active release target.
 
 **Project Sidebar** -- Scopes the workspace to the directory the terminal is operating on. Open a project folder, browse files, open files in the GPUI editor, drag files/folders into folders, resize or hide the sidebar, and reopen recent projects.
 
-**Stacker** -- Prompt queue for work you hand off to agents and CLIs running in the terminal. Save, edit, delete, categorize, search, queue, and copy prompts. Optional prompt bar above the footer for quick access. Agents and scripts can manage saved prompts with `llnzy stacker add/save/list/edit/delete` while the app owns the prompt store. CLI reference: `docs/stacker-cli.md`.
+**Appearances** -- Apply built-in themes, tune terminal and editor colors, import terminal background images, and adjust cursor presentation.
 
-**Appearances** -- Apply built-in themes, tune terminal/editor/sketch colors, import terminal background images, and adjust cursor presentation.
-
-**Tabs** -- Home, Stacker, Terminal, Sketch, Editor, Appearances, and Settings surfaces can be opened from the workspace menus. Tabs can be joined, separated, swapped, renamed, and closed.
+**Tabs** -- Home, Terminal, Editor, Appearances, and Settings surfaces can be opened from the workspace menus. Tabs can be joined, separated, swapped, renamed, and closed.
 
 **Themes** -- Built-in presets plus persistent background image management through the GPUI appearances workflow.
-
-**Sketch** -- A drawing canvas for the visual artifacts that come up while coding with agents: wireframes you draw before writing code, screenshots you annotate, diagrams and images you exchange with agents. Marker, rectangle, symbol, image, and text tools, with selection, moving/resizing, undo/redo, save, export, and persisted appearance settings. Less central than the terminal or editor, but a core surface because visual artifacts matter for agentic workflows.
 
 ## Keyboard Shortcuts
 
