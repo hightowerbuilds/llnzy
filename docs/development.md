@@ -33,15 +33,25 @@ The supported build shapes are:
 ```sh
 cargo check
 cargo check --all-features
+cargo check --lib --no-default-features
 cargo test --lib
 cargo test --all-targets --all-features
 ```
 
-`cargo check --no-default-features` is not currently a supported shape. The
-default `llnzy` binary starts the GPUI workspace, while that workspace module is
-behind the `gpui-workspace` default feature. If LLNZY later needs a headless
-library-only profile, add an explicit headless binary or gate `src/main.rs`
-before treating no-default-features as supported.
+`cargo check --lib --no-default-features` works because the gpui-gated modules
+(`gpui_editor` behind `gpui-editor`; `effects`, `gpui_tabs`, `gpui_terminal`,
+and `gpui_workspace` behind `gpui-workspace`) are feature-gated in `src/lib.rs`,
+so the library compiles without them. The `--lib` flag means the workspace
+binary is not built in this shape, which is also why `src/main.rs` never enters
+it. CI's `linux-check` job runs this shape on `ubuntu-latest` as a non-blocking
+cross-compile smoke check of the platform-independent modules (editor, config,
+lsp, terminal model, error log, and friends).
+
+A full `--no-default-features` build of all targets is not supported:
+`src/main.rs` starts the GPUI workspace and needs the `gpui-workspace` default
+feature. If LLNZY later needs a headless library-only profile, add an explicit
+headless binary or gate `src/main.rs` before treating no-default-features as
+supported.
 
 On macOS, the default and all-features shapes also compile the Metal-backed
 shader/effects dependencies declared under the macOS target section in
@@ -49,8 +59,11 @@ shader/effects dependencies declared under the macOS target section in
 
 ## Current Platform
 
-The enforced CI baseline runs on `macos-latest`. That matches the current app
-surface, including GPUI and the macOS effects pipeline.
+The required CI jobs (check, fmt, clippy, test, build-release) run on
+`macos-latest`. That matches the current app surface, including GPUI and the
+macOS effects pipeline. `linux-check` is a separate advisory job on
+`ubuntu-latest`, scoped to `cargo check --lib --no-default-features`; it is a
+smoke check of the platform-independent modules, not a claim of Linux support.
 
 If a future change claims cross-platform support, add the matching CI job before
 calling the platform supported.
