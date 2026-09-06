@@ -437,12 +437,7 @@ pub(super) fn workspace_surface_pane(
                     )),
             )
         }
-        WorkspaceSurface::Appearances => pane.child(appearances_surface(
-            appearance_config,
-            appearance_page,
-            terminal_background_import_error,
-            cx,
-        )),
+        WorkspaceSurface::Appearances => pane.child(appearances_surface(appearance_config, cx)),
         WorkspaceSurface::Home => pane.child(home_surface(
             workspace_root,
             recent_projects,

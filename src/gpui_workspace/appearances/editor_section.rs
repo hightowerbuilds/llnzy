@@ -2,12 +2,9 @@ use gpui::prelude::*;
 use gpui::{div, px, rgb, Context, MouseButton, MouseDownEvent};
 
 use crate::config::{editor_syntax_presets, Config, EditorSyntaxPreset};
-use crate::gpui_workspace::{
-    WorkspacePalette, WorkspacePrototype, BORDER, MUTED_TEXT, QUEUE_GREEN, SIDEBAR_TEXT,
-};
+use crate::gpui_workspace::{WorkspacePrototype, BORDER, MUTED_TEXT, QUEUE_GREEN, SIDEBAR_TEXT};
 
 use super::widgets::{color_strip, metric_row};
-use super::{markdown_appearance_controls, settings_toggle_row};
 
 pub(super) fn editor_appearance_controls(
     content: gpui::Div,
@@ -33,29 +30,6 @@ pub(super) fn editor_appearance_controls(
             cx,
             |this, cx| this.adjust_sidebar_font_size(-1.0, cx),
             |this, cx| this.adjust_sidebar_font_size(1.0, cx),
-        ))
-}
-
-pub(super) fn editor_settings_controls(
-    content: gpui::Div,
-    config: Config,
-    editor_word_wrap: bool,
-    cx: &mut Context<WorkspacePrototype>,
-) -> gpui::Div {
-    let palette = WorkspacePalette::from_config(&config);
-    editor_appearance_controls(content, config.clone(), cx)
-        .child(settings_toggle_row(
-            "Word wrap",
-            "Wraps long source lines in JavaScript, Markdown, and other text files.",
-            editor_word_wrap,
-            palette,
-            cx,
-            |this, cx| this.toggle_editor_word_wrap(cx),
-        ))
-        .child(markdown_appearance_controls(
-            div().flex().flex_col().gap_3(),
-            config,
-            cx,
         ))
 }
 

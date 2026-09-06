@@ -388,20 +388,18 @@ impl From<WorkspaceSurface> for WorkspaceRecoverySurface {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AppearancePage {
+    Appearances,
     Terminal,
-    Editor,
-    App,
     Advanced,
 }
 
 impl AppearancePage {
-    const ALL: [Self; 4] = [Self::Terminal, Self::Editor, Self::App, Self::Advanced];
+    const ALL: [Self; 3] = [Self::Appearances, Self::Terminal, Self::Advanced];
 
     fn title(self) -> &'static str {
         match self {
+            AppearancePage::Appearances => "Appearances",
             AppearancePage::Terminal => "Terminal",
-            AppearancePage::Editor => "Editor",
-            AppearancePage::App => "App",
             AppearancePage::Advanced => "Advanced",
         }
     }
@@ -786,7 +784,7 @@ impl WorkspacePrototype {
             sidebar_width: SIDEBAR_DEFAULT_WIDTH,
             last_sidebar_width: SIDEBAR_DEFAULT_WIDTH,
             appearance_config,
-            appearance_page: AppearancePage::Terminal,
+            appearance_page: AppearancePage::Appearances,
             terminal_background_import_error: None,
             palette: command_palette::CommandPaletteState::default(),
             preferences,

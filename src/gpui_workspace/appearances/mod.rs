@@ -16,7 +16,7 @@ mod widgets;
 
 pub(super) use terminal_section::gpui_terminal_background_reference;
 
-use editor_section::{editor_appearance_controls, editor_settings_controls};
+use editor_section::editor_appearance_controls;
 use error_log::{error_log_clear_modal, settings_error_log_row};
 use terminal_section::terminal_appearance_controls;
 use widgets::{
@@ -52,8 +52,6 @@ pub(super) fn is_display_font(family: &str) -> bool {
 
 pub(super) fn appearances_surface(
     config: Config,
-    page: AppearancePage,
-    terminal_background_import_error: Option<String>,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     div()
@@ -89,8 +87,7 @@ pub(super) fn appearances_surface(
                                 .text_color(rgb(MUTED_TEXT))
                                 .child("Theme, terminal, and editor presentation"),
                         ),
-                )
-                .child(appearance_page_nav(page, cx)),
+                ),
         )
         .child(
             div()
@@ -100,35 +97,58 @@ pub(super) fn appearances_surface(
                 .p_4()
                 .overflow_hidden()
                 .child(appearance_theme_column(&config, cx))
-                .child(appearance_controls_column(
-                    config,
-                    page,
-                    terminal_background_import_error,
-                    cx,
-                )),
+                .child(appearance_all_controls_column(config, cx)),
         )
 }
 
-fn appearance_page_nav(
+/// The standalone Appearances surface shows every visual section in one
+/// scroll (theme column + terminal/editor/app appearance sections), now that
+/// Settings owns the three-tab split.
+fn appearance_all_controls_column(
+    config: Config,
+    cx: &mut Context<WorkspacePrototype>,
+) -> impl IntoElement {
+    let content = div()
+        .flex_1()
+        .h_full()
+        .flex()
+        .flex_col()
+        .gap_3()
+        .border_1()
+        .border_color(rgb(BORDER))
+        .bg(rgb(0x15151c))
+        .p_4()
+        .child(
+            div()
+                .text_size(px(18.0))
+                .text_color(rgb(ACTIVE_TEXT))
+                .child("Appearances"),
+        );
+
+    let content = settings_appearances_controls(content, config, None, false, cx);
+
+    content
+        .id("appearance-controls-scroll")
+        .overflow_y_scroll()
+        .scrollbar_width(px(8.0))
+}
+
+/// Settings keeps its own three-tab nav (Appearances / Terminal / Advanced).
+fn settings_page_nav(
     page: AppearancePage,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     let mut nav = div().flex().items_center().gap_1();
     for target in AppearancePage::ALL {
-        nav = nav.child(appearance_page_button(target, page, cx));
+        let active = target == page;
+        nav = nav.child(appearance_button(
+            target.title().to_string(),
+            active,
+            cx,
+            move |this, cx| this.set_appearance_page(target, cx),
+        ));
     }
     nav
-}
-
-fn appearance_page_button(
-    target: AppearancePage,
-    page: AppearancePage,
-    cx: &mut Context<WorkspacePrototype>,
-) -> impl IntoElement {
-    let active = target == page;
-    appearance_button(target.title().to_string(), active, cx, move |this, cx| {
-        this.set_appearance_page(target, cx);
-    })
 }
 
 fn appearance_theme_column(
@@ -295,118 +315,74 @@ fn app_theme_section(
     content.child(section)
 }
 
-fn appearance_controls_column(
-    config: Config,
-    page: AppearancePage,
-    terminal_background_import_error: Option<String>,
-    cx: &mut Context<WorkspacePrototype>,
-) -> impl IntoElement {
-    let content = div()
-        .flex_1()
-        .h_full()
-        .flex()
-        .flex_col()
-        .gap_3()
-        .border_1()
-        .border_color(rgb(BORDER))
-        .bg(rgb(0x15151c))
-        .p_4()
-        .child(
-            div()
-                .text_size(px(18.0))
-                .text_color(rgb(ACTIVE_TEXT))
-                .child(page.title()),
-        );
-
-    let content = match page {
-        AppearancePage::Terminal => {
-            terminal_appearance_controls(content, config, terminal_background_import_error, cx)
-        }
-        AppearancePage::Editor => editor_appearance_controls(content, config, cx),
-        AppearancePage::App => {
-            let palette = WorkspacePalette::from_config(&config);
-            app_settings_controls(content, config, 2, palette, cx)
-        }
-        AppearancePage::Advanced => advanced_settings_controls(
-            content,
-            false,
-            ErrorLogFilter::All,
-            Vec::new(),
-            WorkspacePalette::from_config(&config),
-            cx,
-        ),
-    };
-
-    content
-        .id("appearance-controls-scroll")
-        .overflow_y_scroll()
-        .scrollbar_width(px(8.0))
-}
-
-fn app_settings_controls(
-    content: gpui::Div,
-    config: Config,
-    joined_tab_limit: usize,
-    palette: WorkspacePalette,
-    cx: &mut Context<WorkspacePrototype>,
-) -> gpui::Div {
-    app_theme_section(content, &config, palette, cx)
-        .child(metric_row_palette(
-            "App Font Size",
-            format!("{:.0}px", config.font_size),
-            palette,
-            cx,
-            |this, cx| this.adjust_font_size(-1.0, cx),
-            |this, cx| this.adjust_font_size(1.0, cx),
-        ))
-        .child(metric_row_palette(
-            "Selection Alpha",
-            format!("{:.0}%", config.colors.selection_alpha * 100.0),
-            palette,
-            cx,
-            |this, cx| this.adjust_selection_alpha(-0.05, cx),
-            |this, cx| this.adjust_selection_alpha(0.05, cx),
-        ))
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .gap_2()
-                .child(control_label_palette("Time-of-Day Warmth", palette))
-                .child(appearance_button_palette(
-                    if config.time_of_day_enabled {
-                        "On".to_string()
-                    } else {
-                        "Off".to_string()
-                    },
-                    config.time_of_day_enabled,
-                    palette,
-                    cx,
-                    |this, cx| this.toggle_time_of_day(cx),
-                )),
-        )
-        .child(settings_join_limit_row_palette(
-            joined_tab_limit,
-            palette,
-            cx,
-        ))
-}
-
 fn advanced_settings_controls(
     content: gpui::Div,
+    joined_tab_limit: usize,
     error_log_expanded: bool,
     error_log_filter: ErrorLogFilter,
     error_entries: Vec<crate::error_log::LogEntry>,
     palette: WorkspacePalette,
     cx: &mut Context<WorkspacePrototype>,
 ) -> gpui::Div {
-    content.child(settings_error_log_row(
-        error_log_expanded,
-        error_log_filter,
-        error_entries,
-        palette,
-        cx,
-    ))
+    content
+        .child(settings_join_limit_row_palette(
+            joined_tab_limit,
+            palette,
+            cx,
+        ))
+        .child(settings_error_log_row(
+            error_log_expanded,
+            error_log_filter,
+            error_entries,
+            palette,
+            cx,
+        ))
+}
+
+fn settings_join_limit_row_palette(
+    current_limit: usize,
+    palette: WorkspacePalette,
+    cx: &mut Context<WorkspacePrototype>,
+) -> impl IntoElement {
+    let mut choices = div().flex().items_center().gap_1();
+    for limit in [2_u8, 3, 4] {
+        choices = choices.child(appearance_button_palette(
+            limit.to_string(),
+            current_limit == limit as usize,
+            palette,
+            cx,
+            move |this, cx| this.set_joined_tab_limit(limit, cx),
+        ));
+    }
+
+    div()
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap_4()
+        .px_4()
+        .py_3()
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(
+                    div()
+                        .text_size(px(13.0))
+                        .text_color(rgb(palette.active_text))
+                        .child("Joined tab limit"),
+                )
+                .child(
+                    div()
+                        .text_size(px(12.0))
+                        .text_color(rgb(palette.muted_text))
+                        .child(
+                            "Choose whether joined tab groups can hold two, three, or four tabs.",
+                        ),
+                ),
+        )
+        .child(choices)
 }
 
 pub(super) fn markdown_appearance_controls(
@@ -548,7 +524,7 @@ pub(super) fn settings_surface(
                             .child("Settings"),
                     ),
                 )
-                .child(appearance_page_nav(page, cx)),
+                .child(settings_page_nav(page, cx)),
         )
         .child(content);
 
@@ -590,29 +566,6 @@ fn settings_controls_column(
         .p_4()
         .overflow_hidden();
 
-    if page == AppearancePage::App {
-        let content = div()
-            .flex_1()
-            .h_full()
-            .flex()
-            .flex_col()
-            .gap_4()
-            .p_4()
-            .child(
-                div()
-                    .text_size(px(18.0))
-                    .text_color(rgb(palette.active_text))
-                    .child(page.title()),
-            );
-        let content = app_settings_controls(content, config, joined_tab_limit, palette, cx);
-        return body.child(
-            content
-                .id("settings-controls-scroll")
-                .overflow_y_scroll()
-                .scrollbar_width(px(8.0)),
-        );
-    }
-
     let content = div()
         .flex_1()
         .h_full()
@@ -631,15 +584,17 @@ fn settings_controls_column(
         );
 
     let content = match page {
-        AppearancePage::Terminal => {
-            terminal_appearance_controls(content, config, terminal_background_import_error, cx)
-        }
-        AppearancePage::Editor => editor_settings_controls(content, config, editor_word_wrap, cx),
-        AppearancePage::App => {
-            app_settings_controls(content, config, joined_tab_limit, palette, cx)
-        }
+        AppearancePage::Appearances => settings_appearances_controls(
+            content,
+            config,
+            terminal_background_import_error,
+            editor_word_wrap,
+            cx,
+        ),
+        AppearancePage::Terminal => settings_terminal_controls(content, &config, cx),
         AppearancePage::Advanced => advanced_settings_controls(
             content,
+            joined_tab_limit,
             error_log_expanded,
             error_log_filter,
             error_entries,
@@ -656,50 +611,135 @@ fn settings_controls_column(
     )
 }
 
-fn settings_join_limit_row_palette(
-    current_limit: usize,
-    palette: WorkspacePalette,
+/// The Appearances tab of Settings: every visual knob in the app, grouped
+/// into labeled sections — terminal presentation first (it is the headline
+/// surface), then the rest of the app.
+fn settings_appearances_controls(
+    content: gpui::Div,
+    config: Config,
+    terminal_background_import_error: Option<String>,
+    editor_word_wrap: bool,
     cx: &mut Context<WorkspacePrototype>,
-) -> impl IntoElement {
-    let mut choices = div().flex().items_center().gap_1();
-    for limit in [2_u8, 3, 4] {
-        choices = choices.child(appearance_button_palette(
-            limit.to_string(),
-            current_limit == limit as usize,
+) -> gpui::Div {
+    content
+        .child(settings_section_label("TERMINAL"))
+        .child(terminal_appearance_controls(
+            div().flex().flex_col().gap_3(),
+            config.clone(),
+            terminal_background_import_error,
+            cx,
+        ))
+        .child(settings_section_label("EDITOR"))
+        .child(editor_appearance_controls(
+            div().flex().flex_col().gap_3(),
+            config.clone(),
+            cx,
+        ))
+        .child(settings_section_label("EDITOR BEHAVIOR"))
+        .child(editor_behavior_appearance_controls(
+            div().flex().flex_col().gap_3(),
+            config.clone(),
+            editor_word_wrap,
+            cx,
+        ))
+        .child(settings_section_label("APP"))
+        .child(app_appearance_controls(
+            div().flex().flex_col().gap_3(),
+            &config,
+            cx,
+        ))
+}
+
+/// Visual presentation rows that used to live under the Settings "App" page.
+fn app_appearance_controls(
+    content: gpui::Div,
+    config: &Config,
+    cx: &mut Context<WorkspacePrototype>,
+) -> gpui::Div {
+    let palette = WorkspacePalette::from_config(config);
+    app_theme_section(content, config, palette, cx)
+        .child(metric_row_palette(
+            "App Font Size",
+            format!("{:.0}px", config.font_size),
             palette,
             cx,
-            move |this, cx| this.set_joined_tab_limit(limit, cx),
-        ));
-    }
-
-    div()
-        .flex()
-        .items_center()
-        .justify_between()
-        .gap_4()
-        .px_4()
-        .py_3()
+            |this, cx| this.adjust_font_size(-1.0, cx),
+            |this, cx| this.adjust_font_size(1.0, cx),
+        ))
+        .child(metric_row_palette(
+            "Selection Alpha",
+            format!("{:.0}%", config.colors.selection_alpha * 100.0),
+            palette,
+            cx,
+            |this, cx| this.adjust_selection_alpha(-0.05, cx),
+            |this, cx| this.adjust_selection_alpha(0.05, cx),
+        ))
         .child(
             div()
                 .flex()
-                .flex_col()
-                .gap_1()
-                .child(
-                    div()
-                        .text_size(px(13.0))
-                        .text_color(rgb(palette.active_text))
-                        .child("Joined tab limit"),
-                )
-                .child(
-                    div()
-                        .text_size(px(12.0))
-                        .text_color(rgb(palette.muted_text))
-                        .child(
-                            "Choose whether joined tab groups can hold two, three, or four tabs.",
-                        ),
-                ),
+                .items_center()
+                .gap_2()
+                .child(control_label_palette("Time-of-Day Warmth", palette))
+                .child(appearance_button_palette(
+                    if config.time_of_day_enabled {
+                        "On".to_string()
+                    } else {
+                        "Off".to_string()
+                    },
+                    config.time_of_day_enabled,
+                    palette,
+                    cx,
+                    |this, cx| this.toggle_time_of_day(cx),
+                )),
         )
-        .child(choices)
+}
+
+/// Word wrap + markdown preview controls that used to live under the
+/// Settings "Editor" page.
+fn editor_behavior_appearance_controls(
+    content: gpui::Div,
+    config: Config,
+    editor_word_wrap: bool,
+    cx: &mut Context<WorkspacePrototype>,
+) -> gpui::Div {
+    let palette = WorkspacePalette::from_config(&config);
+    content
+        .child(settings_toggle_row(
+            "Word wrap",
+            "Wraps long source lines in JavaScript, Markdown, and other text files.",
+            editor_word_wrap,
+            palette,
+            cx,
+            |this, cx| this.toggle_editor_word_wrap(cx),
+        ))
+        .child(markdown_appearance_controls(
+            div().flex().flex_col().gap_3(),
+            config,
+            cx,
+        ))
+}
+
+/// Terminal-behavior (non-visual) settings for the Terminal tab.
+fn settings_terminal_controls(
+    content: gpui::Div,
+    config: &Config,
+    cx: &mut Context<WorkspacePrototype>,
+) -> gpui::Div {
+    content.child(metric_row(
+        "Scrollback Lines",
+        format!("{}", config.terminal.scrollback_lines),
+        cx,
+        |this, cx| this.adjust_terminal_scrollback(-1000, cx),
+        |this, cx| this.adjust_terminal_scrollback(1000, cx),
+    ))
+}
+
+fn settings_section_label(label: &'static str) -> impl IntoElement {
+    div()
+        .mt_2()
+        .text_size(px(12.0))
+        .text_color(rgb(0x8d94a3))
+        .child(label)
 }
 
 pub(super) fn settings_toggle_row(

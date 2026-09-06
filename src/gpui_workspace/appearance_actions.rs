@@ -60,6 +60,16 @@ impl WorkspacePrototype {
         self.apply_appearance_config(cx);
     }
 
+    /// Terminal-behavior setting (Settings > Terminal): scrollback history
+    /// size per grid, in lines. Applies to new and restarted sessions;
+    /// existing grids keep their current history.
+    pub(super) fn adjust_terminal_scrollback(&mut self, delta: i64, cx: &mut Context<Self>) {
+        let current = self.appearance_config.terminal.scrollback_lines as i64;
+        let next = (current + delta).clamp(1_000, 100_000);
+        self.appearance_config.terminal.scrollback_lines = next as usize;
+        self.apply_appearance_config(cx);
+    }
+
     pub(super) fn set_terminal_font_family(
         &mut self,
         family: Option<String>,
