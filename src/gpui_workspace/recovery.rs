@@ -18,6 +18,7 @@ pub(super) enum WorkspaceRecoverySurface {
     Explorer,
     Appearances,
     Settings,
+    Academy,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -64,6 +65,7 @@ enum RawRecoverySurface {
     Explorer,
     Appearances,
     Settings,
+    Academy,
     #[serde(other)]
     Unknown,
 }
@@ -91,6 +93,7 @@ where
                 RawRecoverySurface::Explorer => WorkspaceRecoverySurface::Explorer,
                 RawRecoverySurface::Appearances => WorkspaceRecoverySurface::Appearances,
                 RawRecoverySurface::Settings => WorkspaceRecoverySurface::Settings,
+                RawRecoverySurface::Academy => WorkspaceRecoverySurface::Academy,
                 RawRecoverySurface::Unknown => {
                     log::debug!(
                         "skipping workspace recovery tab {} with unknown surface kind",

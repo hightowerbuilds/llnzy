@@ -13,6 +13,7 @@ use crate::{
 };
 
 use super::{
+    academy::{academy_surface, AcademyCourseId},
     appearances::{appearances_surface, settings_surface},
     home::home_surface,
     sidebar::{collect_explorer_entries, explorer_tree_panel, ExplorerState},
@@ -32,6 +33,7 @@ pub(super) struct WorkspaceSurfaceContext {
     pub(super) explorers: BTreeMap<u64, ExplorerState>,
     pub(super) appearance_config: Config,
     pub(super) appearance_page: AppearancePage,
+    pub(super) academy_course: Option<AcademyCourseId>,
     pub(super) terminal_background_import_error: Option<String>,
     pub(super) editor_word_wrap: bool,
     pub(super) joined_tab_limit: usize,
@@ -343,6 +345,7 @@ pub(super) fn workspace_surface_pane(
         explorers,
         appearance_config,
         appearance_page,
+        academy_course,
         terminal_background_import_error,
         editor_word_wrap,
         joined_tab_limit,
@@ -438,6 +441,9 @@ pub(super) fn workspace_surface_pane(
             )
         }
         WorkspaceSurface::Appearances => pane.child(appearances_surface(appearance_config, cx)),
+        WorkspaceSurface::Academy => {
+            pane.child(academy_surface(&appearance_config, academy_course, cx))
+        }
         WorkspaceSurface::Home => pane.child(home_surface(
             workspace_root,
             recent_projects,

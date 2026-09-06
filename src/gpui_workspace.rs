@@ -12,6 +12,7 @@ use gpui::{
     WindowBounds, WindowOptions,
 };
 
+mod academy;
 mod appearance_actions;
 mod appearances;
 mod command_palette;
@@ -106,6 +107,7 @@ actions!(
         MenuShowTerminal,
         MenuShowEditor,
         MenuShowAppearances,
+        MenuShowAcademy,
         MenuZoomIn,
         MenuZoomOut,
         MenuZoomReset,
@@ -345,6 +347,7 @@ enum WorkspaceSurface {
     Explorer,
     Appearances,
     Settings,
+    Academy,
 }
 
 impl WorkspaceSurface {
@@ -356,6 +359,7 @@ impl WorkspaceSurface {
             WorkspaceSurface::Explorer => "Explorer",
             WorkspaceSurface::Appearances => "Appearances",
             WorkspaceSurface::Settings => "Settings",
+            WorkspaceSurface::Academy => "Academy",
         }
     }
 }
@@ -369,6 +373,7 @@ impl From<WorkspaceRecoverySurface> for WorkspaceSurface {
             WorkspaceRecoverySurface::Explorer => Self::Explorer,
             WorkspaceRecoverySurface::Appearances => Self::Appearances,
             WorkspaceRecoverySurface::Settings => Self::Settings,
+            WorkspaceRecoverySurface::Academy => Self::Academy,
         }
     }
 }
@@ -382,6 +387,7 @@ impl From<WorkspaceSurface> for WorkspaceRecoverySurface {
             WorkspaceSurface::Explorer => Self::Explorer,
             WorkspaceSurface::Appearances => Self::Appearances,
             WorkspaceSurface::Settings => Self::Settings,
+            WorkspaceSurface::Academy => Self::Academy,
         }
     }
 }
@@ -582,6 +588,7 @@ fn install_workspace_menu_bar(cx: &mut App) {
                 MenuItem::action("Home", MenuShowHome),
                 MenuItem::action("Terminal", MenuShowTerminal),
                 MenuItem::action("Settings", MenuShowAppearances),
+                MenuItem::action("Code Academy", MenuShowAcademy),
             ],
         },
         Menu {
@@ -637,6 +644,7 @@ struct WorkspacePrototype {
     last_sidebar_width: f32,
     appearance_config: Config,
     appearance_page: AppearancePage,
+    academy_course: Option<academy::AcademyCourseId>,
     terminal_background_import_error: Option<String>,
     palette: command_palette::CommandPaletteState,
     preferences: crate::preferences::WorkspacePreferences,
@@ -785,6 +793,7 @@ impl WorkspacePrototype {
             last_sidebar_width: SIDEBAR_DEFAULT_WIDTH,
             appearance_config,
             appearance_page: AppearancePage::Appearances,
+            academy_course: None,
             terminal_background_import_error: None,
             palette: command_palette::CommandPaletteState::default(),
             preferences,
@@ -1810,7 +1819,8 @@ impl WorkspacePrototype {
             WorkspaceSurface::Editor
             | WorkspaceSurface::Home
             | WorkspaceSurface::Appearances
-            | WorkspaceSurface::Settings => {
+            | WorkspaceSurface::Settings
+            | WorkspaceSurface::Academy => {
                 if surface == WorkspaceSurface::Editor {
                     window.focus(&self.active_editor_entity().focus_handle(cx));
                 } else {
@@ -2147,6 +2157,7 @@ impl Render for WorkspacePrototype {
                     explorers: self.explorers.clone(),
                     appearance_config,
                     appearance_page,
+                    academy_course: self.academy_course,
                     terminal_background_import_error,
                     editor_word_wrap: self.editor_word_wrap_enabled(),
                     joined_tab_limit: self.tab_join_limit(),
@@ -2227,6 +2238,7 @@ impl Render for WorkspacePrototype {
             .on_action(cx.listener(Self::menu_show_terminal))
             .on_action(cx.listener(Self::menu_show_editor))
             .on_action(cx.listener(Self::menu_show_appearances))
+            .on_action(cx.listener(Self::menu_show_academy))
             .on_action(cx.listener(Self::menu_zoom_in))
             .on_action(cx.listener(Self::menu_zoom_out))
             .on_action(cx.listener(Self::menu_zoom_reset))

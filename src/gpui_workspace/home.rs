@@ -52,7 +52,8 @@ pub(super) fn home_surface(
                 .text_color(rgb(palette.muted_text))
                 .child("Open a project or jump back into a recent workspace."),
         )
-        .child(home_open_project_button(palette, cx));
+        .child(home_open_project_button(palette, cx))
+        .child(home_new_course_button(palette, cx));
 
     if let Some(root) = workspace_root {
         content = content.child(
@@ -123,6 +124,33 @@ fn home_open_project_button(
             }),
         )
         .child("Open Project")
+}
+
+fn home_new_course_button(
+    palette: WorkspacePalette,
+    cx: &mut Context<WorkspacePrototype>,
+) -> impl IntoElement {
+    div()
+        .mt_2()
+        .w(px(240.0))
+        .h(px(42.0))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded_sm()
+        .border_1()
+        .border_color(rgb(palette.border))
+        .bg(rgb(palette.panel_bg))
+        .text_size(px(15.0))
+        .text_color(rgb(palette.sidebar_text))
+        .cursor_pointer()
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(|this, _: &MouseDownEvent, window, cx| {
+                this.open_academy_from_home(window, cx);
+            }),
+        )
+        .child("New Course")
 }
 
 fn home_recent_project_row(

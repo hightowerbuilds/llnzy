@@ -4,17 +4,18 @@ use crate::config::Config;
 use crate::editor::MarkdownViewMode;
 
 use super::{
-    MenuActivateTab1, MenuActivateTab2, MenuActivateTab3, MenuActivateTab4, MenuActivateTab5,
-    MenuActivateTab6, MenuActivateTab7, MenuActivateTab8, MenuActivateTab9, MenuCloseProject,
-    MenuCloseTab, MenuCopy, MenuEditorCheckDisk, MenuEditorCloseOthers, MenuEditorCloseSaved,
-    MenuEditorReopenClosed, MenuFind, MenuJoinTabs, MenuLspCodeActions, MenuLspCompletion,
-    MenuLspDefinition, MenuLspFormat, MenuLspHover, MenuLspReferences, MenuLspRename,
-    MenuLspSignatureHelp, MenuLspSymbols, MenuMarkdownCycle, MenuMarkdownPreview,
-    MenuMarkdownSource, MenuMarkdownSplit, MenuNewTab, MenuNextTab, MenuOpenProject,
-    MenuPartitionHorizontal, MenuPartitionVertical, MenuPaste, MenuPreviousTab, MenuRedo, MenuSave,
-    MenuSelectAll, MenuSeparateTabs, MenuShowAppearances, MenuShowCommandPalette, MenuShowEditor,
-    MenuShowFileFinder, MenuShowHome, MenuShowTerminal, MenuSwapTabs, MenuToggleSidebar, MenuUndo,
-    MenuZoomIn, MenuZoomOut, MenuZoomReset, WorkspacePrototype, WorkspaceSurface,
+    academy::AcademyCourseId, MenuActivateTab1, MenuActivateTab2, MenuActivateTab3,
+    MenuActivateTab4, MenuActivateTab5, MenuActivateTab6, MenuActivateTab7, MenuActivateTab8,
+    MenuActivateTab9, MenuCloseProject, MenuCloseTab, MenuCopy, MenuEditorCheckDisk,
+    MenuEditorCloseOthers, MenuEditorCloseSaved, MenuEditorReopenClosed, MenuFind, MenuJoinTabs,
+    MenuLspCodeActions, MenuLspCompletion, MenuLspDefinition, MenuLspFormat, MenuLspHover,
+    MenuLspReferences, MenuLspRename, MenuLspSignatureHelp, MenuLspSymbols, MenuMarkdownCycle,
+    MenuMarkdownPreview, MenuMarkdownSource, MenuMarkdownSplit, MenuNewTab, MenuNextTab,
+    MenuOpenProject, MenuPartitionHorizontal, MenuPartitionVertical, MenuPaste, MenuPreviousTab,
+    MenuRedo, MenuSave, MenuSelectAll, MenuSeparateTabs, MenuShowAcademy, MenuShowAppearances,
+    MenuShowCommandPalette, MenuShowEditor, MenuShowFileFinder, MenuShowHome, MenuShowTerminal,
+    MenuSwapTabs, MenuToggleSidebar, MenuUndo, MenuZoomIn, MenuZoomOut, MenuZoomReset,
+    WorkspacePrototype, WorkspaceSurface,
 };
 
 impl WorkspacePrototype {
@@ -538,6 +539,13 @@ impl WorkspacePrototype {
         self.open_or_activate_surface(surface, window, cx);
     }
 
+    /// Home → "New Course" button: open the Academy course picker in a tab,
+    /// reusing the same surface activation path the desktop menu uses.
+    pub(super) fn open_academy_from_home(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.academy_course = None;
+        self.open_or_activate_surface(WorkspaceSurface::Academy, window, cx);
+    }
+
     pub(super) fn menu_show_home(
         &mut self,
         _: &MenuShowHome,
@@ -572,6 +580,33 @@ impl WorkspacePrototype {
         cx: &mut Context<Self>,
     ) {
         self.menu_show_surface(WorkspaceSurface::Settings, window, cx);
+    }
+
+    pub(super) fn menu_show_academy(
+        &mut self,
+        _: &MenuShowAcademy,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.menu_show_surface(WorkspaceSurface::Academy, window, cx);
+    }
+
+    /// Store the Academy course the user picked from the picker cards so
+    /// the Academy surface can render that course's preview panel.
+    pub(super) fn select_academy_course(
+        &mut self,
+        course: AcademyCourseId,
+        cx: &mut Context<Self>,
+    ) {
+        self.academy_course = Some(course);
+        cx.notify();
+    }
+
+    /// Drop the Academy course selection, returning the surface to the
+    /// course picker.
+    pub(super) fn clear_academy_course_selection(&mut self, cx: &mut Context<Self>) {
+        self.academy_course = None;
+        cx.notify();
     }
 
     pub(super) fn menu_zoom_in(&mut self, _: &MenuZoomIn, _: &mut Window, cx: &mut Context<Self>) {
