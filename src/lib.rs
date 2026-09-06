@@ -1,3 +1,4 @@
+pub mod academy;
 pub mod academy_progress;
 pub mod async_guard;
 pub(crate) mod atomic_write;

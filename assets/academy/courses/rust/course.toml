@@ -1,0 +1,23 @@
+id = "rust"
+title = "Rust"
+language = "rust"
+description = "The Rust course for LLNZY Code Academy, aligned chapter-by-chapter to The Rust Programming Language, 3rd Edition."
+
+[book]
+title = "The Rust Programming Language"
+edition = 3
+
+[[modules]]
+title = "Toolchain & Cargo"
+chapter = 1
+lessons = ["L00", "L01"]
+
+[[modules]]
+title = "A Guessing Game Tour"
+chapter = 2
+lessons = ["L02", "L03"]
+
+[[modules]]
+title = "Common Programming Concepts"
+chapter = 3
+lessons = ["L04", "L05", "L06"]
