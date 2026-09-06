@@ -546,18 +546,6 @@ impl WorkspacePrototype {
         self.open_or_activate_surface(WorkspaceSurface::Academy, window, cx);
     }
 
-    /// Sidebar → "New Course" button: same Academy picker, same activation
-    /// path. Kept separate from the Home entry point so the two can diverge
-    /// (e.g. the sidebar one may later pre-select a course).
-    pub(super) fn open_academy_course_picker(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.academy_course = None;
-        self.open_or_activate_surface(WorkspaceSurface::Academy, window, cx);
-    }
-
     pub(super) fn menu_show_home(
         &mut self,
         _: &MenuShowHome,

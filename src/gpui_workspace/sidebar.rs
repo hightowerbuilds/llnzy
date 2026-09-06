@@ -892,15 +892,6 @@ fn sidebar_project_controls(
             |this, _window, cx| {
                 this.toggle_recent_projects(cx);
             },
-        ))
-        .child(project_button(
-            "New Course",
-            false,
-            palette,
-            cx,
-            |this, window, cx| {
-                this.open_academy_course_picker(window, cx);
-            },
         ));
 
     if let Some(root) = workspace_root {
