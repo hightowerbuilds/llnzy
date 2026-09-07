@@ -111,6 +111,11 @@ cp assets/install-cli.sh "$RESOURCES/install-cli.sh"
 cp assets/uninstall-cli.sh "$RESOURCES/uninstall-cli.sh"
 chmod 0755 "$RESOURCES/install-cli.sh" "$RESOURCES/uninstall-cli.sh"
 
+# Code Academy courses. platform::paths::bundled_courses_dir looks for
+# Contents/Resources/courses first, so this copy is what makes Academy work
+# in an installed app rather than only in a source checkout.
+cp -R assets/academy/courses "$RESOURCES/courses"
+
 /usr/libexec/PlistBuddy -c "Set :CFBundleName $DISPLAY_NAME" "$CONTENTS/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName $DISPLAY_NAME" "$CONTENTS/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $APP_ID" "$CONTENTS/Info.plist"
@@ -126,6 +131,11 @@ fi
 
 if [ ! -x "$CONTENTS/MacOS/$EXECUTABLE_NAME" ]; then
     echo "Bundle executable missing: $CONTENTS/MacOS/$EXECUTABLE_NAME" >&2
+    exit 1
+fi
+
+if [ ! -f "$RESOURCES/courses/rust/course.toml" ]; then
+    echo "Bundle courses missing: $RESOURCES/courses/rust/course.toml" >&2
     exit 1
 fi
 

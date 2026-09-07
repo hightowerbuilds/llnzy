@@ -64,7 +64,31 @@ cargo test --release --test performance_budgets -- --ignored --nocapture
 - Toggle effects off and on.
 - Try built-in shader backgrounds and confirm failures degrade to a usable UI.
 
+## Code Academy
+
+- Open the Academy tab (Code Academy in the menu, Home's "Open Course"
+  button, or the footer's Courses button).
+- Confirm the picker lists the Rust course with the lesson count from
+  `assets/academy/courses/rust/course.toml` — not a hardcoded number.
+- Open the course and confirm modules appear as chapter headings with
+  their lessons listed in manifest order.
+- Open a lesson and confirm the markdown body renders (headings, prose,
+  code blocks), concepts appear as chips, and each exercise shows its
+  prompt, files, and check command.
+- Use Previous/Next through the lesson list; confirm the first lesson has
+  no Previous and the last has no Next.
+- Back out to the course, then to the picker.
+- Edit a bundled `lesson.md` while the app runs and confirm the reader
+  picks the change up; break its frontmatter and confirm the previously
+  loaded course stays visible rather than blanking.
+- Rename `assets/academy/courses` (source runs) and relaunch; confirm the
+  Academy surface shows the empty-catalog notice and the error log names
+  the reason, with no panic.
+
 ## Packaging And Operations
+
+- Confirm `Contents/Resources/courses/rust/course.toml` exists in the
+  bundle and the packaged app's Academy tab lists the course.
 
 - Launch the packaged app from `target/llnzy.app`.
 - Confirm the bundle display name is `LLNZY` and the app executable runs.

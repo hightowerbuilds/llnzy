@@ -4,18 +4,18 @@ use crate::config::Config;
 use crate::editor::MarkdownViewMode;
 
 use super::{
-    academy::AcademyCourseId, MenuActivateTab1, MenuActivateTab2, MenuActivateTab3,
-    MenuActivateTab4, MenuActivateTab5, MenuActivateTab6, MenuActivateTab7, MenuActivateTab8,
-    MenuActivateTab9, MenuCloseProject, MenuCloseTab, MenuCopy, MenuEditorCheckDisk,
-    MenuEditorCloseOthers, MenuEditorCloseSaved, MenuEditorReopenClosed, MenuFind, MenuJoinTabs,
-    MenuLspCodeActions, MenuLspCompletion, MenuLspDefinition, MenuLspFormat, MenuLspHover,
-    MenuLspReferences, MenuLspRename, MenuLspSignatureHelp, MenuLspSymbols, MenuMarkdownCycle,
-    MenuMarkdownPreview, MenuMarkdownSource, MenuMarkdownSplit, MenuNewTab, MenuNextTab,
-    MenuOpenProject, MenuPartitionHorizontal, MenuPartitionVertical, MenuPaste, MenuPreviousTab,
-    MenuRedo, MenuSave, MenuSelectAll, MenuSeparateTabs, MenuShowAcademy, MenuShowAppearances,
-    MenuShowCommandPalette, MenuShowEditor, MenuShowFileFinder, MenuShowHome, MenuShowTerminal,
-    MenuSwapTabs, MenuToggleSidebar, MenuUndo, MenuZoomIn, MenuZoomOut, MenuZoomReset,
-    WorkspacePrototype, WorkspaceSurface,
+    MenuActivateTab1, MenuActivateTab2, MenuActivateTab3, MenuActivateTab4, MenuActivateTab5,
+    MenuActivateTab6, MenuActivateTab7, MenuActivateTab8, MenuActivateTab9, MenuCloseProject,
+    MenuCloseTab, MenuCopy, MenuEditorCheckDisk, MenuEditorCloseOthers, MenuEditorCloseSaved,
+    MenuEditorReopenClosed, MenuFind, MenuJoinTabs, MenuLspCodeActions, MenuLspCompletion,
+    MenuLspDefinition, MenuLspFormat, MenuLspHover, MenuLspReferences, MenuLspRename,
+    MenuLspSignatureHelp, MenuLspSymbols, MenuMarkdownCycle, MenuMarkdownPreview,
+    MenuMarkdownSource, MenuMarkdownSplit, MenuNewTab, MenuNextTab, MenuOpenProject,
+    MenuPartitionHorizontal, MenuPartitionVertical, MenuPaste, MenuPreviousTab, MenuRedo, MenuSave,
+    MenuSelectAll, MenuSeparateTabs, MenuShowAcademy, MenuShowAppearances, MenuShowCommandPalette,
+    MenuShowEditor, MenuShowFileFinder, MenuShowHome, MenuShowTerminal, MenuSwapTabs,
+    MenuToggleSidebar, MenuUndo, MenuZoomIn, MenuZoomOut, MenuZoomReset, WorkspacePrototype,
+    WorkspaceSurface,
 };
 
 impl WorkspacePrototype {
@@ -543,6 +543,7 @@ impl WorkspacePrototype {
     /// reusing the same surface activation path the desktop menu uses.
     pub(super) fn open_academy_from_home(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.academy_course = None;
+        self.academy_lesson = None;
         self.open_or_activate_surface(WorkspaceSurface::Academy, window, cx);
     }
 
@@ -592,31 +593,51 @@ impl WorkspacePrototype {
     }
 
     /// Store the Academy course the user picked from the picker cards so
-    /// the Academy surface can render that course's preview panel.
-    pub(super) fn select_academy_course(
-        &mut self,
-        course: AcademyCourseId,
-        cx: &mut Context<Self>,
-    ) {
+    /// the Academy surface can render that course's lesson list. Selecting
+    /// a course always clears any lesson from a previous course.
+    pub(super) fn select_academy_course(&mut self, course: String, cx: &mut Context<Self>) {
         self.academy_course = Some(course);
+        self.academy_lesson = None;
         cx.notify();
     }
 
     /// Home progress row click: select the course and open its Academy tab.
     pub(super) fn open_academy_course(
         &mut self,
-        course: AcademyCourseId,
+        course: String,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.academy_course = Some(course);
+        self.academy_lesson = None;
         self.open_or_activate_surface(WorkspaceSurface::Academy, window, cx);
+    }
+
+    /// Open one lesson in the reader. Carries the course id so lesson rows
+    /// and next/previous navigation cannot land on a lesson from another
+    /// course.
+    pub(super) fn select_academy_lesson(
+        &mut self,
+        course: String,
+        lesson: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.academy_course = Some(course);
+        self.academy_lesson = Some(lesson);
+        cx.notify();
     }
 
     /// Drop the Academy course selection, returning the surface to the
     /// course picker.
     pub(super) fn clear_academy_course_selection(&mut self, cx: &mut Context<Self>) {
         self.academy_course = None;
+        self.academy_lesson = None;
+        cx.notify();
+    }
+
+    /// Leave the lesson reader for the course's lesson list.
+    pub(super) fn clear_academy_lesson_selection(&mut self, cx: &mut Context<Self>) {
+        self.academy_lesson = None;
         cx.notify();
     }
 

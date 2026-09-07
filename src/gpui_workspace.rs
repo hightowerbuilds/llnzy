@@ -2,6 +2,7 @@ use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet},
     path::PathBuf,
+    rc::Rc,
     time::{Duration, Instant},
 };
 
@@ -153,6 +154,28 @@ const SIDEBAR_DROP_INVALID_BG: u32 = 0x3d2428;
 thread_local! {
     static WORKSPACE_REGISTRY: RefCell<Vec<gpui::WeakEntity<WorkspacePrototype>>> =
         const { RefCell::new(Vec::new()) };
+}
+
+/// Load the courses that ship with this build.
+///
+/// Failure is not fatal: a missing directory or a malformed course leaves
+/// Academy with no catalog and writes the reason to the error log, per the
+/// error policy for recoverable content problems. The strict loader means
+/// one broken lesson fails the whole load, which is deliberate — a course
+/// that half-loads would show a lesson list with silent holes in it.
+fn load_academy_library() -> Option<Rc<crate::academy::CourseLibrary>> {
+    let Some(root) = crate::platform::paths::bundled_courses_dir() else {
+        crate::error_log::global()
+            .warn("academy: no courses directory found; the Code Academy catalog is empty");
+        return None;
+    };
+    match crate::academy::CourseLibrary::load(&root) {
+        Ok(library) => Some(Rc::new(library)),
+        Err(err) => {
+            crate::error_log::global().error(format!("academy: {err}"));
+            None
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -644,7 +667,12 @@ struct WorkspacePrototype {
     last_sidebar_width: f32,
     appearance_config: Config,
     appearance_page: AppearancePage,
-    academy_course: Option<academy::AcademyCourseId>,
+    /// Courses loaded from the bundled courses directory. `None` when the
+    /// directory is missing or failed to parse — Academy renders an
+    /// explanatory empty state rather than pretending it has a catalog.
+    academy_library: Option<Rc<crate::academy::CourseLibrary>>,
+    academy_course: Option<String>,
+    academy_lesson: Option<String>,
     academy_progress: crate::academy_progress::AcademyProgress,
     terminal_background_import_error: Option<String>,
     palette: command_palette::CommandPaletteState,
@@ -794,7 +822,9 @@ impl WorkspacePrototype {
             last_sidebar_width: SIDEBAR_DEFAULT_WIDTH,
             appearance_config,
             appearance_page: AppearancePage::Appearances,
+            academy_library: load_academy_library(),
             academy_course: None,
+            academy_lesson: None,
             academy_progress: crate::academy_progress::AcademyProgress::load(),
             terminal_background_import_error: None,
             palette: command_palette::CommandPaletteState::default(),
@@ -2159,7 +2189,9 @@ impl Render for WorkspacePrototype {
                     explorers: self.explorers.clone(),
                     appearance_config,
                     appearance_page,
-                    academy_course: self.academy_course,
+                    academy_library: self.academy_library.clone(),
+                    academy_course: self.academy_course.clone(),
+                    academy_lesson: self.academy_lesson.clone(),
                     academy_progress: self.academy_progress.clone(),
                     terminal_background_import_error,
                     editor_word_wrap: self.editor_word_wrap_enabled(),

@@ -33,6 +33,9 @@ belongs before adding logic to a large GPUI surface.
     line endings, and edit primitives.
   - `syntax.rs`, `search.rs`, `git_gutter.rs`, `snippet.rs`,
     `editorconfig.rs`: pure or mostly pure editor services.
+  - `markdown.rs`: block parsing shared by the editor's markdown preview
+    and the Academy lesson reader. Rendering stays with each surface; only
+    the parse is shared.
   - `recovery.rs` and `perf.rs`: dirty-buffer recovery and large-file/perf
     thresholds.
 - `src/gpui_editor.rs` owns the editor entity and cross-feature orchestration.
@@ -73,6 +76,25 @@ belongs before adding logic to a large GPUI surface.
   editor UI.
 - New protocol parsing should be tested in `src/lsp/`. New editor UX around
   those results belongs in `src/gpui_editor/lsp/`.
+
+## Code Academy
+
+- `src/academy/` is the GPUI-independent course model: `manifest.rs`
+  (`course.toml`), `lesson.rs` (frontmatter + markdown body), and
+  `library.rs` (`CourseLibrary`: strict loading, orphan/missing-lesson
+  rejection, and `reload_if_changed` over a directory signature).
+- `src/academy_progress.rs` owns the persisted completion store
+  (`<data_dir>/academy/progress.json`), keyed by course id and **lesson
+  id** rather than lesson position.
+- `src/gpui_workspace/academy.rs` owns the Academy surface: course picker,
+  lesson list, and lesson reader.
+- `crate::platform::paths::bundled_courses_dir` resolves the courses root —
+  the running `.app`'s `Contents/Resources/courses` first, then the source
+  tree's `assets/academy/courses`. `bundle.sh` performs the copy that makes
+  the first branch exist.
+- Course titles, ordering, and lesson counts belong to the manifests on
+  disk. The surface must not hardcode a catalog; a course added to the
+  courses directory should appear with no code change.
 
 ## Config, Preferences, Theme, And Platform
 

@@ -1,46 +1,32 @@
 //! Persisted lesson-completion state for the in-app Code Academy courses.
 //!
-//! The lesson runtime does not exist yet; this module only owns the on-disk
-//! progress store that the Home page will read to render per-course
-//! progress. Storage is a single JSON file at
-//! `<data_dir>/academy/progress.json`, rewritten via
-//! `crate::atomic_write::atomic_write` on every save. Reads are
-//! best-effort: a missing or corrupt file degrades to an empty store
+//! Storage is a single JSON file at `<data_dir>/academy/progress.json`,
+//! rewritten via `crate::atomic_write::atomic_write` on every save. Reads
+//! are best-effort: a missing or corrupt file degrades to an empty store
 //! instead of failing app startup.
+//!
+//! Completion is keyed by **lesson id** (`"L03"`), not by position. The
+//! course manifest owns lesson identity and ordering, so an id survives
+//! inserting, reordering, or renumbering lessons — a positional index
+//! would silently start pointing at a different lesson. This module
+//! therefore knows nothing about how many lessons a course has; callers
+//! that need a total read it from the loaded `academy::Course`.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-/// Course id of the JavaScript / TypeScript academy track.
-pub const COURSE_JS_TS: &str = "js-ts";
-
-/// Course id of the Rust academy track.
-pub const COURSE_RUST: &str = "rust";
-
-/// Lesson count shared by both launch courses.
-const LESSONS_PER_COURSE: usize = 18;
-
-/// Total lesson count for a course id, or 0 when the id is unknown to the
-/// current course catalog.
-fn course_total(course: &str) -> usize {
-    match course {
-        COURSE_JS_TS | COURSE_RUST => LESSONS_PER_COURSE,
-        _ => 0,
-    }
-}
-
 /// Completed Code Academy lessons, persisted as JSON in the platform data
 /// dir. Completion sets are kept deduplicated; record order is irrelevant.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AcademyProgress {
-    /// Completed 0-based lesson indexes per course id. Sorted containers
-    /// keep the serialized file byte-stable across saves regardless of the
-    /// order lessons were finished in, and make equality insensitive to
+    /// Completed lesson ids per course id. Sorted containers keep the
+    /// serialized file byte-stable across saves regardless of the order
+    /// lessons were finished in, and make equality insensitive to
     /// insertion order.
     #[serde(default)]
-    completed: BTreeMap<String, BTreeSet<usize>>,
+    completed: BTreeMap<String, BTreeSet<String>>,
 }
 
 impl AcademyProgress {
@@ -105,50 +91,53 @@ impl AcademyProgress {
         crate::atomic_write::atomic_write(path, json).map_err(std::io::Error::other)
     }
 
-    /// Number of distinct completed lessons in `course`. Always 0 for an
-    /// unknown course id.
-    pub fn completed_lessons(&self, course: &str) -> usize {
-        self.completed.get(course).map_or(0, BTreeSet::len)
+    /// How many of `lesson_ids` are recorded complete for `course`.
+    ///
+    /// Counting the intersection rather than the stored set is what keeps
+    /// the Home progress row honest when a course shrinks: completions for
+    /// lessons the course no longer defines are ignored here and dropped
+    /// on the next load, instead of reporting 8/7.
+    pub fn completed_lessons(&self, course: &str, lesson_ids: &[&str]) -> usize {
+        let Some(done) = self.completed.get(course) else {
+            return 0;
+        };
+        lesson_ids
+            .iter()
+            .filter(|lesson| done.contains(**lesson))
+            .count()
     }
 
-    /// Total lessons in `course`: 18 for `js-ts` and `rust`, 0 for any id
-    /// the course catalog does not know.
-    pub fn total_lessons(&self, course: &str) -> usize {
-        course_total(course)
+    /// Whether `lesson` of `course` is recorded as complete.
+    pub fn is_lesson_complete(&self, course: &str, lesson: &str) -> bool {
+        self.completed
+            .get(course)
+            .is_some_and(|lessons| lessons.contains(lesson))
     }
 
-    /// Whether `lesson` (0-based) of `course` is recorded as complete.
-    /// False for out-of-range indexes and unknown courses.
-    pub fn is_lesson_complete(&self, course: &str, lesson: usize) -> bool {
-        lesson < course_total(course)
-            && self
-                .completed
-                .get(course)
-                .is_some_and(|lessons| lessons.contains(&lesson))
-    }
-
-    /// Mark `lesson` (0-based) of `course` complete. Idempotent, and a
-    /// no-op for unknown course ids or out-of-range lessons so typos can't
-    /// poison the store.
-    pub fn record_lesson_complete(&mut self, course: &str, lesson: usize) {
-        if lesson >= course_total(course) {
+    /// Mark `lesson` of `course` complete. Idempotent. Empty ids are
+    /// ignored so a bad call site cannot write an unaddressable entry.
+    pub fn record_lesson_complete(&mut self, course: &str, lesson: &str) {
+        if course.is_empty() || lesson.is_empty() {
             return;
         }
         self.completed
             .entry(course.to_string())
             .or_default()
-            .insert(lesson);
+            .insert(lesson.to_string());
     }
 
-    /// Drop anything the current course catalog cannot represent: unknown
-    /// course ids, out-of-range lesson indexes, and now-empty sets.
+    /// Drop entries no course can address: empty ids and now-empty sets.
+    ///
+    /// Unknown *course* ids are deliberately kept — a user course that is
+    /// not currently loaded (removed from the courses dir, or a bundle
+    /// mid-upgrade) must not lose its history just because this load
+    /// couldn't see it.
     fn sanitized(mut self) -> Self {
         self.completed.retain(|course, lessons| {
-            let total = course_total(course);
-            if total == 0 {
+            if course.is_empty() {
                 return false;
             }
-            lessons.retain(|&lesson| lesson < total);
+            lessons.retain(|lesson| !lesson.is_empty());
             !lessons.is_empty()
         });
         self
@@ -165,6 +154,9 @@ fn progress_file() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const RUST: &str = "rust";
+    const JS_TS: &str = "js-ts";
 
     /// Unique-per-test temp dir under the shared `llnzy-academy-test-<pid>`
     /// root. The dir is removed up front so a crashed prior run can't leak
@@ -183,18 +175,18 @@ mod tests {
         let path = dir.join("academy").join("progress.json");
 
         let mut progress = AcademyProgress::default();
-        for lesson in [0, 3, 17] {
-            progress.record_lesson_complete(COURSE_JS_TS, lesson);
+        for lesson in ["L00", "L03", "L17"] {
+            progress.record_lesson_complete(JS_TS, lesson);
         }
-        progress.record_lesson_complete(COURSE_RUST, 11);
+        progress.record_lesson_complete(RUST, "L11");
         progress.save_to(&path).unwrap();
 
         let loaded = AcademyProgress::load_from(&path);
         assert_eq!(loaded, progress);
-        assert_eq!(loaded.completed_lessons(COURSE_JS_TS), 3);
-        assert_eq!(loaded.completed_lessons(COURSE_RUST), 1);
-        assert!(loaded.is_lesson_complete(COURSE_JS_TS, 17));
-        assert!(!loaded.is_lesson_complete(COURSE_JS_TS, 1));
+        assert_eq!(loaded.completed_lessons(JS_TS, &["L00", "L03", "L17"]), 3);
+        assert_eq!(loaded.completed_lessons(RUST, &["L11"]), 1);
+        assert!(loaded.is_lesson_complete(JS_TS, "L17"));
+        assert!(!loaded.is_lesson_complete(JS_TS, "L01"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -204,34 +196,41 @@ mod tests {
         let path = dir.join("academy").join("progress.json");
         let mut progress = AcademyProgress::default();
 
-        progress.record_lesson_complete(COURSE_RUST, 4);
-        progress.record_lesson_complete(COURSE_RUST, 4);
-        progress.record_lesson_complete(COURSE_RUST, 4);
+        progress.record_lesson_complete(RUST, "L04");
+        progress.record_lesson_complete(RUST, "L04");
+        progress.record_lesson_complete(RUST, "L04");
         progress.save_to(&path).unwrap();
 
         let loaded = AcademyProgress::load_from(&path);
-        assert_eq!(loaded.completed_lessons(COURSE_RUST), 1);
-        assert!(loaded.is_lesson_complete(COURSE_RUST, 4));
+        assert_eq!(loaded.completed_lessons(RUST, &["L04"]), 1);
+        assert!(loaded.is_lesson_complete(RUST, "L04"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn completed_lessons_counts_per_course() {
+    fn completed_lessons_counts_only_ids_the_course_defines() {
         let mut progress = AcademyProgress::default();
-        for lesson in 0..5 {
-            progress.record_lesson_complete(COURSE_RUST, lesson);
-        }
-        for lesson in 0..2 {
-            progress.record_lesson_complete(COURSE_JS_TS, lesson);
+        for lesson in ["L00", "L01", "L02"] {
+            progress.record_lesson_complete(RUST, lesson);
         }
 
-        assert_eq!(progress.total_lessons(COURSE_JS_TS), 18);
-        assert_eq!(progress.total_lessons(COURSE_RUST), 18);
-        assert_eq!(progress.completed_lessons(COURSE_RUST), 5);
-        assert_eq!(progress.completed_lessons(COURSE_JS_TS), 2);
-        assert!(progress.is_lesson_complete(COURSE_JS_TS, 0));
-        assert!(progress.is_lesson_complete(COURSE_RUST, 4));
-        assert!(!progress.is_lesson_complete(COURSE_JS_TS, 4));
+        // The course has since dropped L02 and gained L03.
+        let course_ids = ["L00", "L01", "L03"];
+        assert_eq!(progress.completed_lessons(RUST, &course_ids), 2);
+        assert_eq!(progress.completed_lessons(RUST, &[]), 0);
+        assert_eq!(progress.completed_lessons("python", &course_ids), 0);
+    }
+
+    #[test]
+    fn lesson_ids_are_not_positional() {
+        // The whole reason for id keys: inserting a lesson at the front
+        // must not migrate completion onto a different lesson.
+        let mut progress = AcademyProgress::default();
+        progress.record_lesson_complete(RUST, "L05");
+
+        let after_insert = ["L00", "L01", "L02", "L03", "L04", "L05", "L06"];
+        assert!(progress.is_lesson_complete(RUST, "L05"));
+        assert_eq!(progress.completed_lessons(RUST, &after_insert), 1);
     }
 
     #[test]
@@ -243,43 +242,48 @@ mod tests {
 
         let progress = AcademyProgress::load_from(&path);
         assert_eq!(progress, AcademyProgress::default());
-        assert_eq!(progress.completed_lessons(COURSE_JS_TS), 0);
-        assert!(!progress.is_lesson_complete(COURSE_RUST, 0));
+        assert_eq!(progress.completed_lessons(JS_TS, &["L00"]), 0);
+        assert!(!progress.is_lesson_complete(RUST, "L00"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn unknown_course_reports_zero_totals_and_completions() {
-        let dir = test_dir("unknown");
+    fn empty_ids_are_never_recorded() {
+        let mut progress = AcademyProgress::default();
+
+        progress.record_lesson_complete(RUST, "");
+        progress.record_lesson_complete("", "L00");
+
+        assert_eq!(progress, AcademyProgress::default());
+    }
+
+    #[test]
+    fn unloaded_course_history_survives_a_reload() {
+        let dir = test_dir("unloaded-course");
         let path = dir.join("academy").join("progress.json");
         let mut progress = AcademyProgress::default();
 
-        progress.record_lesson_complete("python", 0);
-        assert_eq!(progress.total_lessons("python"), 0);
-        assert_eq!(progress.completed_lessons("python"), 0);
-        assert!(!progress.is_lesson_complete("python", 0));
+        // A course this build does not ship. Its history must persist so
+        // reinstalling the course restores the student's completions.
+        progress.record_lesson_complete("python", "L00");
+        progress.record_lesson_complete(RUST, "L00");
         progress.save_to(&path).unwrap();
+
+        let loaded = AcademyProgress::load_from(&path);
+        assert!(loaded.is_lesson_complete("python", "L00"));
+        assert!(loaded.is_lesson_complete(RUST, "L00"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn empty_lesson_sets_are_dropped_on_load() {
+        let dir = test_dir("empty-set");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("progress.json");
+        std::fs::write(&path, r#"{"completed":{"rust":[],"":["L00"]}}"#).unwrap();
 
         let loaded = AcademyProgress::load_from(&path);
         assert_eq!(loaded, AcademyProgress::default());
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn out_of_range_records_are_dropped() {
-        let dir = test_dir("out-of-range");
-        let path = dir.join("academy").join("progress.json");
-        let mut progress = AcademyProgress::default();
-
-        // 0-based indexes 0..=17 are valid; 18 is not.
-        progress.record_lesson_complete(COURSE_JS_TS, 18);
-        progress.record_lesson_complete(COURSE_RUST, 0);
-        progress.save_to(&path).unwrap();
-
-        let loaded = AcademyProgress::load_from(&path);
-        assert_eq!(loaded.completed_lessons(COURSE_JS_TS), 0);
-        assert_eq!(loaded.completed_lessons(COURSE_RUST), 1);
-        assert!(!loaded.is_lesson_complete(COURSE_JS_TS, 18));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use crate::config::{Config, CursorStyle as ConfigCursorStyle, EditorConfig};
 use crate::editor::buffer::{Buffer, Position};
+use crate::editor::markdown::{parse_markdown_blocks, MarkdownBlock, MarkdownBlockKind};
 use crate::editor::perf;
 use crate::editor::search::EditorSearch;
 use crate::editor::syntax::{group_color_with_overrides, HighlightGroup, HighlightSpan};
@@ -779,7 +780,7 @@ impl EditorPrototype {
             let want_highlights = view.lang_id.is_some() && view.tree.is_some();
             let buffer_text = (want_markdown_preview || want_highlights).then(|| buffer.text());
             let markdown_preview = want_markdown_preview
-                .then(|| markdown_preview_blocks(buffer_text.as_deref().unwrap_or_default()));
+                .then(|| parse_markdown_blocks(buffer_text.as_deref().unwrap_or_default()));
             let line_count = buffer.line_count();
             let degraded_notice =
                 perf::LargeFileDegradation::for_line_count(line_count).status_label();
@@ -1248,110 +1249,6 @@ fn markdown_mode_label(mode: MarkdownViewMode) -> &'static str {
     }
 }
 
-fn markdown_preview_blocks(source: &str) -> Vec<MarkdownPreviewBlock> {
-    let mut blocks = Vec::new();
-    let mut paragraph = Vec::new();
-    let mut code = Vec::new();
-    let mut in_code = false;
-
-    for line in source.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("```") {
-            flush_markdown_paragraph(&mut blocks, &mut paragraph);
-            if in_code {
-                blocks.push(MarkdownPreviewBlock {
-                    kind: MarkdownPreviewBlockKind::Code,
-                    text: code.join("\n"),
-                });
-                code.clear();
-                in_code = false;
-            } else {
-                in_code = true;
-            }
-            continue;
-        }
-
-        if in_code {
-            code.push(line.to_string());
-            continue;
-        }
-
-        if trimmed.is_empty() {
-            flush_markdown_paragraph(&mut blocks, &mut paragraph);
-            continue;
-        }
-
-        if let Some((level, text)) = markdown_heading(trimmed) {
-            flush_markdown_paragraph(&mut blocks, &mut paragraph);
-            blocks.push(MarkdownPreviewBlock {
-                kind: MarkdownPreviewBlockKind::Heading(level),
-                text: strip_markdown_inline(text),
-            });
-        } else if let Some(text) = markdown_bullet(trimmed) {
-            flush_markdown_paragraph(&mut blocks, &mut paragraph);
-            blocks.push(MarkdownPreviewBlock {
-                kind: MarkdownPreviewBlockKind::Bullet,
-                text: strip_markdown_inline(text),
-            });
-        } else if let Some(text) = trimmed.strip_prefix("> ") {
-            flush_markdown_paragraph(&mut blocks, &mut paragraph);
-            blocks.push(MarkdownPreviewBlock {
-                kind: MarkdownPreviewBlockKind::Quote,
-                text: strip_markdown_inline(text),
-            });
-        } else {
-            paragraph.push(strip_markdown_inline(trimmed));
-        }
-    }
-
-    if in_code && !code.is_empty() {
-        blocks.push(MarkdownPreviewBlock {
-            kind: MarkdownPreviewBlockKind::Code,
-            text: code.join("\n"),
-        });
-    }
-    flush_markdown_paragraph(&mut blocks, &mut paragraph);
-
-    if blocks.is_empty() {
-        blocks.push(MarkdownPreviewBlock {
-            kind: MarkdownPreviewBlockKind::Paragraph,
-            text: "Empty markdown document".to_string(),
-        });
-    }
-
-    blocks
-}
-
-fn flush_markdown_paragraph(blocks: &mut Vec<MarkdownPreviewBlock>, paragraph: &mut Vec<String>) {
-    if paragraph.is_empty() {
-        return;
-    }
-    blocks.push(MarkdownPreviewBlock {
-        kind: MarkdownPreviewBlockKind::Paragraph,
-        text: paragraph.join(" "),
-    });
-    paragraph.clear();
-}
-
-fn markdown_heading(line: &str) -> Option<(u8, &str)> {
-    let level = line.chars().take_while(|ch| *ch == '#').count();
-    if !(1..=6).contains(&level) {
-        return None;
-    }
-    let text = line.get(level..)?.trim_start();
-    (!text.is_empty()).then_some((level as u8, text))
-}
-
-fn markdown_bullet(line: &str) -> Option<&str> {
-    line.strip_prefix("- ")
-        .or_else(|| line.strip_prefix("* "))
-        .or_else(|| line.strip_prefix("+ "))
-}
-
-fn strip_markdown_inline(text: &str) -> String {
-    text.replace(['`', '*', '_'], "")
-}
-
 fn refresh_active_syntax(editor: &mut EditorState) {
     let active = editor.active;
     if active >= editor.buffers.len() || active >= editor.views.len() {
@@ -1450,7 +1347,7 @@ struct EditorSnapshot {
     markdown: bool,
     markdown_mode: MarkdownViewMode,
     markdown_preview_scroll: ScrollHandle,
-    markdown_preview: Option<Vec<MarkdownPreviewBlock>>,
+    markdown_preview: Option<Vec<MarkdownBlock>>,
     appearance: EditorAppearance,
 }
 
@@ -1470,21 +1367,6 @@ struct EditorLineSnapshot {
     highlights: Vec<HighlightSpan>,
     search_matches: Vec<EditorSearchLineMatch>,
     diagnostic: Option<EditorDiagnosticSnapshot>,
-}
-
-#[derive(Clone)]
-struct MarkdownPreviewBlock {
-    kind: MarkdownPreviewBlockKind,
-    text: String,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum MarkdownPreviewBlockKind {
-    Heading(u8),
-    Paragraph,
-    Bullet,
-    Code,
-    Quote,
 }
 
 const EDITOR_CHROME_BG: u32 = 0x242424;
@@ -1582,20 +1464,6 @@ mod tests {
         assert!(load_error.is_none());
         assert!(editor.is_empty());
         assert!(last_seen_disk_text.is_empty());
-    }
-
-    #[test]
-    fn markdown_preview_blocks_parse_common_blocks() {
-        let blocks = markdown_preview_blocks("# Title\n\n- Item\n\n```rust\nfn main() {}\n```");
-
-        assert_eq!(blocks.len(), 3);
-        assert!(matches!(
-            blocks[0].kind,
-            MarkdownPreviewBlockKind::Heading(1)
-        ));
-        assert_eq!(blocks[0].text, "Title");
-        assert_eq!(blocks[1].text, "Item");
-        assert!(matches!(blocks[2].kind, MarkdownPreviewBlockKind::Code));
     }
 
     #[test]

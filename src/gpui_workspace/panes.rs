@@ -13,7 +13,7 @@ use crate::{
 };
 
 use super::{
-    academy::{academy_surface, AcademyCourseId},
+    academy::{academy_surface, AcademyContext},
     appearances::{appearances_surface, settings_surface},
     home::home_surface,
     sidebar::{collect_explorer_entries, explorer_tree_panel, ExplorerState},
@@ -33,7 +33,9 @@ pub(super) struct WorkspaceSurfaceContext {
     pub(super) explorers: BTreeMap<u64, ExplorerState>,
     pub(super) appearance_config: Config,
     pub(super) appearance_page: AppearancePage,
-    pub(super) academy_course: Option<AcademyCourseId>,
+    pub(super) academy_library: Option<std::rc::Rc<crate::academy::CourseLibrary>>,
+    pub(super) academy_course: Option<String>,
+    pub(super) academy_lesson: Option<String>,
     pub(super) academy_progress: crate::academy_progress::AcademyProgress,
     pub(super) terminal_background_import_error: Option<String>,
     pub(super) editor_word_wrap: bool,
@@ -346,7 +348,9 @@ pub(super) fn workspace_surface_pane(
         explorers,
         appearance_config,
         appearance_page,
+        academy_library,
         academy_course,
+        academy_lesson,
         academy_progress,
         terminal_background_import_error,
         editor_word_wrap,
@@ -443,13 +447,21 @@ pub(super) fn workspace_surface_pane(
             )
         }
         WorkspaceSurface::Appearances => pane.child(appearances_surface(appearance_config, cx)),
-        WorkspaceSurface::Academy => {
-            pane.child(academy_surface(&appearance_config, academy_course, cx))
-        }
+        WorkspaceSurface::Academy => pane.child(academy_surface(
+            &appearance_config,
+            AcademyContext {
+                library: academy_library,
+                course: academy_course,
+                lesson: academy_lesson,
+                progress: academy_progress,
+            },
+            cx,
+        )),
         WorkspaceSurface::Home => pane.child(home_surface(
             workspace_root,
             recent_projects,
             &appearance_config,
+            academy_library,
             &academy_progress,
             cx,
         )),

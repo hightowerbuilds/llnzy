@@ -3,6 +3,7 @@ pub mod cursor;
 pub mod editorconfig;
 pub mod git_gutter;
 pub mod history;
+pub mod markdown;
 pub mod perf;
 pub mod recovery;
 pub mod search;

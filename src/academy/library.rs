@@ -447,10 +447,7 @@ lessons = ["L00"]
         build_course(&dir);
         write(
             &dir.join("t/course.toml"),
-            &format!(
-                "{}\n[[modules]]\ntitle = \"Two\"\nlessons = [\"L01\"]\n",
-                MANIFEST.replace("lessons = [\"L00\"]", "lessons = [\"L00\"]")
-            ),
+            &format!("{MANIFEST}\n[[modules]]\ntitle = \"Two\"\nlessons = [\"L01\"]\n"),
         );
         write(&dir.join("t/lessons/L01/lesson.md"), &lesson_md());
         let library = CourseLibrary::load(&dir).unwrap();
@@ -484,5 +481,43 @@ mod course_content_tests {
             assert!(!lesson.meta.exercises.is_empty(), "{id} has no exercises");
         }
         assert_eq!(course.manifest.book.as_ref().unwrap().edition, 3);
+    }
+
+    /// The lesson reader renders parsed markdown blocks, so a lesson whose
+    /// body is empty or whose code fences are unbalanced would draw as the
+    /// parser's placeholder. Assert every bundled lesson has a heading and
+    /// real prose to read. Code blocks are deliberately not required — the
+    /// toolchain lessons are prose plus inline code.
+    #[test]
+    fn bundled_lesson_bodies_render_as_content() {
+        use crate::editor::markdown::{parse_markdown_blocks, MarkdownBlockKind};
+
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/academy/courses");
+        let library = CourseLibrary::load(&root).expect("bundled courses must load");
+
+        for course in library.courses() {
+            for (id, lesson) in &course.lessons {
+                let blocks = parse_markdown_blocks(&lesson.body);
+                assert!(
+                    !blocks
+                        .iter()
+                        .any(|block| block.text == "Empty markdown document"),
+                    "{id} body does not parse into content"
+                );
+                assert!(
+                    blocks
+                        .iter()
+                        .any(|block| matches!(block.kind, MarkdownBlockKind::Heading(_))),
+                    "{id} body has no heading"
+                );
+                assert!(
+                    blocks.iter().any(|block| {
+                        matches!(block.kind, MarkdownBlockKind::Paragraph)
+                            && block.text.chars().count() > 80
+                    }),
+                    "{id} body has no substantial prose"
+                );
+            }
+        }
     }
 }

@@ -124,8 +124,8 @@ fn markdown_style_table(style: MarkdownPreviewStyle) -> MarkdownStyleTable {
 
 pub(super) fn markdown_preview_body(snapshot: &EditorSnapshot) -> impl IntoElement {
     let blocks = snapshot.markdown_preview.clone().unwrap_or_else(|| {
-        vec![MarkdownPreviewBlock {
-            kind: MarkdownPreviewBlockKind::Paragraph,
+        vec![MarkdownBlock {
+            kind: MarkdownBlockKind::Paragraph,
             text: "No markdown preview available".to_string(),
         }]
     });
@@ -182,7 +182,7 @@ pub(super) fn markdown_preview_body(snapshot: &EditorSnapshot) -> impl IntoEleme
 /// (H1 is the unnumbered title). Returns `None` for other blocks/styles.
 fn heading_number_prefix(
     table: &MarkdownStyleTable,
-    block: &MarkdownPreviewBlock,
+    block: &MarkdownBlock,
     counters: &mut [usize; 2],
 ) -> Option<String> {
     if !table.numbered_headings {
@@ -191,12 +191,12 @@ fn heading_number_prefix(
     // Article-class style: number then a quad of space, no trailing period
     // ("1  Introduction", "1.1  Motivation").
     match block.kind {
-        MarkdownPreviewBlockKind::Heading(2) => {
+        MarkdownBlockKind::Heading(2) => {
             counters[0] += 1;
             counters[1] = 0;
             Some(format!("{}\u{2003}", counters[0]))
         }
-        MarkdownPreviewBlockKind::Heading(3) => {
+        MarkdownBlockKind::Heading(3) => {
             counters[1] += 1;
             Some(format!("{}.{}\u{2003}", counters[0].max(1), counters[1]))
         }
@@ -205,7 +205,7 @@ fn heading_number_prefix(
 }
 
 fn markdown_preview_block(
-    block: MarkdownPreviewBlock,
+    block: MarkdownBlock,
     appearance: &EditorAppearance,
     table: &MarkdownStyleTable,
     heading_prefix: Option<String>,
@@ -224,7 +224,7 @@ fn markdown_preview_block(
     let muted_color = appearance.muted_color();
     let rule_color = appearance.preview_rule_color();
     match block.kind {
-        MarkdownPreviewBlockKind::Heading(level) => {
+        MarkdownBlockKind::Heading(level) => {
             let (scale, top_pad) = match level {
                 1 => (table.heading_scales[0], 4.0),
                 2 => (table.heading_scales[1], 4.0),
@@ -259,13 +259,13 @@ fn markdown_preview_block(
             }
             heading.child(text)
         }
-        MarkdownPreviewBlockKind::Paragraph => div()
+        MarkdownBlockKind::Paragraph => div()
             .w_full()
             .text_size(px(base_size))
             .line_height(px(base_line_height))
             .text_color(body_color)
             .child(block.text),
-        MarkdownPreviewBlockKind::Bullet => div()
+        MarkdownBlockKind::Bullet => div()
             .w_full()
             .flex()
             .gap_3()
@@ -279,7 +279,7 @@ fn markdown_preview_block(
                     .child(table.bullet_marker),
             )
             .child(div().flex_1().child(block.text)),
-        MarkdownPreviewBlockKind::Quote => {
+        MarkdownBlockKind::Quote => {
             let quote_size = base_size * table.quote_size_scale;
             let quote_line_height =
                 (base_line_height * table.quote_size_scale).max(quote_size * 1.3);
@@ -316,7 +316,7 @@ fn markdown_preview_block(
             }
             quote.child(block.text)
         }
-        MarkdownPreviewBlockKind::Code => {
+        MarkdownBlockKind::Code => {
             let code_bg = appearance.preview_code_background();
             let code_border = appearance.preview_code_border();
             let code_font = table

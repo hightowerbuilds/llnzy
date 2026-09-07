@@ -1,14 +1,16 @@
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui::prelude::*;
 use gpui::{div, img, px, relative, rgb, Context, MouseButton, MouseDownEvent};
 
+use crate::academy::CourseLibrary;
 use crate::academy_progress::AcademyProgress;
 use crate::config::Config;
 
 use super::{
-    academy::{AcademyCourseId, ACADEMY_COURSE_ROWS},
+    academy::{course_logo, course_progress},
     sidebar::project_display_name,
     WorkspacePalette, WorkspacePrototype,
 };
@@ -17,6 +19,7 @@ pub(super) fn home_surface(
     workspace_root: Option<PathBuf>,
     recent_projects: Vec<PathBuf>,
     config: &Config,
+    academy_library: Option<Rc<CourseLibrary>>,
     academy_progress: &AcademyProgress,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
@@ -62,7 +65,8 @@ pub(super) fn home_surface(
         .child(home_open_project_button(palette, cx))
         .child(home_new_course_button(palette, cx))
         .child(home_academy_progress_section(
-            &academy_progress,
+            academy_library.as_deref(),
+            academy_progress,
             palette,
             cx,
         ));
@@ -165,21 +169,42 @@ fn home_new_course_button(
         .child("Open Course")
 }
 
-/// Academy course progress on Home: one row per launch course showing
-/// the language insignia, completed-vs-total lessons, and a progress bar.
-/// Clicking a row opens the Academy tab with that course selected.
+/// Academy course progress on Home: one row per loaded course showing the
+/// language insignia, completed-vs-total lessons, and a progress bar.
+/// Clicking a row opens the Academy tab with that course selected. Course
+/// identity, titles, and totals all come from the loaded library, so a
+/// course added to the courses directory appears here with no code change.
 fn home_academy_progress_section(
+    library: Option<&CourseLibrary>,
     progress: &AcademyProgress,
     palette: WorkspacePalette,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     let mut rows = div().flex().flex_col().gap_2().w(px(360.0));
-    for (id, title, key) in ACADEMY_COURSE_ROWS {
-        let completed = progress.completed_lessons(key);
-        let total = progress.total_lessons(key);
-        rows = rows.child(home_academy_progress_row(
-            id, title, completed, total, palette, cx,
-        ));
+    let mut any = false;
+    if let Some(library) = library {
+        for course in library.courses() {
+            any = true;
+            let (completed, total) = course_progress(course, progress);
+            rows = rows.child(home_academy_progress_row(
+                &course.manifest.id,
+                &course.manifest.title,
+                &course.manifest.language,
+                completed,
+                total,
+                palette,
+                cx,
+            ));
+        }
+    }
+    if !any {
+        rows = rows.child(
+            div()
+                .py_2()
+                .text_size(px(13.0))
+                .text_color(rgb(palette.muted_text))
+                .child("No courses installed"),
+        );
     }
 
     div()
@@ -197,13 +222,10 @@ fn home_academy_progress_section(
         .child(rows)
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "Row rendering bundles display fields with progress state"
-)]
 fn home_academy_progress_row(
-    id: AcademyCourseId,
+    id: &str,
     title: &str,
+    language: &str,
     completed: usize,
     total: usize,
     palette: WorkspacePalette,
@@ -215,6 +237,7 @@ fn home_academy_progress_row(
         completed as f32 / total as f32
     };
     let percent = (fraction * 100.0).round() as u32;
+    let course_id = id.to_string();
 
     div()
         .w_full()
@@ -227,7 +250,7 @@ fn home_academy_progress_row(
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(move |this, _: &MouseDownEvent, window, cx| {
-                this.open_academy_course(id, window, cx);
+                this.open_academy_course(course_id.clone(), window, cx);
             }),
         )
         .child(
@@ -241,7 +264,7 @@ fn home_academy_progress_row(
                         .flex()
                         .items_center()
                         .gap_2()
-                        .child(match id.logo() {
+                        .child(match course_logo(language) {
                             Some(logo) => {
                                 div().child(img(Arc::clone(&logo)).size(px(24.0)).flex_none())
                             }
@@ -259,7 +282,7 @@ fn home_academy_progress_row(
                         .text_size(px(11.0))
                         .text_color(rgb(palette.muted_text))
                         .child(if total == 0 {
-                            "Not started".to_string()
+                            "No lessons".to_string()
                         } else {
                             format!("{completed}/{total} lessons · {percent}%")
                         }),
