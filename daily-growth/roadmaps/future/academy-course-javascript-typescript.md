@@ -2,6 +2,14 @@
 
 Status: future roadmap, September 2026.
 
+Implementation update: the subsequent request calls for **separate JavaScript
+and TypeScript courses**. Their content now lives in
+`assets/academy/courses/javascript` and `assets/academy/courses/typescript`.
+They use the current inline starter/solution schema and strict `tsc` checks,
+superseding this document's combined `js-ts` layout and `tsx` proposal. See
+`assets/academy/courses/README.md` for current setup and validation. The
+integrated exercise runner remains future work; the design below is historical.
+
 Owner decision, September 2026: this is the JS/TS launch course for the
 Academy. One course, two acts — Act I teaches JavaScript on the real node
 runtime, Act II re-covers the same ground in TypeScript and goes deeper —

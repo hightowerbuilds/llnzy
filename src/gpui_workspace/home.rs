@@ -1,16 +1,15 @@
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::sync::Arc;
 
 use gpui::prelude::*;
-use gpui::{div, img, px, relative, rgb, Context, MouseButton, MouseDownEvent};
+use gpui::{div, px, relative, rgb, Context, MouseButton, MouseDownEvent};
 
 use crate::academy::CourseLibrary;
 use crate::academy_progress::AcademyProgress;
 use crate::config::Config;
 
 use super::{
-    academy::{course_logo, course_progress},
+    academy::{course_insignia, course_progress},
     sidebar::project_display_name,
     WorkspacePalette, WorkspacePrototype,
 };
@@ -264,12 +263,7 @@ fn home_academy_progress_row(
                         .flex()
                         .items_center()
                         .gap_2()
-                        .child(match course_logo(language) {
-                            Some(logo) => {
-                                div().child(img(Arc::clone(&logo)).size(px(24.0)).flex_none())
-                            }
-                            None => div(),
-                        })
+                        .child(course_insignia(language, 24.0))
                         .child(
                             div()
                                 .text_size(px(13.0))

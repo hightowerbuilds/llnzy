@@ -134,10 +134,12 @@ if [ ! -x "$CONTENTS/MacOS/$EXECUTABLE_NAME" ]; then
     exit 1
 fi
 
-if [ ! -f "$RESOURCES/courses/rust/course.toml" ]; then
-    echo "Bundle courses missing: $RESOURCES/courses/rust/course.toml" >&2
-    exit 1
-fi
+for course in rust javascript typescript; do
+    if [ ! -f "$RESOURCES/courses/$course/course.toml" ]; then
+        echo "Bundle course missing: $RESOURCES/courses/$course/course.toml" >&2
+        exit 1
+    fi
+done
 
 APP_SWAP_IN_PROGRESS=1
 if [ -d "$APP" ]; then

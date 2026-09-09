@@ -10,6 +10,20 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  academy-courses:
+    name: JavaScript and TypeScript course checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: npm install --global typescript@5.9.3
+      - run: python3 scripts/check_academy_courses.py
+
   check:
     name: Check
     runs-on: macos-latest
@@ -79,7 +93,7 @@ jobs:
   build-release:
     name: Build Release Bundle
     runs-on: macos-latest
-    needs: [check, fmt, clippy, test]
+    needs: [check, fmt, clippy, test, academy-courses]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

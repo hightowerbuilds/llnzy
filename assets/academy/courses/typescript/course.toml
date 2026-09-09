@@ -1,0 +1,24 @@
+id = "typescript"
+title = "TypeScript"
+language = "typescript"
+description = "Build on JavaScript with strict compiler checks, validated boundaries, reusable types, asynchronous results, and a modular ledger. Requires JavaScript fundamentals, Node.js 22+, and TypeScript 5.9.3 on PATH; setup is covered in L00."
+
+[[modules]]
+title = "The Compiler and Contracts"
+lessons = ["L00", "L01"]
+
+[[modules]]
+title = "Trust and Control Flow"
+lessons = ["L02", "L03"]
+
+[[modules]]
+title = "Modeling Reusable Data"
+lessons = ["L04", "L05"]
+
+[[modules]]
+title = "Async Work and Module Boundaries"
+lessons = ["L06", "L07"]
+
+[[modules]]
+title = "A Typed Ledger"
+lessons = ["L08", "L09"]

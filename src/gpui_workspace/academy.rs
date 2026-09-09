@@ -41,12 +41,34 @@ pub(super) struct AcademyContext {
 pub(super) fn course_logo(language: &str) -> Option<Arc<RenderImage>> {
     let bytes: &'static [u8] = match language.to_ascii_lowercase().as_str() {
         "rust" => include_bytes!("../../assets/academy/rust-logo.png"),
-        "javascript" | "typescript" | "js" | "ts" => {
+        "javascript" | "js" => {
             include_bytes!("../../assets/academy/javascript-logo.png")
         }
         _ => return None,
     };
     render_png(bytes)
+}
+
+/// Use a native badge for TypeScript so its course and progress rows are
+/// distinguishable from JavaScript without another bitmap asset.
+pub(super) fn course_insignia(language: &str, size: f32) -> impl IntoElement {
+    if matches!(language.to_ascii_lowercase().as_str(), "typescript" | "ts") {
+        return div()
+            .size(px(size))
+            .flex_none()
+            .flex()
+            .items_end()
+            .justify_end()
+            .pr(px(2.0))
+            .bg(rgb(0x3178c6))
+            .text_color(rgb(0xffffff))
+            .text_size(px(size * 0.5))
+            .child("TS");
+    }
+    match course_logo(language) {
+        Some(logo) => div().child(img(logo).size(px(size)).flex_none()),
+        None => div(),
+    }
 }
 
 /// Decode an embedded PNG once per call; callers keep the returned
@@ -228,12 +250,7 @@ fn academy_course_card(
                         .flex()
                         .items_center()
                         .gap_2()
-                        .child(match course_logo(&course.manifest.language) {
-                            Some(logo) => {
-                                div().child(img(Arc::clone(&logo)).size(px(28.0)).flex_none())
-                            }
-                            None => div(),
-                        })
+                        .child(course_insignia(&course.manifest.language, 28.0))
                         .child(
                             div()
                                 .text_size(px(15.0))
@@ -336,12 +353,7 @@ fn academy_course_detail(
                         .flex()
                         .items_center()
                         .gap_2()
-                        .child(match course_logo(&course.manifest.language) {
-                            Some(logo) => {
-                                div().child(img(Arc::clone(&logo)).size(px(24.0)).flex_none())
-                            }
-                            None => div(),
-                        })
+                        .child(course_insignia(&course.manifest.language, 24.0))
                         .child(
                             div()
                                 .text_size(px(16.0))

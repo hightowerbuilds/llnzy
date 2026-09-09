@@ -68,8 +68,8 @@ cargo test --release --test performance_budgets -- --ignored --nocapture
 
 - Open the Academy tab (Code Academy in the menu, Home's "Open Course"
   button, or the footer's Courses button).
-- Confirm the picker lists the Rust course with the lesson count from
-  `assets/academy/courses/rust/course.toml` — not a hardcoded number.
+- Confirm the picker lists Rust, JavaScript, and TypeScript with lesson counts
+  from their manifests (7, 11, and 10 respectively). TypeScript has a blue TS badge.
 - Open the course and confirm modules appear as chapter headings with
   their lessons listed in manifest order.
 - Open a lesson and confirm the markdown body renders (headings, prose,
@@ -78,6 +78,10 @@ cargo test --release --test performance_budgets -- --ignored --nocapture
 - Use Previous/Next through the lesson list; confirm the first lesson has
   no Previous and the last has no Next.
 - Back out to the course, then to the picker.
+- Open both JavaScript and TypeScript; verify their five modules, introductory
+  toolchain instructions, and final project lessons render. Follow the terminal
+  practice instructions in `assets/academy/courses/README.md`; automatic exercise
+  materialization and grading remain unimplemented.
 - Edit a bundled `lesson.md` while the app runs and confirm the reader
   picks the change up; break its frontmatter and confirm the previously
   loaded course stays visible rather than blanking.
@@ -87,8 +91,8 @@ cargo test --release --test performance_budgets -- --ignored --nocapture
 
 ## Packaging And Operations
 
-- Confirm `Contents/Resources/courses/rust/course.toml` exists in the
-  bundle and the packaged app's Academy tab lists the course.
+- Confirm manifests for `rust`, `javascript`, and `typescript` exist under
+  `Contents/Resources/courses` in the bundle and the packaged app lists all three.
 
 - Launch the packaged app from `target/llnzy.app`.
 - Confirm the bundle display name is `LLNZY` and the app executable runs.

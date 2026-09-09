@@ -463,6 +463,28 @@ lessons = ["L00"]
 mod course_content_tests {
     use super::*;
 
+    #[test]
+    fn javascript_and_typescript_are_separate_complete_courses() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/academy/courses");
+        let library = CourseLibrary::load(&root).expect("bundled courses must load");
+        for (id, lesson_count) in [("javascript", 11), ("typescript", 10)] {
+            let course = library.course(id).expect("language course present");
+            assert_eq!(course.manifest.language, id);
+            assert_eq!(course.manifest.modules.len(), 5);
+            assert_eq!(course.lesson_ids_in_order().len(), lesson_count);
+            assert!(course.manifest.book.is_none());
+            for lesson in course.lessons.values() {
+                assert!(!lesson.meta.concepts.is_empty());
+                for exercise in &lesson.meta.exercises {
+                    assert!(exercise
+                        .files
+                        .iter()
+                        .any(|file| file.starter != file.solution));
+                }
+            }
+        }
+    }
+
     /// The bundled Rust course ships in `assets/academy/courses`. This
     /// test loads it through the same strict loader the app will use, so
     /// a malformed lesson fails CI instead of the app.

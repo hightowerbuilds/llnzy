@@ -65,6 +65,12 @@ macOS effects pipeline. `linux-check` is a separate advisory job on
 `ubuntu-latest`, scoped to `cargo check --lib --no-default-features`; it is a
 smoke check of the platform-independent modules, not a claim of Linux support.
 
+The `academy-courses` job runs on Ubuntu with Node 22, Python 3.13, and
+TypeScript 5.9.3. It runs `python3 scripts/check_academy_courses.py` to verify
+all JavaScript and TypeScript solutions pass and starters fail. Release
+bundling also depends on this job. See `assets/academy/courses/README.md`
+for local prerequisites and starter export commands.
+
 If a future change claims cross-platform support, add the matching CI job before
 calling the platform supported.
 

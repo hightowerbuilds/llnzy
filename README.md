@@ -55,7 +55,7 @@ Requires Rust 1.75+. macOS is the active release target.
 
 **Tabs** -- Home, Terminal, Editor, Appearances, and Settings surfaces can be opened from the workspace menus. Tabs can be joined, separated, swapped, renamed, and closed.
 
-**Code Academy** -- Language courses that run on the machine you already work on. Courses are directories of markdown lessons with a `course.toml` manifest, loaded from the app bundle or a source checkout; the surface renders the picker, module/lesson list, and lesson reader from those files. Ships a Rust course aligned to *The Rust Programming Language*, 3rd edition. Exercise materialization and the check runner are not wired up yet, so lessons currently read rather than grade.
+**Code Academy** -- Language courses that run on the machine you already work on. Courses are directories of markdown lessons with a `course.toml` manifest, loaded from the app bundle or a source checkout; the surface renders the picker, module/lesson list, and lesson reader from those files. Ships Rust aligned to *The Rust Programming Language*, 3rd edition, plus separate JavaScript (11 lessons, five modules) and TypeScript (10 lessons, five modules) courses with starter code, solutions, and deterministic exercise checks. Exercise materialization and the check runner are not wired up yet, so lessons currently read rather than grade. See [course setup and validation](assets/academy/courses/README.md) for terminal practice.
 
 **Themes** -- Built-in presets plus persistent background image management through the GPUI appearances workflow.
 

@@ -1,0 +1,24 @@
+id = "javascript"
+title = "JavaScript"
+language = "javascript"
+description = "Learn JavaScript with Node.js: values, functions, collections, modules, validation, asynchronous work, and a tested expense-report CLI. Requires Node.js 22+; no npm dependencies."
+
+[[modules]]
+title = "Runtime & Values"
+lessons = ["L00", "L01"]
+
+[[modules]]
+title = "Control Flow & Functions"
+lessons = ["L02", "L03"]
+
+[[modules]]
+title = "Objects & Data Pipelines"
+lessons = ["L04", "L05"]
+
+[[modules]]
+title = "Errors & Modules"
+lessons = ["L06", "L07"]
+
+[[modules]]
+title = "Async, Streams & Capstone"
+lessons = ["L08", "L09", "L10"]

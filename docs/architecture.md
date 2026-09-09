@@ -95,6 +95,13 @@ belongs before adding logic to a large GPUI surface.
 - Course titles, ordering, and lesson counts belong to the manifests on
   disk. The surface must not hardcode a catalog; a course added to the
   courses directory should appear with no code change.
+- `assets/academy/courses/javascript` and `typescript` are separate five-module
+  courses. Each lesson embeds its own starter/solution files in TOML frontmatter;
+  no shared workspace or downloaded exercise dependency is required.
+- `scripts/check_academy_courses.py` materializes each JS/TS fixture in a fresh
+  temporary directory and checks solution success plus starter failure. CI
+  provisions Node and TypeScript before running it; lesson checks never install
+  packages. Strict Rust loader tests validate the course schema separately.
 
 ## Config, Preferences, Theme, And Platform
 
