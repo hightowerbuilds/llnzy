@@ -170,6 +170,16 @@ function identity<T>(value: T): T { return value; }
 const name = identity("Ada"); // string information is retained
 ```
 
-Run `tsc --project tsconfig.json --pretty false && node dist/check.js` from the exported exercise directory in your terminal. Compilation must succeed before Node runs. Read the first compiler diagnostic, fix its cause, and rerun. Keep `check.ts`, `assert.ts`, and `tsconfig.json` intact; edit the exercise implementation files. The checks compare behavior and compile type examples; printing the success message yourself does not implement the exercise.
+Run the check from the exported exercise directory in your terminal:
+
+```bash
+tsc --project tsconfig.json --pretty false && node dist/check.js
+```
+
+Compilation must succeed before Node runs. Read the first compiler diagnostic, fix its cause, and rerun.
+
+Keep `check.ts`, `assert.ts`, and `tsconfig.json` intact; edit the exercise implementation files.
+
+The checks compare behavior and compile type examples. Printing the success message yourself does not implement the exercise.
 
 After passing, hover the exported functions in the editor and explain their input and output types without executing them.

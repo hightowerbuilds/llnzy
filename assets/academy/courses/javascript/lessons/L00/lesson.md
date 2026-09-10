@@ -71,7 +71,9 @@ console.log('L00 passed');
 +++
 # Run JavaScript with Node
 
-JavaScript is the language; Node.js is the runtime that executes it here. This course assumes you can create a file and navigate a terminal, but does not assume another programming language. Use Node.js 22 or newer. Exercises use only built-in features and modules, so there is nothing to install with npm. Browser APIs such as `document` are outside this course.
+JavaScript is the language; Node.js is the runtime that executes it here. This course assumes you can create a file and navigate a terminal, but does not assume another programming language.
+
+Use Node.js 22 or newer. Exercises use only built-in features and modules, so there is nothing to install with npm. Browser APIs such as `document` are outside this course.
 
 A program evaluates expressions and executes statements. `const` names a value without allowing reassignment; `let` names a binding you plan to update. Strings hold text. A function accepts arguments and returns a result to its caller:
 
@@ -87,7 +89,9 @@ Save that example as `hello.js` and run `node hello.js`. Backticks make a templa
 
 Each exercise includes `package.json` with `"type":"module"`, enabling the `import` and `export` syntax already present in the starter. You will design your own module boundaries in L07. For now, preserve those keywords and implement the function bodies.
 
-An object groups named fields. Assigning an object to another variable shares the same object; it does not copy it. `structuredClone(record)` creates an independent copy of the plain records used here, including nested fields. It is not a universal copier: functions cannot be cloned this way. The first harness checks that the runtime supports this feature and that editing the copy leaves the original intact.
+An object groups named fields. Assigning an object to another variable shares the same object; it does not copy it. `structuredClone(record)` creates an independent copy of the plain records used here, including nested fields.
+
+It is not a universal copier: functions cannot be cloned this way. The first harness checks that the runtime supports this feature and that editing the copy leaves the original intact.
 
 After the exercise, explain why `const copy = original` would fail the independence check. Use the editor's hover on `greeting` to inspect its inferred return type.
 
@@ -95,4 +99,20 @@ After the exercise, explain why `const copy = original` would fail the independe
 
 Implement greeting(name) with a template literal and cloneRecord(record) with structuredClone. Return values; the harness handles printing.
 
-Using Python 3.11 or newer, export a fresh workspace from the repository root with `python3 scripts/check_academy_courses.py --export javascript L00 /tmp/llnzy-js-l00`. The destination must not already exist; choose a new path for a retake. Open those files in LLNZY, then run `node check.js` from the exported directory. The starter intentionally fails. Leave `check.js` unchanged: it calls your functions with several inputs and reports the first failed assertion. Read that failure, inspect the relevant input, and rerun after one focused edit.
+Export a fresh workspace from the repository root. The exporter needs Python 3.11 or newer:
+
+```bash
+python3 scripts/check_academy_courses.py --export javascript L00 /tmp/llnzy-js-l00
+```
+
+The destination must not already exist, so choose a new path for a retake.
+
+Open those files in LLNZY, then run the check from the exported directory:
+
+```bash
+node check.js
+```
+
+The starter intentionally fails. Leave `check.js` unchanged: it calls your functions with several inputs and reports the first failed assertion.
+
+Read that failure, inspect the relevant input, and rerun after one focused edit.

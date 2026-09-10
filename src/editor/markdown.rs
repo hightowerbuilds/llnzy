@@ -11,6 +11,34 @@
 pub struct MarkdownBlock {
     pub kind: MarkdownBlockKind,
     pub text: String,
+    /// The fence's info string, lowercased, for `Code` blocks that carry
+    /// one. Renderers use it to tell a shell command the reader should run
+    /// from a source sample they should only read. `None` on every other
+    /// kind and on bare fences.
+    pub lang: Option<String>,
+}
+
+impl MarkdownBlock {
+    /// A block with no language, which is every kind except a tagged
+    /// fence. Keeps call sites from restating `lang: None`.
+    pub fn new(kind: MarkdownBlockKind, text: impl Into<String>) -> Self {
+        Self {
+            kind,
+            text: text.into(),
+            lang: None,
+        }
+    }
+
+    /// Whether this block is a command the reader is meant to run, rather
+    /// than source to study. Drives the copy affordance in the Academy
+    /// lesson reader.
+    pub fn is_shell_command(&self) -> bool {
+        self.kind == MarkdownBlockKind::Code
+            && matches!(
+                self.lang.as_deref(),
+                Some("sh" | "bash" | "zsh" | "shell" | "console" | "terminal")
+            )
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -35,6 +63,7 @@ pub fn parse_markdown_blocks(source: &str) -> Vec<MarkdownBlock> {
     let mut paragraph = Vec::new();
     let mut code = Vec::new();
     let mut in_code = false;
+    let mut code_lang: Option<String> = None;
 
     for line in source.lines() {
         let trimmed = line.trim();
@@ -44,10 +73,14 @@ pub fn parse_markdown_blocks(source: &str) -> Vec<MarkdownBlock> {
                 blocks.push(MarkdownBlock {
                     kind: MarkdownBlockKind::Code,
                     text: code.join("\n"),
+                    lang: code_lang.take(),
                 });
                 code.clear();
                 in_code = false;
             } else {
+                // The closing fence carries no info string, so the opening
+                // one is the only place the language can be read.
+                code_lang = fence_lang(trimmed);
                 in_code = true;
             }
             continue;
@@ -65,22 +98,22 @@ pub fn parse_markdown_blocks(source: &str) -> Vec<MarkdownBlock> {
 
         if let Some((level, text)) = heading(trimmed) {
             flush_paragraph(&mut blocks, &mut paragraph);
-            blocks.push(MarkdownBlock {
-                kind: MarkdownBlockKind::Heading(level),
-                text: strip_inline(text),
-            });
+            blocks.push(MarkdownBlock::new(
+                MarkdownBlockKind::Heading(level),
+                strip_inline(text),
+            ));
         } else if let Some(text) = bullet(trimmed) {
             flush_paragraph(&mut blocks, &mut paragraph);
-            blocks.push(MarkdownBlock {
-                kind: MarkdownBlockKind::Bullet,
-                text: strip_inline(text),
-            });
+            blocks.push(MarkdownBlock::new(
+                MarkdownBlockKind::Bullet,
+                strip_inline(text),
+            ));
         } else if let Some(text) = trimmed.strip_prefix("> ") {
             flush_paragraph(&mut blocks, &mut paragraph);
-            blocks.push(MarkdownBlock {
-                kind: MarkdownBlockKind::Quote,
-                text: strip_inline(text),
-            });
+            blocks.push(MarkdownBlock::new(
+                MarkdownBlockKind::Quote,
+                strip_inline(text),
+            ));
         } else {
             paragraph.push(strip_inline(trimmed));
         }
@@ -90,15 +123,16 @@ pub fn parse_markdown_blocks(source: &str) -> Vec<MarkdownBlock> {
         blocks.push(MarkdownBlock {
             kind: MarkdownBlockKind::Code,
             text: code.join("\n"),
+            lang: code_lang.take(),
         });
     }
     flush_paragraph(&mut blocks, &mut paragraph);
 
     if blocks.is_empty() {
-        blocks.push(MarkdownBlock {
-            kind: MarkdownBlockKind::Paragraph,
-            text: "Empty markdown document".to_string(),
-        });
+        blocks.push(MarkdownBlock::new(
+            MarkdownBlockKind::Paragraph,
+            "Empty markdown document",
+        ));
     }
 
     blocks
@@ -108,11 +142,18 @@ fn flush_paragraph(blocks: &mut Vec<MarkdownBlock>, paragraph: &mut Vec<String>)
     if paragraph.is_empty() {
         return;
     }
-    blocks.push(MarkdownBlock {
-        kind: MarkdownBlockKind::Paragraph,
-        text: paragraph.join(" "),
-    });
+    blocks.push(MarkdownBlock::new(
+        MarkdownBlockKind::Paragraph,
+        paragraph.join(" "),
+    ));
     paragraph.clear();
+}
+
+/// The fence's info string, lowercased and trimmed. `None` for a bare
+/// ``` fence, so a fence without a language is not mistaken for one.
+fn fence_lang(fence: &str) -> Option<String> {
+    let info = fence.trim_start_matches('`').trim();
+    (!info.is_empty()).then(|| info.to_ascii_lowercase())
 }
 
 fn heading(line: &str) -> Option<(u8, &str)> {
@@ -150,6 +191,35 @@ mod tests {
         assert_eq!(blocks[1].text, "Item");
         assert!(matches!(blocks[2].kind, MarkdownBlockKind::Code));
         assert_eq!(blocks[2].text, "fn main() {}");
+    }
+
+    #[test]
+    fn fenced_language_is_captured_and_classified() {
+        let blocks = parse_markdown_blocks("```bash\ncargo run\n```");
+        assert_eq!(blocks[0].lang.as_deref(), Some("bash"));
+        assert!(blocks[0].is_shell_command());
+
+        // Source to read, not a command to run.
+        let blocks = parse_markdown_blocks("```rust\nfn main() {}\n```");
+        assert_eq!(blocks[0].lang.as_deref(), Some("rust"));
+        assert!(!blocks[0].is_shell_command());
+
+        // A bare fence has no language, and must not be taken for one.
+        let blocks = parse_markdown_blocks("```\ncargo run\n```");
+        assert_eq!(blocks[0].lang, None);
+        assert!(!blocks[0].is_shell_command());
+
+        // Case and stray spacing in the info string are normalized.
+        let blocks = parse_markdown_blocks("```  Shell \ncargo run\n```");
+        assert_eq!(blocks[0].lang.as_deref(), Some("shell"));
+        assert!(blocks[0].is_shell_command());
+    }
+
+    #[test]
+    fn only_code_blocks_carry_a_language() {
+        let blocks = parse_markdown_blocks("# Title\n\ntext\n\n- item\n\n> quote");
+        assert!(blocks.iter().all(|block| block.lang.is_none()));
+        assert!(blocks.iter().all(|block| !block.is_shell_command()));
     }
 
     #[test]

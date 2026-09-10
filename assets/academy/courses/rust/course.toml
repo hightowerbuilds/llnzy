@@ -2,6 +2,7 @@ id = "rust"
 title = "Rust"
 language = "rust"
 description = "The Rust course for LLNZY Code Academy, aligned chapter-by-chapter to The Rust Programming Language, 3rd Edition."
+order = 3
 
 [book]
 title = "The Rust Programming Language"

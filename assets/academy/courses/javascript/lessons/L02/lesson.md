@@ -113,10 +113,28 @@ console.log(letters); // sm
 
 A `switch` compares one value against cases using strict equality. End each ordinary case with `break`, or return directly from a function, to avoid accidentally continuing into the next case. A `default` handles values not listed explicitly.
 
-Write the empty-array result down before implementing the total: starting an accumulator at zero makes that case work without a special branch. After passing, explain why replacing `continue` with `return total` would incorrectly stop at the first negative value. Add your own mixed input to a separate probe file and trace the accumulator by hand.
+Write the empty-array result down before implementing the total: starting an accumulator at zero makes that case work without a special branch.
+
+After passing, explain why replacing `continue` with `return total` would incorrectly stop at the first negative value. Add your own mixed input to a separate probe file and trace the accumulator by hand.
 
 ## Practice
 
 Implement classify(n): positive, negative, or zero. Implement totalPositive(numbers) ignoring zero and negatives. Implement commandAction(command) mapping add to write, list to read, and everything else to unknown using switch.
 
-Using Python 3.11 or newer, export a fresh workspace from the repository root with `python3 scripts/check_academy_courses.py --export javascript L02 /tmp/llnzy-js-l02`. The destination must not already exist; choose a new path for a retake. Open those files in LLNZY, then run `node check.js` from the exported directory. The starter intentionally fails. Leave `check.js` unchanged: it calls your functions with several inputs and reports the first failed assertion. Read that failure, inspect the relevant input, and rerun after one focused edit.
+Export a fresh workspace from the repository root. The exporter needs Python 3.11 or newer:
+
+```bash
+python3 scripts/check_academy_courses.py --export javascript L02 /tmp/llnzy-js-l02
+```
+
+The destination must not already exist, so choose a new path for a retake.
+
+Open those files in LLNZY, then run the check from the exported directory:
+
+```bash
+node check.js
+```
+
+The starter intentionally fails. Leave `check.js` unchanged: it calls your functions with several inputs and reports the first failed assertion.
+
+Read that failure, inspect the relevant input, and rerun after one focused edit.

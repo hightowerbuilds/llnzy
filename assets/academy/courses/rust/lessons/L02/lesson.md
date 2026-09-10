@@ -58,6 +58,24 @@ fn main() {
 +++
 # Processing a Guess
 
-Chapter 2 builds a guessing game, and its first lesson is that input is untrusted text. The book calls `io::stdin().read_line(&mut guess)`, which returns a `Result` because reading can fail, then leans on `.expect()` for now. Whatever arrives, the tail of the buffer holds a newline, so `trim()` comes before `parse::<u32>()`, which itself returns a `Result` — "banana" and a number past `u32`'s range both land in the error arm. Graded checks cannot pipe stdin, so we pull the logic out into a pure function that takes `&str` and returns `String`; `main` just demonstrates it on fixed samples. That refactor — isolate the decision, print at the edge — is a habit worth keeping.
+Chapter 2 builds a guessing game, and its first lesson is that input is untrusted text.
 
-In the terminal, add your own demo strings to the loop and watch which arm they hit.
+## Reading a line
+
+The book calls `io::stdin().read_line(&mut guess)`, which returns a `Result` because reading can fail, then leans on `.expect()` for now.
+
+Whatever arrives, the tail of the buffer holds a newline. So `trim()` comes before `parse::<u32>()` — and `parse` itself returns a `Result`, because "banana" and a number past `u32`'s range both land in the error arm.
+
+## Why this lesson looks different from the book
+
+Graded checks cannot pipe stdin. So we pull the logic out into a pure function that takes `&str` and returns `String`, and `main` just demonstrates it on fixed samples.
+
+That refactor — isolate the decision, print at the edge — is a habit worth keeping well past this lesson.
+
+## Run it
+
+```bash
+cargo run
+```
+
+Add your own demo strings to the loop and watch which arm they hit.

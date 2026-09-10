@@ -133,9 +133,13 @@ export function totalCents(lines: readonly Readonly<Line>[]): number {
 +++
 # Inference and Function Contracts
 
-Inference saves repetition when the compiler already has evidence: `const count = 2` needs no number annotation. A function parameter is a boundary; without an annotation an ordinary exported parameter may become an implicit `any`, which strict mode rejects. Annotate public inputs and outputs, then let intermediate expressions infer.
+Inference saves repetition when the compiler already has evidence: `const count = 2` needs no number annotation.
 
-A type alias gives a domain concept a name. `readonly Line[]` promises that the function will not rearrange or append to the input array through this reference; it does not freeze JavaScript objects at runtime. `Readonly<Line>` also prevents assignment to a line's properties through that type. The tests freeze their fixture to catch runtime mutation too.
+A function parameter is a boundary; without an annotation an ordinary exported parameter may become an implicit `any`, which strict mode rejects. Annotate public inputs and outputs, then let intermediate expressions infer.
+
+A type alias gives a domain concept a name. `readonly Line[]` promises that the function will not rearrange or append to the input array through this reference; it does not freeze JavaScript objects at runtime.
+
+`Readonly<Line>` also prevents assignment to a line's properties through that type. The tests freeze their fixture to catch runtime mutation too.
 
 The cart stores money as integer cents. Multiplying integer quantities by integer prices avoids the familiar `0.1 + 0.2` decimal surprise for these small amounts. This lesson assumes valid nonnegative prices; later boundary lessons establish those assumptions from unknown data.
 
@@ -150,6 +154,16 @@ function double(value: number): number {
 }
 ```
 
-Run `tsc --project tsconfig.json --pretty false && node dist/check.js` from the exported exercise directory in your terminal. Compilation must succeed before Node runs. Read the first compiler diagnostic, fix its cause, and rerun. Keep `check.ts`, `assert.ts`, and `tsconfig.json` intact; edit the exercise implementation files. The checks compare behavior and compile type examples; printing the success message yourself does not implement the exercise.
+Run the check from the exported exercise directory in your terminal:
+
+```bash
+tsc --project tsconfig.json --pretty false && node dist/check.js
+```
+
+Compilation must succeed before Node runs. Read the first compiler diagnostic, fix its cause, and rerun.
+
+Keep `check.ts`, `assert.ts`, and `tsconfig.json` intact; edit the exercise implementation files.
+
+The checks compare behavior and compile type examples. Printing the success message yourself does not implement the exercise.
 
 After passing, hover the exported functions in the editor and explain their input and output types without executing them.

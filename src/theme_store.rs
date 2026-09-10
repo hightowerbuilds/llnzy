@@ -1,7 +1,9 @@
 use std::{
+    collections::HashMap,
     fs::File,
     io::Read,
     path::{Path, PathBuf},
+    sync::{Mutex, OnceLock},
 };
 
 use crate::config::{BackgroundImageFit, ColorScheme, Config, CursorStyle, EffectsConfig};
@@ -182,6 +184,93 @@ fn background_file_digest(path: &Path) -> Result<[u8; 32], String> {
     Ok(hasher.finalize().into())
 }
 
+// ── Blurred Background Cache ──
+
+/// Width the blur actually runs at. Downscaling first is what makes this
+/// affordable: a Gaussian over a 2048px image costs seconds, while the
+/// same visual result comes from blurring a small copy and letting the
+/// renderer scale it back up. The detail a blur destroys is discarded
+/// before the expensive part rather than after it.
+const BLUR_WORK_WIDTH: u32 = 320;
+
+type BlurMemo = Mutex<HashMap<(PathBuf, u32), Option<PathBuf>>>;
+
+/// In-process memo over `build_blurred_background`. Without it a cache
+/// miss — or an unreadable image — would be retried on every frame, which
+/// turns one slow decode into a permanent stall.
+fn blur_memo() -> &'static BlurMemo {
+    static MEMO: OnceLock<BlurMemo> = OnceLock::new();
+    MEMO.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Path to a blurred copy of `source`, built and cached on first use.
+///
+/// Returns `None` when the image cannot be read or no cache directory is
+/// available. Callers should fall back to the sharp image: a crisp
+/// background is a much smaller failure than no background at all.
+pub fn blurred_background_path(source: &Path, sigma: f32) -> Option<PathBuf> {
+    // Key on tenths of a sigma so the memo and the on-disk name agree, and
+    // so a float that differs in the last bit doesn't miss the cache.
+    let sigma_key = (sigma.max(0.0) * 10.0).round() as u32;
+    let key = (source.to_path_buf(), sigma_key);
+
+    if let Ok(memo) = blur_memo().lock() {
+        if let Some(cached) = memo.get(&key) {
+            return cached.clone();
+        }
+    }
+
+    let built = build_blurred_background(source, sigma, sigma_key);
+    if let Ok(mut memo) = blur_memo().lock() {
+        memo.insert(key, built.clone());
+    }
+    built
+}
+
+fn build_blurred_background(source: &Path, sigma: f32, sigma_key: u32) -> Option<PathBuf> {
+    let dir = crate::platform::paths::current_paths()?
+        .cache_dir
+        .join("backgrounds-blurred");
+    build_blurred_background_in_dir(source, sigma, sigma_key, &dir)
+}
+
+fn build_blurred_background_in_dir(
+    source: &Path,
+    sigma: f32,
+    sigma_key: u32,
+    dir: &Path,
+) -> Option<PathBuf> {
+    let digest = background_file_digest(source).ok()?;
+
+    // Name by content digest, not by source path: re-importing the same
+    // picture under a new filename reuses the blur instead of rebuilding
+    // it, and editing a file in place misses the stale entry.
+    let mut name = String::with_capacity(32);
+    for byte in &digest[..16] {
+        use std::fmt::Write as _;
+        let _ = write!(name, "{byte:02x}");
+    }
+    let target = dir.join(format!("{name}-{sigma_key}.png"));
+    if target.is_file() {
+        return Some(target);
+    }
+
+    std::fs::create_dir_all(dir).ok()?;
+    let image = image::open(source).ok()?;
+    let width = image.width().max(1);
+    let height = image.height().max(1);
+    let work_width = BLUR_WORK_WIDTH.min(width);
+    let work_height = ((work_width as u64 * height as u64) / width as u64).max(1) as u32;
+    let small = image.resize_exact(
+        work_width,
+        work_height,
+        image::imageops::FilterType::Triangle,
+    );
+    let blurred = image::imageops::blur(&small.to_rgba8(), sigma);
+    blurred.save(&target).ok()?;
+    Some(target)
+}
+
 /// List all saved background images.
 pub fn list_backgrounds() -> Vec<PathBuf> {
     let Some(dir) = backgrounds_dir() else {
@@ -230,10 +319,6 @@ struct ThemeFile {
     // Effects
     effects_background: String,
     effects_background_intensity: f32,
-    effects_background_speed: f32,
-    effects_background_color: Option<String>,
-    effects_background_color2: Option<String>,
-    effects_background_color3: Option<String>,
     effects_background_image: Option<String>,
     #[serde(default)]
     effects_background_image_fit: Option<String>,
@@ -336,10 +421,6 @@ fn save_theme_to_dir(
         ansi: config.colors.ansi.iter().copied().map(rgb_to_hex).collect(),
         effects_background: config.effects.background.clone(),
         effects_background_intensity: config.effects.background_intensity,
-        effects_background_speed: config.effects.background_speed,
-        effects_background_color: config.effects.background_color.map(rgb_to_hex),
-        effects_background_color2: config.effects.background_color2.map(rgb_to_hex),
-        effects_background_color3: config.effects.background_color3.map(rgb_to_hex),
         effects_background_image: config.effects.background_image.clone(),
         effects_background_image_fit: Some(
             config.effects.background_image_fit.as_str().to_string(),
@@ -417,12 +498,9 @@ fn load_user_themes_from_dir(dir: &Path) -> Vec<(VisualTheme, ThemeViewFlags)> {
             effects: EffectsConfig {
                 enabled: true,
                 fps_target: 60,
-                background: tf.effects_background,
+                background: crate::config::normalize_background_mode(&tf.effects_background)
+                    .to_string(),
                 background_intensity: tf.effects_background_intensity,
-                background_speed: tf.effects_background_speed,
-                background_color: tf.effects_background_color.as_deref().map(hex_to_rgb),
-                background_color2: tf.effects_background_color2.as_deref().map(hex_to_rgb),
-                background_color3: tf.effects_background_color3.as_deref().map(hex_to_rgb),
                 background_image: tf.effects_background_image,
                 background_image_fit: tf
                     .effects_background_image_fit
@@ -691,7 +769,7 @@ mod tests {
         let root = test_dir("themes");
         let mut config = Config::default();
         config.colors.foreground = [1, 2, 3];
-        config.effects.background = "aurora".to_string();
+        config.effects.background = "image".to_string();
         config.effects.background_image = Some("/tmp/background.png".to_string());
         config.cursor_style = CursorStyle::Beam;
         let flags = ThemeViewFlags {
@@ -711,7 +789,7 @@ mod tests {
         assert_eq!(theme.name, "My Theme");
         assert_eq!(theme.description, "desc");
         assert_eq!(theme.colors.foreground, [1, 2, 3]);
-        assert_eq!(theme.effects.background, "aurora");
+        assert_eq!(theme.effects.background, "image");
         assert_eq!(
             theme.effects.background_image.as_deref(),
             Some("/tmp/background.png")
@@ -722,6 +800,138 @@ mod tests {
 
         delete_user_theme_from_dir("My Theme", &root).unwrap();
         assert!(load_user_themes_from_dir(&root).is_empty());
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// Themes saved before the shader patterns were retired still name one
+    /// as their background mode. Loading one must not hand the renderer a
+    /// mode it can no longer draw.
+    #[test]
+    fn user_theme_with_retired_shader_background_loads_as_none() {
+        let root = test_dir("themes-retired-shader");
+        let mut config = Config::default();
+        config.effects.background = "image".to_string();
+        save_theme_to_dir("Legacy", "desc", &config, &ThemeViewFlags::default(), &root).unwrap();
+
+        let path = root.join("Legacy.toml");
+        let saved = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(
+            &path,
+            saved.replace(
+                r#"effects_background = "image""#,
+                r#"effects_background = "aurora""#,
+            ),
+        )
+        .unwrap();
+
+        let themes = load_user_themes_from_dir(&root);
+        assert_eq!(themes.len(), 1);
+        assert_eq!(themes[0].0.effects.background, "none");
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// Write a real PNG so the blur path exercises actual decoding rather
+    /// than a stub the image crate would reject.
+    fn write_checkerboard_png(path: &Path, width: u32, height: u32) {
+        let mut buffer = image::RgbaImage::new(width, height);
+        for (x, y, pixel) in buffer.enumerate_pixels_mut() {
+            // A hard checkerboard: high-frequency detail a blur must visibly
+            // destroy, which is what the variance assertion below measures.
+            let on = ((x / 4) + (y / 4)) % 2 == 0;
+            *pixel = image::Rgba(if on {
+                [255, 255, 255, 255]
+            } else {
+                [0, 0, 0, 255]
+            });
+        }
+        buffer.save(path).expect("write test png");
+    }
+
+    #[test]
+    fn blurred_background_downscales_and_smooths() {
+        let root = std::env::temp_dir().join(format!("llnzy-blur-build-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("create root");
+        let source = root.join("source.png");
+        write_checkerboard_png(&source, 1024, 512);
+
+        let cache = root.join("cache");
+        let blurred = build_blurred_background_in_dir(&source, 8.0, 80, &cache)
+            .expect("blurred image is built");
+        assert!(blurred.is_file());
+
+        let output = image::open(&blurred).expect("blurred image decodes");
+        assert_eq!(output.width(), BLUR_WORK_WIDTH);
+        assert_eq!(output.height(), BLUR_WORK_WIDTH / 2, "aspect ratio is kept");
+
+        // The checkerboard is pure black and white; a real blur has to pull
+        // interior pixels toward mid grey. Sample away from the edges, where
+        // the blur kernel clamps and can preserve extremes.
+        let rgba = output.to_rgba8();
+        let mut extremes = 0usize;
+        let mut sampled = 0usize;
+        for y in (rgba.height() / 4)..(rgba.height() * 3 / 4) {
+            for x in (rgba.width() / 4)..(rgba.width() * 3 / 4) {
+                let value = rgba.get_pixel(x, y).0[0];
+                if !(16..=239).contains(&value) {
+                    extremes += 1;
+                }
+                sampled += 1;
+            }
+        }
+        assert!(sampled > 0);
+        assert!(
+            extremes * 10 < sampled,
+            "expected the blur to remove the checkerboard's extremes, \
+             got {extremes} of {sampled} still black or white"
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn blurred_background_reuses_the_cached_file() {
+        let root = std::env::temp_dir().join(format!("llnzy-blur-cache-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("create root");
+        let source = root.join("source.png");
+        write_checkerboard_png(&source, 64, 64);
+        let cache = root.join("cache");
+
+        let first = build_blurred_background_in_dir(&source, 8.0, 80, &cache).expect("first build");
+        let marker = b"cached, not rebuilt";
+        std::fs::write(&first, marker).expect("overwrite cache entry");
+
+        let second =
+            build_blurred_background_in_dir(&source, 8.0, 80, &cache).expect("second build");
+        assert_eq!(first, second);
+        assert_eq!(
+            std::fs::read(&second).expect("read cache entry"),
+            marker,
+            "a cache hit must not re-encode the image"
+        );
+
+        // A different sigma is a different entry.
+        let other = build_blurred_background_in_dir(&source, 2.0, 20, &cache).expect("other sigma");
+        assert_ne!(first, other);
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn blurred_background_reports_unreadable_sources() {
+        let root = std::env::temp_dir().join(format!("llnzy-blur-bad-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("create root");
+        let source = root.join("not-an-image.png");
+        std::fs::write(&source, b"definitely not a png").expect("write junk");
+
+        assert!(
+            build_blurred_background_in_dir(&source, 8.0, 80, &root.join("cache")).is_none(),
+            "an undecodable source must fall back rather than panic"
+        );
 
         let _ = std::fs::remove_dir_all(root);
     }

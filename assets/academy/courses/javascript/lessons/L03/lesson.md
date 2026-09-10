@@ -101,7 +101,9 @@ Every call to `makePrefix` creates a separate parameter binding. A counter uses 
 
 Closures capture bindings, not automatically frozen snapshots of values. `for (const value of values)` creates a binding per iteration, so callbacks keep the intended value. A single mutable variable outside the loop would be shared by every callback. Compare these patterns in a probe before writing `makeCallbacks`.
 
-`this` is a different mechanism. For an ordinary method call `record.label()`, the receiver is `record`. Detaching the method as `const label = record.label` removes that receiver. ES modules run in strict mode, so calling a detached ordinary function does not supply a useful default object. `method.bind(record)` creates a callable with a fixed receiver:
+`this` is a different mechanism. For an ordinary method call `record.label()`, the receiver is `record`. Detaching the method as `const label = record.label` removes that receiver.
+
+ES modules run in strict mode, so calling a detached ordinary function does not supply a useful default object. `method.bind(record)` creates a callable with a fixed receiver:
 
 ```js
 const meter = { value: 4, read() { return this.value; } };
@@ -117,4 +119,20 @@ Further reading: [MDN on closures](https://developer.mozilla.org/en-US/docs/Web/
 
 Implement makeCounter(start = 0), returning a function that increments then returns its private count. Implement makeCallbacks(values), returning one zero-argument callback per value. Implement bindLabel(record), returning record.label bound to record so it works when detached.
 
-Using Python 3.11 or newer, export a fresh workspace from the repository root with `python3 scripts/check_academy_courses.py --export javascript L03 /tmp/llnzy-js-l03`. The destination must not already exist; choose a new path for a retake. Open those files in LLNZY, then run `node check.js` from the exported directory. The starter intentionally fails. Leave `check.js` unchanged: it calls your functions with several inputs and reports the first failed assertion. Read that failure, inspect the relevant input, and rerun after one focused edit.
+Export a fresh workspace from the repository root. The exporter needs Python 3.11 or newer:
+
+```bash
+python3 scripts/check_academy_courses.py --export javascript L03 /tmp/llnzy-js-l03
+```
+
+The destination must not already exist, so choose a new path for a retake.
+
+Open those files in LLNZY, then run the check from the exported directory:
+
+```bash
+node check.js
+```
+
+The starter intentionally fails. Leave `check.js` unchanged: it calls your functions with several inputs and reports the first failed assertion.
+
+Read that failure, inspect the relevant input, and rerun after one focused edit.

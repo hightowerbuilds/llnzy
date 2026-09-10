@@ -1,0 +1,25 @@
+id = "elixir"
+title = "Elixir"
+language = "elixir"
+description = "Learn functional programming on the BEAM, from immutable values and pattern matching to tested, supervised OTP services."
+order = 4
+
+[[modules]]
+title = "IEx & Immutable Values"
+lessons = ["L00", "L01"]
+
+[[modules]]
+title = "Patterns & Functions"
+lessons = ["L02", "L03"]
+
+[[modules]]
+title = "Collections & Data Pipelines"
+lessons = ["L04", "L05"]
+
+[[modules]]
+title = "Mix, Tests & Processes"
+lessons = ["L06", "L07"]
+
+[[modules]]
+title = "OTP & Capstone"
+lessons = ["L08", "L09"]

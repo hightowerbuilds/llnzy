@@ -139,6 +139,20 @@ impl TabGroupState {
             .unwrap_or(1)
     }
 
+    /// Position of this tab's group among the live groups, or `None` when
+    /// the tab is not joined.
+    ///
+    /// This is what drives per-group tab coloring, and it is an ordinal
+    /// among *live* groups rather than the group's id. Ids only ever climb,
+    /// so two groups on screen at once could take the same slot in a
+    /// fixed-size color list; an ordinal cannot, which is the whole point —
+    /// distinct groups must look distinct. The cost is that dissolving a
+    /// group shifts the colors of the ones after it, which is a far smaller
+    /// surprise than two separate groups sharing a color.
+    pub fn group_ordinal_for_tab(&self, tab_id: TabId) -> Option<usize> {
+        self.groups.iter().position(|group| group.contains(tab_id))
+    }
+
     pub fn join_pair(&mut self, primary: TabId, secondary: TabId) -> Option<TabGroupId> {
         self.join_pair_with_axis(primary, secondary, PartitionAxis::default())
     }
@@ -471,6 +485,57 @@ fn merge_shares(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_member_of_a_group_shares_one_ordinal() {
+        let mut groups = TabGroupState::default();
+        groups.join_pair(1, 2);
+        groups.join_tabs_with_axis(1, 3, 3, PartitionAxis::Vertical);
+        assert_eq!(groups.group_member_count(1), 3, "all three joined");
+
+        assert_eq!(groups.group_ordinal_for_tab(1), Some(0));
+        assert_eq!(groups.group_ordinal_for_tab(2), Some(0));
+        assert_eq!(groups.group_ordinal_for_tab(3), Some(0));
+    }
+
+    #[test]
+    fn separate_groups_take_separate_ordinals() {
+        let mut groups = TabGroupState::default();
+        groups.join_pair(1, 2);
+        groups.join_pair(3, 4);
+        groups.join_pair(5, 6);
+
+        let first = groups.group_ordinal_for_tab(1).unwrap();
+        let second = groups.group_ordinal_for_tab(3).unwrap();
+        let third = groups.group_ordinal_for_tab(5).unwrap();
+
+        assert_eq!((first, second, third), (0, 1, 2));
+        assert_eq!(groups.group_ordinal_for_tab(2), Some(first));
+        assert_eq!(groups.group_ordinal_for_tab(4), Some(second));
+        assert_eq!(groups.group_ordinal_for_tab(6), Some(third));
+    }
+
+    #[test]
+    fn an_unjoined_tab_has_no_ordinal() {
+        let mut groups = TabGroupState::default();
+        groups.join_pair(1, 2);
+
+        assert_eq!(groups.group_ordinal_for_tab(9), None);
+    }
+
+    #[test]
+    fn ordinals_stay_contiguous_after_a_group_dissolves() {
+        let mut groups = TabGroupState::default();
+        groups.join_pair(1, 2);
+        groups.join_pair(3, 4);
+        assert_eq!(groups.group_ordinal_for_tab(3), Some(1));
+
+        // Dropping the first group shifts the second down rather than
+        // leaving a hole, so the live groups keep taking the leading colors.
+        groups.separate_tab(1);
+        assert_eq!(groups.group_ordinal_for_tab(1), None);
+        assert_eq!(groups.group_ordinal_for_tab(3), Some(0));
+    }
 
     #[test]
     fn join_pair_rejects_same_tab() {

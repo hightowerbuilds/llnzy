@@ -61,6 +61,24 @@ fn main() {
 +++
 # Variables & Mutability
 
-Chapter 3 opens with the rule that surprises everyone: `let` bindings are immutable by default, and opting in costs one word — `let mut`. That default is load-bearing, because a reader can trust that a value named without `mut` never changes under them. Shadowing is the other move: `let hours = hours * 7;` builds a *new* binding that can even change type, while the old one quietly goes out of scope — different from mutation, which reuses storage and must be declared. `const` is a third thing again: named in `SCREAMING_SNAKE_CASE`, typed explicitly, set at compile time, and never `mut`.
+Chapter 3 opens with the rule that surprises everyone: `let` bindings are immutable by default, and opting in costs one word — `let mut`.
 
-In the terminal, drop the `mut` fix back in and read the exact compiler wording — that message will be a colleague for years.
+That default is load-bearing, because a reader can trust that a value named without `mut` never changes under them.
+
+## Shadowing is not mutation
+
+Shadowing is the other move. `let hours = hours * 7;` builds a *new* binding that can even change type, while the old one quietly goes out of scope.
+
+That is different from mutation, which reuses storage and must be declared up front.
+
+## And const is a third thing again
+
+`const` is named in `SCREAMING_SNAKE_CASE`, typed explicitly, set at compile time, and never `mut`.
+
+## Run it
+
+```bash
+cargo run
+```
+
+Drop the `mut` fix back in and read the exact compiler wording — that message will be a colleague for years.

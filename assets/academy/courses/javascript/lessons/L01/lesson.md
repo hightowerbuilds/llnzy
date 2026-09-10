@@ -78,7 +78,9 @@ console.log('L01 passed');
 +++
 # Values, Equality & Defaults
 
-JavaScript has seven primitive types: string, number, bigint, boolean, undefined, symbol, and null. Objects are a separate category; arrays and functions are special kinds of objects. `typeof` is useful but has historical exceptions: `typeof null` is `"object"`, arrays also report `"object"`, and callable functions report `"function"`. Use explicit checks when your domain needs a more specific label.
+JavaScript has seven primitive types: string, number, bigint, boolean, undefined, symbol, and null. Objects are a separate category; arrays and functions are special kinds of objects.
+
+`typeof` is useful but has historical exceptions: `typeof null` is `"object"`, arrays also report `"object"`, and callable functions report `"function"`. Use explicit checks when your domain needs a more specific label.
 
 ```js
 console.log(8 === '8');       // false: different types
@@ -103,4 +105,20 @@ Order matters in `describe`: detect null, arrays, and NaN before returning the g
 
 Implement describe(value), same(a,b), and label(value). describe returns null, array, nan, or the typeof label; same uses strict equality; label defaults only null and undefined to anonymous.
 
-Using Python 3.11 or newer, export a fresh workspace from the repository root with `python3 scripts/check_academy_courses.py --export javascript L01 /tmp/llnzy-js-l01`. The destination must not already exist; choose a new path for a retake. Open those files in LLNZY, then run `node check.js` from the exported directory. The starter intentionally fails. Leave `check.js` unchanged: it calls your functions with several inputs and reports the first failed assertion. Read that failure, inspect the relevant input, and rerun after one focused edit.
+Export a fresh workspace from the repository root. The exporter needs Python 3.11 or newer:
+
+```bash
+python3 scripts/check_academy_courses.py --export javascript L01 /tmp/llnzy-js-l01
+```
+
+The destination must not already exist, so choose a new path for a retake.
+
+Open those files in LLNZY, then run the check from the exported directory:
+
+```bash
+node check.js
+```
+
+The starter intentionally fails. Leave `check.js` unchanged: it calls your functions with several inputs and reports the first failed assertion.
+
+Read that failure, inspect the relevant input, and rerun after one focused edit.

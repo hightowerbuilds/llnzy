@@ -27,16 +27,9 @@ pub struct WorkspacePreferences {
     #[serde(default)]
     pub terminal_background_image_fit: String,
 
-    /// Three RGB stops for the active shader palette as `[[u8; 3]; 3]`.
-    /// `None` means "use the active effect kind's default palette" — so
-    /// switching kinds still picks the kind-appropriate defaults until the
-    /// user explicitly chooses an override.
-    #[serde(default)]
-    pub terminal_palette: Option<[[u8; 3]; 3]>,
-
-    /// 0.0..=1.0 shader intensity (Smoke Intensity / Fire Intensity / etc.
-    /// depending on active kind). `None` means "use the EffectParams
-    /// default" so a fresh user sees the picked defaults.
+    /// 0.05..=1.0 brightness of the terminal background image — the render
+    /// path dims the image by `1 - intensity`. `None` means "use the
+    /// config.toml value" so a fresh user sees the built-in default.
     #[serde(default)]
     pub terminal_background_intensity: Option<f32>,
 
@@ -149,7 +142,6 @@ mod tests {
         let prefs = WorkspacePreferences {
             terminal_background_image: Some("forest.png".to_string()),
             terminal_background_image_fit: "fit".to_string(),
-            terminal_palette: Some([[16, 9, 20], [77, 31, 79], [197, 122, 200]]),
             terminal_background_intensity: Some(0.42),
             terminal_font_family: Some("Menlo".to_string()),
             terminal_layout: "display".to_string(),
@@ -181,7 +173,6 @@ mod tests {
         let loaded = WorkspacePreferences::load_from(&path);
         assert!(loaded.terminal_background_image.is_none());
         assert!(loaded.terminal_background_image_fit.is_empty());
-        assert!(loaded.terminal_palette.is_none());
         assert!(loaded.terminal_background_intensity.is_none());
         assert!(loaded.terminal_font_family.is_none());
         assert_eq!(loaded.terminal_layout, "display");

@@ -9,22 +9,26 @@ use gpui::{
 use crate::{
     config::Config,
     gpui_editor::EditorPrototype,
-    gpui_terminal::{terminal_background_layer, terminal_shader_effect_layer, TerminalSurface},
+    gpui_terminal::{
+        workspace_background_image_active, workspace_background_layer,
+        workspace_background_layer_blurred, TerminalSurface,
+    },
 };
 
 use super::{
-    academy::{academy_surface, AcademyContext},
+    academy::{academy_surface, AcademyBackdrop, AcademyContext},
     appearances::{appearances_surface, settings_surface},
     home::home_surface,
     sidebar::{collect_explorer_entries, explorer_tree_panel, ExplorerState},
     tabs::WorkspaceTabId,
-    AppearancePage, ErrorLogFilter, JoinedWorkspacePanes, WorkspacePalette, WorkspacePrototype,
+    ErrorLogFilter, JoinedWorkspacePanes, SettingsPage, WorkspacePalette, WorkspacePrototype,
     WorkspaceSurface, BORDER, JOINED_TAB_DIVIDER_WIDTH,
 };
 use crate::tab_groups::PartitionAxis;
 
 #[derive(Clone)]
 pub(super) struct WorkspaceSurfaceContext {
+    pub(super) notepad: Entity<super::notepad::Notepad>,
     pub(super) editor: Entity<EditorPrototype>,
     pub(super) file_editors: BTreeMap<u64, Entity<EditorPrototype>>,
     pub(super) terminals: BTreeMap<u64, Entity<TerminalSurface>>,
@@ -32,7 +36,7 @@ pub(super) struct WorkspaceSurfaceContext {
     pub(super) recent_projects: Vec<PathBuf>,
     pub(super) explorers: BTreeMap<u64, ExplorerState>,
     pub(super) appearance_config: Config,
-    pub(super) appearance_page: AppearancePage,
+    pub(super) settings_page: SettingsPage,
     pub(super) academy_library: Option<std::rc::Rc<crate::academy::CourseLibrary>>,
     pub(super) academy_course: Option<String>,
     pub(super) academy_lesson: Option<String>,
@@ -48,6 +52,46 @@ pub(super) struct WorkspaceSurfaceContext {
 struct JoinedPaneResizeDrag {
     axis: PartitionAxis,
     divider_index: usize,
+}
+
+/// What the joined container already painted behind a pane, if anything.
+/// A pane covered by a shared layer must paint neither its own fill nor
+/// its own copy of the image, or the shared one stops being shared.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum SharedBackground {
+    /// Unjoined, or joined with a surface that does not bear a background.
+    None,
+    Sharp,
+    Blurred,
+}
+
+impl SharedBackground {
+    fn is_shared(self) -> bool {
+        self != Self::None
+    }
+}
+
+/// Whether a surface draws the workspace background behind its content.
+///
+/// The terminal has always done so. The Academy opts in through
+/// `effects.effects_on_ui`, which is what keeps a user who wants the image
+/// confined to the terminal from getting it behind lesson prose. Every
+/// other surface (editor, explorer, settings) stays opaque: they are
+/// working surfaces, not ambient ones.
+///
+/// This is also the join predicate. When every pane in a joined group
+/// bears the background, the layer is mounted once on the shared container
+/// so the panes read as one continuous image instead of two independently
+/// object-fitted copies of it.
+fn surface_bears_background(surface: WorkspaceSurface, config: &Config) -> bool {
+    match surface {
+        WorkspaceSurface::Terminal => true,
+        // Images only, and only when the reference still resolves.
+        WorkspaceSurface::Academy => {
+            config.effects.effects_on_ui && workspace_background_image_active(config)
+        }
+        _ => false,
+    }
 }
 
 impl Render for JoinedPaneResizeDrag {
@@ -86,9 +130,23 @@ pub(super) fn workspace_content(
         let shares = joined.shares;
         let panes = joined.panes;
         let pane_count = panes.len();
-        let shared_terminal_background = panes
+        let shared_workspace_background = panes
             .iter()
-            .all(|pane| pane.surface == WorkspaceSurface::Terminal);
+            .all(|pane| surface_bears_background(pane.surface, &context.appearance_config));
+        // The shared layer can only be blurred when nothing in the group
+        // wants it sharp. A terminal joined to the Academy keeps the image
+        // crisp for both — one continuous background beats each pane
+        // getting the treatment it would have picked alone.
+        let shared_background_blurred = panes
+            .iter()
+            .all(|pane| pane.surface == WorkspaceSurface::Academy);
+        let shared_background = if !shared_workspace_background {
+            SharedBackground::None
+        } else if shared_background_blurred {
+            SharedBackground::Blurred
+        } else {
+            SharedBackground::Sharp
+        };
         let resize_tab_id = panes[0].id;
         let mut joined_container = div()
             .id("joined-workspace-panes")
@@ -128,12 +186,14 @@ pub(super) fn workspace_content(
                 )),
         };
 
-        if shared_terminal_background {
-            if let Some(background) = terminal_background_layer(&context.appearance_config) {
+        if shared_workspace_background {
+            let layer = if shared_background_blurred {
+                workspace_background_layer_blurred(&context.appearance_config)
+            } else {
+                workspace_background_layer(&context.appearance_config)
+            };
+            if let Some(background) = layer {
                 joined_container = joined_container.child(background);
-            }
-            if let Some(shader_layer) = terminal_shader_effect_layer(&context.appearance_config) {
-                joined_container = joined_container.child(shader_layer);
             }
         }
 
@@ -144,14 +204,14 @@ pub(super) fn workspace_content(
                 context.clone(),
                 primary.surface,
                 Some(primary.id),
-                shared_terminal_background,
+                shared_background,
                 cx,
             );
             let secondary_pane = workspace_surface_pane(
                 context,
                 secondary.surface,
                 Some(secondary.id),
-                shared_terminal_background,
+                shared_background,
                 cx,
             );
             let (primary_pane, secondary_pane, resize_handle) = match axis {
@@ -222,7 +282,7 @@ pub(super) fn workspace_content(
                 context.clone(),
                 pane_info.surface,
                 Some(pane_info.id),
-                shared_terminal_background,
+                shared_background,
                 cx,
             );
             joined_container = match axis {
@@ -286,7 +346,14 @@ pub(super) fn workspace_content(
     }
 
     content.child(
-        workspace_surface_pane(context, active_surface, Some(active_tab_id), false, cx).flex_1(),
+        workspace_surface_pane(
+            context,
+            active_surface,
+            Some(active_tab_id),
+            SharedBackground::None,
+            cx,
+        )
+        .flex_1(),
     )
 }
 
@@ -298,11 +365,8 @@ fn empty_workspace_surface(config: &Config) -> gpui::Div {
         .overflow_hidden()
         .bg(rgb(palette.editor_bg));
 
-    if let Some(background) = terminal_background_layer(config) {
+    if let Some(background) = workspace_background_layer(config) {
         surface = surface.child(background);
-    }
-    if let Some(shader_layer) = terminal_shader_effect_layer(config) {
-        surface = surface.child(shader_layer);
     }
 
     surface.child(
@@ -336,10 +400,11 @@ pub(super) fn workspace_surface_pane(
     context: WorkspaceSurfaceContext,
     surface: WorkspaceSurface,
     tab_id: Option<WorkspaceTabId>,
-    shared_terminal_background: bool,
+    shared_background: SharedBackground,
     cx: &mut Context<WorkspacePrototype>,
 ) -> gpui::Div {
     let WorkspaceSurfaceContext {
+        notepad,
         editor,
         file_editors,
         terminals,
@@ -347,7 +412,7 @@ pub(super) fn workspace_surface_pane(
         recent_projects,
         explorers,
         appearance_config,
-        appearance_page,
+        settings_page,
         academy_library,
         academy_course,
         academy_lesson,
@@ -361,8 +426,13 @@ pub(super) fn workspace_surface_pane(
     } = context;
     let palette = WorkspacePalette::from_config(&appearance_config);
 
+    // A background-bearing pane in a shared group must stay transparent so
+    // the single layer mounted on the joined container shows through it.
+    // Unjoined, or joined with a surface that does not bear the background,
+    // the pane keeps its own fill and mounts its own layer below.
+    let bears_background = surface_bears_background(surface, &appearance_config);
     let mut pane = div().h_full().overflow_hidden();
-    if !(surface == WorkspaceSurface::Terminal && shared_terminal_background) {
+    if !(bears_background && shared_background.is_shared()) {
         pane = pane.bg(rgb(palette.editor_bg));
     }
 
@@ -395,12 +465,9 @@ pub(super) fn workspace_surface_pane(
         WorkspaceSurface::Terminal => match terminal_for_pane(&terminals, tab_id) {
             Some(terminal) => {
                 let mut terminal_pane = div().relative().size_full().overflow_hidden();
-                if !shared_terminal_background {
-                    if let Some(background) = terminal_background_layer(&appearance_config) {
+                if !shared_background.is_shared() {
+                    if let Some(background) = workspace_background_layer(&appearance_config) {
                         terminal_pane = terminal_pane.child(background);
-                    }
-                    if let Some(shader_layer) = terminal_shader_effect_layer(&appearance_config) {
-                        terminal_pane = terminal_pane.child(shader_layer);
                     }
                 }
                 pane.child(terminal_pane.child(terminal))
@@ -447,17 +514,39 @@ pub(super) fn workspace_surface_pane(
             )
         }
         WorkspaceSurface::Appearances => pane.child(appearances_surface(appearance_config, cx)),
-        WorkspaceSurface::Academy => pane.child(academy_surface(
-            &appearance_config,
-            AcademyContext {
-                library: academy_library,
-                course: academy_course,
-                lesson: academy_lesson,
-                progress: academy_progress,
-            },
-            cx,
-        )),
+        WorkspaceSurface::Academy => {
+            // Mirrors the terminal arm: mount the image only when this pane
+            // isn't already covered by a shared layer on the joined
+            // container. Standing alone the Academy blurs its own copy;
+            // inside a shared group it inherits whatever the group painted,
+            // which is sharp whenever a terminal is in the group.
+            let mut academy_pane = div().relative().size_full().overflow_hidden();
+            let backdrop = match shared_background {
+                SharedBackground::Blurred => AcademyBackdrop::Blurred,
+                SharedBackground::Sharp => AcademyBackdrop::Sharp,
+                SharedBackground::None if bears_background => {
+                    if let Some(background) = workspace_background_layer_blurred(&appearance_config)
+                    {
+                        academy_pane = academy_pane.child(background);
+                    }
+                    AcademyBackdrop::Blurred
+                }
+                SharedBackground::None => AcademyBackdrop::None,
+            };
+            pane.child(academy_pane.child(academy_surface(
+                &appearance_config,
+                AcademyContext {
+                    library: academy_library,
+                    course: academy_course,
+                    lesson: academy_lesson,
+                    progress: academy_progress,
+                },
+                backdrop,
+                cx,
+            )))
+        }
         WorkspaceSurface::Home => pane.child(home_surface(
+            notepad,
             workspace_root,
             recent_projects,
             &appearance_config,
@@ -467,7 +556,7 @@ pub(super) fn workspace_surface_pane(
         )),
         WorkspaceSurface::Settings => pane.child(settings_surface(
             appearance_config,
-            appearance_page,
+            settings_page,
             terminal_background_import_error,
             editor_word_wrap,
             joined_tab_limit,
@@ -486,4 +575,104 @@ fn terminal_for_pane(
     tab_id
         .and_then(|tab_id| terminals.get(&tab_id.0).cloned())
         .or_else(|| terminals.values().next().cloned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A config whose background resolves to a real file, so
+    /// `workspace_background_image_active` sees an image rather than a
+    /// dangling reference.
+    ///
+    /// `name` must be unique per test: these run on parallel threads in one
+    /// process and each deletes its fixture on the way out, so a shared
+    /// path lets one test unlink the file another is still asserting on.
+    fn config_with_background_image(name: &str) -> (Config, PathBuf) {
+        let path = std::env::temp_dir().join(format!(
+            "llnzy-panes-background-{}-{name}.png",
+            std::process::id()
+        ));
+        std::fs::write(&path, b"not a real png, only the path is read").expect("write fixture");
+        let mut config = Config::default();
+        config.effects.enabled = true;
+        config.effects.background = "image".to_string();
+        config.effects.background_image = Some(path.to_string_lossy().to_string());
+        (config, path)
+    }
+
+    fn shares_background(surfaces: &[WorkspaceSurface], config: &Config) -> bool {
+        surfaces
+            .iter()
+            .all(|surface| surface_bears_background(*surface, config))
+    }
+
+    #[test]
+    fn terminal_bears_background_regardless_of_mode() {
+        let config = Config::default();
+        assert!(surface_bears_background(
+            WorkspaceSurface::Terminal,
+            &config
+        ));
+    }
+
+    #[test]
+    fn working_surfaces_never_bear_background() {
+        let (config, path) = config_with_background_image("working-surfaces");
+        for surface in [
+            WorkspaceSurface::Editor,
+            WorkspaceSurface::Explorer,
+            WorkspaceSurface::Settings,
+            WorkspaceSurface::Appearances,
+            WorkspaceSurface::Home,
+        ] {
+            assert!(
+                !surface_bears_background(surface, &config),
+                "{surface:?} should stay opaque"
+            );
+        }
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn academy_bears_background_only_with_an_active_image() {
+        let (config, path) = config_with_background_image("academy-image");
+        assert!(surface_bears_background(WorkspaceSurface::Academy, &config));
+
+        // The documented opt-out keeps the image inside the terminal.
+        let mut opted_out = config.clone();
+        opted_out.effects.effects_on_ui = false;
+        assert!(!surface_bears_background(
+            WorkspaceSurface::Academy,
+            &opted_out
+        ));
+
+        // A reference that no longer resolves is not an active image.
+        let mut dangling = config.clone();
+        dangling.effects.background_image = Some("/nonexistent/llnzy/background.png".to_string());
+        assert!(!surface_bears_background(
+            WorkspaceSurface::Academy,
+            &dangling
+        ));
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn joined_panes_share_one_background_when_every_surface_bears_it() {
+        let (config, path) = config_with_background_image("joined-share");
+        use WorkspaceSurface::{Academy, Editor, Terminal};
+
+        assert!(shares_background(&[Terminal, Terminal], &config));
+        assert!(shares_background(&[Terminal, Academy], &config));
+        assert!(shares_background(&[Academy, Academy], &config));
+        assert!(shares_background(&[Terminal, Academy, Terminal], &config));
+
+        // One non-bearing pane drops the whole group back to per-pane
+        // backgrounds, which is what keeps the editor opaque.
+        assert!(!shares_background(&[Terminal, Editor], &config));
+        assert!(!shares_background(&[Academy, Editor], &config));
+
+        let _ = std::fs::remove_file(path);
+    }
 }

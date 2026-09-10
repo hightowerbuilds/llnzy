@@ -4,13 +4,12 @@ use gpui::{div, px, rgb, Context, MouseButton, MouseDownEvent};
 use crate::{config::Config, theme::builtin_themes};
 
 use super::{
-    AppearancePage, ErrorLogFilter, WorkspacePalette, WorkspacePrototype, ACTIVE_TEXT, BORDER,
+    ErrorLogFilter, SettingsPage, WorkspacePalette, WorkspacePrototype, ACTIVE_TEXT, BORDER,
     EDITOR_BG, MUTED_TEXT, PANEL_BG, QUEUE_GREEN, SIDEBAR_TEXT,
 };
 
 mod editor_section;
 mod error_log;
-mod shader_palettes;
 mod terminal_section;
 mod widgets;
 
@@ -21,7 +20,7 @@ use error_log::{error_log_clear_modal, settings_error_log_row};
 use terminal_section::terminal_appearance_controls;
 use widgets::{
     appearance_button, appearance_button_palette, color_strip, control_label_palette,
-    effect_toggle_button_palette, metric_readout, metric_row, metric_row_palette,
+    effect_toggle_button_palette, glass_fill, metric_readout, metric_row, metric_row_palette,
 };
 
 // Monospace families. `None` means "use the system default", which is what
@@ -133,19 +132,16 @@ fn appearance_all_controls_column(
         .scrollbar_width(px(8.0))
 }
 
-/// Settings keeps its own three-tab nav (Appearances / Terminal / Advanced).
-fn settings_page_nav(
-    page: AppearancePage,
-    cx: &mut Context<WorkspacePrototype>,
-) -> impl IntoElement {
+/// Settings groups controls under Home, Courses, and Terminal.
+fn settings_page_nav(page: SettingsPage, cx: &mut Context<WorkspacePrototype>) -> impl IntoElement {
     let mut nav = div().flex().items_center().gap_1();
-    for target in AppearancePage::ALL {
+    for target in SettingsPage::ALL {
         let active = target == page;
         nav = nav.child(appearance_button(
             target.title().to_string(),
             active,
             cx,
-            move |this, cx| this.set_appearance_page(target, cx),
+            move |this, cx| this.set_settings_page(target, cx),
         ));
     }
     nav
@@ -276,7 +272,7 @@ fn app_theme_section(
                 } else {
                     palette.border
                 }))
-                .bg(rgb(palette.panel_bg))
+                .bg(glass_fill(palette.panel_bg))
                 .p_3()
                 .child(
                     div()
@@ -441,7 +437,7 @@ fn markdown_preview_style_controls(
                 .rounded_sm()
                 .border_1()
                 .border_color(rgb(if active { 0x47785f } else { BORDER }))
-                .bg(rgb(if active { 0x183725 } else { 0x242632 }))
+                .bg(glass_fill(if active { 0x183725 } else { 0x242632 }))
                 .text_size(px(12.0))
                 .text_color(rgb(if active { QUEUE_GREEN } else { SIDEBAR_TEXT }))
                 .cursor_pointer()
@@ -475,7 +471,7 @@ fn markdown_preview_style_controls(
 )]
 pub(super) fn settings_surface(
     config: Config,
-    page: AppearancePage,
+    page: SettingsPage,
     terminal_background_import_error: Option<String>,
     editor_word_wrap: bool,
     joined_tab_limit: usize,
@@ -499,13 +495,18 @@ pub(super) fn settings_surface(
         cx,
     );
 
+    let background = crate::gpui_terminal::workspace_background_layer_blurred(&config);
+    let has_background = background.is_some();
     let root_content = div()
         .id("settings-surface")
+        .relative()
         .flex_1()
         .h_full()
         .flex()
         .flex_col()
-        .bg(rgb(palette.editor_bg))
+        .when(!has_background, |surface| {
+            surface.bg(rgb(palette.editor_bg))
+        })
         .child(
             div()
                 .h(px(52.0))
@@ -524,6 +525,9 @@ pub(super) fn settings_surface(
                             .child("Settings"),
                     ),
                 )
+                .when(has_background, |header| {
+                    header.bg(glass_fill(palette.editor_bg))
+                })
                 .child(settings_page_nav(page, cx)),
         )
         .child(content);
@@ -533,6 +537,8 @@ pub(super) fn settings_surface(
         .size_full()
         .flex()
         .flex_col()
+        .overflow_hidden()
+        .children(background)
         .child(root_content);
 
     if pending_clear_error_log {
@@ -548,7 +554,7 @@ pub(super) fn settings_surface(
 )]
 fn settings_controls_column(
     config: Config,
-    page: AppearancePage,
+    page: SettingsPage,
     terminal_background_import_error: Option<String>,
     editor_word_wrap: bool,
     joined_tab_limit: usize,
@@ -574,7 +580,7 @@ fn settings_controls_column(
         .gap_3()
         .border_1()
         .border_color(rgb(palette.border))
-        .bg(rgb(palette.panel_bg))
+        .bg(glass_fill(palette.panel_bg))
         .p_4()
         .child(
             div()
@@ -584,23 +590,48 @@ fn settings_controls_column(
         );
 
     let content = match page {
-        AppearancePage::Appearances => settings_appearances_controls(
-            content,
-            config,
-            terminal_background_import_error,
-            editor_word_wrap,
-            cx,
-        ),
-        AppearancePage::Terminal => settings_terminal_controls(content, &config, cx),
-        AppearancePage::Advanced => advanced_settings_controls(
-            content,
-            joined_tab_limit,
-            error_log_expanded,
-            error_log_filter,
-            error_entries,
-            palette,
-            cx,
-        ),
+        SettingsPage::Home => {
+            let content = app_appearance_controls(
+                content.child(settings_section_label("APP APPEARANCE")),
+                &config,
+                cx,
+            );
+            advanced_settings_controls(
+                content.child(settings_section_label("WORKSPACE & DIAGNOSTICS")),
+                joined_tab_limit,
+                error_log_expanded,
+                error_log_filter,
+                error_entries,
+                palette,
+                cx,
+            )
+        }
+        SettingsPage::Courses => {
+            let content = editor_appearance_controls(
+                content.child(settings_section_label("EDITOR APPEARANCE")),
+                config.clone(),
+                cx,
+            );
+            editor_behavior_appearance_controls(
+                content.child(settings_section_label("EDITING & MARKDOWN")),
+                config,
+                editor_word_wrap,
+                cx,
+            )
+        }
+        SettingsPage::Terminal => {
+            let content = terminal_appearance_controls(
+                content.child(settings_section_label("TERMINAL APPEARANCE")),
+                config.clone(),
+                terminal_background_import_error,
+                cx,
+            );
+            settings_terminal_controls(
+                content.child(settings_section_label("TERMINAL BEHAVIOR")),
+                &config,
+                cx,
+            )
+        }
     };
 
     body.child(
@@ -611,9 +642,7 @@ fn settings_controls_column(
     )
 }
 
-/// The Appearances tab of Settings: every visual knob in the app, grouped
-/// into labeled sections — terminal presentation first (it is the headline
-/// surface), then the rest of the app.
+/// Combined controls for the standalone Appearances surface.
 fn settings_appearances_controls(
     content: gpui::Div,
     config: Config,

@@ -72,12 +72,11 @@ impl GpuiTabManager {
         self.groups.group_for_tab(tab_id).is_some()
     }
 
-    pub fn joined_member_index(&self, tab_id: TabId) -> Option<usize> {
-        self.groups
-            .group_for_tab(tab_id)?
-            .members()
-            .iter()
-            .position(|member| *member == tab_id)
+    /// Which joined group this tab belongs to, as an ordinal among the live
+    /// groups. Drives tab border color: every member of a group shares one
+    /// color, and a separate group takes the next one.
+    pub fn joined_group_ordinal(&self, tab_id: TabId) -> Option<usize> {
+        self.groups.group_ordinal_for_tab(tab_id)
     }
 
     pub fn joined_group_for(

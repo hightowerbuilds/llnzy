@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run bundled JS/TS exercise fixtures (Python 3.11+, node, tsc on PATH).
+"""Run bundled exercise fixtures (Python 3.11+ and course runtimes on PATH).
 
 Only run against trusted course content: check commands execute local code.
 The Rust loader tests separately validate the full authoring schema.
@@ -13,6 +13,9 @@ import shlex
 import subprocess
 import tempfile
 import tomllib
+
+
+COURSES = {"javascript": ("node",), "typescript": ("node", "tsc"), "elixir": ("elixir", "mix")}
 
 
 ROOT = Path(__file__).resolve().parents[1] / "assets/academy/courses"
@@ -74,11 +77,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--export", nargs=3, metavar=("COURSE", "LESSON", "DESTINATION"),
                         help="export starter files into a new directory instead of validating")
+    parser.add_argument("--course", choices=COURSES, help="validate only this course")
     args = parser.parse_args()
+    if args.export and args.course:
+        parser.error("--course and --export cannot be combined")
     if args.export:
         course_id, lesson_id, destination = args.export
-        if course_id not in ("javascript", "typescript"):
-            parser.error("COURSE must be javascript or typescript")
+        if course_id not in COURSES:
+            parser.error("COURSE must be " + ", ".join(COURSES))
         lesson = read_lesson(course_id, lesson_id)
         root = Path(destination).resolve()
         try:
@@ -91,11 +97,12 @@ def main():
             print(f"Starter files: {target}")
             print(f"Check command: {shlex.join(exercise['check']['command'])}")
         return
-    for executable in ("node", "tsc"):
+    selected = [args.course] if args.course else list(COURSES)
+    for executable in sorted({exe for course in selected for exe in COURSES[course]}):
         if not shutil.which(executable):
             raise SystemExit(f"Missing {executable} on PATH; see assets/academy/courses/README.md")
     count = 0
-    for course_id in ("javascript", "typescript"):
+    for course_id in selected:
         course = ROOT / course_id
         manifest = tomllib.loads((course / "course.toml").read_text())
         for module in manifest["modules"]:
@@ -114,7 +121,7 @@ def main():
                             )
                     count += 1
                     print(f"PASS {label}: solution passes, starter fails", flush=True)
-    print(f"Validated {count} exercises across two courses.")
+    print(f"Validated {count} exercises across {len(selected)} courses.")
 
 
 if __name__ == "__main__":

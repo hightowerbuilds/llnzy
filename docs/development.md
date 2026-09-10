@@ -53,9 +53,15 @@ feature. If LLNZY later needs a headless library-only profile, add an explicit
 headless binary or gate `src/main.rs` before treating no-default-features as
 supported.
 
-On macOS, the default and all-features shapes also compile the Metal-backed
-shader/effects dependencies declared under the macOS target section in
-`Cargo.toml`.
+GPUI uses its native Metal renderer with `runtime_shaders`, so building only
+requires Command Line Tools rather than the offline Metal compiler from Xcode.
+GPUI's own shader source compiles on the device at launch; no shader download
+is required. Keep `macos-blade` disabled: Blade 0.7.1 unwraps a missing Metal
+drawable, and upstream reports crashes when moving windows between displays
+([GPUI issue #27767](https://github.com/zed-industries/zed/issues/27767)). Native
+Metal skips drawing when no drawable is available. The display-transition smoke
+test remains required because compilation cannot reproduce HDMI hotplug or GPU
+switching.
 
 ## Current Platform
 
@@ -66,8 +72,8 @@ macOS effects pipeline. `linux-check` is a separate advisory job on
 smoke check of the platform-independent modules, not a claim of Linux support.
 
 The `academy-courses` job runs on Ubuntu with Node 22, Python 3.13, and
-TypeScript 5.9.3. It runs `python3 scripts/check_academy_courses.py` to verify
-all JavaScript and TypeScript solutions pass and starters fail. Release
+TypeScript 5.9.3, Elixir 1.19.5, and OTP 28. It runs `python3 scripts/check_academy_courses.py` to verify
+all JavaScript, TypeScript, and Elixir solutions pass and starters fail. Release
 bundling also depends on this job. See `assets/academy/courses/README.md`
 for local prerequisites and starter export commands.
 
@@ -102,5 +108,5 @@ complete the roadmap after the automated gate is green.
 ## Expected Working Tree
 
 Generated build output, screenshots, local assistant/tool directories, and
-private local state should stay out of commits. Shader sources, packaging
-metadata, docs, and tests required for the quality gate must be tracked.
+private local state should stay out of commits. Packaging metadata, docs, and
+tests required for the quality gate must be tracked.

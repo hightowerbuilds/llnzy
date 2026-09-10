@@ -271,6 +271,11 @@ impl EditorPrototype {
     }
 
     pub(crate) fn save_active_buffer(&mut self, cx: &mut Context<Self>) {
+        if self.writing_surface {
+            // The owning notepad observes text changes and persists its notebook.
+            cx.notify();
+            return;
+        }
         if self.image_preview_active {
             self.status_message = Some("Image previews are read-only".to_string());
             cx.notify();

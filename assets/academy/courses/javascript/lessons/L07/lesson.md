@@ -91,7 +91,9 @@ console.log("L07 passed");
 +++
 # Build a Program from ES Modules
 
-Modules divide a program into pieces with explicit dependencies. A named export makes a binding available to other files; a named import states exactly what the consumer uses. Each file has its own scope, so helper variables do not accidentally become globals. In this lesson package.json selects ES modules through `"type": "module"`.
+Modules divide a program into pieces with explicit dependencies. A named export makes a binding available to other files; a named import states exactly what the consumer uses.
+
+Each file has its own scope, so helper variables do not accidentally become globals. In this lesson package.json selects ES modules through `"type": "module"`.
 
 Keep data transformations in stats.js and presentation in report.js. report.js should call the exported functions rather than copy their implementations. This separation lets one calculation serve a terminal report, a chart, or another module. Relative Node imports include the extension and begin with `./` or `../`.
 
@@ -105,8 +107,26 @@ import { minutes } from "./units.js";
 console.log(minutes(2)); // 120
 ```
 
-Refactoring is a structural change that keeps behavior stable. Before splitting a working script, capture its outputs and edge cases. Then move one responsibility at a time and rerun those checks. Here the tests verify both lower-level calculations and the composed report so that a presentation fix cannot conceal a broken calculation.
+Refactoring is a structural change that keeps behavior stable. Before splitting a working script, capture its outputs and edge cases. Then move one responsibility at a time and rerun those checks.
 
-Array.sort mutates its receiver. Sort the new array produced by map rather than the caller's original members. Use a Map for team totals, which avoids collisions with object property names such as `__proto__`. Sort team names before formatting to make output stable. Use ordinary string comparison, not locale-dependent formatting, for these ASCII fixtures.
+Here the tests verify both lower-level calculations and the composed report so that a presentation fix cannot conceal a broken calculation.
 
-From the repository root, export this lesson with `python3 scripts/check_academy_courses.py --export javascript L07 /tmp/llnzy-javascript-L07` (Python 3.11+, destination must be new). Open the exported directory in the editor and run `node check.js` from that directory with Node.js 22 or newer. Edit the implementation files and keep the supplied assertions intact. Read an assertion failure as a concrete example of behavior to repair. No exercise check downloads packages or accesses the network.
+Array.sort mutates its receiver. Sort the new array produced by map rather than the caller's original members. Use a Map for team totals, which avoids collisions with object property names such as `__proto__`.
+
+Sort team names before formatting to make output stable. Use ordinary string comparison, not locale-dependent formatting, for these ASCII fixtures.
+
+From the repository root, export this lesson. Python 3.11+ is required, and the destination must be new:
+
+```bash
+python3 scripts/check_academy_courses.py --export javascript L07 /tmp/llnzy-javascript-L07
+```
+
+Open the exported directory in the editor, then run the check from that directory with Node.js 22 or newer:
+
+```bash
+node check.js
+```
+
+Edit the implementation files and keep the supplied assertions intact. Read an assertion failure as a concrete example of behavior to repair.
+
+No exercise check downloads packages or accesses the network.

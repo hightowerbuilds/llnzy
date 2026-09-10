@@ -281,12 +281,12 @@ impl EditorConfig {
 pub struct EffectsConfig {
     pub enabled: bool,
     pub fps_target: u32,
+    /// Background mode: `"none"` or `"image"`. See
+    /// [`normalize_background_mode`](super::normalize_background_mode).
     pub background: String,
+    /// Brightness of the background image — the terminal dims it by
+    /// `1 - background_intensity`.
     pub background_intensity: f32,
-    pub background_speed: f32,
-    pub background_color: Option<[u8; 3]>,
-    pub background_color2: Option<[u8; 3]>,
-    pub background_color3: Option<[u8; 3]>,
     pub background_image: Option<String>,
     pub background_image_fit: BackgroundImageFit,
     pub bloom_enabled: bool,
@@ -338,15 +338,6 @@ impl BackgroundImageFit {
         }
     }
 
-    pub fn shader_mode(self) -> f32 {
-        match self {
-            Self::Fill => 0.0,
-            Self::Fit => 1.0,
-            Self::Tile => 2.0,
-            Self::Center => 3.0,
-        }
-    }
-
     pub fn parse(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
             "fill" | "fill_screen" | "fill-screen" | "cover" => Some(Self::Fill),
@@ -377,10 +368,6 @@ impl Default for EffectsConfig {
             fps_target: 60,
             background: "none".to_string(),
             background_intensity: 0.3,
-            background_speed: 1.0,
-            background_color: None,
-            background_color2: None,
-            background_color3: None,
             background_image: None,
             background_image_fit: BackgroundImageFit::Fill,
             bloom_enabled: false,

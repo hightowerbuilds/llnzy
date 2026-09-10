@@ -3,8 +3,7 @@ fn main() {
 
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        let msg = format!("llnzy panic: {}\n", info);
-        let _ = llnzy::diagnostics::write_diagnostic("crash.log", &msg);
+        let _ = llnzy::diagnostics::append_crash_report(&format!("llnzy panic: {info}"));
         default_hook(info);
     }));
 

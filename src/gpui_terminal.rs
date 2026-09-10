@@ -112,60 +112,41 @@ actions!(
     ]
 );
 
-pub(crate) fn terminal_background_layer(config: &Config) -> Option<gpui::Div> {
+/// Workspace-wide background-image layer. Returns `Some` only when the
+/// active background mode is `image` and the reference resolves to a file
+/// on disk. Named for the workspace rather than the terminal because every
+/// background-bearing surface mounts it — the terminal, the Academy, and
+/// the empty workspace — from one global `effects` config.
+pub(crate) fn workspace_background_layer(config: &Config) -> Option<gpui::Div> {
     terminal_background_image_path(config).map(|path| terminal_background_image(path, config))
 }
 
-/// Workspace-wide shader-driven effect layer. Returns `Some` only when the
-/// active background mode is a shader effect (smoke / fire / aurora).
-/// Pulls intensity + palette from the config so the live preview in the
-/// Appearances panel and the actual workspace render share one source of
-/// truth. The element is wrapped in a full-bleed `Div` so two joined
-/// terminal panes see one continuous shader field when this layer is
-/// mounted at the shared-container level.
-pub(crate) fn terminal_shader_effect_layer(config: &Config) -> Option<gpui::Div> {
-    if !config.effects.enabled {
-        return None;
-    }
-    let kind = crate::effects::EffectKind::from_background_mode(&config.effects.background)?;
-    let (default_c1, default_c2, default_c3) = default_palette_for(kind);
-    let c1 = config.effects.background_color.unwrap_or(default_c1);
-    let c2 = config.effects.background_color2.unwrap_or(default_c2);
-    let c3 = config.effects.background_color3.unwrap_or(default_c3);
-    Some(
-        div().absolute().size_full().overflow_hidden().child(
-            crate::effects::EffectsElement::new()
-                .with_kind(kind)
-                .with_intensity(config.effects.background_intensity)
-                .with_palette(c1, c2, c3),
-        ),
-    )
+/// Blur applied behind reading surfaces, in the downscaled working image's
+/// pixels. Tuned so text stays legible over a busy photo without the image
+/// dissolving into a flat wash.
+const UI_BACKGROUND_BLUR_SIGMA: f32 = 8.0;
+
+/// `workspace_background_layer` backed by a blurred copy of the image.
+///
+/// GPUI 0.2.2 has no backdrop filter: `blur_radius` in its style tree
+/// belongs to box shadows, and `WindowBackgroundAppearance::Blurred` blurs
+/// the desktop behind the whole window. So a frosted panel has to come
+/// from a pre-blurred image rather than a live filter. Falls back to the
+/// sharp image when the blur cannot be built — a crisp background beats no
+/// background.
+pub(crate) fn workspace_background_layer_blurred(config: &Config) -> Option<gpui::Div> {
+    let path = terminal_background_image_path(config)?;
+    let blurred = crate::theme_store::blurred_background_path(&path, UI_BACKGROUND_BLUR_SIGMA)
+        .unwrap_or_else(|| path.clone());
+    Some(terminal_background_image(blurred, config))
 }
 
-/// Default palette stops for a shader effect when the user hasn't picked
-/// one explicitly. Mirrors the curated presets exposed in the Terminal
-/// appearance tab.
-pub(crate) fn default_palette_for(kind: crate::effects::EffectKind) -> ([u8; 3], [u8; 3], [u8; 3]) {
-    use crate::effects::EffectKind;
-    match kind {
-        EffectKind::Smoke => ([0x10, 0x09, 0x14], [0x4d, 0x1f, 0x4f], [0xc5, 0x7a, 0xc8]),
-        EffectKind::Fire => ([0x12, 0x04, 0x02], [0xff, 0x55, 0x18], [0xff, 0xd6, 0x6b]),
-        EffectKind::Aurora => ([0x08, 0x0e, 0x26], [0x2e, 0xdc, 0x96], [0xc8, 0x5a, 0xe6]),
-        EffectKind::Trees => ([0x0a, 0x16, 0x0e], [0x3a, 0x78, 0x34], [0xd0, 0xe8, 0x96]),
-        EffectKind::Rain => ([0x08, 0x0e, 0x18], [0x2e, 0x46, 0x60], [0xbe, 0xd7, 0xf0]),
-    }
-}
-
-fn terminal_uses_background_image(config: &Config) -> bool {
+/// True when the background mode is `image` and the reference resolves to
+/// a file on disk. Any surface that mounts `workspace_background_layer`
+/// must consult this first and skip its own opaque fill, otherwise the
+/// fill hides the image.
+pub(crate) fn workspace_background_image_active(config: &Config) -> bool {
     terminal_background_image_path(config).is_some()
-}
-
-/// True when the active background mode is a shader-driven effect. In that
-/// case the terminal must NOT paint its opaque body fill, otherwise the
-/// fill covers the shader layer mounted by `terminal_shader_effect_layer`.
-fn terminal_uses_shader_effect(config: &Config) -> bool {
-    config.effects.enabled
-        && crate::effects::EffectKind::from_background_mode(&config.effects.background).is_some()
 }
 
 pub(crate) fn bind_terminal_keys(cx: &mut App) {
@@ -811,8 +792,7 @@ impl EntityInputHandler for TerminalSurface {
 
 impl Render for TerminalSurface {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let uses_background_image = terminal_uses_background_image(&self.config);
-        let uses_shader_effect = terminal_uses_shader_effect(&self.config);
+        let uses_background_image = workspace_background_image_active(&self.config);
         let body = if self.session.is_some() {
             let mut terminal_body = div()
                 .relative()
@@ -824,7 +804,7 @@ impl Render for TerminalSurface {
                 .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
                 .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up));
 
-            if !uses_background_image && !uses_shader_effect {
+            if !uses_background_image {
                 terminal_body = terminal_body.bg(rgb(TERMINAL_BG));
             }
 
@@ -893,7 +873,7 @@ impl Render for TerminalSurface {
             .on_action(cx.listener(Self::ctrl_u))
             .on_action(cx.listener(Self::ctrl_w));
 
-        if !uses_background_image && !uses_shader_effect {
+        if !uses_background_image {
             root = root.bg(rgb(TERMINAL_PANEL_BG));
         }
 

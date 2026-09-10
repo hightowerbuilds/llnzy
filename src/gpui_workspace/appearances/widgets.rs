@@ -1,10 +1,16 @@
 use gpui::prelude::*;
-use gpui::{div, px, rgb, Context, MouseButton, MouseDownEvent};
+use gpui::{div, px, rgb, rgba, Context, MouseButton, MouseDownEvent};
 
 use crate::gpui_workspace::{
     WorkspacePalette, WorkspacePrototype, ACTIVE_TEXT, BORDER, MUTED_TEXT, QUEUE_GREEN,
     SIDEBAR_TEXT,
 };
+
+// The settings surface supplies a cached blurred image beneath these fills.
+// Keep foreground text and color swatches opaque while the image shows through.
+pub(super) fn glass_fill(color: u32) -> gpui::Rgba {
+    rgba((color << 8) | 0x88)
+}
 
 pub(super) fn metric_readout(label: &'static str, value: String) -> impl IntoElement {
     div()
@@ -22,7 +28,7 @@ pub(super) fn metric_readout(label: &'static str, value: String) -> impl IntoEle
                 .rounded_sm()
                 .border_1()
                 .border_color(rgb(0x3a3f4d))
-                .bg(rgb(0x11131a))
+                .bg(glass_fill(0x11131a))
                 .px_2()
                 .text_size(px(12.0))
                 .text_color(rgb(SIDEBAR_TEXT))
@@ -52,7 +58,7 @@ pub(super) fn metric_row(
                 .items_center()
                 .justify_center()
                 .rounded_sm()
-                .bg(rgb(0x242632))
+                .bg(glass_fill(0x242632))
                 .text_size(px(13.0))
                 .text_color(rgb(ACTIVE_TEXT))
                 .child(value),
@@ -91,7 +97,7 @@ pub(super) fn metric_row_palette(
                 .rounded_sm()
                 .border_1()
                 .border_color(rgb(palette.border))
-                .bg(rgb(palette.panel_bg))
+                .bg(glass_fill(palette.panel_bg))
                 .text_size(px(13.0))
                 .text_color(rgb(palette.active_text))
                 .child(value),
@@ -177,7 +183,7 @@ pub(super) fn appearance_button(
         .rounded_sm()
         .border_1()
         .border_color(rgb(if active { 0x47785f } else { BORDER }))
-        .bg(rgb(if active { 0x183725 } else { 0x242632 }))
+        .bg(glass_fill(if active { 0x183725 } else { 0x242632 }))
         .text_size(px(12.0))
         .text_color(rgb(if active { QUEUE_GREEN } else { SIDEBAR_TEXT }))
         .cursor_pointer()
@@ -210,7 +216,7 @@ pub(super) fn appearance_button_palette(
         } else {
             palette.border
         }))
-        .bg(rgb(if active {
+        .bg(glass_fill(if active {
             palette.sidebar_row_selected_bg
         } else {
             palette.inactive_tab_bg
@@ -229,10 +235,6 @@ pub(super) fn appearance_button_palette(
             }),
         )
         .child(label)
-}
-
-pub(super) fn palette_band(color: [u8; 3]) -> impl IntoElement {
-    div().flex_1().w_full().bg(rgb(color_u32(color)))
 }
 
 pub(super) fn color_strip<const N: usize>(colors: [[u8; 3]; N]) -> impl IntoElement {

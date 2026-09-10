@@ -26,9 +26,16 @@ impl EditorPrototype {
     pub(super) fn on_editor_key_down(
         &mut self,
         event: &KeyDownEvent,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if let Some(next) = &self.writing_next_focus {
+            if matches!(event.keystroke.key.as_str(), "enter" | "tab") {
+                window.focus(next);
+                cx.stop_propagation();
+                return;
+            }
+        }
         if self.lsp_panel.is_some() {
             match event.keystroke.key.as_str() {
                 "escape" => {
@@ -550,6 +557,8 @@ impl EntityInputHandler for EditorPrototype {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let text = self.writing_input(new_text);
+        let new_text = text.as_ref();
         let explicit_range = range_utf16.and_then(|range| {
             Some((
                 self.position_for_utf16(range.start)?,

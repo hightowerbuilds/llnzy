@@ -51,6 +51,24 @@ solution = """fn main() {
 +++
 # Scalar Types & Control Flow
 
-Still chapter 3, now the scalar types: integers sized and signed per name (`i32`, `u8`, `u64`), two float types, `bool`, and `char`, which is a four-byte Unicode scalar rather than a byte. Control flow is deliberately plain. `if` takes no parentheses and, unlike most languages, is an expression — you can assign from its arms. Loops come in three shapes: bare `loop` until you `break`, `while` on a condition, and `for` over an iterator such as `1..=15`, which is the one to reach for by default since it cannot index off the end. The classic classroom task here is divisibility printing, and arm order is the whole exercise.
+Still chapter 3, now the scalar types.
 
-In the terminal, extend the range to 30 and confirm your arm ordering holds beyond the first coincidence.
+## The scalars
+
+Integers are sized and signed per name: `i32`, `u8`, `u64`. Then two float types, `bool`, and `char`, which is a four-byte Unicode scalar rather than a byte.
+
+## Control flow is deliberately plain
+
+`if` takes no parentheses and, unlike most languages, is an expression — you can assign from its arms.
+
+Loops come in three shapes: bare `loop` until you `break`, `while` on a condition, and `for` over an iterator such as `1..=15`. Reach for `for` by default, since it cannot index off the end.
+
+The classic classroom task here is divisibility printing, and arm order is the whole exercise.
+
+## Run it
+
+```bash
+cargo run
+```
+
+Extend the range to 30 and confirm your arm ordering holds beyond the first coincidence.

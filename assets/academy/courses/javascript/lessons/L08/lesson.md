@@ -103,7 +103,9 @@ console.log("L08 passed");
 
 A promise represents an eventual result. Calling an async function starts its execution; it returns a promise, and await suspends that function until the awaited promise settles. An async function's return value becomes its promise's fulfillment value. A throw becomes rejection.
 
-Await inside a loop when each operation depends on the previous one or when you intentionally limit concurrency. For independent operations, call each task to obtain its promise, then pass the promises to Promise.all. Promise.all waits for them and preserves input order in its result. It rejects when an input rejects; it does not cancel other work already started.
+Await inside a loop when each operation depends on the previous one or when you intentionally limit concurrency. For independent operations, call each task to obtain its promise, then pass the promises to Promise.all.
+
+Promise.all waits for them and preserves input order in its result. It rejects when an input rejects; it does not cancel other work already started.
 
 This example illustrates aggregation without timers or a network:
 
@@ -120,4 +122,18 @@ Wrap the await itself in try/catch when converting failure into a result object.
 
 The checks use manually released promises to prove start order and overlap. No elapsed time threshold determines success. After passing, explain why parallel output order differs from completion order, and why a failure does not automatically undo successful neighboring tasks.
 
-From the repository root, export this lesson with `python3 scripts/check_academy_courses.py --export javascript L08 /tmp/llnzy-javascript-L08` (Python 3.11+, destination must be new). Open the exported directory in the editor and run `node check.js` from that directory with Node.js 22 or newer. Edit the implementation files and keep the supplied assertions intact. Read an assertion failure as a concrete example of behavior to repair. No exercise check downloads packages or accesses the network.
+From the repository root, export this lesson. Python 3.11+ is required, and the destination must be new:
+
+```bash
+python3 scripts/check_academy_courses.py --export javascript L08 /tmp/llnzy-javascript-L08
+```
+
+Open the exported directory in the editor, then run the check from that directory with Node.js 22 or newer:
+
+```bash
+node check.js
+```
+
+Edit the implementation files and keep the supplied assertions intact. Read an assertion failure as a concrete example of behavior to repair.
+
+No exercise check downloads packages or accesses the network.

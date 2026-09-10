@@ -1,6 +1,6 @@
 # Academy courses
 
-The catalog contains independent Rust, JavaScript, and TypeScript courses.
+The catalog contains independent Rust, JavaScript, TypeScript, and Elixir courses.
 Start with JavaScript if functions, arrays, modules, or promises are unfamiliar;
 TypeScript builds on those skills. Each JS/TS course has five ordered modules,
 worked explanations, practice exercises, and a final project.
@@ -50,7 +50,7 @@ the editor and terminal compiler use the same settings.
 
 ## Validate authored content
 
-With Python 3.11+, Node, and `tsc` on PATH:
+With Python 3.11+, Node, `tsc`, Elixir, and Mix on PATH:
 
 ```sh
 python3 scripts/check_academy_courses.py
@@ -61,9 +61,45 @@ The Python runner executes each solution and starter in separate temporary
 directories. A solution must satisfy its declared check; a starter must fail
 it. Exact checks compare stdout including its final newline, and output checks
 also require exit status zero. A timeout or missing executable fails validation.
-CI runs these fixtures with Node 22 and TypeScript 5.9.3. The Rust tests load
+CI runs these fixtures with Node 22, TypeScript 5.9.3, Elixir 1.19.5, and OTP 28.0. The Rust tests load
 every course through the application's strict schema and markdown parser.
 
 The earlier combined `js-ts` roadmap is historical design context. These two
 standalone courses implement the subsequent request for separate curricula;
 they use `tsc` instead of the roadmap's proposed `tsx` runtime-only checks.
+
+## Elixir
+
+Elixir has ten ordered lessons across five modules:
+
+| Module | Lessons |
+| --- | --- |
+| IEx & Immutable Values | First program; values, rebinding, and maps |
+| Patterns & Functions | Tagged results; guards and recursion |
+| Collections & Data Pipelines | Enum and pipes; input validation |
+| Mix, Tests & Processes | Mix and ExUnit; messages and Tasks |
+| OTP & Capstone | GenServer; a supervised task tracker |
+
+Basic programming familiarity is enough; other courses are not prerequisites.
+Install Elixir and compatible Erlang/OTP using the
+[official instructions](https://elixir-lang.org/install.html). Fixtures are
+validated with Elixir 1.19.5 and OTP 28; CI uses OTP 28.0. Check
+`elixir --version` and `mix --version`. No Hex packages or network access are
+needed for exercises. L06 exports a Mix project; other lessons use ExUnit scripts.
+
+```sh
+python3 scripts/check_academy_courses.py --export elixir L00 /tmp/llnzy-elixir-l00
+python3 scripts/check_academy_courses.py --course elixir
+```
+
+Run `elixir check.exs` from the exported directory (`mix test` for L06).
+The validator checks both passing solutions and failing starters, including
+capstone worker restart and loss of in-memory state. The default validator now
+runs all three exercise-backed courses and requires all their runtimes.
+
+Reference material: [Elixir introduction](https://hexdocs.pm/elixir/introduction.html),
+[GenServer](https://hexdocs.pm/elixir/GenServer.html), and
+[Supervisor](https://hexdocs.pm/elixir/Supervisor.html). The lessons are an
+independent foundation curriculum; Phoenix and durable storage are extensions.
+Elixir files can be edited and run in the terminal; the editor does not yet
+provide an Elixir tree-sitter grammar.

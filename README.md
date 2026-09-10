@@ -55,7 +55,9 @@ Requires Rust 1.75+. macOS is the active release target.
 
 **Tabs** -- Home, Terminal, Editor, Appearances, and Settings surfaces can be opened from the workspace menus. Tabs can be joined, separated, swapped, renamed, and closed.
 
-**Code Academy** -- Language courses that run on the machine you already work on. Courses are directories of markdown lessons with a `course.toml` manifest, loaded from the app bundle or a source checkout; the surface renders the picker, module/lesson list, and lesson reader from those files. Ships Rust aligned to *The Rust Programming Language*, 3rd edition, plus separate JavaScript (11 lessons, five modules) and TypeScript (10 lessons, five modules) courses with starter code, solutions, and deterministic exercise checks. Exercise materialization and the check runner are not wired up yet, so lessons currently read rather than grade. See [course setup and validation](assets/academy/courses/README.md) for terminal practice.
+**Code Academy** -- Language courses that run on the machine you already work on. Courses are directories of markdown lessons with a `course.toml` manifest, loaded from the app bundle or a source checkout; the surface renders the picker, module/lesson list, and lesson reader from those files. Ships Rust aligned to *The Rust Programming Language*, 3rd edition, plus separate JavaScript (11 lessons, five modules) TypeScript (10 lessons, five modules), and Elixir (10 lessons, five modules) courses with starter code, solutions, and deterministic exercise checks. Exercise materialization and the check runner are not wired up yet, so lessons currently read rather than grade. See [course setup and validation](assets/academy/courses/README.md) for terminal practice.
+
+**Notepad** -- A minimal writing surface on Home for course notes, questions, and reminders. Entries show their creation date and appear newest first; each note has an editable title. Home places projects and courses on the left and the notepad on the right. Notes save automatically on this device, stay available across projects, and are shared between windows. No file setup or manual save is required.
 
 **Themes** -- Built-in presets plus persistent background image management through the GPUI appearances workflow.
 
@@ -99,7 +101,7 @@ llnzy reads `config.toml` from the platform config directory and auto-reloads ch
 
 ```toml
 [effects]
-background = "smoke"
+background = "image"
 bloom_enabled = true
 crt_enabled = true
 

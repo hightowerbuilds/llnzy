@@ -94,9 +94,13 @@ console.log("L06 passed");
 
 An exception interrupts normal control flow and travels up the call stack until a catch block handles it. Use exceptions when a function cannot honor its promise. A parser promising a valid player must not quietly return a partial object after validation fails.
 
-Extend Error to create an expected failure category. Setting `this.name` gives the error a useful label; inheriting from Error preserves its message and stack. The message should describe the invalid input. Catch errors at the layer that can decide what to do next: parsePlayer translates malformed JSON into a domain error, while importPlayers can skip invalid rows and continue importing.
+Extend Error to create an expected failure category. Setting `this.name` gives the error a useful label; inheriting from Error preserves its message and stack. The message should describe the invalid input.
 
-Keep the try around JSON.parse narrow. Catching the entire parser and relabeling every exception as invalid input could hide your own programming mistakes. The batch importer should collect ValidationError messages and rethrow anything else. A stack trace is a route to the source of a failure, so inspect the first frame in your code rather than copying the message into a workaround.
+Catch errors at the layer that can decide what to do next: parsePlayer translates malformed JSON into a domain error, while importPlayers can skip invalid rows and continue importing.
+
+Keep the try around JSON.parse narrow. Catching the entire parser and relabeling every exception as invalid input could hide your own programming mistakes.
+
+The batch importer should collect ValidationError messages and rethrow anything else. A stack trace is a route to the source of a failure, so inspect the first frame in your code rather than copying the message into a workaround.
 
 A different domain illustrates the pattern:
 
@@ -113,6 +117,22 @@ catch (error) {
 }
 ```
 
-Validate the object before reading its fields: null and arrays are not player records. Check Number.isSafeInteger as well as nonnegativity; zero is valid. Do not mutate the caller's raw strings or discard accepted whitespace from names. After passing, call parsePlayer directly with malformed text in a scratch script and compare its thrown error with the batch import's collected message.
+Validate the object before reading its fields: null and arrays are not player records. Check Number.isSafeInteger as well as nonnegativity; zero is valid.
 
-From the repository root, export this lesson with `python3 scripts/check_academy_courses.py --export javascript L06 /tmp/llnzy-javascript-L06` (Python 3.11+, destination must be new). Open the exported directory in the editor and run `node check.js` from that directory with Node.js 22 or newer. Edit the implementation files and keep the supplied assertions intact. Read an assertion failure as a concrete example of behavior to repair. No exercise check downloads packages or accesses the network.
+Do not mutate the caller's raw strings or discard accepted whitespace from names. After passing, call parsePlayer directly with malformed text in a scratch script and compare its thrown error with the batch import's collected message.
+
+From the repository root, export this lesson. Python 3.11+ is required, and the destination must be new:
+
+```bash
+python3 scripts/check_academy_courses.py --export javascript L06 /tmp/llnzy-javascript-L06
+```
+
+Open the exported directory in the editor, then run the check from that directory with Node.js 22 or newer:
+
+```bash
+node check.js
+```
+
+Edit the implementation files and keep the supplied assertions intact. Read an assertion failure as a concrete example of behavior to repair.
+
+No exercise check downloads packages or accesses the network.

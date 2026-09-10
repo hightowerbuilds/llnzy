@@ -95,6 +95,12 @@ belongs before adding logic to a large GPUI surface.
 - Course titles, ordering, and lesson counts belong to the manifests on
   disk. The surface must not hardcode a catalog; a course added to the
   courses directory should appear with no code change.
+- Display order comes from `course.toml`'s optional `order` (low to high,
+  id as tiebreak). Courses without it sort last, so a new course directory
+  shows up without displacing the curated sequence. A new course should
+  declare its own `order` rather than rely on that fallback.
+  `bundled_courses_are_listed_in_curriculum_order` pins the shipped
+  sequence and must be updated when a course is added or reordered.
 - `assets/academy/courses/javascript` and `typescript` are separate five-module
   courses. Each lesson embeds its own starter/solution files in TOML frontmatter;
   no shared workspace or downloaded exercise dependency is required.
@@ -102,6 +108,21 @@ belongs before adding logic to a large GPUI surface.
   temporary directory and checks solution success plus starter failure. CI
   provisions Node and TypeScript before running it; lesson checks never install
   packages. Strict Rust loader tests validate the course schema separately.
+
+## Home Notepad
+
+- `src/notebook.rs` owns the versioned chronological note model, titles, and
+  atomic JSON persistence at `<data_dir>/notes/notebook.json`.
+- `src/gpui_workspace/notepad.rs` owns the Home writing surface and a shared
+  GPUI notebook entity so windows observe the same notes. Changes save after
+  400 ms of inactivity and flush on window release/app quit. Failed loads
+  disable editing rather than replacing an unreadable notebook; failed saves
+  leave the in-memory text intact and expose a retry action.
+- The writing surface reuses `EditorPrototype` with an untitled prose buffer,
+  wrapping enabled, and editor chrome hidden. The title uses a single-line
+  writing field with Enter/Tab focus transfer to the body. It does not open files or attach
+  an LSP server. Notes are independent of course progress and workspace recovery.
+- `LLNZY_PROFILE=dev` isolates notebook storage with the other development data.
 
 ## Config, Preferences, Theme, And Platform
 
@@ -111,7 +132,6 @@ belongs before adding logic to a large GPUI surface.
   preferences, theme data, and user-imported backgrounds/themes.
 - `src/platform/` owns app paths, packaging metadata, shell profiles, and
   terminal launch specs.
-- `src/effects/` owns GPUI shader/effect elements and host setup.
 - `src/utf16.rs` owns UTF-16 <-> char index conversion shared by the terminal
   IME path and the LSP position adapter.
 - Platform-specific behavior belongs behind `src/platform/` or a tightly

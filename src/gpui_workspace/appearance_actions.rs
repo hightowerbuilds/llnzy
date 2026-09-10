@@ -7,12 +7,14 @@ use crate::{
 
 use super::{
     appearances::{gpui_terminal_background_reference, is_display_font},
-    AppearancePage, WorkspacePrototype,
+    SettingsPage, WorkspacePrototype,
 };
 
 impl WorkspacePrototype {
     pub(super) fn apply_appearance_config(&mut self, cx: &mut Context<Self>) {
         let config = self.appearance_config.clone();
+        self.notepad
+            .update(cx, |notepad, cx| notepad.set_config(config.clone(), cx));
         let shared_config = std::sync::Arc::new(config);
         for editor in self.editor_entities() {
             let config = (*shared_config).clone();
@@ -25,8 +27,8 @@ impl WorkspacePrototype {
         cx.notify();
     }
 
-    pub(super) fn set_appearance_page(&mut self, page: AppearancePage, cx: &mut Context<Self>) {
-        self.appearance_page = page;
+    pub(super) fn set_settings_page(&mut self, page: SettingsPage, cx: &mut Context<Self>) {
+        self.settings_page = page;
         cx.notify();
     }
 
@@ -310,25 +312,12 @@ impl WorkspacePrototype {
         self.apply_appearance_config(cx);
     }
 
-    pub(super) fn adjust_effect_intensity(&mut self, delta: f32, cx: &mut Context<Self>) {
+    /// Brightness of the terminal background image: the render path dims the
+    /// image by `1 - background_intensity`.
+    pub(super) fn adjust_background_brightness(&mut self, delta: f32, cx: &mut Context<Self>) {
         let next = (self.appearance_config.effects.background_intensity + delta).clamp(0.05, 1.0);
         self.appearance_config.effects.background_intensity = next;
         self.preferences.terminal_background_intensity = Some(next);
-        self.preferences.save();
-        self.apply_appearance_config(cx);
-    }
-
-    pub(super) fn set_effect_palette(
-        &mut self,
-        c1: [u8; 3],
-        c2: [u8; 3],
-        c3: [u8; 3],
-        cx: &mut Context<Self>,
-    ) {
-        self.appearance_config.effects.background_color = Some(c1);
-        self.appearance_config.effects.background_color2 = Some(c2);
-        self.appearance_config.effects.background_color3 = Some(c3);
-        self.preferences.terminal_palette = Some([c1, c2, c3]);
         self.preferences.save();
         self.apply_appearance_config(cx);
     }

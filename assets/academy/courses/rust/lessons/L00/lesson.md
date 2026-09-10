@@ -39,6 +39,35 @@ solution = """fn main() {
 +++
 # Toolchain Check
 
-This lesson pairs with chapter 1 of *The Rust Programming Language* (3rd ed.), the getting-started chapter. Rust installs through `rustup`, which owns a toolchain directory and can hold several at once; `rustup show` tells you which is active. Underneath sit two programs: `rustc`, the compiler, and `cargo`, the build tool and package manager that almost everyone drives instead. Versions are the first thing to check when something behaves oddly, which is why the prompt asks you to run `rustc --version` and `cargo --version` yourself. We deliberately never assert on that text in a check — version strings drift across machines and releases, and graded output must stay deterministic. When your program prints a fixed line, the toolchain is proven.
+This lesson pairs with chapter 1 of *The Rust Programming Language* (3rd ed.), the getting-started chapter.
 
-Try it in the terminal as well: run `rustup show`, then `cargo run` there and watch the same line appear.
+## What rustup owns
+
+Rust installs through `rustup`, which owns a toolchain directory and can hold several at once. Ask it which one is active:
+
+```bash
+rustup show
+```
+
+Underneath sit two programs: `rustc`, the compiler, and `cargo`, the build tool and package manager that almost everyone drives instead.
+
+## Check your versions first
+
+Versions are the first thing to check when something behaves oddly, which is why the prompt asks you to run these yourself:
+
+```bash
+rustc --version
+cargo --version
+```
+
+We deliberately never assert on that text in a check. Version strings drift across machines and releases, and graded output must stay deterministic.
+
+When your program prints a fixed line instead, the toolchain is proven.
+
+## Run it
+
+```bash
+cargo run
+```
+
+Try the same thing in your own terminal and watch the line appear there too.

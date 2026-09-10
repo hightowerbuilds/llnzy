@@ -231,6 +231,9 @@ pub(crate) struct EditorPrototype {
     /// redundant render).
     last_render_was_focused: bool,
     show_chrome: bool,
+    writing_surface: bool,
+    /// Single-line writing field: Enter/Tab transfer focus to this target.
+    writing_next_focus: Option<FocusHandle>,
     /// Region of the active buffer currently held as IME composition /
     /// dictation preview. `None` outside an active composition. Set by
     /// `replace_and_mark_text_in_range`, cleared by `unmark_text` or any
@@ -464,6 +467,61 @@ struct ExternalFileChangeSnapshot {
 
 impl EditorPrototype {
     #[cfg(feature = "gpui-workspace")]
+    pub(crate) fn notepad(cx: &mut Context<Self>) -> Self {
+        let mut this = Self::with_chrome_and_initial_file(cx, false, false);
+        this.writing_surface = true;
+        this.editor.open_prose("");
+        this
+    }
+
+    #[cfg(feature = "gpui-workspace")]
+    pub(crate) fn note_title(next: FocusHandle, cx: &mut Context<Self>) -> Self {
+        let mut this = Self::notepad(cx);
+        this.writing_next_focus = Some(next);
+        this
+    }
+
+    fn writing_input<'a>(&self, text: &'a str) -> std::borrow::Cow<'a, str> {
+        if self.writing_next_focus.is_some() {
+            std::borrow::Cow::Owned(
+                text.chars()
+                    .map(|c| {
+                        if c.is_control() || c == '\u{2028}' || c == '\u{2029}' {
+                            ' '
+                        } else {
+                            c
+                        }
+                    })
+                    .collect(),
+            )
+        } else {
+            std::borrow::Cow::Borrowed(text)
+        }
+    }
+
+    #[cfg(feature = "gpui-workspace")]
+    pub(crate) fn note_text(&self) -> String {
+        self.editor
+            .active_buffer_view()
+            .map(|(_, buffer, _)| buffer.text())
+            .unwrap_or_default()
+    }
+
+    #[cfg(feature = "gpui-workspace")]
+    pub(crate) fn set_note_text(&mut self, text: &str, cx: &mut Context<Self>) {
+        while !self.editor.is_empty() {
+            self.editor.close(0);
+        }
+        self.editor.open_prose(text);
+        self.marked_range = None;
+        self.editor_search = EditorSearch::default();
+        self.go_to_line_active = false;
+        self.last_text_layout = None;
+        self.last_text_bounds = None;
+        cx.notify();
+    }
+
+    #[cfg(feature = "gpui-workspace")]
     pub(crate) fn new(cx: &mut Context<Self>) -> Self {
         Self::with_chrome(cx, false)
     }
@@ -662,13 +720,23 @@ impl EditorPrototype {
             cursor_blink_visible: true,
             last_render_was_focused: false,
             show_chrome,
+            writing_surface: false,
+            writing_next_focus: None,
             marked_range: None,
         };
         this.open_all_file_backed_buffers_with_lsp();
         this
     }
 
-    pub(crate) fn set_appearance_config(&mut self, config: Config, cx: &mut Context<Self>) {
+    pub(crate) fn set_appearance_config(&mut self, mut config: Config, cx: &mut Context<Self>) {
+        if self.writing_surface {
+            config.editor.show_line_numbers = false;
+            config.editor.highlight_current_line = false;
+            config.editor.word_wrap = self.writing_next_focus.is_none();
+            config.editor.visible_whitespace = false;
+            config.editor.rulers.clear();
+            config.editor.font_size = Some(16.0);
+        }
         self.appearance_config = EditorAppearanceConfig::from_config(&config);
         self.last_text_layout = None;
         self.scroll_line_remainder = 0.0;

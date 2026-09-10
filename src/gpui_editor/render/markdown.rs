@@ -124,10 +124,10 @@ fn markdown_style_table(style: MarkdownPreviewStyle) -> MarkdownStyleTable {
 
 pub(super) fn markdown_preview_body(snapshot: &EditorSnapshot) -> impl IntoElement {
     let blocks = snapshot.markdown_preview.clone().unwrap_or_else(|| {
-        vec![MarkdownBlock {
-            kind: MarkdownBlockKind::Paragraph,
-            text: "No markdown preview available".to_string(),
-        }]
+        vec![MarkdownBlock::new(
+            MarkdownBlockKind::Paragraph,
+            "No markdown preview available",
+        )]
     });
     let table = markdown_style_table(snapshot.appearance.markdown_preview_style);
     let base_size = markdown_preview_font_size(&snapshot.appearance) * table.body_size_scale;

@@ -800,3 +800,15 @@ fn unique_suffix() -> u128 {
         .unwrap_or_default()
         .as_nanos()
 }
+#[test]
+fn loaded_prose_undo_never_erases_the_original_note() {
+    let mut buffer = super::Buffer::prose("Remember 🦀\nTry again tomorrow");
+    assert!(buffer.kind().is_prose());
+    assert!(!buffer.is_modified());
+    assert!(buffer.undo().is_none());
+    let position = super::Position::new(0, 10);
+    buffer.insert(position, "!");
+    assert!(buffer.undo().is_some());
+    assert_eq!(buffer.text(), "Remember 🦀\nTry again tomorrow");
+    assert!(buffer.undo().is_none());
+}

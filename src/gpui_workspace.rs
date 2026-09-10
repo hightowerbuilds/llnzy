@@ -20,6 +20,7 @@ mod command_palette;
 mod footer;
 mod home;
 mod menu_actions;
+mod notepad;
 mod panes;
 mod project;
 mod recovery;
@@ -128,7 +129,16 @@ const SIDEBAR_TEXT: u32 = 0xabb2bf;
 const FOLDER_BLUE: u32 = 0x64b4ff;
 const ACCENT: u32 = 0x214966;
 const QUEUE_GREEN: u32 = 0x6aff90;
-const JOINED_SECONDARY: u32 = 0x6ab8ff;
+
+/// Border colors for joined tab groups, taken in order.
+///
+/// Every tab in one group wears the same color; the next group on screen
+/// takes the next entry, so two groups are never confusable at a glance.
+/// Past the end the list wraps — four distinct hues is already more
+/// simultaneous groups than the join limit makes practical, and wrapping
+/// degrades to a repeat rather than to no color at all.
+const JOINED_GROUPS_DARK: [u32; 4] = [0x6aff90, 0x6ab8ff, 0xc78bff, 0xffc46a];
+const JOINED_GROUPS_LIGHT: [u32; 4] = [0x5f9f79, 0x5f7fb0, 0x8a6bb0, 0xa8792f];
 
 const RECOVERY_PERSIST_INTERVAL: Duration = Duration::from_secs(5);
 /// Cadence for draining the explorer filesystem watcher. Combined with the
@@ -193,12 +203,18 @@ pub(super) struct WorkspacePalette {
     pub(super) sidebar_text: u32,
     pub(super) accent: u32,
     pub(super) queue_green: u32,
-    pub(super) joined_secondary: u32,
+    pub(super) joined_groups: [u32; 4],
     pub(super) sidebar_row_selected_bg: u32,
     pub(super) sidebar_row_hover_bg: u32,
 }
 
 impl WorkspacePalette {
+    /// Border color for a joined group, by its ordinal among live groups.
+    /// Wraps, so any ordinal is safe to pass.
+    pub(super) fn joined_group_color(&self, ordinal: usize) -> u32 {
+        self.joined_groups[ordinal % self.joined_groups.len()]
+    }
+
     pub(super) fn from_config(config: &Config) -> Self {
         if config
             .colors
@@ -229,7 +245,7 @@ impl WorkspacePalette {
             sidebar_text: SIDEBAR_TEXT,
             accent: ACCENT,
             queue_green: QUEUE_GREEN,
-            joined_secondary: JOINED_SECONDARY,
+            joined_groups: JOINED_GROUPS_DARK,
             sidebar_row_selected_bg: SIDEBAR_ROW_SELECTED_BG,
             sidebar_row_hover_bg: SIDEBAR_ROW_HOVER_BG,
         }
@@ -250,7 +266,7 @@ impl WorkspacePalette {
             sidebar_text: 0x5f554b,
             accent: 0xb7d8d4,
             queue_green: 0x5f9f79,
-            joined_secondary: 0x5f7fb0,
+            joined_groups: JOINED_GROUPS_LIGHT,
             sidebar_row_selected_bg: 0xe2d0ed,
             sidebar_row_hover_bg: 0xeadcc8,
         }
@@ -261,6 +277,43 @@ impl WorkspacePalette {
 mod workspace_palette_tests {
     use super::{WorkspacePalette, CHROME_BG};
     use crate::config::Config;
+
+    #[test]
+    fn joined_group_colors_are_distinct_in_both_themes() {
+        for palette in [WorkspacePalette::dark(), WorkspacePalette::light()] {
+            let colors = palette.joined_groups;
+            for (i, color) in colors.iter().enumerate() {
+                for (j, other) in colors.iter().enumerate() {
+                    assert!(
+                        i == j || color != other,
+                        "group colors {i} and {j} are the same ({color:#08x}); \
+                         separate groups would be indistinguishable"
+                    );
+                }
+                assert_ne!(
+                    *color, palette.border,
+                    "group color {i} matches the unjoined border color"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn joined_group_color_wraps_past_the_list() {
+        let palette = WorkspacePalette::dark();
+        let len = palette.joined_groups.len();
+
+        assert_eq!(palette.joined_group_color(0), palette.joined_groups[0]);
+        assert_eq!(
+            palette.joined_group_color(len),
+            palette.joined_groups[0],
+            "an ordinal past the end wraps rather than panicking"
+        );
+        assert_eq!(
+            palette.joined_group_color(len * 3 + 2),
+            palette.joined_groups[2]
+        );
+    }
 
     #[test]
     fn palette_switches_to_light_for_light_config_background() {
@@ -319,11 +372,6 @@ fn appearance_config_from_preferences(
     // Layer the rest of the persisted appearance state on top of the
     // config-file defaults. Each field stays None / empty unless the
     // user has explicitly chosen an override.
-    if let Some([c1, c2, c3]) = preferences.terminal_palette {
-        config.effects.background_color = Some(c1);
-        config.effects.background_color2 = Some(c2);
-        config.effects.background_color3 = Some(c3);
-    }
     if let Some(intensity) = preferences.terminal_background_intensity {
         config.effects.background_intensity = intensity.clamp(0.05, 1.0);
     }
@@ -416,20 +464,20 @@ impl From<WorkspaceSurface> for WorkspaceRecoverySurface {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum AppearancePage {
-    Appearances,
+enum SettingsPage {
+    Home,
+    Courses,
     Terminal,
-    Advanced,
 }
 
-impl AppearancePage {
-    const ALL: [Self; 3] = [Self::Appearances, Self::Terminal, Self::Advanced];
+impl SettingsPage {
+    const ALL: [Self; 3] = [Self::Home, Self::Courses, Self::Terminal];
 
     fn title(self) -> &'static str {
         match self {
-            AppearancePage::Appearances => "Appearances",
-            AppearancePage::Terminal => "Terminal",
-            AppearancePage::Advanced => "Advanced",
+            SettingsPage::Home => "Home",
+            SettingsPage::Terminal => "Terminal",
+            SettingsPage::Courses => "Courses",
         }
     }
 }
@@ -643,6 +691,7 @@ fn restore_joined_group_shares(tab_manager: &mut GpuiTabManager, primary: u64, s
 }
 
 struct WorkspacePrototype {
+    notepad: Entity<notepad::Notepad>,
     editor: Entity<EditorPrototype>,
     file_editors: BTreeMap<u64, Entity<EditorPrototype>>,
     terminals: BTreeMap<u64, Entity<TerminalSurface>>,
@@ -666,7 +715,7 @@ struct WorkspacePrototype {
     sidebar_width: f32,
     last_sidebar_width: f32,
     appearance_config: Config,
-    appearance_page: AppearancePage,
+    settings_page: SettingsPage,
     /// Courses loaded from the bundled courses directory. `None` when the
     /// directory is missing or failed to parse — Academy renders an
     /// explanatory empty state rather than pretending it has a catalog.
@@ -798,6 +847,7 @@ impl WorkspacePrototype {
         });
 
         let mut workspace = Self {
+            notepad: cx.new(|cx| notepad::Notepad::new(appearance_config.clone(), cx)),
             editor,
             file_editors: BTreeMap::new(),
             terminals,
@@ -821,7 +871,7 @@ impl WorkspacePrototype {
             sidebar_width: SIDEBAR_DEFAULT_WIDTH,
             last_sidebar_width: SIDEBAR_DEFAULT_WIDTH,
             appearance_config,
-            appearance_page: AppearancePage::Appearances,
+            settings_page: SettingsPage::Home,
             academy_library: load_academy_library(),
             academy_course: None,
             academy_lesson: None,
@@ -1853,7 +1903,9 @@ impl WorkspacePrototype {
             | WorkspaceSurface::Appearances
             | WorkspaceSurface::Settings
             | WorkspaceSurface::Academy => {
-                if surface == WorkspaceSurface::Editor {
+                if surface == WorkspaceSurface::Home {
+                    window.focus(&self.notepad.read(cx).editor.focus_handle(cx));
+                } else if surface == WorkspaceSurface::Editor {
                     window.focus(&self.active_editor_entity().focus_handle(cx));
                 } else {
                     window.focus(&self.editor.focus_handle(cx));
@@ -2150,7 +2202,7 @@ impl Render for WorkspacePrototype {
         let sidebar_new_entry = self.sidebar_new_entry.clone();
         let appearance_config = self.appearance_config.clone();
         let workspace_palette = WorkspacePalette::from_config(&appearance_config);
-        let appearance_page = self.appearance_page;
+        let settings_page = self.settings_page;
         let terminal_background_import_error = self.terminal_background_import_error.clone();
         let explorer_entries = self.explorer_entries();
         let selected_path = self.sidebar_explorer.selected_path.clone();
@@ -2181,6 +2233,7 @@ impl Render for WorkspacePrototype {
             .child(sidebar_bumper(sidebar_visible, workspace_palette, cx))
             .child(workspace_content(
                 WorkspaceSurfaceContext {
+                    notepad: self.notepad.clone(),
                     editor: self.editor.clone(),
                     file_editors: self.file_editors.clone(),
                     terminals: self.terminals.clone(),
@@ -2188,7 +2241,7 @@ impl Render for WorkspacePrototype {
                     recent_projects,
                     explorers: self.explorers.clone(),
                     appearance_config,
-                    appearance_page,
+                    settings_page,
                     academy_library: self.academy_library.clone(),
                     academy_course: self.academy_course.clone(),
                     academy_lesson: self.academy_lesson.clone(),

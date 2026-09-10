@@ -5,8 +5,6 @@ pub(crate) mod atomic_write;
 pub mod config;
 pub mod diagnostics;
 pub mod editor;
-#[cfg(feature = "gpui-workspace")]
-pub mod effects;
 pub mod error_log;
 pub mod explorer;
 pub mod fs_watch;
@@ -21,6 +19,7 @@ pub mod gpui_terminal;
 pub mod gpui_workspace;
 pub mod keybindings;
 pub mod lsp;
+pub mod notebook;
 pub mod path_utils;
 pub mod platform;
 pub mod preferences;

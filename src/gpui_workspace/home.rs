@@ -15,21 +15,22 @@ use super::{
 };
 
 pub(super) fn home_surface(
+    notepad: gpui::Entity<super::notepad::Notepad>,
     workspace_root: Option<PathBuf>,
     recent_projects: Vec<PathBuf>,
-    config: &Config,
+    _config: &Config,
     academy_library: Option<Rc<CourseLibrary>>,
     academy_progress: &AcademyProgress,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
-    let palette = WorkspacePalette::from_config(config);
-    let mut recent_list = div().flex().flex_col().gap_1().w(px(360.0));
+    let palette = home_palette();
+    let mut recent_list = div().flex().flex_col().gap_1().w_full();
     let recent = recent_projects.into_iter().take(5).collect::<Vec<_>>();
     if recent.is_empty() {
         recent_list = recent_list.child(
             div()
                 .py_2()
-                .text_size(px(13.0))
+                .text_size(px(16.0))
                 .text_color(rgb(palette.muted_text))
                 .child("No recent projects"),
         );
@@ -40,27 +41,9 @@ pub(super) fn home_surface(
     }
 
     let mut content = div()
-        .flex_1()
-        .h_full()
+        .w_full()
         .flex()
         .flex_col()
-        .items_center()
-        .bg(rgb(palette.editor_bg))
-        .pt(px(80.0))
-        .child(
-            div()
-                .text_size(px(26.0))
-                .text_color(rgb(palette.active_text))
-                .child("Home"),
-        )
-        .child(
-            div()
-                .mt_2()
-                .mb_5()
-                .text_size(px(13.0))
-                .text_color(rgb(palette.muted_text))
-                .child("Open a project or jump back into a recent workspace."),
-        )
         .child(home_open_project_button(palette, cx))
         .child(home_new_course_button(palette, cx))
         .child(home_academy_progress_section(
@@ -74,7 +57,7 @@ pub(super) fn home_surface(
         content = content.child(
             div()
                 .mt_5()
-                .w(px(360.0))
+                .w_full()
                 .rounded_sm()
                 .border_1()
                 .border_color(rgb(palette.border))
@@ -82,21 +65,21 @@ pub(super) fn home_surface(
                 .p_3()
                 .child(
                     div()
-                        .text_size(px(12.0))
+                        .text_size(px(16.0))
                         .text_color(rgb(palette.muted_text))
                         .child("OPEN PROJECT"),
                 )
                 .child(
                     div()
                         .mt_1()
-                        .text_size(px(15.0))
+                        .text_size(px(16.0))
                         .text_color(rgb(palette.active_text))
                         .child(project_display_name(&root)),
                 )
                 .child(
                     div()
                         .mt_1()
-                        .text_size(px(11.0))
+                        .text_size(px(16.0))
                         .text_color(rgb(palette.muted_text))
                         .child(root.display().to_string()),
                 ),
@@ -108,13 +91,48 @@ pub(super) fn home_surface(
             div()
                 .mt_6()
                 .mb_2()
-                .text_size(px(12.0))
+                .text_size(px(16.0))
                 .text_color(rgb(palette.muted_text))
                 .child("RECENT PROJECTS"),
         )
         .child(recent_list);
 
-    content
+    div()
+        .id("home-scroll")
+        .flex_1()
+        .min_w(px(0.0))
+        .h_full()
+        .overflow_scroll()
+        .bg(rgb(palette.chrome_bg))
+        .text_size(px(16.0))
+        .p_6()
+        .child(
+            div()
+                .w_full()
+                .min_w(px(760.0))
+                .flex()
+                .flex_col()
+                .gap_6()
+                .child(div().text_color(rgb(palette.active_text)).child("Home"))
+                .child(
+                    div()
+                        .w_full()
+                        .flex()
+                        .items_start()
+                        .gap_6()
+                        .child(div().w(px(320.0)).flex_shrink_0().child(content))
+                        .child(div().flex_1().min_w(px(0.0)).child(notepad)),
+                ),
+        )
+}
+
+/// Home uses the neutral gray/black chrome, independent of terminal themes.
+pub(super) fn home_palette() -> WorkspacePalette {
+    let mut palette = WorkspacePalette::dark();
+    palette.panel_bg = 0x1b1b1b;
+    palette.editor_bg = 0x1b1b1b;
+    palette.border = 0x383838;
+    palette
 }
 
 fn home_open_project_button(
@@ -122,14 +140,16 @@ fn home_open_project_button(
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     div()
-        .w(px(240.0))
+        .w_full()
         .h(px(42.0))
         .flex()
         .items_center()
         .justify_center()
         .rounded_sm()
-        .bg(rgb(palette.accent))
-        .text_size(px(15.0))
+        .border_1()
+        .border_color(rgb(palette.border))
+        .bg(rgb(palette.panel_bg))
+        .text_size(px(16.0))
         .text_color(rgb(palette.active_text))
         .cursor_pointer()
         .on_mouse_down(
@@ -147,7 +167,7 @@ fn home_new_course_button(
 ) -> impl IntoElement {
     div()
         .mt_2()
-        .w(px(240.0))
+        .w_full()
         .h(px(42.0))
         .flex()
         .items_center()
@@ -156,7 +176,7 @@ fn home_new_course_button(
         .border_1()
         .border_color(rgb(palette.border))
         .bg(rgb(palette.panel_bg))
-        .text_size(px(15.0))
+        .text_size(px(16.0))
         .text_color(rgb(palette.sidebar_text))
         .cursor_pointer()
         .on_mouse_down(
@@ -179,7 +199,7 @@ fn home_academy_progress_section(
     palette: WorkspacePalette,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
-    let mut rows = div().flex().flex_col().gap_2().w(px(360.0));
+    let mut rows = div().flex().flex_col().gap_2().w_full();
     let mut any = false;
     if let Some(library) = library {
         for course in library.courses() {
@@ -200,7 +220,7 @@ fn home_academy_progress_section(
         rows = rows.child(
             div()
                 .py_2()
-                .text_size(px(13.0))
+                .text_size(px(16.0))
                 .text_color(rgb(palette.muted_text))
                 .child("No courses installed"),
         );
@@ -208,15 +228,15 @@ fn home_academy_progress_section(
 
     div()
         .mt_6()
-        .w(px(360.0))
+        .w_full()
         .flex()
         .flex_col()
         .gap_2()
         .child(
             div()
-                .text_size(px(12.0))
+                .text_size(px(16.0))
                 .text_color(rgb(palette.muted_text))
-                .child("COURSE PROGRESS"),
+                .child("Courses"),
         )
         .child(rows)
 }
@@ -255,8 +275,8 @@ fn home_academy_progress_row(
         .child(
             div()
                 .flex()
-                .items_center()
-                .justify_between()
+                .flex_col()
+                .items_start()
                 .gap_2()
                 .child(
                     div()
@@ -266,14 +286,14 @@ fn home_academy_progress_row(
                         .child(course_insignia(language, 24.0))
                         .child(
                             div()
-                                .text_size(px(13.0))
+                                .text_size(px(16.0))
                                 .text_color(rgb(palette.sidebar_text))
                                 .child(title.to_string()),
                         ),
                 )
                 .child(
                     div()
-                        .text_size(px(11.0))
+                        .text_size(px(16.0))
                         .text_color(rgb(palette.muted_text))
                         .child(if total == 0 {
                             "No lessons".to_string()
@@ -326,14 +346,14 @@ fn home_recent_project_row(
         )
         .child(
             div()
-                .text_size(px(14.0))
+                .text_size(px(16.0))
                 .text_color(rgb(palette.sidebar_text))
                 .child(title),
         )
         .child(
             div()
                 .mt_1()
-                .text_size(px(11.0))
+                .text_size(px(16.0))
                 .text_color(rgb(palette.muted_text))
                 .child(detail),
         )

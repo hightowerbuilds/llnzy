@@ -5,6 +5,31 @@ use crate::error_log::ErrorLog;
 
 pub const DIAGNOSTICS_REPORT_FILENAME: &str = "diagnostics-report.txt";
 
+/// Append so a second panic during cleanup cannot erase the original cause.
+pub fn append_crash_report(message: &str) -> std::io::Result<()> {
+    append_crash_report_to(&diagnostics_path("crash.log"), message)
+}
+
+fn append_crash_report_to(path: &Path, message: &str) -> std::io::Result<()> {
+    use std::io::Write;
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?;
+    writeln!(
+        file,
+        "\n{:?} pid={} version={}\n{message}\n{}",
+        std::time::SystemTime::now(),
+        std::process::id(),
+        env!("CARGO_PKG_VERSION"),
+        std::backtrace::Backtrace::force_capture(),
+    )
+}
+
 pub fn diagnostics_dir() -> PathBuf {
     crate::platform::paths::development_paths().logs_dir
 }
@@ -92,6 +117,20 @@ pub fn render_diagnostics_report(log: Option<&ErrorLog>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cleanup_panic_preserves_original_crash() {
+        let root = std::env::temp_dir().join(format!("llnzy-crash-log-{}", std::process::id()));
+        let path = root.join("logs/crash.log");
+        append_crash_report_to(&path, "original rendering failure").unwrap();
+        append_crash_report_to(&path, "cleanup failure").unwrap();
+        let report = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            report.find("original rendering failure").unwrap()
+                < report.find("cleanup failure").unwrap()
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn diagnostics_path_uses_logs_directory() {

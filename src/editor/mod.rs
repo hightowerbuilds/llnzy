@@ -200,6 +200,17 @@ impl EditorState {
         self.buffers.is_empty()
     }
 
+    /// Start a plain writing buffer without a file, parser, or language server.
+    pub fn open_prose(&mut self, text: &str) -> BufferId {
+        let id = self.alloc_buffer_id();
+        let buffer = Buffer::prose(text);
+        self.buffers.push(buffer);
+        self.views.push(BufferView::default());
+        self.buffer_ids.push(id);
+        self.active = self.buffers.len() - 1;
+        id
+    }
+
     /// Open a file into a new buffer, or switch to it if already open.
     pub fn open(&mut self, path: PathBuf) -> Result<BufferId, String> {
         if let Some(idx) = self.buffers.iter().position(|b| b.path() == Some(&path)) {

@@ -79,6 +79,26 @@ fn main() {
 +++
 # Functions & Compound Types Intro
 
-Chapter 3 closes with functions and its compound types. Every parameter is typed, and the return type sits after `->`; a body that ends in an expression *without* a semicolon is the value, which is why `width * height` returns while `width * height;` would not. Tuples group mixed types of fixed arity — reach elements by position like `pair.1`, or destructure with `let (a, b) = pair;` — and arrays hold one type with a length fixed at compile time. Both are stack-shaped and quick, and neither grows. Structs, which name their fields and arrive next chapter with ownership, are where this groundwork pays off.
+Chapter 3 closes with functions and its compound types.
 
-In the terminal, rewrite swap to destructure instead of indexing, and add a three-element tuple to see where fixed arity starts to chafe.
+## Functions return their last expression
+
+Every parameter is typed, and the return type sits after `->`.
+
+A body that ends in an expression *without* a semicolon is the value. That is why `width * height` returns, while `width * height;` would not.
+
+## Tuples and arrays
+
+Tuples group mixed types of fixed arity. Reach elements by position like `pair.1`, or destructure with `let (a, b) = pair;`.
+
+Arrays hold one type with a length fixed at compile time. Both are stack-shaped and quick, and neither grows.
+
+Structs, which name their fields and arrive next chapter with ownership, are where this groundwork pays off.
+
+## Run it
+
+```bash
+cargo run
+```
+
+Rewrite swap to destructure instead of indexing, then add a three-element tuple to see where fixed arity starts to chafe.

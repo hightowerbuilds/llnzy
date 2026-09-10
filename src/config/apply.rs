@@ -133,22 +133,10 @@ impl Config {
                 self.effects.fps_target = fps.clamp(15, 240);
             }
             if let Some(bg) = effects.background {
-                self.effects.background = bg;
+                self.effects.background = super::normalize_background_mode(&bg).to_string();
             }
             if let Some(i) = effects.background_intensity {
                 self.effects.background_intensity = i.clamp(0.0, 1.0);
-            }
-            if let Some(s) = effects.background_speed {
-                self.effects.background_speed = s.clamp(0.0, 10.0);
-            }
-            if let Some(c) = effects.background_color.and_then(|s| parse_hex(&s)) {
-                self.effects.background_color = Some(c);
-            }
-            if let Some(c) = effects.background_color2.and_then(|s| parse_hex(&s)) {
-                self.effects.background_color2 = Some(c);
-            }
-            if let Some(c) = effects.background_color3.and_then(|s| parse_hex(&s)) {
-                self.effects.background_color3 = Some(c);
             }
             if let Some(p) = effects.background_image {
                 self.effects.background_image = Some(p);

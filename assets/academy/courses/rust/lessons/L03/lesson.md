@@ -78,6 +78,22 @@ fn main() {
 +++
 # The Secret Number
 
-Chapter 2's game compares a guess against a secret with `guess.cmp(&secret)` and matches on `Ordering` — `Less`, `Greater`, `Equal` — breaking out when the guess lands. The book reaches for the `rand` crate here, which is right for real projects; this course stays std-only and offline, so `next_secret` is a tiny linear congruential generator: multiply, add, shift, wrap. Seeded at 7 it always produces 79, then 32 — deterministic, which is exactly what a graded check needs and what a real game must avoid. Notice the two `&mut` threads running together: `state` mutates through the generator while the loop itself stays immutable in its inputs.
+Chapter 2's game compares a guess against a secret with `guess.cmp(&secret)` and matches on `Ordering` — `Less`, `Greater`, `Equal` — breaking out when the guess lands.
 
-In the terminal, change the seed or the guesses and predict the output before you run it.
+## No rand crate here
+
+The book reaches for the `rand` crate at this point, which is right for real projects. This course stays std-only and offline, so `next_secret` is a tiny linear congruential generator: multiply, add, shift, wrap.
+
+Seeded at 7 it always produces 79, then 32. Deterministic — which is exactly what a graded check needs, and exactly what a real game must avoid.
+
+## Two mutable threads at once
+
+Notice what runs together here: `state` mutates through the generator, while the loop itself stays immutable in its inputs.
+
+## Run it
+
+```bash
+cargo run
+```
+
+Change the seed or the guesses, and predict the output before you run it.

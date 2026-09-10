@@ -23,8 +23,12 @@ impl Render for EditorPrototype {
             content
         }
         .child(editor_file_tabs(&snapshot, cx))
-        .child(editor_body(&snapshot, cx.entity(), cx))
-        .child(status_bar(&snapshot));
+        .child(editor_body(&snapshot, cx.entity(), cx));
+        let content = if self.writing_surface {
+            content
+        } else {
+            content.child(status_bar(&snapshot))
+        };
 
         let root = div()
             .size_full()

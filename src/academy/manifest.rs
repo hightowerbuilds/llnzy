@@ -31,6 +31,14 @@ pub struct CourseManifest {
     pub title: String,
     pub language: String,
     pub description: String,
+    /// Position in the Academy's course list, low to high. Ordering is
+    /// curriculum information — which language a learner should meet
+    /// first — so it belongs to the manifest rather than to the surface
+    /// that draws it. A course that omits `order` sorts after every
+    /// course that declares one, which keeps a new course directory
+    /// visible without letting it jump the curated sequence.
+    #[serde(default)]
+    pub order: Option<u32>,
     #[serde(default)]
     pub book: Option<BookRef>,
     pub modules: Vec<ModuleSpec>,

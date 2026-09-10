@@ -8,7 +8,6 @@ use crate::gpui_workspace::{
     WorkspacePrototype, ACTIVE_TEXT, GPUI_TERMINAL_BACKGROUND_MAX_EDGE, MUTED_TEXT,
 };
 
-use super::shader_palettes::terminal_smoke_controls;
 use super::widgets::{appearance_button, control_label, effect_toggle_button, metric_row};
 use super::{TERMINAL_DISPLAY_FONT_CHOICES, TERMINAL_MONO_FONT_CHOICES};
 
@@ -142,30 +141,6 @@ pub(super) fn terminal_appearance_controls(
                     |this, cx| this.set_background_mode("none", cx),
                 ))
                 .child(appearance_button(
-                    "Smoke".to_string(),
-                    config.effects.background == "smoke",
-                    cx,
-                    |this, cx| this.set_background_mode("smoke", cx),
-                ))
-                .child(appearance_button(
-                    "Fire".to_string(),
-                    config.effects.background == "fire",
-                    cx,
-                    |this, cx| this.set_background_mode("fire", cx),
-                ))
-                .child(appearance_button(
-                    "Aurora".to_string(),
-                    config.effects.background == "aurora",
-                    cx,
-                    |this, cx| this.set_background_mode("aurora", cx),
-                ))
-                .child(appearance_button(
-                    "Trees".to_string(),
-                    config.effects.background == "trees",
-                    cx,
-                    |this, cx| this.set_background_mode("trees", cx),
-                ))
-                .child(appearance_button(
                     "Image".to_string(),
                     config.effects.background == "image",
                     cx,
@@ -177,7 +152,6 @@ pub(super) fn terminal_appearance_controls(
             terminal_background_import_error,
             cx,
         ))
-        .child(terminal_smoke_controls(&config, cx))
         .child(
             div()
                 .flex()
@@ -288,6 +262,18 @@ fn terminal_background_image_controls(
             ));
         }
         controls = controls.child(fit_row);
+
+        // The terminal dims the image by `1 - background_intensity`, so this
+        // reads as brightness. It lives here now that the shader backgrounds
+        // it used to sit under are gone.
+        let brightness = (config.effects.background_intensity.clamp(0.05, 1.0) * 100.0).round();
+        controls = controls.child(metric_row(
+            "Image Brightness",
+            format!("{brightness:.0}%"),
+            cx,
+            |this, cx| this.adjust_background_brightness(-0.05, cx),
+            |this, cx| this.adjust_background_brightness(0.05, cx),
+        ));
     }
 
     if let Some(error) = terminal_background_import_error {

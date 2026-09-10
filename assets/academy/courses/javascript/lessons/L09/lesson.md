@@ -82,7 +82,9 @@ console.log("L09 passed");
 
 A stream delivers chunks as they become available. A chunk is not necessarily a complete line: it might contain half a word, several lines, or a carriage return separated from its following newline. Splitting each raw chunk independently would make the answer depend on how the data arrived.
 
-Node's readline interface handles line framing. Construct it with `{ input: readable, crlfDelay: Infinity }` to treat CRLF as one line ending even across delayed chunks. Iterate with for-await-of; each iteration receives one framed line. Trim the line, skip an empty result, and split the remainder on one or more whitespace characters to count words.
+Node's readline interface handles line framing. Construct it with `{ input: readable, crlfDelay: Infinity }` to treat CRLF as one line ending even across delayed chunks.
+
+Iterate with for-await-of; each iteration receives one framed line. Trim the line, skip an empty result, and split the remainder on one or more whitespace characters to count words.
 
 Here is a separate example that reads two rows from arbitrary chunks:
 
@@ -94,10 +96,28 @@ const reader = createInterface({input: source, crlfDelay: Infinity});
 for await (const row of reader) console.log(row);
 ```
 
-Use try/finally to close your readline interface when iteration finishes or your processing throws. Closing an interface and destroying a caller-owned input stream are different operations; this function does not take ownership of destroying the stream. This exercise accepts finite, non-failing streams. Readline async iteration does not forward input-stream errors; try/finally provides cleanup, not recovery from a failing source. These fixtures use finite in-memory sources, so there are no network resources or file handles to manage.
+Use try/finally to close your readline interface when iteration finishes or your processing throws. Closing an interface and destroying a caller-owned input stream are different operations; this function does not take ownership of destroying the stream.
 
-Keep formatting separate from input consumption. A pure formatSummary is easy to test and reuse. Count words before uppercasing; preserve internal spaces in displayed text while using flexible whitespace matching for the count. The exercise stores line results, so its memory usage grows with input size even though it consumes a stream. A huge-file version would emit each summary or aggregate only totals rather than retaining every row.
+This exercise accepts finite, non-failing streams. Readline async iteration does not forward input-stream errors; try/finally provides cleanup, not recovery from a failing source. These fixtures use finite in-memory sources, so there are no network resources or file handles to manage.
 
-From the repository root, export this lesson with `python3 scripts/check_academy_courses.py --export javascript L09 /tmp/llnzy-javascript-L09` (Python 3.11+, destination must be new). Open the exported directory in the editor and run `node check.js` from that directory with Node.js 22 or newer. Edit the implementation files and keep the supplied assertions intact. Read an assertion failure as a concrete example of behavior to repair. No exercise check downloads packages or accesses the network.
+Keep formatting separate from input consumption. A pure formatSummary is easy to test and reuse. Count words before uppercasing; preserve internal spaces in displayed text while using flexible whitespace matching for the count.
+
+The exercise stores line results, so its memory usage grows with input size even though it consumes a stream. A huge-file version would emit each summary or aggregate only totals rather than retaining every row.
+
+From the repository root, export this lesson. Python 3.11+ is required, and the destination must be new:
+
+```bash
+python3 scripts/check_academy_courses.py --export javascript L09 /tmp/llnzy-javascript-L09
+```
+
+Open the exported directory in the editor, then run the check from that directory with Node.js 22 or newer:
+
+```bash
+node check.js
+```
+
+Edit the implementation files and keep the supplied assertions intact. Read an assertion failure as a concrete example of behavior to repair.
+
+No exercise check downloads packages or accesses the network.
 
 Reference: [Node.js readline async iteration](https://nodejs.org/api/readline.html#rlsymbolasynciterator).

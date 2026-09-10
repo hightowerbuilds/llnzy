@@ -2,6 +2,7 @@ id = "typescript"
 title = "TypeScript"
 language = "typescript"
 description = "Build on JavaScript with strict compiler checks, validated boundaries, reusable types, asynchronous results, and a modular ledger. Requires JavaScript fundamentals, Node.js 22+, and TypeScript 5.9.3 on PATH; setup is covered in L00."
+order = 2
 
 [[modules]]
 title = "The Compiler and Contracts"

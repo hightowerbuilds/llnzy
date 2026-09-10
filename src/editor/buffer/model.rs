@@ -66,6 +66,14 @@ pub(super) fn content_hash(rope: &Rope) -> u64 {
 }
 
 impl Buffer {
+    /// Load prose as the undo baseline, without recording it as an insertion.
+    pub fn prose(text: &str) -> Self {
+        let mut buffer = Self::empty_prose();
+        buffer.rope = Rope::from_str(text);
+        buffer.saved_hash = content_hash(&buffer.rope);
+        buffer
+    }
+
     /// Create an empty buffer with no associated file.
     pub fn empty() -> Self {
         Self::empty_with_kind(BufferKind::Code)

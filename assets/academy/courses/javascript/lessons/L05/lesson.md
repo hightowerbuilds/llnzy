@@ -79,7 +79,9 @@ console.log('L05 passed');
 +++
 # Transform Collections with map, filter & reduce
 
-Collection methods express three different questions. `filter` asks which items to keep, returning a new array of zero or more original items. `map` asks what each item should become, returning one result per input. `reduce` combines the items into one accumulator. These methods create arrays or values, but their callbacks can still mutate referenced objects; keep callbacks pure here.
+Collection methods express three different questions. `filter` asks which items to keep, returning a new array of zero or more original items. `map` asks what each item should become, returning one result per input.
+
+`reduce` combines the items into one accumulator. These methods create arrays or values, but their callbacks can still mutate referenced objects; keep callbacks pure here.
 
 ```js
 const measurements = [2, -1, 4];
@@ -90,9 +92,13 @@ const sum = positiveSquares.reduce((total, value) => total + value, 0);
 console.log(positiveSquares, sum); // [4, 16] 20
 ```
 
-Supply an initial accumulator such as zero. Without it, reducing an empty array throws, and the first element takes on a different role from the others. A numeric total, an array, or an object can be an accumulator; choose the shape that fits the answer rather than putting every operation into one complicated reduction.
+Supply an initial accumulator such as zero. Without it, reducing an empty array throws, and the first element takes on a different role from the others.
 
-The exercise starts a small expense domain used later in the course. Store money as integer cents: `250` means 2.50 currency units. Binary floating-point numbers do not represent every decimal fraction exactly, so repeated arithmetic on fractional currency can introduce rounding surprises. Integer cents keep these small, validated exercise amounts exact; JavaScript numbers still have a finite safe integer range.
+A numeric total, an array, or an object can be an accumulator; choose the shape that fits the answer rather than putting every operation into one complicated reduction.
+
+The exercise starts a small expense domain used later in the course. Store money as integer cents: `250` means 2.50 currency units.
+
+Binary floating-point numbers do not represent every decimal fraction exactly, so repeated arithmetic on fractional currency can introduce rounding surprises. Integer cents keep these small, validated exercise amounts exact; JavaScript numbers still have a finite safe integer range.
 
 `sort` mutates its receiver. Copy before sorting data you need to preserve, and provide a numeric comparator:
 
@@ -111,4 +117,20 @@ The optional `tag` filter deliberately distinguishes `undefined` from an empty s
 
 Implement summarize(entries,tag). Select matching tags (or all entries when tag is undefined); return labels, totalCents, and largestCents containing up to three amounts sorted descending. Use filter, map, and reduce, keep integer cents, and leave inputs unchanged.
 
-Using Python 3.11 or newer, export a fresh workspace from the repository root with `python3 scripts/check_academy_courses.py --export javascript L05 /tmp/llnzy-js-l05`. The destination must not already exist; choose a new path for a retake. Open those files in LLNZY, then run `node check.js` from the exported directory. The starter intentionally fails. Leave `check.js` unchanged: it calls your functions with several inputs and reports the first failed assertion. Read that failure, inspect the relevant input, and rerun after one focused edit.
+Export a fresh workspace from the repository root. The exporter needs Python 3.11 or newer:
+
+```bash
+python3 scripts/check_academy_courses.py --export javascript L05 /tmp/llnzy-js-l05
+```
+
+The destination must not already exist, so choose a new path for a retake.
+
+Open those files in LLNZY, then run the check from the exported directory:
+
+```bash
+node check.js
+```
+
+The starter intentionally fails. Leave `check.js` unchanged: it calls your functions with several inputs and reports the first failed assertion.
+
+Read that failure, inspect the relevant input, and rerun after one focused edit.

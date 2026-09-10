@@ -160,7 +160,7 @@ pub(super) fn workspace_tab_bar(
             active_tab_id,
             label,
             width,
-            tab_manager.joined_member_index(tab.id.0),
+            tab_manager.joined_group_ordinal(tab.id.0),
             menu_anchor,
             palette,
             cx,
@@ -290,7 +290,7 @@ fn workspace_tab(
     active_tab_id: WorkspaceTabId,
     label: String,
     width: f32,
-    joined_member: Option<usize>,
+    joined_group: Option<usize>,
     menu_anchor: WorkspaceTabMenuAnchor,
     palette: WorkspacePalette,
     cx: &mut Context<WorkspacePrototype>,
@@ -314,9 +314,11 @@ fn workspace_tab(
         .px_3()
         .rounded_sm()
         .border_1()
-        .border_color(rgb(match joined_member {
-            Some(0) => palette.queue_green,
-            Some(_) => palette.joined_secondary,
+        // Group identity, not position within the group: every member of
+        // a joined group wears the same border, and a separate group wears
+        // a different one.
+        .border_color(rgb(match joined_group {
+            Some(ordinal) => palette.joined_group_color(ordinal),
             None => palette.border,
         }))
         .bg(rgb(if active {

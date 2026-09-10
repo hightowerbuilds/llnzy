@@ -72,6 +72,18 @@ impl EditorPrototype {
         command: EditorCommand,
         cx: &mut Context<Self>,
     ) {
+        if self.writing_next_focus.is_some()
+            && matches!(
+                command,
+                EditorCommand::Enter
+                    | EditorCommand::Indent { .. }
+                    | EditorCommand::DuplicateLineOrSelection
+                    | EditorCommand::MoveLine(_)
+                    | EditorCommand::ToggleLineComment
+            )
+        {
+            return;
+        }
         if self.image_preview_active {
             match command {
                 EditorCommand::Copy => {
@@ -202,7 +214,11 @@ impl EditorPrototype {
             } else {
                 ""
             };
-            let text = format!("\n{indent}{extra}");
+            let text = if buffer.kind().is_prose() {
+                "\n".to_string()
+            } else {
+                format!("\n{indent}{extra}")
+            };
             let new_pos = buffer.compute_end_pos_pub(view.cursor.pos, &text);
             buffer.insert(view.cursor.pos, &text);
             view.cursor.pos = new_pos;
@@ -471,6 +487,8 @@ impl EditorPrototype {
         range: Option<(Position, Position)>,
         text: &str,
     ) {
+        let input = self.writing_input(text);
+        let text = input.as_ref();
         if range.is_none() && text.is_empty() {
             return;
         }

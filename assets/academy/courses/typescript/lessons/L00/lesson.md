@@ -117,14 +117,31 @@ export const ready: boolean = true;
 +++
 # Your First Strict Build
 
+The Academy can display this lesson; exercise materialization and in-app checks are not wired up yet.
 
-The Academy can display this lesson; exercise materialization and in-app checks are not wired yet. From the repository root, export the starter files with `python3 scripts/check_academy_courses.py --export typescript L00 /tmp/llnzy-typescript-L00`, then open that directory in the editor and use it as your terminal working directory. Choose a destination that does not already exist. For later lessons, change both the lesson ID and destination, for example L01 and `/tmp/llnzy-typescript-L01`. The exporter requires Python 3.11 or newer; it copies starter files and prints the check command.
+From the repository root, export the starter files:
 
-This course assumes you can already write JavaScript functions, arrays, objects, imports, and promises. Complete the JavaScript course first if those are unfamiliar. TypeScript adds a static analysis stage: it checks a program before execution, then emits JavaScript. Its annotations do not validate user input at runtime.
+```bash
+python3 scripts/check_academy_courses.py --export typescript L00 /tmp/llnzy-typescript-L00
+```
 
-Use Node.js 22 or newer and TypeScript 5.9.3. In your own terminal, run `node --version` and `tsc --version`. If the compiler is missing, install it once with `npm install --global typescript@5.9.3` (this step needs network access), then reopen LLNZY so its checks inherit the updated PATH. If your Node installation does not allow global packages, use a user-managed Node installation instead of changing system permissions. Lesson checks never install packages or access the network.
+Then open that directory in the editor and use it as your terminal working directory. Choose a destination that does not already exist.
 
-Each lesson is self-contained: `package.json` selects ES modules and `tsconfig.json` enables strict checking. The DOM library supplies the type of `console`; these exercises do not use browser APIs or require Node type packages. `noEmitOnError` prevents new output after errors, and the `&&` in the command prevents running stale output when compilation fails.
+For later lessons, change both the lesson ID and the destination — `L01` with `/tmp/llnzy-typescript-L01`, and so on.
+
+The exporter requires Python 3.11 or newer. It copies starter files and prints the check command.
+
+This course assumes you can already write JavaScript functions, arrays, objects, imports, and promises. Complete the JavaScript course first if those are unfamiliar.
+
+TypeScript adds a static analysis stage: it checks a program before execution, then emits JavaScript. Its annotations do not validate user input at runtime.
+
+Use Node.js 22 or newer and TypeScript 5.9.3. In your own terminal, run `node --version` and `tsc --version`. If the compiler is missing, install it once with `npm install --global typescript@5.9.3` (this step needs network access), then reopen LLNZY so its checks inherit the updated PATH.
+
+If your Node installation does not allow global packages, use a user-managed Node installation instead of changing system permissions. Lesson checks never install packages or access the network.
+
+Each lesson is self-contained: `package.json` selects ES modules and `tsconfig.json` enables strict checking. The DOM library supplies the type of `console`; these exercises do not use browser APIs or require Node type packages.
+
+`noEmitOnError` prevents new output after errors, and the `&&` in the command prevents running stale output when compilation fails.
 
 Open `setup.ts` and hover each declaration. A variable declared `number` cannot contain a string even when that string looks numeric. Correct the value rather than weakening the annotation. The compiler and runtime checks serve different purposes: a well-typed implementation can still return the wrong answer.
 
@@ -137,7 +154,17 @@ const label: string = "ready";
 console.log(label.toUpperCase()); // READY
 ```
 
-Run `tsc --project tsconfig.json --pretty false && node dist/check.js` from the exported exercise directory in your terminal. Compilation must succeed before Node runs. Read the first compiler diagnostic, fix its cause, and rerun. Keep `check.ts`, `assert.ts`, and `tsconfig.json` intact; edit the exercise implementation files. The checks compare behavior and compile type examples; printing the success message yourself does not implement the exercise.
+Run the check from the exported exercise directory in your terminal:
+
+```bash
+tsc --project tsconfig.json --pretty false && node dist/check.js
+```
+
+Compilation must succeed before Node runs. Read the first compiler diagnostic, fix its cause, and rerun.
+
+Keep `check.ts`, `assert.ts`, and `tsconfig.json` intact; edit the exercise implementation files.
+
+The checks compare behavior and compile type examples. Printing the success message yourself does not implement the exercise.
 
 After passing, hover the exported functions in the editor and explain their input and output types without executing them.
 

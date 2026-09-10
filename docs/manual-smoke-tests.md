@@ -21,6 +21,41 @@ cargo test --release --test performance_budgets -- --ignored --nocapture
 - Join, split, rename, swap, and close tabs.
 - Quit and relaunch; confirm the app still starts cleanly.
 
+## macOS Display Changes
+
+- Build with `./bundle.sh --release --dmg` and launch the app copied from the DMG.
+- Keep an unsaved editor buffer and an active terminal open. Connect HDMI,
+  move the window to the external display and back, then disconnect HDMI.
+  Repeat several times; confirm the process stays alive, typing still works,
+  terminal output continues, and the buffer is intact.
+- Repeat with a terminal background image enabled and disabled, including
+  displays with different scaling and refresh rates when available.
+- Change the main display, switch between mirroring and extended desktop,
+  enter/exit fullscreen, switch Spaces, and sleep/wake with HDMI connected.
+- Confirm redraws resume after each transition. If a crash occurs, preserve
+  `~/Library/Application Support/llnzy/logs/crash.log` and the corresponding
+  macOS DiagnosticReports entry. Crash logs now append backtraces so cleanup
+  panics cannot overwrite the first failure.
+
+## Home Notepad
+
+- Launch with `./dev.sh`; open Home and type a multiline note, including emoji
+  and IME composition. Check selection, copy/paste, undo/redo, and wrapping.
+- Enter a title, press Tab/Enter to write the body, and create another note.
+  Verify titles appear in history, title-only notes are preserved, and pasted
+  multiline titles stay on one line. Reopen pre-title notes to check compatibility.
+  Reopen and edit the earlier note; its creation date and position stay stable.
+- Switch to a course and back, then quit immediately after an edit and relaunch.
+  Confirm the complete text survives, even before the autosave delay expires.
+- Open a second app window; edit a note and confirm the other window updates.
+- Verify Home keeps its neutral gray/black background, 16 px text, and two
+  columns: projects/courses on the left, padded note fields on the right.
+  In a narrow joined pane, confirm both columns remain reachable by scrolling.
+- With the app closed, back up the dev notebook and replace it with malformed
+  JSON. Relaunch: an error must appear and the file must remain untouched.
+  Restore the backup afterwards. Exercise a save failure with a non-writable
+  dev notes directory, restore write access, and click the retry status.
+
 ## Project And Editor
 
 - Open a real project folder.
@@ -62,7 +97,8 @@ cargo test --release --test performance_budgets -- --ignored --nocapture
 - Try missing, invalid, and oversized background images and confirm the app
   rejects them without crashing.
 - Toggle effects off and on.
-- Try built-in shader backgrounds and confirm failures degrade to a usable UI.
+- Switch the background between None and Image and confirm the terminal stays
+  legible in both, and that Image Brightness moves the image dim.
 
 ## Code Academy
 

@@ -158,7 +158,9 @@ Open `model.ts` and follow references to `LineReport`. The model calls the count
 
 Use `import type` for an interface needed only during checking. It vanishes from emitted JavaScript. Relative imports use `.js` because Node executes the emitted modules; TypeScript's NodeNext resolution maps those specifiers back to the `.ts` sources while checking.
 
-A parsing pipeline can map each line to its trimmed form, filter empty lines, then map to reports. The summary can reduce reports from an initial total of zero. Test empty text and Windows line endings, not only a happy path. After passing, rename `text` in the interface temporarily and follow every resulting diagnostic before restoring it.
+A parsing pipeline can map each line to its trimmed form, filter empty lines, then map to reports. The summary can reduce reports from an initial total of zero.
+
+Test empty text and Windows line endings, not only a happy path. After passing, rename `text` in the interface temporarily and follow every resulting diagnostic before restoring it.
 
 A small example to compare with your exercise:
 
@@ -170,7 +172,17 @@ import type { Point } from "./shape.js";
 export function horizontal(point: Point): number { return point.x; }
 ```
 
-Run `tsc --project tsconfig.json --pretty false && node dist/check.js` from the exported exercise directory in your terminal. Compilation must succeed before Node runs. Read the first compiler diagnostic, fix its cause, and rerun. Keep `check.ts`, `assert.ts`, and `tsconfig.json` intact; edit the exercise implementation files. The checks compare behavior and compile type examples; printing the success message yourself does not implement the exercise.
+Run the check from the exported exercise directory in your terminal:
+
+```bash
+tsc --project tsconfig.json --pretty false && node dist/check.js
+```
+
+Compilation must succeed before Node runs. Read the first compiler diagnostic, fix its cause, and rerun.
+
+Keep `check.ts`, `assert.ts`, and `tsconfig.json` intact; edit the exercise implementation files.
+
+The checks compare behavior and compile type examples. Printing the success message yourself does not implement the exercise.
 
 After passing, hover the exported functions in the editor and explain their input and output types without executing them.
 

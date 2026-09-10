@@ -146,9 +146,19 @@ impl CourseLibrary {
         self.courses.get(id)
     }
 
-    /// All courses, sorted by id.
+    /// All courses in display order: the manifest's `order` first, then id
+    /// as a stable tiebreak. Courses without an `order` sort last, so a
+    /// course dropped into the courses directory appears without a code
+    /// change and without displacing the curated sequence.
     pub fn courses(&self) -> impl Iterator<Item = &Course> {
-        self.courses.values()
+        let mut courses: Vec<&Course> = self.courses.values().collect();
+        courses.sort_by(|left, right| {
+            let rank = |course: &Course| course.manifest.order.unwrap_or(u32::MAX);
+            rank(left)
+                .cmp(&rank(right))
+                .then_with(|| left.manifest.id.cmp(&right.manifest.id))
+        });
+        courses.into_iter()
     }
 
     /// Re-scan if the tree changed. Returns true when a reload happened
@@ -274,6 +284,63 @@ lessons = ["L00"]
     fn build_course(root: &Path) {
         write(&root.join("t/course.toml"), MANIFEST);
         write(&root.join("t/lessons/L00/lesson.md"), &lesson_md());
+    }
+
+    /// Build a course whose id deliberately disagrees with its display
+    /// order, so a passing assertion can only come from `order` and never
+    /// from the id-keyed map's alphabetical iteration.
+    fn build_ordered_course(root: &Path, id: &str, order: Option<u32>) {
+        let mut manifest = format!(
+            "id = \"{id}\"\ntitle = \"{id}\"\nlanguage = \"rust\"\ndescription = \"test\"\n"
+        );
+        if let Some(order) = order {
+            manifest.push_str(&format!("order = {order}\n"));
+        }
+        manifest.push_str("\n[[modules]]\ntitle = \"One\"\nchapter = 1\nlessons = [\"L00\"]\n");
+        write(&root.join(format!("{id}/course.toml")), &manifest);
+        write(
+            &root.join(format!("{id}/lessons/L00/lesson.md")),
+            &lesson_md(),
+        );
+    }
+
+    fn course_ids(library: &CourseLibrary) -> Vec<&str> {
+        library
+            .courses()
+            .map(|course| course.manifest.id.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn courses_follow_the_manifest_order_not_the_id() {
+        let dir = temp_dir("display-order");
+        // Alphabetically these are apple, banana, cherry; by order they are
+        // the reverse, which is the whole point of the field.
+        build_ordered_course(&dir, "apple", Some(3));
+        build_ordered_course(&dir, "banana", Some(2));
+        build_ordered_course(&dir, "cherry", Some(1));
+
+        let library = CourseLibrary::load(&dir).unwrap();
+        assert_eq!(course_ids(&library), vec!["cherry", "banana", "apple"]);
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn courses_without_an_order_sort_last_and_stay_alphabetical() {
+        let dir = temp_dir("display-order-default");
+        build_ordered_course(&dir, "ordered", Some(1));
+        build_ordered_course(&dir, "zeta", None);
+        build_ordered_course(&dir, "alpha", None);
+
+        let library = CourseLibrary::load(&dir).unwrap();
+        assert_eq!(
+            course_ids(&library),
+            vec!["ordered", "alpha", "zeta"],
+            "an unordered course appears without displacing the curated sequence"
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -463,11 +530,27 @@ lessons = ["L00"]
 mod course_content_tests {
     use super::*;
 
+    /// The shipped catalog's order is a curriculum decision — JavaScript
+    /// before TypeScript before Rust before Elixir — so it is pinned here rather than
+    /// left to whatever the id-keyed map happens to yield. Note that
+    /// alphabetical order would give javascript, rust, typescript, so this
+    /// fails if the manifests ever lose their `order`.
     #[test]
-    fn javascript_and_typescript_are_separate_complete_courses() {
+    fn bundled_courses_are_listed_in_curriculum_order() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/academy/courses");
         let library = CourseLibrary::load(&root).expect("bundled courses must load");
-        for (id, lesson_count) in [("javascript", 11), ("typescript", 10)] {
+        let ids: Vec<&str> = library
+            .courses()
+            .map(|course| course.manifest.id.as_str())
+            .collect();
+        assert_eq!(ids, vec!["javascript", "typescript", "rust", "elixir"]);
+    }
+
+    #[test]
+    fn bundled_standalone_courses_are_complete() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/academy/courses");
+        let library = CourseLibrary::load(&root).expect("bundled courses must load");
+        for (id, lesson_count) in [("javascript", 11), ("typescript", 10), ("elixir", 10)] {
             let course = library.course(id).expect("language course present");
             assert_eq!(course.manifest.language, id);
             assert_eq!(course.manifest.modules.len(), 5);
@@ -510,6 +593,65 @@ mod course_content_tests {
     /// parser's placeholder. Assert every bundled lesson has a heading and
     /// real prose to read. Code blocks are deliberately not required — the
     /// toolchain lessons are prose plus inline code.
+    /// Courses that have had the readability pass: short paragraphs, and
+    /// every lesson offering a command the reader can copy and run.
+    ///
+    /// This is an opt-in list rather than every course, because the pass is
+    /// editorial work done course by course. A course joins the list when
+    /// it has had that pass — not before, or this test just fails for
+    /// authors who have not gotten there yet.
+    const READABILITY_PASS_COURSES: [&str; 3] = ["rust", "javascript", "typescript"];
+
+    /// Both properties a well-meaning content edit can undo silently, so
+    /// they are pinned here rather than left to review.
+    #[test]
+    fn edited_courses_stay_paragraphed_and_runnable() {
+        use crate::editor::markdown::{parse_markdown_blocks, MarkdownBlockKind};
+
+        // Comfortably above the current longest (317 chars) and far below
+        // the 450-700 char lumps this replaced.
+        const MAX_PARAGRAPH: usize = 320;
+
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/academy/courses");
+        let library = CourseLibrary::load(&root).expect("bundled courses must load");
+
+        for course_id in READABILITY_PASS_COURSES {
+            let course = library
+                .course(course_id)
+                .unwrap_or_else(|| panic!("{course_id} course present"));
+
+            for (id, lesson) in &course.lessons {
+                let blocks = parse_markdown_blocks(&lesson.body);
+
+                assert!(
+                    blocks.iter().any(|block| block.is_shell_command()),
+                    "{course_id} {id} has no runnable command block, \
+                     so the reader has nothing to copy"
+                );
+
+                let paragraphs: Vec<_> = blocks
+                    .iter()
+                    .filter(|block| block.kind == MarkdownBlockKind::Paragraph)
+                    .collect();
+
+                for paragraph in &paragraphs {
+                    let length = paragraph.text.chars().count();
+                    assert!(
+                        length <= MAX_PARAGRAPH,
+                        "{course_id} {id} has a {length}-character paragraph; \
+                         split it (limit {MAX_PARAGRAPH})"
+                    );
+                }
+
+                assert!(
+                    paragraphs.len() >= 3,
+                    "{course_id} {id} reads as one lump; \
+                     it should be broken into paragraphs"
+                );
+            }
+        }
+    }
+
     #[test]
     fn bundled_lesson_bodies_render_as_content() {
         use crate::editor::markdown::{parse_markdown_blocks, MarkdownBlockKind};

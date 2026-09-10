@@ -4,7 +4,7 @@ use gpui::{div, px, rgb, Context, MouseButton, MouseDownEvent};
 use crate::config::{editor_syntax_presets, Config, EditorSyntaxPreset};
 use crate::gpui_workspace::{WorkspacePrototype, BORDER, MUTED_TEXT, QUEUE_GREEN, SIDEBAR_TEXT};
 
-use super::widgets::{color_strip, metric_row};
+use super::widgets::{color_strip, glass_fill, metric_row};
 
 pub(super) fn editor_appearance_controls(
     content: gpui::Div,
@@ -75,7 +75,7 @@ fn editor_syntax_theme_button(
         .rounded_sm()
         .border_1()
         .border_color(rgb(if active { 0x47785f } else { BORDER }))
-        .bg(rgb(if active { 0x183725 } else { 0x242632 }))
+        .bg(glass_fill(if active { 0x183725 } else { 0x242632 }))
         .px_2()
         .py_1()
         .cursor_pointer()

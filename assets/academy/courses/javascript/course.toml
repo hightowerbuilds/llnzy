@@ -2,6 +2,7 @@ id = "javascript"
 title = "JavaScript"
 language = "javascript"
 description = "Learn JavaScript with Node.js: values, functions, collections, modules, validation, asynchronous work, and a tested expense-report CLI. Requires Node.js 22+; no npm dependencies."
+order = 1
 
 [[modules]]
 title = "Runtime & Values"

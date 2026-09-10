@@ -38,6 +38,29 @@ solution = """fn main() {
 +++
 # Hello, Cargo
 
-Still chapter 1, now on the project conventions you will use for the whole course. `cargo new` scaffolds a directory with a manifest and one source file: `Cargo.toml` at the root describing the package, and `src/main.rs` as the binary's entry point. The manifest's `[package]` table carries the name, version, and the language edition; `[dependencies]` starts empty and stays empty here, because this course is std-only and no check ever touches the network. Two commands matter today. `cargo run` compiles and then executes in one step; `cargo build` only compiles, leaving a binary under `target/debug/` that you can run directly. We pin `edition = "2021"` in every starter so a lesson behaves the same regardless of what your local cargo defaults to.
+Still chapter 1, now on the project conventions you will use for the whole course.
 
-In the terminal, run `cargo build`, then execute `./target/debug/lesson` yourself and compare the two workflows.
+## What cargo new gives you
+
+`cargo new` scaffolds a directory with a manifest and one source file: `Cargo.toml` at the root describing the package, and `src/main.rs` as the binary's entry point.
+
+The manifest's `[package]` table carries the name, version, and the language edition. `[dependencies]` starts empty and stays empty here, because this course is std-only and no check ever touches the network.
+
+We pin `edition = "2021"` in every starter so a lesson behaves the same regardless of what your local cargo defaults to.
+
+## Two commands matter today
+
+`cargo run` compiles and then executes in one step:
+
+```bash
+cargo run
+```
+
+`cargo build` only compiles, leaving a binary under `target/debug/` that you can run directly:
+
+```bash
+cargo build
+./target/debug/lesson
+```
+
+Run both and compare the two workflows. Same program, different feedback loop.

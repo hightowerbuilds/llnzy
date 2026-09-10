@@ -159,13 +159,17 @@ export function describeState(state: LoadState): string {
 +++
 # Interfaces, Aliases, and Safe Patches
 
-Use an interface to name an object contract that can be extended: `Entry extends Identified` adds fields to a shared shape. Interfaces can also participate in declaration merging, which is useful in extension APIs but can surprise you if you reuse a name. A type alias can name an object too, and can additionally describe unions, tuples, and utility-type compositions. Neither choice changes runtime behavior.
+Use an interface to name an object contract that can be extended: `Entry extends Identified` adds fields to a shared shape. Interfaces can also participate in declaration merging, which is useful in extension APIs but can surprise you if you reuse a name.
+
+A type alias can name an object too, and can additionally describe unions, tuples, and utility-type compositions. Neither choice changes runtime behavior.
 
 Here the domain entity is an interface; the loading alternatives form a type alias. State the reason in one sentence for each. Both describe structurally compatible values: membership depends on shape, not a runtime class declaration.
 
 `Partial<Pick<Entry, "label" | "cents">>` first selects editable fields and then makes them optional. It deliberately excludes the stable ID. With exact optional property checking, omitting `label` differs from explicitly passing `label: undefined`.
 
-Construct a new object by explicitly copying the stable ID and choosing only the allowed patch fields. Structural typing permits a variable with additional properties to satisfy EntryPatch; the type does not remove those properties at runtime. Spreading the entire patch could therefore overwrite the ID. Use nullish coalescing to preserve provided zero values. Avoid `patch.cents || entry.cents`: a legitimate zero would be discarded. This function trusts its typed arguments; validating arbitrary JSON remains a separate boundary responsibility. Narrow the state by its tag before reading the ready entry.
+Construct a new object by explicitly copying the stable ID and choosing only the allowed patch fields. Structural typing permits a variable with additional properties to satisfy EntryPatch; the type does not remove those properties at runtime. Spreading the entire patch could therefore overwrite the ID.
+
+Use nullish coalescing to preserve provided zero values. Avoid `patch.cents || entry.cents`: a legitimate zero would be discarded. This function trusts its typed arguments; validating arbitrary JSON remains a separate boundary responsibility. Narrow the state by its tag before reading the ready entry.
 
 A small example to compare with your exercise:
 
@@ -175,6 +179,16 @@ interface User extends Named { id: number }
 type UserNamePatch = Partial<Pick<User, "name">>;
 ```
 
-Run `tsc --project tsconfig.json --pretty false && node dist/check.js` from the exported exercise directory in your terminal. Compilation must succeed before Node runs. Read the first compiler diagnostic, fix its cause, and rerun. Keep `check.ts`, `assert.ts`, and `tsconfig.json` intact; edit the exercise implementation files. The checks compare behavior and compile type examples; printing the success message yourself does not implement the exercise.
+Run the check from the exported exercise directory in your terminal:
+
+```bash
+tsc --project tsconfig.json --pretty false && node dist/check.js
+```
+
+Compilation must succeed before Node runs. Read the first compiler diagnostic, fix its cause, and rerun.
+
+Keep `check.ts`, `assert.ts`, and `tsconfig.json` intact; edit the exercise implementation files.
+
+The checks compare behavior and compile type examples. Printing the success message yourself does not implement the exercise.
 
 After passing, hover the exported functions in the editor and explain their input and output types without executing them.

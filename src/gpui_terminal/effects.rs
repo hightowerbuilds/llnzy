@@ -67,7 +67,6 @@ pub(super) fn terminal_effect_underlay(
     }
 
     let mut quads = Vec::new();
-    quads.extend(terminal_background_effects(terminal_bounds, config));
     if config.effects.particles_enabled {
         quads.extend(terminal_particle_effects(terminal_bounds, config));
     }
@@ -92,33 +91,9 @@ pub(super) fn terminal_effect_overlay(
     quads
 }
 
-fn terminal_background_effects(terminal_bounds: Bounds<Pixels>, config: &Config) -> Vec<PaintQuad> {
-    let mode = config.effects.background.as_str();
-    // `smoke`, `fire`, and `aurora` are driven by the WGSL pipeline via
-    // `paint_surface` -- the workspace mounts an `EffectsElement` at the
-    // joined-container level so two terminals see one continuous shader
-    // field. The rectangle path here was retired in M2/M3 to avoid double-
-    // rendering on top.
-    if matches!(
-        mode,
-        "none" | "image" | "smoke" | "fire" | "aurora" | "trees" | "rain"
-    ) {
-        return Vec::new();
-    }
-
-    let intensity = config.effects.background_intensity.clamp(0.0, 1.0);
-    let width = terminal_bounds.size.width / px(1.0);
-    let height = terminal_bounds.size.height / px(1.0);
-    vec![terminal_local_quad(
-        terminal_bounds,
-        0.0,
-        0.0,
-        width,
-        height,
-        effect_palette_color(config, 0),
-        0.05 + intensity * 0.12,
-    )]
-}
+/// Cycled through by the particle field. Fixed now that the per-effect
+/// palette override the shader backgrounds fed it is gone.
+const PARTICLE_COLORS: [[u8; 3]; 3] = [[95, 200, 255], [106, 255, 144], [182, 114, 255]];
 
 fn terminal_particle_effects(terminal_bounds: Bounds<Pixels>, config: &Config) -> Vec<PaintQuad> {
     let width = terminal_bounds.size.width / px(1.0);
@@ -139,7 +114,7 @@ fn terminal_particle_effects(terminal_bounds: Bounds<Pixels>, config: &Config) -
             y,
             size,
             size,
-            effect_palette_color(config, index),
+            PARTICLE_COLORS[index % PARTICLE_COLORS.len()],
             alpha,
         ));
     }
@@ -340,15 +315,6 @@ fn terminal_local_quad(
         ),
         rgba(rgba_u32(color, alpha.clamp(0.0, 1.0))),
     )
-}
-
-fn effect_palette_color(config: &Config, index: usize) -> [u8; 3] {
-    let defaults = [[95, 200, 255], [106, 255, 144], [182, 114, 255]];
-    match index % 3 {
-        0 => config.effects.background_color.unwrap_or(defaults[0]),
-        1 => config.effects.background_color2.unwrap_or(defaults[1]),
-        _ => config.effects.background_color3.unwrap_or(defaults[2]),
-    }
 }
 
 fn hash_unit(mut value: u32) -> f32 {

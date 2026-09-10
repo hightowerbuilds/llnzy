@@ -273,17 +273,29 @@ export async function runLedger(load: () => Promise<unknown>, command: Command):
 +++
 # Capstone: A Modular Async Ledger Report
 
-The final project connects the preceding ideas across a small codebase. Read model.ts first, then boundary.ts, then ledger.ts, then the integration checks. Use go-to-definition to trace how unknown data becomes trusted entries. Before editing, state what each exported function accepts and returns, where validation happens, and which layer converts exceptions into result data.
+The final project connects the preceding ideas across a small codebase. Read model.ts first, then boundary.ts, then ledger.ts, then the integration checks.
 
-The loader is injected as `() => Promise<unknown>`. This makes the core independent of a filesystem, HTTP service, or test fixture. These lessons deliberately use in-memory loaders so every check is offline and deterministic. A real application's adapter could read JSON and return it as unknown; the same boundary would still validate it.
+Use go-to-definition to trace how unknown data becomes trusted entries. Before editing, state what each exported function accepts and returns, where validation happens, and which layer converts exceptions into result data.
 
-`select<T extends Entry>` preserves additional fields of a more specific entry subtype. It should return a new array, match tags with strict equality, and leave the original objects alone. The optional tag means omitted selects everything; an explicit empty string selects nothing in a valid ledger. Do not treat both cases as falsy.
+The loader is injected as `() => Promise<unknown>`. This makes the core independent of a filesystem, HTTP service, or test fixture.
 
-For a summary, accumulate cents by tag with reduce and a Map, sort tags by ordinary string comparison, then map to output lines. Reject a total that exceeds the safe-integer range with `Error("total exceeds safe integer range")`. Valid individual amounts do not guarantee their sum is safe. For list output, retain the original order.
+These lessons deliberately use in-memory loaders so every check is offline and deterministic. A real application's adapter could read JSON and return it as unknown; the same boundary would still validate it.
 
-In runLedger, await the loader and pass its value through parseEntries before dispatching the tagged command. An exhaustive switch catches future command additions. Convert any thrown value into the error branch, narrowing with instanceof Error first. On success return the formatted string. No function should print a success marker; the supplied integration harness owns output.
+`select<T extends Entry>` preserves additional fields of a more specific entry subtype. It should return a new array, match tags with strict equality, and leave the original objects alone.
 
-Run the two reports together with Promise.all as the test does. Then inspect failure paths: invalid data, a rejected loader, and overflow. These are part of the program's behavior. After completion, explain why Entry is an interface, Command is a union alias, select is generic, and the loader returns unknown. As an extension, add a new command and let compiler diagnostics lead you to its dispatcher.
+The optional tag means omitted selects everything; an explicit empty string selects nothing in a valid ledger. Do not treat both cases as falsy.
+
+For a summary, accumulate cents by tag with reduce and a Map, sort tags by ordinary string comparison, then map to output lines.
+
+Reject a total that exceeds the safe-integer range with `Error("total exceeds safe integer range")`. Valid individual amounts do not guarantee their sum is safe. For list output, retain the original order.
+
+In runLedger, await the loader and pass its value through parseEntries before dispatching the tagged command. An exhaustive switch catches future command additions.
+
+Convert any thrown value into the error branch, narrowing with instanceof Error first. On success return the formatted string. No function should print a success marker; the supplied integration harness owns output.
+
+Run the two reports together with Promise.all as the test does. Then inspect failure paths: invalid data, a rejected loader, and overflow. These are part of the program's behavior.
+
+After completion, explain why Entry is an interface, Command is a union alias, select is generic, and the loader returns unknown. As an extension, add a new command and let compiler diagnostics lead you to its dispatcher.
 
 A small example to compare with your exercise:
 
@@ -294,6 +306,16 @@ if (result.ok) console.log(result.value);
 else console.log(result.error.message);
 ```
 
-Run `tsc --project tsconfig.json --pretty false && node dist/check.js` from the exported exercise directory in your terminal. Compilation must succeed before Node runs. Read the first compiler diagnostic, fix its cause, and rerun. Keep `check.ts`, `assert.ts`, and `tsconfig.json` intact; edit the exercise implementation files. The checks compare behavior and compile type examples; printing the success message yourself does not implement the exercise.
+Run the check from the exported exercise directory in your terminal:
+
+```bash
+tsc --project tsconfig.json --pretty false && node dist/check.js
+```
+
+Compilation must succeed before Node runs. Read the first compiler diagnostic, fix its cause, and rerun.
+
+Keep `check.ts`, `assert.ts`, and `tsconfig.json` intact; edit the exercise implementation files.
+
+The checks compare behavior and compile type examples. Printing the success message yourself does not implement the exercise.
 
 After passing, hover the exported functions in the editor and explain their input and output types without executing them.

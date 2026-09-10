@@ -190,7 +190,9 @@ export function parseEntries(raw: unknown): Entry[] {
 +++
 # Ledger Boundary: From JSON to Trusted Entries
 
-This is the first half of the capstone: a local expense ledger. Its domain interface is small enough to read completely, but the data boundary has several independent promises to establish. Arbitrary JSON does not become an Entry[] because a variable has that annotation. Receive it as unknown and validate before exposing trusted objects to the rest of the program.
+This is the first half of the capstone: a local expense ledger. Its domain interface is small enough to read completely, but the data boundary has several independent promises to establish.
+
+Arbitrary JSON does not become an Entry[] because a variable has that annotation. Receive it as unknown and validate before exposing trusted objects to the rest of the program.
 
 Require positive safe-integer IDs and nonnegative safe-integer cents. `Number.isSafeInteger` rejects fractions, infinities, and integers beyond reliable JavaScript representation. A Set records seen IDs so duplicates fail even if both objects are otherwise valid. An empty ledger is allowed.
 
@@ -198,7 +200,9 @@ Build fresh objects containing exactly the declared fields. Structural typing do
 
 Array.isArray narrows an unknown value to an array whose elements are permissively typed by the standard library. Assign each element to a local `unknown` before checking its fields so that accidental property access cannot bypass your guard. Do not use type assertions or explicit any.
 
-Separate errors by contract: a non-array throws `entries must be an array`, malformed fields throw `invalid entry`, and reused IDs throw `duplicate id`. The custom class lets callers distinguish expected validation failures from unrelated programming errors. The next lesson reuses this boundary in a multi-module asynchronous report.
+Separate errors by contract: a non-array throws `entries must be an array`, malformed fields throw `invalid entry`, and reused IDs throw `duplicate id`.
+
+The custom class lets callers distinguish expected validation failures from unrelated programming errors. The next lesson reuses this boundary in a multi-module asynchronous report.
 
 A small example to compare with your exercise:
 
@@ -210,6 +214,16 @@ if (typeof input === "object" && input !== null && "count" in input) {
 }
 ```
 
-Run `tsc --project tsconfig.json --pretty false && node dist/check.js` from the exported exercise directory in your terminal. Compilation must succeed before Node runs. Read the first compiler diagnostic, fix its cause, and rerun. Keep `check.ts`, `assert.ts`, and `tsconfig.json` intact; edit the exercise implementation files. The checks compare behavior and compile type examples; printing the success message yourself does not implement the exercise.
+Run the check from the exported exercise directory in your terminal:
+
+```bash
+tsc --project tsconfig.json --pretty false && node dist/check.js
+```
+
+Compilation must succeed before Node runs. Read the first compiler diagnostic, fix its cause, and rerun.
+
+Keep `check.ts`, `assert.ts`, and `tsconfig.json` intact; edit the exercise implementation files.
+
+The checks compare behavior and compile type examples. Printing the success message yourself does not implement the exercise.
 
 After passing, hover the exported functions in the editor and explain their input and output types without executing them.

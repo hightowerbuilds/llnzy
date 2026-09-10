@@ -207,11 +207,17 @@ console.log("L10 passed");
 +++
 # Capstone: A JSON Expense Report CLI
 
-Build a small command-line program whose responsibilities are visible in separate modules. ledger.js owns validation and reporting; cli.js owns argument parsing, file reading, stdout, stderr, and exit status. The check harness creates temporary JSON files and runs the actual CLI as a child process, so success requires the pieces to work together.
+Build a small command-line program whose responsibilities are visible in separate modules. ledger.js owns validation and reporting; cli.js owns argument parsing, file reading, stdout, stderr, and exit status.
 
-Run `node cli.js expenses.json` to report every tag, or `node cli.js expenses.json food` to select food. Exactly one file argument and at most one tag are allowed. Reject other argument counts with `usage: node cli.js FILE [TAG]`. An explicit empty tag matches nothing. A successful report always ends with a total line, including `total: 0` for no matching records.
+The check harness creates temporary JSON files and runs the actual CLI as a child process, so success requires the pieces to work together.
 
-The input must be an array; otherwise throw `entries must be an array`. Each expense must be a non-null, non-array object with a nonblank string label, a nonblank string tag, and nonnegative safe-integer cents; otherwise throw `invalid entry`. Return fresh records containing only label, tag, and cents. Preserve accepted strings. Use integer cents throughout, and reject either a per-tag sum or the grand total outside the safe-integer range with `total exceeds safe integer range`.
+Run `node cli.js expenses.json` to report every tag, or `node cli.js expenses.json food` to select food. Exactly one file argument and at most one tag are allowed.
+
+Reject other argument counts with `usage: node cli.js FILE [TAG]`. An explicit empty tag matches nothing. A successful report always ends with a total line, including `total: 0` for no matching records.
+
+The input must be an array; otherwise throw `entries must be an array`. Each expense must be a non-null, non-array object with a nonblank string label, a nonblank string tag, and nonnegative safe-integer cents; otherwise throw `invalid entry`.
+
+Return fresh records containing only label, tag, and cents. Preserve accepted strings. Use integer cents throughout, and reject either a per-tag sum or the grand total outside the safe-integer range with `total exceeds safe integer range`.
 
 The following file is a useful manual fixture, different from the automated checks:
 
@@ -222,10 +228,30 @@ The following file is a useful manual fixture, different from the automated chec
 ]
 ```
 
-It should print `office: 425` and then `total: 425`. JSON requires double-quoted keys and strings; it does not allow comments or trailing commas. The file reader returns text, JSON.parse constructs JavaScript values, and validation decides whether those values meet your contract. Validate every expense before filtering so a tag filter cannot hide malformed records.
+It should print `office: 425` and then `total: 425`. JSON requires double-quoted keys and strings; it does not allow comments or trailing commas.
 
-Use `process.argv.slice(2)` for user arguments. The first two entries describe the runtime and script. Read with `readFile(path, "utf8")` from node:fs/promises and await the result. Catch at the CLI boundary, print `error: ` plus the error message with console.error, and set `process.exitCode = 1`; this allows normal stream flushing. Do not match platform-dependent filesystem error wording in tests, but preserve useful messages for a person debugging their own command.
+The file reader returns text, JSON.parse constructs JavaScript values, and validation decides whether those values meet your contract. Validate every expense before filtering so a tag filter cannot hide malformed records.
 
-Build summaries with filter, reduce, and map, keeping formatting deterministic by sorting tags. A Map handles arbitrary tag strings safely. As a final review, explain why validation precedes reporting, why cents stay integers, why report generation does not write files, and why a failed CLI writes to stderr rather than stdout. This project reports an existing journal; persistent editing is a possible follow-up extension.
+Use `process.argv.slice(2)` for user arguments. The first two entries describe the runtime and script. Read with `readFile(path, "utf8")` from node:fs/promises and await the result.
 
-From the repository root, export this lesson with `python3 scripts/check_academy_courses.py --export javascript L10 /tmp/llnzy-javascript-L10` (Python 3.11+, destination must be new). Open the exported directory in the editor and run `node check.js` from that directory with Node.js 22 or newer. Edit the implementation files and keep the supplied assertions intact. Read an assertion failure as a concrete example of behavior to repair. No exercise check downloads packages or accesses the network.
+Catch at the CLI boundary, print `error: ` plus the error message with console.error, and set `process.exitCode = 1`; this allows normal stream flushing. Do not match platform-dependent filesystem error wording in tests, but preserve useful messages for a person debugging their own command.
+
+Build summaries with filter, reduce, and map, keeping formatting deterministic by sorting tags. A Map handles arbitrary tag strings safely.
+
+As a final review, explain why validation precedes reporting, why cents stay integers, why report generation does not write files, and why a failed CLI writes to stderr rather than stdout. This project reports an existing journal; persistent editing is a possible follow-up extension.
+
+From the repository root, export this lesson. Python 3.11+ is required, and the destination must be new:
+
+```bash
+python3 scripts/check_academy_courses.py --export javascript L10 /tmp/llnzy-javascript-L10
+```
+
+Open the exported directory in the editor, then run the check from that directory with Node.js 22 or newer:
+
+```bash
+node check.js
+```
+
+Edit the implementation files and keep the supplied assertions intact. Read an assertion failure as a concrete example of behavior to repair.
+
+No exercise check downloads packages or accesses the network.

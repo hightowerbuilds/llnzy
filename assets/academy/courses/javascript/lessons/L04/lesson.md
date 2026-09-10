@@ -97,7 +97,9 @@ console.log('L04 passed');
 +++
 # Immutable Record Updates
 
-An object stores named properties; an array stores an ordered sequence. The properties can themselves refer to objects or arrays. When two variables refer to the same object, a mutation through either variable is visible through the other. `const` prevents reassignment of the variable, not modification of the referenced object.
+An object stores named properties; an array stores an ordered sequence. The properties can themselves refer to objects or arrays.
+
+When two variables refer to the same object, a mutation through either variable is visible through the other. `const` prevents reassignment of the variable, not modification of the referenced object.
 
 Spread builds a new container from existing fields. Later fields override earlier ones:
 
@@ -121,10 +123,28 @@ The second spread copies the nested object on the path you are changing. Unchang
 
 The starter is deliberately plausible but wrong: it changes the caller's data. The harness freezes the provided object and nested containers, making such writes fail immediately instead of silently corrupting a later assertion. `Object.freeze` itself is shallow; the harness explicitly freezes each relevant level.
 
-First decide which containers need copying, then preserve every field not named in the requested change. After passing, explain why `{ ...player, profile: { name } }` loses information and why `{ ...player }` alone is insufficient for renaming a nested profile. Use hover to inspect the shape of `renamed` in a separate example.
+First decide which containers need copying, then preserve every field not named in the requested change.
+
+After passing, explain why `{ ...player, profile: { name } }` loses information and why `{ ...player }` alone is insufficient for renaming a nested profile. Use hover to inspect the shape of `renamed` in a separate example.
 
 ## Practice
 
 Implement renamePlayer(player,name) returning a new player with a new nested profile containing name, preserving other fields. Implement appendScore(player,score) returning a new player and scores array. Neither function may mutate its input; preserve unrelated fields.
 
-Using Python 3.11 or newer, export a fresh workspace from the repository root with `python3 scripts/check_academy_courses.py --export javascript L04 /tmp/llnzy-js-l04`. The destination must not already exist; choose a new path for a retake. Open those files in LLNZY, then run `node check.js` from the exported directory. The starter intentionally fails. Leave `check.js` unchanged: it calls your functions with several inputs and reports the first failed assertion. Read that failure, inspect the relevant input, and rerun after one focused edit.
+Export a fresh workspace from the repository root. The exporter needs Python 3.11 or newer:
+
+```bash
+python3 scripts/check_academy_courses.py --export javascript L04 /tmp/llnzy-js-l04
+```
+
+The destination must not already exist, so choose a new path for a retake.
+
+Open those files in LLNZY, then run the check from the exported directory:
+
+```bash
+node check.js
+```
+
+The starter intentionally fails. Leave `check.js` unchanged: it calls your functions with several inputs and reports the first failed assertion.
+
+Read that failure, inspect the relevant input, and rerun after one focused edit.

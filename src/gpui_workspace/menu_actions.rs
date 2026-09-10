@@ -19,6 +19,18 @@ use super::{
 };
 
 impl WorkspacePrototype {
+    fn menu_text_editor(
+        &self,
+        window: &Window,
+        cx: &gpui::App,
+    ) -> gpui::Entity<crate::gpui_editor::EditorPrototype> {
+        if self.active_surface() == WorkspaceSurface::Home {
+            self.notepad.read(cx).focused_editor(window, cx)
+        } else {
+            self.active_editor_entity()
+        }
+    }
+
     fn with_editor_menu_action(
         &mut self,
         window: &mut Window,
@@ -279,37 +291,57 @@ impl WorkspacePrototype {
         self.close_project(cx);
     }
 
-    pub(super) fn menu_save(&mut self, _: &MenuSave, _: &mut Window, cx: &mut Context<Self>) {
-        if self.active_surface() == WorkspaceSurface::Editor {
-            self.active_editor_entity()
+    pub(super) fn menu_save(&mut self, _: &MenuSave, window: &mut Window, cx: &mut Context<Self>) {
+        if matches!(
+            self.active_surface(),
+            WorkspaceSurface::Editor | WorkspaceSurface::Home
+        ) {
+            self.menu_text_editor(window, cx)
                 .update(cx, |editor, cx| editor.save_active_buffer(cx));
         }
     }
 
-    pub(super) fn menu_undo(&mut self, _: &MenuUndo, _: &mut Window, cx: &mut Context<Self>) {
-        if self.active_surface() == WorkspaceSurface::Editor {
-            self.active_editor_entity()
+    pub(super) fn menu_undo(&mut self, _: &MenuUndo, window: &mut Window, cx: &mut Context<Self>) {
+        if matches!(
+            self.active_surface(),
+            WorkspaceSurface::Editor | WorkspaceSurface::Home
+        ) {
+            self.menu_text_editor(window, cx)
                 .update(cx, |editor, cx| editor.undo_edit(cx));
         }
     }
 
-    pub(super) fn menu_redo(&mut self, _: &MenuRedo, _: &mut Window, cx: &mut Context<Self>) {
-        if self.active_surface() == WorkspaceSurface::Editor {
-            self.active_editor_entity()
+    pub(super) fn menu_redo(&mut self, _: &MenuRedo, window: &mut Window, cx: &mut Context<Self>) {
+        if matches!(
+            self.active_surface(),
+            WorkspaceSurface::Editor | WorkspaceSurface::Home
+        ) {
+            self.menu_text_editor(window, cx)
                 .update(cx, |editor, cx| editor.redo_edit(cx));
         }
     }
 
-    pub(super) fn menu_copy(&mut self, _: &MenuCopy, _: &mut Window, cx: &mut Context<Self>) {
-        if self.active_surface() == WorkspaceSurface::Editor {
-            self.active_editor_entity()
+    pub(super) fn menu_copy(&mut self, _: &MenuCopy, window: &mut Window, cx: &mut Context<Self>) {
+        if matches!(
+            self.active_surface(),
+            WorkspaceSurface::Editor | WorkspaceSurface::Home
+        ) {
+            self.menu_text_editor(window, cx)
                 .update(cx, |editor, cx| editor.copy_selection_to_clipboard(cx));
         }
     }
 
-    pub(super) fn menu_paste(&mut self, _: &MenuPaste, _: &mut Window, cx: &mut Context<Self>) {
-        if self.active_surface() == WorkspaceSurface::Editor {
-            self.active_editor_entity()
+    pub(super) fn menu_paste(
+        &mut self,
+        _: &MenuPaste,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if matches!(
+            self.active_surface(),
+            WorkspaceSurface::Editor | WorkspaceSurface::Home
+        ) {
+            self.menu_text_editor(window, cx)
                 .update(cx, |editor, cx| editor.paste_from_workspace(cx));
         }
     }
@@ -317,11 +349,14 @@ impl WorkspacePrototype {
     pub(super) fn menu_select_all(
         &mut self,
         _: &MenuSelectAll,
-        _: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.active_surface() == WorkspaceSurface::Editor {
-            self.active_editor_entity()
+        if matches!(
+            self.active_surface(),
+            WorkspaceSurface::Editor | WorkspaceSurface::Home
+        ) {
+            self.menu_text_editor(window, cx)
                 .update(cx, |editor, cx| editor.select_all_text(cx));
         }
     }

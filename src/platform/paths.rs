@@ -109,10 +109,6 @@ impl PlatformPathSet {
     pub fn backgrounds_dir(&self) -> PathBuf {
         self.config_dir.join("backgrounds")
     }
-
-    pub fn shaders_dir(&self) -> PathBuf {
-        self.config_dir.join("shaders")
-    }
 }
 
 /// Resolve the bundled-courses directory from an executable path, for a

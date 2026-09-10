@@ -163,13 +163,19 @@ export async function attempt<T>(task: () => Promise<T>, tries: number): Promise
 +++
 # Typed Async Results
 
-An async function returns a promise even when its body returns an ordinary value. `Promise<Result<T, Error>>` tells the caller to await first and then inspect the result tag. JavaScript promises do not have a separate generic parameter for their rejection type; a caught rejection is unknown because a task may throw a string or any other value.
+An async function returns a promise even when its body returns an ordinary value. `Promise<Result<T, Error>>` tells the caller to await first and then inspect the result tag.
 
-Narrow caught values with `instanceof Error` before using `.message`. Normalize other values into an Error so consumers see one stable error contract. Retrying belongs at the layer that knows whether another attempt is appropriate. This exercise uses deterministic injected tasks; it has no timers, network, or random failures.
+JavaScript promises do not have a separate generic parameter for their rejection type; a caught rejection is unknown because a task may throw a string or any other value.
+
+Narrow caught values with `instanceof Error` before using `.message`. Normalize other values into an Error so consumers see one stable error contract.
+
+Retrying belongs at the layer that knows whether another attempt is appropriate. This exercise uses deterministic injected tasks; it has no timers, network, or random failures.
 
 Validate the attempt budget before invoking the task. Then use a bounded loop with await inside it, returning as soon as an attempt succeeds. On the final rejection, return the normalized error. An explicit unreachable throw after the loop can document that validation plus iteration must already have returned.
 
-The tests also await two independent attempts with `Promise.all`. Calling the two async functions starts the operations; Promise.all waits for both and preserves input order in the returned array, regardless of completion order. Do not write a floating async call: its failure could escape the flow you intended to handle.
+The tests also await two independent attempts with `Promise.all`. Calling the two async functions starts the operations; Promise.all waits for both and preserves input order in the returned array, regardless of completion order.
+
+Do not write a floating async call: its failure could escape the flow you intended to handle.
 
 A small example to compare with your exercise:
 
@@ -180,6 +186,16 @@ async function twice(task: () => Promise<number>): Promise<number> {
 }
 ```
 
-Run `tsc --project tsconfig.json --pretty false && node dist/check.js` from the exported exercise directory in your terminal. Compilation must succeed before Node runs. Read the first compiler diagnostic, fix its cause, and rerun. Keep `check.ts`, `assert.ts`, and `tsconfig.json` intact; edit the exercise implementation files. The checks compare behavior and compile type examples; printing the success message yourself does not implement the exercise.
+Run the check from the exported exercise directory in your terminal:
+
+```bash
+tsc --project tsconfig.json --pretty false && node dist/check.js
+```
+
+Compilation must succeed before Node runs. Read the first compiler diagnostic, fix its cause, and rerun.
+
+Keep `check.ts`, `assert.ts`, and `tsconfig.json` intact; edit the exercise implementation files.
+
+The checks compare behavior and compile type examples. Printing the success message yourself does not implement the exercise.
 
 After passing, hover the exported functions in the editor and explain their input and output types without executing them.

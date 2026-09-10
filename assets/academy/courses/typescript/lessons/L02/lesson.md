@@ -136,9 +136,13 @@ export function isPlayer(value: unknown): value is Player {
 
 External data is evidence to inspect, not a type to assume. `unknown` can hold anything, but you cannot read its properties until you narrow it. In contrast, `any` switches off useful checking. A type assertion such as `raw as Player` merely tells the compiler to trust you; it does not inspect the input.
 
-Build your guard from the outside inward. First establish that the value is an object, is not null, and is not an array. Then use `"name" in value` and `"score" in value` before reading those fields. Check field types before calling string or number operations. `typeof null` is `"object"`, and `typeof NaN` is `"number"`, so neither single test is enough.
+Build your guard from the outside inward. First establish that the value is an object, is not null, and is not an array. Then use `"name" in value` and `"score" in value` before reading those fields.
 
-A predicate return type `value is Player` allows callers to narrow after a successful test. The compiler trusts that claim, so the implementation must justify every property it promises. Use `trim()` only to determine whether a name is blank; do not silently modify an accepted name. A zero score is valid, which is why truthiness is the wrong score check.
+Check field types before calling string or number operations. `typeof null` is `"object"`, and `typeof NaN` is `"number"`, so neither single test is enough.
+
+A predicate return type `value is Player` allows callers to narrow after a successful test. The compiler trusts that claim, so the implementation must justify every property it promises.
+
+Use `trim()` only to determine whether a name is blank; do not silently modify an accepted name. A zero score is valid, which is why truthiness is the wrong score check.
 
 In `check.ts`, hover `value` inside the successful guard branch and outside it. Explain how control flow changes what operations are allowed.
 
@@ -150,7 +154,17 @@ function lengthIfText(value: unknown): number {
 }
 ```
 
-Run `tsc --project tsconfig.json --pretty false && node dist/check.js` from the exported exercise directory in your terminal. Compilation must succeed before Node runs. Read the first compiler diagnostic, fix its cause, and rerun. Keep `check.ts`, `assert.ts`, and `tsconfig.json` intact; edit the exercise implementation files. The checks compare behavior and compile type examples; printing the success message yourself does not implement the exercise.
+Run the check from the exported exercise directory in your terminal:
+
+```bash
+tsc --project tsconfig.json --pretty false && node dist/check.js
+```
+
+Compilation must succeed before Node runs. Read the first compiler diagnostic, fix its cause, and rerun.
+
+Keep `check.ts`, `assert.ts`, and `tsconfig.json` intact; edit the exercise implementation files.
+
+The checks compare behavior and compile type examples. Printing the success message yourself does not implement the exercise.
 
 After passing, hover the exported functions in the editor and explain their input and output types without executing them.
 

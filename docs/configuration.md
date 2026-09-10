@@ -10,7 +10,7 @@ llnzy reads `config.toml` from the platform config directory. The file is option
 
 Every key below is optional. You only need to include the ones you want to change.
 
-Built-in visual themes currently ship as two presets: `Minimalist` and `Buzz`. User themes are saved under the same platform config directory in `themes/`. Saved workspaces use `workspaces/`, background images use `backgrounds/`, and custom WGSL background shaders use `shaders/`.
+Built-in visual themes currently ship as two presets: `Minimalist` and `Buzz`. User themes are saved under the same platform config directory in `themes/`. Saved workspaces use `workspaces/`, and background images use `backgrounds/`.
 
 ---
 
@@ -127,20 +127,18 @@ opacity = 0.95
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `enabled` | boolean | `true` | Enables visual effects. |
-| `background` | string | `"none"` | Background mode. Built-ins are `"none"`, `"smoke"`, `"aurora"`, and `"image"`. Custom `.wgsl` shader files in the app shader folder can also be selected by file stem. |
-| `background_intensity` | float | `0.3` | Background shader opacity/intensity. |
-| `background_speed` | float | `1.0` | Background shader animation speed. |
-| `background_color` | string | _(none)_ | Optional `"#RRGGBB"` color seed for shader backgrounds. |
+| `background` | string | `"none"` | Background mode: `"none"` or `"image"`. Any other value — including the retired shader patterns `"smoke"`, `"fire"`, `"aurora"`, `"trees"`, and `"rain"` — falls back to `"none"`. |
+| `background_intensity` | float | `0.3` | Brightness of the background image; the terminal dims the image by `1 - background_intensity`. |
 | `background_image` | string | _(none)_ | Path to an image used when `background = "image"`. |
 | `background_image_fit` | string | `"fill"` | Image placement when `background = "image"`: `"fill"`, `"fit"`, `"tile"`, or `"center"`. |
 | `effects_on_ui` | boolean | `true` | Applies post-processing effects to UI views that opt in. |
 
 ```toml
 [effects]
-background = "smoke"
+background = "image"
 background_intensity = 0.4
-background_speed = 1.0
-background_color = "#242424"
+background_image = "~/Pictures/terminal.png"
+background_image_fit = "fill"
 ```
 
 ---

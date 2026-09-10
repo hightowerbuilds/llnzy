@@ -15,7 +15,10 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui::prelude::*;
-use gpui::{div, img, px, relative, rgb, Context, MouseButton, MouseDownEvent, RenderImage};
+use gpui::{
+    div, img, px, relative, rgb, rgba, ClipboardItem, Context, MouseButton, MouseDownEvent,
+    RenderImage, Rgba,
+};
 
 use crate::academy::{Course, CourseLibrary, Exercise};
 use crate::academy_progress::AcademyProgress;
@@ -32,6 +35,59 @@ pub(super) struct AcademyContext {
     pub(super) course: Option<String>,
     pub(super) lesson: Option<String>,
     pub(super) progress: AcademyProgress,
+}
+
+/// What sits behind the Academy surface this frame.
+///
+/// `Blurred` is the surface's own layer. `Sharp` happens when the Academy
+/// is joined to a terminal: the two panes share one image so it reads as
+/// continuous, and the terminal has no business being blurred, so the
+/// Academy takes the sharp image and leans on panel opacity instead.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum AcademyBackdrop {
+    None,
+    Sharp,
+    Blurred,
+}
+
+/// Panel fills for the Academy, resolved once per render.
+///
+/// The surface is reading material: prose, code, and cards stacked on a
+/// flat theme fill. Put a photo behind that flat fill and you see nothing,
+/// so over an image the fills go translucent instead. How translucent
+/// depends on what the image is doing: a blurred backdrop carries no
+/// competing detail, so the panels can be sheerer and let more of it
+/// through, which is the whole point of blurring it. A sharp photo needs
+/// more cover to keep text legible. Code blocks sit above panels in both
+/// cases, because misread code costs more than a muted photo.
+#[derive(Clone, Copy)]
+struct AcademyChrome {
+    panel: Rgba,
+    code: Rgba,
+}
+
+impl AcademyChrome {
+    fn new(palette: WorkspacePalette, backdrop: AcademyBackdrop) -> Self {
+        match backdrop {
+            AcademyBackdrop::None => Self {
+                panel: rgb(palette.panel_bg),
+                code: rgb(palette.editor_bg),
+            },
+            AcademyBackdrop::Sharp => Self {
+                panel: translucent(palette.panel_bg, 0xd9),
+                code: translucent(palette.editor_bg, 0xe6),
+            },
+            AcademyBackdrop::Blurred => Self {
+                panel: translucent(palette.panel_bg, 0xbf),
+                code: translucent(palette.editor_bg, 0xd9),
+            },
+        }
+    }
+}
+
+/// Widen a `0xRRGGBB` theme color into `0xRRGGBBAA` at the given alpha.
+fn translucent(color: u32, alpha: u32) -> Rgba {
+    rgba((color << 8) | alpha)
 }
 
 /// Course insignia, chosen by the manifest's `language` field so a new
@@ -90,12 +146,18 @@ pub(super) fn course_progress(course: &Course, progress: &AcademyProgress) -> (u
     )
 }
 
+/// `backdrop` describes the image behind this surface, mounted either on
+/// its own pane or shared across a joined group. Anything but `None` means
+/// the surface drops its full-bleed fill and lets the panels carry the
+/// contrast instead.
 pub(super) fn academy_surface(
     config: &Config,
     academy: AcademyContext,
+    backdrop: AcademyBackdrop,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     let palette = WorkspacePalette::from_config(config);
+    let chrome = AcademyChrome::new(palette, backdrop);
 
     let mut content = div()
         .id("academy-surface-scroll")
@@ -104,9 +166,12 @@ pub(super) fn academy_surface(
         .flex()
         .flex_col()
         .items_center()
-        .bg(rgb(palette.editor_bg))
         .pt(px(48.0))
         .overflow_y_scroll();
+
+    if backdrop == AcademyBackdrop::None {
+        content = content.bg(rgb(palette.editor_bg));
+    }
 
     let Some(library) = academy.library.as_deref() else {
         return content
@@ -136,6 +201,7 @@ this build — reinstall the app, or run from a source checkout.",
                         lesson,
                         &academy.progress,
                         palette,
+                        chrome,
                         cx,
                     ));
                 }
@@ -146,6 +212,7 @@ this build — reinstall the app, or run from a source checkout.",
                             course,
                             &academy.progress,
                             palette,
+                            chrome,
                             cx,
                         ));
                 }
@@ -156,7 +223,13 @@ this build — reinstall the app, or run from a source checkout.",
             let mut any = false;
             for course in library.courses() {
                 any = true;
-                grid = grid.child(academy_course_card(course, &academy.progress, palette, cx));
+                grid = grid.child(academy_course_card(
+                    course,
+                    &academy.progress,
+                    palette,
+                    chrome,
+                    cx,
+                ));
             }
             content = content.child(academy_heading(palette));
             content = if any {
@@ -214,6 +287,7 @@ fn academy_course_card(
     course: &Course,
     progress: &AcademyProgress,
     palette: WorkspacePalette,
+    chrome: AcademyChrome,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     let id = course.manifest.id.clone();
@@ -230,7 +304,7 @@ fn academy_course_card(
         .rounded_sm()
         .border_1()
         .border_color(rgb(palette.border))
-        .bg(rgb(palette.panel_bg))
+        .bg(chrome.panel)
         .p_3()
         .cursor_pointer()
         .on_mouse_down(
@@ -325,6 +399,7 @@ fn academy_course_detail(
     course: &Course,
     progress: &AcademyProgress,
     palette: WorkspacePalette,
+    chrome: AcademyChrome,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     let (completed, total) = course_progress(course, progress);
@@ -340,7 +415,7 @@ fn academy_course_detail(
         .rounded_sm()
         .border_1()
         .border_color(rgb(palette.accent))
-        .bg(rgb(palette.panel_bg))
+        .bg(chrome.panel)
         .p_4()
         .child(
             div()
@@ -493,6 +568,7 @@ fn academy_lesson_reader(
     lesson: &crate::academy::Lesson,
     progress: &AcademyProgress,
     palette: WorkspacePalette,
+    chrome: AcademyChrome,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     let course_id = course.manifest.id.clone();
@@ -506,7 +582,7 @@ fn academy_lesson_reader(
         .rounded_sm()
         .border_1()
         .border_color(rgb(palette.border))
-        .bg(rgb(palette.panel_bg))
+        .bg(chrome.panel)
         .p_4()
         .child(academy_back_row(
             palette,
@@ -574,14 +650,26 @@ fn academy_lesson_reader(
         panel = panel.child(chips);
     }
 
-    let mut body = div().mt_4().flex().flex_col().gap_2();
-    for block in parse_markdown_blocks(&lesson.body) {
-        body = body.child(academy_markdown_block(&block, palette));
+    // The whole body as one copy, for readers who want the lesson in their
+    // own notes rather than one command at a time. Sourced from the raw
+    // markdown, not the parsed blocks, so what lands on the clipboard is
+    // the lesson as written.
+    panel = panel.child(div().mt_4().flex().justify_end().child(academy_copy_button(
+        "academy-copy-lesson",
+        "Copy lesson",
+        lesson.body.clone(),
+        palette,
+        cx,
+    )));
+
+    let mut body = div().mt_2().flex().flex_col().gap_3();
+    for (index, block) in parse_markdown_blocks(&lesson.body).iter().enumerate() {
+        body = body.child(academy_markdown_block(index, block, palette, chrome, cx));
     }
     panel = panel.child(body);
 
     for (index, exercise) in lesson.meta.exercises.iter().enumerate() {
-        panel = panel.child(academy_exercise(index, exercise, palette));
+        panel = panel.child(academy_exercise(index, exercise, palette, cx));
     }
 
     // Sequential navigation: the reader is the only place the student
@@ -641,7 +729,9 @@ fn academy_exercise(
     index: usize,
     exercise: &Exercise,
     palette: WorkspacePalette,
+    cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
+    let command = exercise.check.command.join(" ");
     let mut files = div().mt_2().flex().flex_wrap().gap_1();
     for file in &exercise.files {
         files = files.child(
@@ -679,58 +769,162 @@ fn academy_exercise(
         )
         .child(files)
         .child(
+            // The grading command is something the reader runs, so it gets
+            // the same copy affordance as a command in the prose.
             div()
                 .mt_2()
-                .text_size(px(10.0))
-                .text_color(rgb(palette.muted_text))
-                .child(format!("Checked by: {}", exercise.check.command.join(" "))),
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap_2()
+                .child(
+                    div()
+                        .text_size(px(10.0))
+                        .text_color(rgb(palette.muted_text))
+                        .child(format!("Checked by: {command}")),
+                )
+                .child(academy_copy_button(
+                    ("academy-copy-check", index),
+                    "Copy command",
+                    command,
+                    palette,
+                    cx,
+                )),
         )
+}
+
+/// Lesson body text size. Prose is the product on this surface, so it is
+/// sized for sustained reading rather than to match the workspace chrome
+/// around it; headings and code scale from here.
+const ACADEMY_BODY_TEXT: f32 = 16.0;
+
+/// A button that puts `payload` on the system clipboard.
+///
+/// GPUI 0.2.2 has no selectable static text — `InteractiveText` offers
+/// click, hover, and tooltip but no selection state — so copying out of a
+/// lesson goes through explicit affordances like this one rather than
+/// dragging across the prose.
+fn academy_copy_button(
+    id: impl Into<gpui::ElementId>,
+    label: &str,
+    payload: String,
+    palette: WorkspacePalette,
+    cx: &mut Context<WorkspacePrototype>,
+) -> gpui::Stateful<gpui::Div> {
+    div()
+        .id(id)
+        .flex_none()
+        .rounded_sm()
+        .border_1()
+        .border_color(rgb(palette.border))
+        .px_2()
+        .py(px(1.0))
+        .text_size(px(11.0))
+        .text_color(rgb(palette.sidebar_text))
+        .cursor_pointer()
+        .hover(|style| style.border_color(rgb(palette.accent)))
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |_this, _: &MouseDownEvent, _window, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(payload.clone()));
+            }),
+        )
+        .child(label.to_string())
 }
 
 /// Render one parsed markdown block with the workspace palette. Academy
 /// keeps its own compact renderer rather than the editor's preview styles
 /// because the lesson body sits inside workspace chrome, not a page.
-fn academy_markdown_block(block: &MarkdownBlock, palette: WorkspacePalette) -> gpui::Div {
+///
+/// `index` only has to be unique within the lesson: it disambiguates the
+/// per-block copy buttons' element ids.
+fn academy_markdown_block(
+    index: usize,
+    block: &MarkdownBlock,
+    palette: WorkspacePalette,
+    chrome: AcademyChrome,
+    cx: &mut Context<WorkspacePrototype>,
+) -> gpui::Div {
     match block.kind {
         MarkdownBlockKind::Heading(level) => {
             let size = match level {
-                1 => 20.0,
-                2 => 16.0,
-                3 => 14.0,
-                _ => 13.0,
+                1 => ACADEMY_BODY_TEXT * 1.625,
+                2 => ACADEMY_BODY_TEXT * 1.3125,
+                3 => ACADEMY_BODY_TEXT * 1.125,
+                _ => ACADEMY_BODY_TEXT,
             };
             div()
-                .mt_3()
+                .mt_4()
                 .text_size(px(size))
                 .text_color(rgb(palette.active_text))
                 .child(block.text.clone())
         }
         MarkdownBlockKind::Paragraph => div()
-            .text_size(px(13.0))
+            .text_size(px(ACADEMY_BODY_TEXT))
             .text_color(rgb(palette.sidebar_text))
             .child(block.text.clone()),
         MarkdownBlockKind::Bullet => div()
             .pl_3()
-            .text_size(px(13.0))
+            .text_size(px(ACADEMY_BODY_TEXT))
             .text_color(rgb(palette.sidebar_text))
             .child(format!("• {}", block.text)),
         MarkdownBlockKind::Quote => div()
             .pl_3()
             .border_l_2()
             .border_color(rgb(palette.accent))
-            .text_size(px(13.0))
+            .text_size(px(ACADEMY_BODY_TEXT))
             .text_color(rgb(palette.muted_text))
             .child(block.text.clone()),
-        MarkdownBlockKind::Code => div()
-            .rounded_sm()
-            .bg(rgb(palette.editor_bg))
-            .border_1()
-            .border_color(rgb(palette.border))
-            .p_2()
-            .font_family("Menlo")
-            .text_size(px(12.0))
-            .text_color(rgb(palette.sidebar_text))
-            .child(block.text.clone()),
+        MarkdownBlockKind::Code => {
+            // A command the reader is meant to run is labelled and framed
+            // differently from a source sample they are meant to study —
+            // the copy button is the point of the former.
+            let is_command = block.is_shell_command();
+            let label = if is_command {
+                "COMMAND".to_string()
+            } else {
+                block.lang.as_deref().unwrap_or("code").to_ascii_uppercase()
+            };
+            let border = if is_command {
+                palette.accent
+            } else {
+                palette.border
+            };
+            div()
+                .rounded_sm()
+                .bg(chrome.code)
+                .border_1()
+                .border_color(rgb(border))
+                .p_2()
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap_2()
+                        .mb_1()
+                        .child(
+                            div()
+                                .text_size(px(10.0))
+                                .text_color(rgb(palette.muted_text))
+                                .child(label),
+                        )
+                        .child(academy_copy_button(
+                            ("academy-copy-block", index),
+                            if is_command { "Copy command" } else { "Copy" },
+                            block.text.clone(),
+                            palette,
+                            cx,
+                        )),
+                )
+                .child(
+                    div()
+                        .font_family("Menlo")
+                        .text_size(px(ACADEMY_BODY_TEXT - 2.0))
+                        .text_color(rgb(palette.sidebar_text))
+                        .child(block.text.clone()),
+                )
+        }
     }
 }
 

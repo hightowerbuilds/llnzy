@@ -185,9 +185,6 @@ fn apply_cursor_window_shell_and_effect_options() {
 
             [effects]
             background = "smoke"
-            background_color = "#112233"
-            background_color2 = "#445566"
-            background_color3 = "#778899"
             background_image = "/tmp/background.png"
             background_image_fit = "tile"
             effects_on_ui = false
@@ -202,10 +199,8 @@ fn apply_cursor_window_shell_and_effect_options() {
     assert_eq!(config.opacity, 1.0);
     assert_eq!(config.shell, "/bin/bash");
     assert!(config.terminal.copy_on_select);
-    assert_eq!(config.effects.background, "smoke");
-    assert_eq!(config.effects.background_color, Some([0x11, 0x22, 0x33]));
-    assert_eq!(config.effects.background_color2, Some([0x44, 0x55, 0x66]));
-    assert_eq!(config.effects.background_color3, Some([0x77, 0x88, 0x99]));
+    // The retired shader patterns fall back to "none".
+    assert_eq!(config.effects.background, "none");
     assert_eq!(
         config.effects.background_image,
         Some("/tmp/background.png".to_string())
@@ -215,6 +210,20 @@ fn apply_cursor_window_shell_and_effect_options() {
         BackgroundImageFit::Tile
     );
     assert!(!config.effects.effects_on_ui);
+}
+
+#[test]
+fn background_mode_keeps_image_and_retires_everything_else() {
+    assert_eq!(normalize_background_mode("image"), "image");
+    assert_eq!(normalize_background_mode(" Image "), "image");
+    assert_eq!(normalize_background_mode("none"), "none");
+    for retired in ["smoke", "fire", "aurora", "trees", "rain", "custom-shader"] {
+        assert_eq!(
+            normalize_background_mode(retired),
+            "none",
+            "{retired} should no longer resolve to a renderable mode"
+        );
+    }
 }
 
 #[test]

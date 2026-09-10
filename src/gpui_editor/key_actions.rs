@@ -479,7 +479,11 @@ impl EditorPrototype {
         self.dispatch_editor_command(EditorCommand::Delete(EditorDeleteTarget::ToLineEnd), cx);
     }
 
-    pub(super) fn enter(&mut self, _: &Enter, _: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn enter(&mut self, _: &Enter, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(next) = &self.writing_next_focus {
+            window.focus(next);
+            return;
+        }
         if self.accept_lsp_panel_selection(cx) {
             return;
         }
@@ -498,7 +502,11 @@ impl EditorPrototype {
         self.dispatch_editor_command(EditorCommand::Enter, cx);
     }
 
-    pub(super) fn tab(&mut self, _: &Tab, _: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn tab(&mut self, _: &Tab, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(next) = &self.writing_next_focus {
+            window.focus(next);
+            return;
+        }
         if self.accept_lsp_panel_selection(cx) {
             return;
         }
