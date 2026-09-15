@@ -114,40 +114,45 @@ pub(super) fn home_surface(
                 .child("Opened projects will appear here."),
         );
     }
+    // Courses and writing are separate containers with a gap between them
+    // rather than two halves of one panel split by a rule. Each carries its
+    // own fill and border so it reads as a card on the chrome, with or
+    // without an image behind it.
+    let container = |theme: UiTheme| {
+        div()
+            .rounded_sm()
+            .border_1()
+            .border_color(rgb(theme.border))
+            .bg(backdrop.panel_fill(theme.panel_bg))
+            .p_4()
+            .flex()
+            .flex_col()
+            .gap_3()
+    };
     let mut body = div().w_full().min_w(px(0.0)).flex().gap_6();
     if narrow {
-        body = body.flex_col().child(entry).child(notepad).child(
-            div()
-                .pt_4()
-                .border_t_1()
-                .border_color(rgb(theme.border))
-                .child(section_heading("All courses", theme))
-                .child(catalog)
-                .child(projects),
-        );
+        body = body
+            .flex_col()
+            .child(container(theme).child(entry))
+            .child(container(theme).child(notepad))
+            .child(
+                container(theme)
+                    .child(section_heading("All courses", theme))
+                    .child(catalog)
+                    .child(projects),
+            );
     } else {
         body = body
             .items_start()
             .child(
-                div()
-                    .w(px(288.0))
+                container(theme)
+                    .w(px(320.0))
                     .flex_shrink_0()
-                    .flex()
-                    .flex_col()
-                    .gap_3()
                     .child(entry)
                     .child(catalog)
                     .child(projects),
             )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.0))
-                    .pl_6()
-                    .border_l_1()
-                    .border_color(rgb(theme.border))
-                    .child(notepad),
-            );
+            .child(container(theme).flex_1().min_w(px(0.0)).child(notepad));
     }
     div()
         .id("home-scroll")
@@ -170,11 +175,6 @@ pub(super) fn home_surface(
                 .flex()
                 .flex_col()
                 .gap_4()
-                // A controlled tint makes chrome readable over bright photographs,
-                // while margins continue showing the selected image unmodified.
-                .bg(backdrop.panel_fill(theme.panel_bg))
-                .p_4()
-                .rounded_sm()
                 .child(
                     div()
                         .flex()

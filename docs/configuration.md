@@ -59,7 +59,6 @@ line_height = 1.3
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `scheme` | string | _(none)_ | Apply a built-in color scheme. Accepted values: `"dracula"`, `"nord"`, `"one-dark"` (or `"onedark"`), `"solarized-dark"` (or `"solarized"`), `"monokai"`. Case-insensitive. |
-| `time_of_day_enabled` | boolean | `false` | Apply a subtle cool shift around local midday and a warm shift at local night. This uses the computer's local wall-clock time, not UTC. |
 
 When a scheme is set, it provides all 16 ANSI colors plus foreground, background, cursor, and selection colors. You can override individual colors on top of a scheme.
 

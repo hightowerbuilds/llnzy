@@ -301,9 +301,4 @@ impl WorkspacePrototype {
         self.preferences.save();
         self.apply_appearance_config(cx);
     }
-
-    pub(super) fn toggle_time_of_day(&mut self, cx: &mut Context<Self>) {
-        self.appearance_config.time_of_day_enabled = !self.appearance_config.time_of_day_enabled;
-        cx.notify();
-    }
 }

@@ -6,7 +6,7 @@ mod model;
 mod presets;
 mod schema;
 
-pub use colors::{apply_time_of_day, indexed_color, ColorTransition};
+pub use colors::{indexed_color, ColorTransition};
 pub use model::{
     BackgroundImageFit, ColorScheme, Config, CursorStyle, EditorColors, EditorConfig,
     EditorLanguageConfig, EffectiveEditorConfig, EffectsConfig, MarkdownPreviewStyle,

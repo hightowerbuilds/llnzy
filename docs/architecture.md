@@ -149,8 +149,9 @@ belongs before adding logic to a large GPUI surface.
 ## Home And Notepad
 
 - `src/gpui_workspace/home.rs` composes one valid Continue action or immediate
-  course entry, compact course rows, and the notepad. Desktop panes place the
-  288-pixel course column beside the larger writing area with one divider.
+  course entry, compact course rows, and the notepad. Desktop panes place a
+  320-pixel course container beside a larger writing container, each its own
+  bordered card with a gap between them.
   Below 760 pixels of available pane width, a compact course entry precedes
   writing; the full course catalog and recent projects follow the notepad.
   Open project is a secondary header action. Course data comes from the library;

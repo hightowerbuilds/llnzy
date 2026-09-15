@@ -45,7 +45,7 @@ fn terminal_is_light(config: &Config) -> bool {
 }
 
 const TERMINAL_PANEL_BG: u32 = 0x0d0d10;
-const TERMINAL_BORDER: u32 = 0x30323a;
+const TERMINAL_BORDER: u32 = 0x363636;
 const TERMINAL_MUTED: u32 = 0x8d94a3;
 const TERMINAL_ACCENT: u32 = 0x6aff90;
 const TERMINAL_ERROR: u32 = 0xff7a7a;

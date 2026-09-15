@@ -13,7 +13,6 @@ pub(super) fn glass_fill(color: u32) -> gpui::Rgba {
 
 pub(super) const CONTROL_LABEL_TEXT: f32 = Typography::CONTROL;
 pub(super) const CONTROL_VALUE_TEXT: f32 = Typography::BODY;
-pub(super) const COURSES_TEXT: f32 = Typography::CONTROL;
 
 pub(super) fn metric_readout_sized(
     label: &'static str,

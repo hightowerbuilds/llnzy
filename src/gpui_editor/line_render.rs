@@ -314,13 +314,13 @@ fn styled_text_chunk(
     style: TextChunkStyle,
     appearance: &EditorAppearance,
 ) -> impl IntoElement {
-    // Pin each chunk to its column span. Flex would otherwise size the box
-    // from the shaped width, and rounding or shaping differences between
-    // chunks would push later text off the grid the caret is drawn on.
-    let columns = text.chars().count().max(1) as f32;
+    // The box takes its shaped width, never a column count times the average
+    // advance. The caret is the next flex sibling, so it lands exactly where
+    // the shaped text ends: on the code grid for a monospace face with
+    // ligatures off, and after the real glyphs for the notepad's proportional
+    // reading face, whose letters are narrower than the measured average.
     let mut chunk = div()
         .h(appearance.line_height)
-        .w(appearance.char_width * columns)
         .flex_none()
         .flex()
         .items_center()

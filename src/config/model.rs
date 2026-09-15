@@ -114,7 +114,6 @@ pub struct Config {
     pub syntax_colors: FxHashMap<HighlightGroup, [u8; 3]>,
     pub keybindings: KeyBindings,
     pub transition: Option<ColorTransition>,
-    pub time_of_day_enabled: bool,
     pub(super) config_path: Option<PathBuf>,
     pub(super) config_mtime: Option<SystemTime>,
 }
@@ -424,7 +423,6 @@ impl Default for Config {
             syntax_colors: FxHashMap::default(),
             keybindings: KeyBindings::default_bindings(),
             transition: None,
-            time_of_day_enabled: false,
             config_path: None,
             config_mtime: None,
         }
