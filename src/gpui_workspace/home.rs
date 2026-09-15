@@ -1,360 +1,367 @@
-use std::path::PathBuf;
-use std::rc::Rc;
+//! Home keeps learning and writing in the first viewport.
+use std::{path::PathBuf, rc::Rc};
 
-use gpui::prelude::*;
-use gpui::{div, px, relative, rgb, Context, MouseButton, MouseDownEvent};
-
-use crate::academy::CourseLibrary;
-use crate::academy_progress::AcademyProgress;
-use crate::config::Config;
+use gpui::{div, prelude::*, px, rgb, Context};
 
 use super::{
-    academy::{course_insignia, course_progress},
+    academy::{course_insignia, course_progress, SurfaceBackdrop},
     sidebar::project_display_name,
-    WorkspacePalette, WorkspacePrototype,
+    WorkspacePrototype,
+};
+use crate::{
+    academy::{Course, CourseLibrary},
+    academy_progress::AcademyProgress,
+    config::Config,
+    ui::{button, interactive, section_heading, ButtonVariant},
+    ui_theme::{ControlSize, Typography, UiTheme},
 };
 
+/// Available width is the containing pane's width, so split panes receive the
+/// same compact composition as narrow windows. The image remains mounted by the pane.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Home composes projects, courses, and notes from separate workspace state"
+)]
 pub(super) fn home_surface(
     notepad: gpui::Entity<super::notepad::Notepad>,
     workspace_root: Option<PathBuf>,
     recent_projects: Vec<PathBuf>,
-    _config: &Config,
+    config: &Config,
     academy_library: Option<Rc<CourseLibrary>>,
     academy_progress: &AcademyProgress,
+    backdrop: SurfaceBackdrop,
+    available_width: f32,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
-    let palette = home_palette();
-    let mut recent_list = div().flex().flex_col().gap_1().w_full();
-    let recent = recent_projects.into_iter().take(5).collect::<Vec<_>>();
-    if recent.is_empty() {
-        recent_list = recent_list.child(
-            div()
-                .py_2()
-                .text_size(px(16.0))
-                .text_color(rgb(palette.muted_text))
-                .child("No recent projects"),
-        );
-    } else {
-        for project in recent {
-            recent_list = recent_list.child(home_recent_project_row(project, palette, cx));
-        }
-    }
-
-    let mut content = div()
-        .w_full()
+    let theme = UiTheme::from_config(config);
+    let narrow = available_width < 760.0;
+    let library = academy_library.as_deref();
+    let continuation = home_continue(library, academy_progress, theme, cx);
+    let has_continuation = continuation.is_some();
+    let mut entry = div()
+        .id("home-course-entry")
         .flex()
         .flex_col()
-        .child(home_open_project_button(palette, cx))
-        .child(home_new_course_button(palette, cx))
-        .child(home_academy_progress_section(
-            academy_library.as_deref(),
-            academy_progress,
-            palette,
-            cx,
-        ));
-
-    if let Some(root) = workspace_root {
-        content = content.child(
+        .gap_3()
+        .child(section_heading("Courses", theme));
+    if let Some(continuation) = continuation {
+        entry = entry.child(continuation);
+    } else {
+        entry = entry.child(
             div()
-                .mt_5()
-                .w_full()
-                .rounded_sm()
-                .border_1()
-                .border_color(rgb(palette.border))
-                .bg(rgb(palette.panel_bg))
-                .p_3()
-                .child(
-                    div()
-                        .text_size(px(16.0))
-                        .text_color(rgb(palette.muted_text))
-                        .child("OPEN PROJECT"),
-                )
-                .child(
-                    div()
-                        .mt_1()
-                        .text_size(px(16.0))
-                        .text_color(rgb(palette.active_text))
-                        .child(project_display_name(&root)),
-                )
-                .child(
-                    div()
-                        .mt_1()
-                        .text_size(px(16.0))
-                        .text_color(rgb(palette.muted_text))
-                        .child(root.display().to_string()),
-                ),
+                .text_size(px(Typography::CONTROL))
+                .text_color(rgb(theme.muted_text))
+                .child("Choose a course to get started."),
         );
     }
-
-    content = content
-        .child(
+    // On a narrow pane, one real course remains directly accessible above
+    // writing. The complete catalog follows the notepad, never precedes it.
+    let first_course = library.and_then(|library| library.courses().next());
+    if narrow && !has_continuation {
+        if let Some(course) = first_course {
+            entry = entry.child(home_course_row(course, academy_progress, theme, cx));
+        } else {
+            entry = entry.child(empty_courses(theme));
+        }
+    }
+    let mut catalog = div().flex().flex_col().gap_1().w_full();
+    let mut any = false;
+    if let Some(library) = library {
+        for course in library.courses() {
+            any = true;
+            catalog = catalog.child(home_course_row(course, academy_progress, theme, cx));
+        }
+    }
+    if !any {
+        catalog = catalog.child(empty_courses(theme));
+    }
+    let mut projects = div()
+        .mt_6()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .child(section_heading("Recent projects", theme));
+    let mut recent = recent_projects;
+    if let Some(root) = workspace_root {
+        if !recent.contains(&root) {
+            recent.insert(0, root);
+        }
+    }
+    for project in recent.iter().take(4) {
+        let path = project.clone();
+        projects = projects.child(
+            interactive(
+                gpui::SharedString::from(format!("home-project-{}", project.display())),
+                theme,
+                cx.listener(move |this, _, _, cx| this.open_project(path.clone(), cx)),
+            )
+            .hover(move |style| style.bg(rgb(theme.hover_bg)))
+            .active(move |style| style.bg(rgb(theme.pressed_bg)))
+            .w_full()
+            .px_2()
+            .py_2()
+            .text_size(px(Typography::CONTROL))
+            .text_color(rgb(theme.muted_text))
+            .child(div().truncate().child(project_display_name(project))),
+        );
+    }
+    if recent.is_empty() {
+        projects = projects.child(
             div()
-                .mt_6()
-                .mb_2()
-                .text_size(px(16.0))
-                .text_color(rgb(palette.muted_text))
-                .child("RECENT PROJECTS"),
-        )
-        .child(recent_list);
-
+                .py_2()
+                .text_size(px(Typography::CAPTION))
+                .text_color(rgb(theme.muted_text))
+                .child("Opened projects will appear here."),
+        );
+    }
+    let mut body = div().w_full().min_w(px(0.0)).flex().gap_6();
+    if narrow {
+        body = body.flex_col().child(entry).child(notepad).child(
+            div()
+                .pt_4()
+                .border_t_1()
+                .border_color(rgb(theme.border))
+                .child(section_heading("All courses", theme))
+                .child(catalog)
+                .child(projects),
+        );
+    } else {
+        body = body
+            .items_start()
+            .child(
+                div()
+                    .w(px(288.0))
+                    .flex_shrink_0()
+                    .flex()
+                    .flex_col()
+                    .gap_3()
+                    .child(entry)
+                    .child(catalog)
+                    .child(projects),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .pl_6()
+                    .border_l_1()
+                    .border_color(rgb(theme.border))
+                    .child(notepad),
+            );
+    }
     div()
         .id("home-scroll")
         .flex_1()
         .min_w(px(0.0))
         .h_full()
-        .overflow_scroll()
-        .bg(rgb(palette.chrome_bg))
-        .text_size(px(16.0))
-        .p_6()
+        .overflow_y_scroll()
+        .when(backdrop == SurfaceBackdrop::None, |surface| {
+            surface.bg(rgb(theme.chrome_bg))
+        })
+        .p_4()
+        .when(!narrow, |surface| surface.p_6())
+        .text_color(rgb(theme.sidebar_text))
+        .text_size(px(Typography::BODY))
         .child(
             div()
                 .w_full()
-                .min_w(px(760.0))
+                .max_w(px(1200.0))
+                .mx_auto()
                 .flex()
                 .flex_col()
-                .gap_6()
-                .child(div().text_color(rgb(palette.active_text)).child("Home"))
-                .child(
-                    div()
-                        .w_full()
-                        .flex()
-                        .items_start()
-                        .gap_6()
-                        .child(div().w(px(320.0)).flex_shrink_0().child(content))
-                        .child(div().flex_1().min_w(px(0.0)).child(notepad)),
-                ),
-        )
-}
-
-/// Home uses the neutral gray/black chrome, independent of terminal themes.
-pub(super) fn home_palette() -> WorkspacePalette {
-    let mut palette = WorkspacePalette::dark();
-    palette.panel_bg = 0x1b1b1b;
-    palette.editor_bg = 0x1b1b1b;
-    palette.border = 0x383838;
-    palette
-}
-
-fn home_open_project_button(
-    palette: WorkspacePalette,
-    cx: &mut Context<WorkspacePrototype>,
-) -> impl IntoElement {
-    div()
-        .w_full()
-        .h(px(42.0))
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded_sm()
-        .border_1()
-        .border_color(rgb(palette.border))
-        .bg(rgb(palette.panel_bg))
-        .text_size(px(16.0))
-        .text_color(rgb(palette.active_text))
-        .cursor_pointer()
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(|this, _: &MouseDownEvent, _window, cx| {
-                this.pick_open_project(cx);
-            }),
-        )
-        .child("Open Project")
-}
-
-fn home_new_course_button(
-    palette: WorkspacePalette,
-    cx: &mut Context<WorkspacePrototype>,
-) -> impl IntoElement {
-    div()
-        .mt_2()
-        .w_full()
-        .h(px(42.0))
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded_sm()
-        .border_1()
-        .border_color(rgb(palette.border))
-        .bg(rgb(palette.panel_bg))
-        .text_size(px(16.0))
-        .text_color(rgb(palette.sidebar_text))
-        .cursor_pointer()
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(|this, _: &MouseDownEvent, window, cx| {
-                this.open_academy_from_home(window, cx);
-            }),
-        )
-        .child("Open Course")
-}
-
-/// Academy course progress on Home: one row per loaded course showing the
-/// language insignia, completed-vs-total lessons, and a progress bar.
-/// Clicking a row opens the Academy tab with that course selected. Course
-/// identity, titles, and totals all come from the loaded library, so a
-/// course added to the courses directory appears here with no code change.
-fn home_academy_progress_section(
-    library: Option<&CourseLibrary>,
-    progress: &AcademyProgress,
-    palette: WorkspacePalette,
-    cx: &mut Context<WorkspacePrototype>,
-) -> impl IntoElement {
-    let mut rows = div().flex().flex_col().gap_2().w_full();
-    let mut any = false;
-    if let Some(library) = library {
-        for course in library.courses() {
-            any = true;
-            let (completed, total) = course_progress(course, progress);
-            rows = rows.child(home_academy_progress_row(
-                &course.manifest.id,
-                &course.manifest.title,
-                &course.manifest.language,
-                completed,
-                total,
-                palette,
-                cx,
-            ));
-        }
-    }
-    if !any {
-        rows = rows.child(
-            div()
-                .py_2()
-                .text_size(px(16.0))
-                .text_color(rgb(palette.muted_text))
-                .child("No courses installed"),
-        );
-    }
-
-    div()
-        .mt_6()
-        .w_full()
-        .flex()
-        .flex_col()
-        .gap_2()
-        .child(
-            div()
-                .text_size(px(16.0))
-                .text_color(rgb(palette.muted_text))
-                .child("Courses"),
-        )
-        .child(rows)
-}
-
-fn home_academy_progress_row(
-    id: &str,
-    title: &str,
-    language: &str,
-    completed: usize,
-    total: usize,
-    palette: WorkspacePalette,
-    cx: &mut Context<WorkspacePrototype>,
-) -> impl IntoElement {
-    let fraction = if total == 0 {
-        0.0
-    } else {
-        completed as f32 / total as f32
-    };
-    let percent = (fraction * 100.0).round() as u32;
-    let course_id = id.to_string();
-
-    div()
-        .w_full()
-        .rounded_sm()
-        .border_1()
-        .border_color(rgb(palette.border))
-        .bg(rgb(palette.panel_bg))
-        .p_2()
-        .cursor_pointer()
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |this, _: &MouseDownEvent, window, cx| {
-                this.open_academy_course(course_id.clone(), window, cx);
-            }),
-        )
-        .child(
-            div()
-                .flex()
-                .flex_col()
-                .items_start()
-                .gap_2()
+                .gap_4()
+                // A controlled tint makes chrome readable over bright photographs,
+                // while margins continue showing the selected image unmodified.
+                .bg(backdrop.panel_fill(theme.panel_bg))
+                .p_4()
+                .rounded_sm()
                 .child(
                     div()
                         .flex()
                         .items_center()
-                        .gap_2()
-                        .child(course_insignia(language, 24.0))
+                        .justify_between()
+                        .gap_3()
                         .child(
                             div()
-                                .text_size(px(16.0))
-                                .text_color(rgb(palette.sidebar_text))
-                                .child(title.to_string()),
-                        ),
+                                .text_size(px(Typography::PAGE_TITLE))
+                                .text_color(rgb(theme.active_text))
+                                .child("Home"),
+                        )
+                        .child(button(
+                            "home-open-project",
+                            "Open project",
+                            theme,
+                            ButtonVariant::Ghost,
+                            ControlSize::Compact,
+                            cx.listener(|this, _, _, cx| this.pick_open_project(cx)),
+                        )),
                 )
-                .child(
-                    div()
-                        .text_size(px(16.0))
-                        .text_color(rgb(palette.muted_text))
-                        .child(if total == 0 {
-                            "No lessons".to_string()
-                        } else {
-                            format!("{completed}/{total} lessons · {percent}%")
-                        }),
-                ),
+                .child(body),
         )
-        .child(home_progress_bar(fraction, palette))
 }
 
-/// Thin two-tone bar: track in panel border color, fill in accent.
-fn home_progress_bar(fraction: f32, palette: WorkspacePalette) -> impl IntoElement {
+fn empty_courses(theme: UiTheme) -> gpui::Div {
     div()
-        .mt_2()
-        .h(px(4.0))
-        .w_full()
-        .rounded_sm()
-        .bg(rgb(palette.border))
-        .overflow_hidden()
-        .child(
-            div()
-                .h_full()
-                .w(relative(fraction.clamp(0.0, 1.0)))
-                .bg(rgb(palette.accent)),
-        )
+        .py_2()
+        .text_size(px(Typography::CONTROL))
+        .text_color(rgb(theme.muted_text))
+        .child("No courses installed. Courses will appear here when available.")
 }
 
-fn home_recent_project_row(
-    project: PathBuf,
-    palette: WorkspacePalette,
+fn home_continue(
+    library: Option<&CourseLibrary>,
+    progress: &AcademyProgress,
+    theme: UiTheme,
+    cx: &mut Context<WorkspacePrototype>,
+) -> Option<gpui::Div> {
+    let (course, lesson) = resumable_lesson(library, progress)?;
+    Some(
+        div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(
+                div()
+                    .text_size(px(Typography::BODY))
+                    .text_color(rgb(theme.active_text))
+                    .child(course.manifest.title.clone()),
+            )
+            .child(
+                div()
+                    .text_size(px(Typography::CONTROL))
+                    .text_color(rgb(theme.muted_text))
+                    .child(lesson.meta.title.clone()),
+            )
+            .child(button(
+                "home-continue",
+                "Continue lesson",
+                theme,
+                ButtonVariant::Primary,
+                ControlSize::Regular,
+                cx.listener(|this, _, window, cx| this.continue_academy_learning(window, cx)),
+            )),
+    )
+}
+
+fn home_course_row(
+    course: &Course,
+    progress: &AcademyProgress,
+    theme: UiTheme,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
-    let title = project_display_name(&project);
-    let detail = project.display().to_string();
-    let path = project;
-    div()
-        .w_full()
-        .rounded_sm()
-        .border_1()
-        .border_color(rgb(palette.border))
-        .bg(rgb(palette.panel_bg))
-        .p_2()
-        .cursor_pointer()
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |this, _: &MouseDownEvent, _window, cx| {
-                this.open_project(path.clone(), cx);
+    let (completed, total) = course_progress(course, progress);
+    let course_id = course.manifest.id.clone();
+    interactive(
+        gpui::SharedString::from(format!("home-course-{course_id}")),
+        theme,
+        cx.listener(move |this, _, window, cx| {
+            this.open_academy_course(course_id.clone(), window, cx)
+        }),
+    )
+    .hover(move |style| style.bg(rgb(theme.hover_bg)))
+    .active(move |style| style.bg(rgb(theme.pressed_bg)))
+    .w_full()
+    .min_w(px(0.0))
+    .flex()
+    .items_center()
+    .gap_3()
+    .px_2()
+    .py_3()
+    .child(course_insignia(&course.manifest.language, 22.0))
+    .child(
+        div()
+            .flex_1()
+            .min_w(px(0.0))
+            .flex()
+            .flex_col()
+            .gap_1()
+            .child(
+                div()
+                    .text_size(px(Typography::CONTROL))
+                    .text_color(rgb(theme.active_text))
+                    .child(course.manifest.title.clone()),
+            )
+            .child(
+                div()
+                    .text_size(px(Typography::CAPTION))
+                    .text_color(rgb(theme.muted_text))
+                    .child(if total == 0 {
+                        "No lessons yet".into()
+                    } else if completed == 0 {
+                        format!("{total} lessons")
+                    } else {
+                        format!("{completed} of {total} complete")
+                    }),
+            ),
+    )
+    .child(
+        div()
+            .flex_shrink_0()
+            .text_size(px(Typography::CAPTION))
+            .text_color(rgb(theme.muted_text))
+            .child(if completed == 0 {
+                "Start →"
+            } else {
+                "Open →"
             }),
+    )
+}
+
+/// Stored progress can outlive an installed course or lesson. Only offer a
+/// continuation when both IDs resolve, without clearing the student's progress.
+fn resumable_lesson<'a>(
+    library: Option<&'a CourseLibrary>,
+    progress: &AcademyProgress,
+) -> Option<(&'a Course, &'a crate::academy::Lesson)> {
+    let location = progress.last_location()?;
+    let course = library?.course(&location.course_id)?;
+    let lesson = course.lessons.get(&location.lesson_id)?;
+    Some((course, lesson))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn catalog() -> CourseLibrary {
+        CourseLibrary::load(
+            &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/academy/courses"),
         )
-        .child(
-            div()
-                .text_size(px(16.0))
-                .text_color(rgb(palette.sidebar_text))
-                .child(title),
-        )
-        .child(
-            div()
-                .mt_1()
-                .text_size(px(16.0))
-                .text_color(rgb(palette.muted_text))
-                .child(detail),
-        )
+        .expect("bundled course catalog")
+    }
+
+    #[test]
+    fn continuation_resolves_the_saved_course_and_lesson() {
+        let library = catalog();
+        let course = library.courses().next().expect("a bundled course");
+        let lesson = course.lesson_ids_in_order()[0];
+        let mut progress = AcademyProgress::default();
+        progress.record_location(&course.manifest.id, lesson, Some(PathBuf::from("practice")));
+        let before = progress.clone();
+        let (resumed_course, resumed_lesson) = resumable_lesson(Some(&library), &progress).unwrap();
+        assert_eq!(resumed_course.manifest.id, course.manifest.id);
+        assert_eq!(resumed_lesson.id, lesson);
+        assert_eq!(
+            progress, before,
+            "rendering must preserve practice and completion data"
+        );
+    }
+
+    #[test]
+    fn stale_or_unavailable_catalog_omits_continue_without_discarding_progress() {
+        let library = catalog();
+        let course = library.courses().next().unwrap();
+        let mut progress = AcademyProgress::default();
+        assert!(resumable_lesson(Some(&library), &progress).is_none());
+        for (course_id, lesson_id) in [
+            ("course-removed-from-disk", "L00"),
+            (course.manifest.id.as_str(), "lesson-removed-from-disk"),
+        ] {
+            progress.record_location(course_id, lesson_id, None);
+            let before = progress.clone();
+            assert!(resumable_lesson(Some(&library), &progress).is_none());
+            assert!(resumable_lesson(None, &progress).is_none());
+            assert_eq!(progress, before);
+        }
+    }
 }

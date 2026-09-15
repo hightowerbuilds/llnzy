@@ -35,10 +35,12 @@ impl Render for EditorPrototype {
             .flex()
             .flex_col()
             .bg(snapshot.appearance.background_color())
-            .text_color(snapshot.appearance.foreground_color())
-            .font_family("Inter")
+            .text_color(rgb(snapshot.appearance.chrome.active_text))
+            .font_family(Typography::FONT_FAMILY)
+            .text_size(px(Typography::BODY))
             .key_context("EditorPrototype")
             .track_focus(&self.focus_handle(cx))
+            .tab_stop(self.writing_surface)
             .on_key_down(cx.listener(Self::on_editor_key_down))
             .on_action(cx.listener(Self::move_left))
             .on_action(cx.listener(Self::move_right))
@@ -98,14 +100,15 @@ impl Render for EditorPrototype {
             .on_action(cx.listener(Self::close_find_action));
 
         if self.show_chrome {
-            root.child(header()).child(content)
+            root.child(header(snapshot.appearance.chrome))
+                .child(content)
         } else {
             root.child(content)
         }
     }
 }
 
-fn header() -> impl IntoElement {
+fn header(theme: UiTheme) -> impl IntoElement {
     div()
         .h(px(44.0))
         .w_full()
@@ -114,23 +117,24 @@ fn header() -> impl IntoElement {
         .justify_between()
         .px_4()
         .border_b_1()
-        .border_color(rgb(EDITOR_BORDER))
-        .bg(rgb(EDITOR_CHROME_BG))
+        .border_color(rgb(theme.border))
+        .bg(rgb(theme.chrome_bg))
         .child(
             div()
                 .font_weight(gpui::FontWeight::BOLD)
-                .text_size(px(15.0))
+                .text_size(px(Typography::SECTION))
                 .child("LLNZY GPUI Editor"),
         )
         .child(
             div()
-                .text_size(px(12.0))
-                .text_color(rgb(EDITOR_MUTED_FG))
+                .text_size(px(Typography::CONTROL))
+                .text_color(rgb(theme.muted_text))
                 .child("EditorState-backed code editing"),
         )
 }
 
 fn editor_header(snapshot: &EditorSnapshot) -> impl IntoElement {
+    let theme = snapshot.appearance.chrome;
     div()
         .h(px(48.0))
         .w_full()
@@ -139,18 +143,22 @@ fn editor_header(snapshot: &EditorSnapshot) -> impl IntoElement {
         .justify_between()
         .px_4()
         .border_b_1()
-        .border_color(rgb(EDITOR_BORDER))
-        .bg(rgb(EDITOR_CHROME_BG))
+        .border_color(rgb(theme.border))
+        .bg(rgb(theme.chrome_bg))
         .child(
             div()
                 .flex()
                 .flex_col()
                 .gap_1()
-                .child(div().text_size(px(13.0)).child(snapshot.title.clone()))
                 .child(
                     div()
-                        .text_size(px(11.0))
-                        .text_color(rgb(EDITOR_MUTED_FG))
+                        .text_size(px(Typography::CONTROL))
+                        .child(snapshot.title.clone()),
+                )
+                .child(
+                    div()
+                        .text_size(px(Typography::CAPTION))
+                        .text_color(rgb(theme.muted_text))
                         .child(snapshot.subtitle.clone()),
                 ),
         )
@@ -158,11 +166,11 @@ fn editor_header(snapshot: &EditorSnapshot) -> impl IntoElement {
             div()
                 .rounded_sm()
                 .border_1()
-                .border_color(rgb(EDITOR_BORDER))
+                .border_color(rgb(theme.border))
                 .px_2()
                 .py_1()
-                .text_size(px(11.0))
-                .text_color(rgb(EDITOR_TEXT_FG))
+                .text_size(px(Typography::CAPTION))
+                .text_color(rgb(theme.active_text))
                 .child(snapshot.language.clone()),
         )
 }
@@ -176,6 +184,7 @@ fn editor_body(
     input: Entity<EditorPrototype>,
     cx: &mut Context<EditorPrototype>,
 ) -> gpui::Div {
+    let theme = snapshot.appearance.chrome;
     if let Some(preview) = snapshot.image_preview.clone() {
         return image_preview_body(preview, &snapshot.appearance);
     }
@@ -217,7 +226,7 @@ fn editor_body(
                     .w(relative(0.5))
                     .min_h(px(0.0)),
             )
-            .child(div().w(px(1.0)).h_full().bg(rgb(EDITOR_BORDER)))
+            .child(div().w(px(1.0)).h_full().bg(rgb(theme.border)))
             .child(
                 div()
                     .w(relative(0.5))
@@ -312,13 +321,21 @@ fn editor_source_body(
             body.child(rename_symbol_overlay(snapshot, cx))
         })
         .when_some(snapshot.external_change.clone(), |body, change| {
-            body.child(external_change_overlay(change, cx))
+            body.child(external_change_overlay(
+                change,
+                snapshot.appearance.chrome,
+                cx,
+            ))
         })
         .when_some(snapshot.degraded_notice.clone(), |body, notice| {
-            body.child(degraded_mode_overlay(notice))
+            body.child(degraded_mode_overlay(notice, snapshot.appearance.chrome))
         })
         .when_some(snapshot.lsp_panel.clone(), |body, panel| {
-            body.child(language_panel_overlay(panel, cx))
+            body.child(language_panel_overlay(
+                panel,
+                snapshot.appearance.chrome,
+                cx,
+            ))
         })
 }
 
@@ -326,6 +343,7 @@ fn image_preview_body(
     preview: EditorImagePreviewSnapshot,
     appearance: &EditorAppearance,
 ) -> gpui::Div {
+    let theme = appearance.chrome;
     let detail = preview
         .dimensions
         .map(|(width, height)| format!("{width} x {height}"))
@@ -357,12 +375,12 @@ fn image_preview_body(
                 .max_w(px(420.0))
                 .rounded_sm()
                 .border_1()
-                .border_color(rgb(EDITOR_BORDER))
-                .bg(rgba(0x10131add))
+                .border_color(rgb(theme.border))
+                .bg(rgb(theme.panel_bg))
                 .px_2()
                 .py_1()
-                .text_size(px(11.0))
-                .text_color(appearance.muted_color())
+                .text_size(px(Typography::CAPTION))
+                .text_color(rgb(theme.muted_text))
                 .overflow_hidden()
                 .whitespace_nowrap()
                 .child(format!("{detail} | {size}")),

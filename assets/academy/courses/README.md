@@ -1,56 +1,73 @@
 # Academy courses
 
-The catalog contains independent Rust, JavaScript, TypeScript, and Elixir courses.
-Start with JavaScript if functions, arrays, modules, or promises are unfamiliar;
-TypeScript builds on those skills. Each JS/TS course has five ordered modules,
-worked explanations, practice exercises, and a final project.
+Choose a course by what you already know and what you want to build:
 
-| Module | JavaScript (11 lessons) | TypeScript (10 lessons) |
+| Course | Before you start | Shipped scope and outcome |
 | --- | --- | --- |
-| 1 | Runtime & Values | The Compiler and Contracts |
-| 2 | Control Flow & Functions | Trust and Control Flow |
-| 3 | Objects & Data Pipelines | Modeling Reusable Data |
-| 4 | Errors & Modules | Async Work and Module Boundaries |
-| 5 | Async, Streams & Capstone | A Typed Ledger |
+| JavaScript | Basic file and terminal skills; no prior programming language | 11 lessons in five modules, from values to a tested expense-report CLI using Node.js. Browser interfaces are outside this course. |
+| TypeScript | JavaScript functions, arrays, objects, modules, and promises | 10 lessons in five modules, from strict compilation to a modular async ledger report. Take JavaScript first if those prerequisites are unfamiliar. |
+| Rust | Basic file and terminal skills; no prior Rust | Seven introductory lessons aligned with chapters 1–3 of *The Rust Programming Language*, 3rd edition. Ends with functions and compound types; ownership, borrowing, structs, and a capstone are not shipped yet. The book is optional companion reading. |
+| Elixir | Basic programming familiarity; no prior Elixir or Erlang | 10 lessons in five modules, from immutable values to a supervised task tracker. Phoenix and durable storage are extensions. |
 
-## Toolchain
+## Practice in LLNZY
 
-Use Node.js 22 or newer for these courses. JavaScript exercises use only Node's
-built-in modules. TypeScript exercises also require TypeScript 5.9.3 on PATH:
+1. Open a course and select its first lesson. Read the explanation and exercise prompt.
+2. Choose **Open practice** on the exercise card. LLNZY prepares a persistent folder with the bundled starter files and opens the workspace. Returning to that exercise reuses your work.
+3. Edit the implementation files and save your changes. Keep supplied checks intact unless the lesson explicitly asks you to add a test.
+4. Choose **Check work** to run the exercise from its practice folder. Read the result and fix one issue at a time. The intentionally incomplete starters should fail; that first failure is part of learning.
+5. If stuck, use the lesson’s **Hint before a solution** section. Predict one input and trace your code before comparing with a reference solution. After passing, try a new case and explain your approach in your own words.
+
+The packaged app includes the course material. Students do not need Python or the
+LLNZY source repository. Each lesson has its own workspace; later exercises do
+not require copying build output from an earlier lesson. You may also run the
+shown check command in the practice folder’s terminal.
+
+Checks are feedback on supplied examples, not proof of complete understanding.
+Reading, explaining, experimenting, and writing your own cases matter too.
+
+## Install your course tools once
+
+LLNZY currently targets macOS. Install the tools for your selected course, then
+reopen the app so it inherits their updated PATH. Installing tools can require
+network access; bundled exercise checks do not install packages.
+
+| Course | Required tools | Verify in a terminal |
+| --- | --- | --- |
+| JavaScript | [Node.js](https://nodejs.org/en/download) 22 or newer | `node --version` |
+| TypeScript | Node.js 22+ and TypeScript 5.9.3 | `node --version`, `tsc --version` |
+| Rust | [Stable Rust through rustup](https://www.rust-lang.org/tools/install), including Cargo | `rustc --version`, `cargo --version` |
+| Elixir | [Elixir and compatible Erlang/OTP](https://elixir-lang.org/install.html); fixtures validated with Elixir 1.19.5 and OTP 28 | `elixir --version`, `mix --version` |
+
+For TypeScript, install the compiler once:
 
 ```sh
 npm install --global typescript@5.9.3
 ```
 
-This is a one-time setup command requiring network access. Exercise checks do
-not install packages. TypeScript exercises compile with strict checking before
-running the generated JavaScript. See the [compiler documentation](https://www.typescriptlang.org/docs/handbook/compiler-options.html)
-for the distinction between checking types and emitting JavaScript.
+Use a user-managed Node installation if global packages are not writable.
+TypeScript checks compile with strict checking before running JavaScript, and
+`tsconfig.json` keeps the editor and compiler settings together. JavaScript
+uses Node’s built-in modules; Rust uses its standard library; Elixir needs no
+Hex packages. Elixir L06 includes a Mix project and uses `mix test`; the other
+Elixir lessons use `elixir check.exs`.
 
-## Practice today
+Editor hover, completion, and navigation depend on a separately installed
+language server. They are optional: the course runtime can execute your check
+without editor assistance. Elixir currently has no bundled editor grammar or
+built-in language-server entry, so its editing assistance differs from Rust,
+JavaScript, and TypeScript.
 
-The Academy displays course modules, lesson text, exercise prompts, file paths,
-and check commands. Creating exercise workspaces and running checks from the UI
-are still pending. To practice now, export starter files from the repository root
-using Python 3.11+:
+## When a check fails
 
-```sh
-python3 scripts/check_academy_courses.py --export javascript L00 /tmp/llnzy-js-L00
-python3 scripts/check_academy_courses.py --export typescript L00 /tmp/llnzy-ts-L00
-```
-
-The destination must not exist; this prevents overwriting earlier work. Open the
-exported directory in LLNZY, read the matching Academy lesson, edit the files,
-and run its check command from that directory. Export each subsequent lesson
-into a new directory so files and compiler output cannot mix.
-
-Solutions are inline authoring fixtures for review and validation. Try the
-exercise before consulting them. TypeScript lessons include `tsconfig.json` so
-the editor and terminal compiler use the same settings.
+- **Tool missing:** verify the tool in the table above, finish installation, and reopen LLNZY. This is a setup issue, not an incorrect answer.
+- **File missing in a manual terminal run:** use the practice folder as the working directory. It should contain the files named in the exercise card. Open practice prepares those files.
+- **Compiler error:** start with the first diagnostic pointing into your implementation. Repair its cause, save, and check again before chasing later errors.
+- **Assertion or output mismatch:** compare expected and actual values. Trace the reported input through your function. Exact-output checks include capitalization, spacing, and the final newline; avoid extra debug printing on stdout.
+- **Timeout:** look for a loop that never finishes, a missing reply, or interactive input. The bundled checks use deterministic inputs and should not wait for typing.
 
 ## Validate authored content
 
-With Python 3.11+, Node, `tsc`, Elixir, and Mix on PATH:
+Course maintainers need Python 3.11+ and all four courses’ runtimes on PATH:
 
 ```sh
 python3 scripts/check_academy_courses.py
@@ -58,48 +75,31 @@ cargo test --lib academy::
 ```
 
 The Python runner executes each solution and starter in separate temporary
-directories. A solution must satisfy its declared check; a starter must fail
-it. Exact checks compare stdout including its final newline, and output checks
-also require exit status zero. A timeout or missing executable fails validation.
-CI runs these fixtures with Node 22, TypeScript 5.9.3, Elixir 1.19.5, and OTP 28.0. The Rust tests load
-every course through the application's strict schema and markdown parser.
+directories. Every currently bundled exercise, including Rust’s setup lessons,
+has an intentionally incomplete starter: a solution must pass and a starter
+must fail. A compiling starter is not necessarily a passing starter; Rust L00
+must print the required line. If a future setup exercise deliberately starts
+complete, add an explicit, narrowly scoped validator expectation with its
+reason instead of silently accepting all passing starters.
 
-The earlier combined `js-ts` roadmap is historical design context. These two
-standalone courses implement the subsequent request for separate curricula;
-they use `tsc` instead of the roadmap's proposed `tsx` runtime-only checks.
+Exact checks compare stdout including the final newline. Output checks also
+require exit status zero. A timeout or missing executable fails validation.
+CI uses Node 22, TypeScript 5.9.3, stable Rust, Elixir 1.19.5, and OTP 28.0.
+The Rust loader tests validate every course against the app’s schema and
+markdown parser. These checks validate curriculum fixtures; they do not replace
+interactive testing of the packaged learning workflow.
 
-## Elixir
-
-Elixir has ten ordered lessons across five modules:
-
-| Module | Lessons |
-| --- | --- |
-| IEx & Immutable Values | First program; values, rebinding, and maps |
-| Patterns & Functions | Tagged results; guards and recursion |
-| Collections & Data Pipelines | Enum and pipes; input validation |
-| Mix, Tests & Processes | Mix and ExUnit; messages and Tasks |
-| OTP & Capstone | GenServer; a supervised task tracker |
-
-Basic programming familiarity is enough; other courses are not prerequisites.
-Install Elixir and compatible Erlang/OTP using the
-[official instructions](https://elixir-lang.org/install.html). Fixtures are
-validated with Elixir 1.19.5 and OTP 28; CI uses OTP 28.0. Check
-`elixir --version` and `mix --version`. No Hex packages or network access are
-needed for exercises. L06 exports a Mix project; other lessons use ExUnit scripts.
+To validate one course or export a standalone starter as an author:
 
 ```sh
-python3 scripts/check_academy_courses.py --export elixir L00 /tmp/llnzy-elixir-l00
-python3 scripts/check_academy_courses.py --course elixir
+python3 scripts/check_academy_courses.py --course rust
+python3 scripts/check_academy_courses.py --export javascript L00 /tmp/llnzy-js-L00
 ```
 
-Run `elixir check.exs` from the exported directory (`mix test` for L06).
-The validator checks both passing solutions and failing starters, including
-capstone worker restart and loss of in-memory state. The default validator now
-runs all three exercise-backed courses and requires all their runtimes.
+The export destination must not exist, preventing accidental overwrites. Choose
+a fresh directory per lesson. Solutions remain inline authoring fixtures; they
+are separate from students’ persistent practice files.
 
-Reference material: [Elixir introduction](https://hexdocs.pm/elixir/introduction.html),
-[GenServer](https://hexdocs.pm/elixir/GenServer.html), and
-[Supervisor](https://hexdocs.pm/elixir/Supervisor.html). The lessons are an
-independent foundation curriculum; Phoenix and durable storage are extensions.
-Elixir files can be edited and run in the terminal; the editor does not yet
-provide an Elixir tree-sitter grammar.
+The earlier combined `js-ts` roadmap is historical design context. The shipped
+JavaScript and TypeScript courses are separate curricula and use `tsc` for
+TypeScript compilation rather than the roadmap’s proposed `tsx` checks.

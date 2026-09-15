@@ -76,7 +76,7 @@ ExUnit.start()
 +++
 # Mix Projects & ExUnit
 
-Mix builds projects, compiles modules, and runs tests. In a scratch directory, `mix new sample` creates `mix.exs`, source under `lib/`, and tests under `test/`. The exported workspace for this lesson already contains a minimal project, so run its commands there without generating another nested project.
+Mix builds projects, compiles modules, and runs tests. In a scratch directory, `mix new sample` creates `mix.exs`, source under `lib/`, and tests under `test/`. The practice folder for this lesson already contains a minimal project, so run its commands there without generating another nested project.
 
 ```sh
 mix compile
@@ -84,7 +84,9 @@ mix test
 iex -S mix
 ```
 
-The project function in mix.exs declares application metadata and dependencies. This course uses only Elixir's standard tools and needs no Hex dependencies. `test/test_helper.exs` starts ExUnit; files ending in `_test.exs` define test cases. `use ExUnit.Case` provides `test` and `assert` so failures show the expression and values involved.
+The project function in mix.exs declares application metadata and dependencies. This course uses only Elixir's standard tools and needs no Hex dependencies. `test/test_helper.exs` starts ExUnit; files ending in `_test.exs` define test cases.
+
+`use ExUnit.Case` provides `test` and `assert` so failures show the expression and values involved.
 
 ```elixir
 test "integer cents preserve exact totals" do
@@ -94,10 +96,20 @@ end
 
 Tests describe behavior through a public function. Check an empty input, multiple items, and a boundary such as zero quantity. Integer cents avoid floating-point rounding for this deliberately small pricing model. Validation belongs at the input boundary; this function assumes the documented nonnegative integer fields.
 
-Implement the reduction, run `mix test`, and inspect any failed assertion before editing. Then add your own zero-quantity case even though the provided contract also covers it. Use `mix format lib/basket.ex test/basket_test.exs` to format your work. The earlier lessons used ExUnit from scripts; Mix now handles source compilation and test discovery for you.
+Implement the reduction, run `mix test`, and inspect any failed assertion before editing. Then add your own zero-quantity case even though the provided contract also covers it. Use `mix format lib/basket.ex test/basket_test.exs` to format your work.
+
+The earlier lessons used ExUnit from scripts; Mix now handles source compilation and test discovery for you.
 
 ## Practice
 
 Implement Basket.total/1 for a list of %{price: integer_cents, quantity: integer} maps with nonnegative values. Sum price times quantity. Add a test for a zero-quantity item to test/basket_test.exs.
 
-Export from the repository root with `python3 scripts/check_academy_courses.py --export elixir L06 /tmp/llnzy-elixir-l06` (Python 3.11+). Choose a destination that does not already exist. Open the exported files in LLNZY and run `mix test` from that directory. The starter intentionally fails. Add the requested test without removing the supplied assertions. A successful check exits with status zero; read assertion failures to find the input that needs attention.
+Choose **Open practice** in the exercise card to create or reopen this lesson’s files. Edit the implementation, save your changes, then choose **Check work**. Your practice folder is reused when you return; opening it again keeps your edits. No source checkout or Python is needed.
+
+The command shown in the exercise card runs from that folder. The starter intentionally fails. Add the requested test without removing the supplied assertions. A successful check exits with status zero; read assertion failures to find the input that needs attention.
+
+## Hint before a solution
+
+Start the reduction at zero. Compute one item’s contribution before adding it to the accumulated cents.
+
+Try one focused change and check again. Before comparing with a reference solution, explain the failing case in your own words. A passing check covers the supplied examples; also try a new input and explain why your implementation handles it.

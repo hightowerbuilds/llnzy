@@ -1,37 +1,43 @@
 use gpui::prelude::*;
-use gpui::{div, px, rgb, rgba, Context, MouseButton, MouseDownEvent};
+use gpui::{div, px, rgb, Context, SharedString};
 
-use crate::gpui_workspace::{
-    WorkspacePalette, WorkspacePrototype, ACTIVE_TEXT, BORDER, MUTED_TEXT, QUEUE_GREEN,
-    SIDEBAR_TEXT,
-};
+use crate::gpui_workspace::WorkspacePrototype;
+use crate::ui::{self, ButtonVariant, ControlState};
+use crate::ui_theme::UiTheme;
+use crate::ui_theme::{ControlSize, Typography};
 
-// The settings surface supplies a cached blurred image beneath these fills.
-// Keep foreground text and color swatches opaque while the image shows through.
+// Settings mounts the cached background image beneath local translucent fills.
 pub(super) fn glass_fill(color: u32) -> gpui::Rgba {
-    rgba((color << 8) | 0x88)
+    ui::surface_fill(color, true)
 }
 
-pub(super) fn metric_readout(label: &'static str, value: String) -> impl IntoElement {
+pub(super) const CONTROL_LABEL_TEXT: f32 = Typography::CONTROL;
+pub(super) const CONTROL_VALUE_TEXT: f32 = Typography::BODY;
+pub(super) const COURSES_TEXT: f32 = Typography::CONTROL;
+
+pub(super) fn metric_readout_sized(
+    label: &'static str,
+    value: String,
+    label_text: f32,
+    value_text: f32,
+    palette: UiTheme,
+) -> impl IntoElement {
     div()
         .w_full()
         .flex()
+        .flex_wrap()
         .items_center()
         .gap_2()
-        .child(control_label(label))
+        .child(control_label_sized(label, label_text, palette))
         .child(
             div()
-                .h(px(30.0))
+                .min_h(px(ControlSize::Regular.height()))
                 .min_w(px(150.0))
                 .flex()
                 .items_center()
-                .rounded_sm()
-                .border_1()
-                .border_color(rgb(0x3a3f4d))
-                .bg(glass_fill(0x11131a))
                 .px_2()
-                .text_size(px(12.0))
-                .text_color(rgb(SIDEBAR_TEXT))
+                .text_size(px(value_text))
+                .text_color(rgb(palette.sidebar_text))
                 .child(value),
         )
 }
@@ -39,93 +45,72 @@ pub(super) fn metric_readout(label: &'static str, value: String) -> impl IntoEle
 pub(super) fn metric_row(
     label: &'static str,
     value: String,
+    palette: UiTheme,
     cx: &mut Context<WorkspacePrototype>,
     decrement: impl Fn(&mut WorkspacePrototype, &mut Context<WorkspacePrototype>) + 'static,
     increment: impl Fn(&mut WorkspacePrototype, &mut Context<WorkspacePrototype>) + 'static,
 ) -> impl IntoElement {
-    div()
-        .w_full()
-        .flex()
-        .items_center()
-        .gap_2()
-        .child(control_label(label))
-        .child(appearance_button("-".to_string(), false, cx, decrement))
-        .child(
-            div()
-                .w(px(72.0))
-                .h(px(30.0))
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded_sm()
-                .bg(glass_fill(0x242632))
-                .text_size(px(13.0))
-                .text_color(rgb(ACTIVE_TEXT))
-                .child(value),
-        )
-        .child(appearance_button("+".to_string(), false, cx, increment))
+    metric_row_sized(
+        label,
+        value,
+        CONTROL_LABEL_TEXT,
+        CONTROL_VALUE_TEXT,
+        palette,
+        cx,
+        decrement,
+        increment,
+    )
 }
 
-pub(super) fn metric_row_palette(
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Metric controls combine typography and two independent actions"
+)]
+pub(super) fn metric_row_sized(
     label: &'static str,
     value: String,
-    palette: WorkspacePalette,
+    label_text: f32,
+    value_text: f32,
+    palette: UiTheme,
     cx: &mut Context<WorkspacePrototype>,
     decrement: impl Fn(&mut WorkspacePrototype, &mut Context<WorkspacePrototype>) + 'static,
     increment: impl Fn(&mut WorkspacePrototype, &mut Context<WorkspacePrototype>) + 'static,
 ) -> impl IntoElement {
     div()
+        .id(SharedString::from(format!("metric-{label}")))
         .w_full()
         .flex()
+        .flex_wrap()
         .items_center()
         .gap_2()
-        .child(control_label_palette(label, palette))
-        .child(appearance_button_palette(
-            "-".to_string(),
-            false,
-            palette,
-            cx,
-            decrement,
-        ))
+        .child(control_label_sized(label, label_text, palette))
+        .child(appearance_button("−".into(), false, palette, cx, decrement))
         .child(
             div()
                 .w(px(72.0))
-                .h(px(30.0))
+                .h(px(ControlSize::Regular.height()))
                 .flex()
                 .items_center()
                 .justify_center()
-                .rounded_sm()
-                .border_1()
-                .border_color(rgb(palette.border))
-                .bg(glass_fill(palette.panel_bg))
-                .text_size(px(13.0))
+                .text_size(px(value_text))
                 .text_color(rgb(palette.active_text))
                 .child(value),
         )
-        .child(appearance_button_palette(
-            "+".to_string(),
-            false,
-            palette,
-            cx,
-            increment,
-        ))
+        .child(appearance_button("+".into(), false, palette, cx, increment))
 }
 
-pub(super) fn control_label(label: &'static str) -> impl IntoElement {
-    div()
-        .w(px(150.0))
-        .text_size(px(12.0))
-        .text_color(rgb(MUTED_TEXT))
-        .child(label)
+pub(super) fn control_label(label: &'static str, palette: UiTheme) -> impl IntoElement {
+    control_label_sized(label, CONTROL_LABEL_TEXT, palette)
 }
 
-pub(super) fn control_label_palette(
+pub(super) fn control_label_sized(
     label: &'static str,
-    palette: WorkspacePalette,
+    text: f32,
+    palette: UiTheme,
 ) -> impl IntoElement {
     div()
-        .w(px(150.0))
-        .text_size(px(12.0))
+        .w(px(180.0))
+        .text_size(px(text))
         .text_color(rgb(palette.muted_text))
         .child(label)
 }
@@ -133,34 +118,13 @@ pub(super) fn control_label_palette(
 pub(super) fn effect_toggle_button(
     label: &'static str,
     active: bool,
+    palette: UiTheme,
     cx: &mut Context<WorkspacePrototype>,
     on_click: impl Fn(&mut WorkspacePrototype, &mut Context<WorkspacePrototype>) + 'static,
 ) -> impl IntoElement {
-    appearance_button(
-        if active {
-            format!("{label} On")
-        } else {
-            format!("{label} Off")
-        },
-        active,
-        cx,
-        on_click,
-    )
-}
-
-pub(super) fn effect_toggle_button_palette(
-    label: &'static str,
-    active: bool,
-    palette: WorkspacePalette,
-    cx: &mut Context<WorkspacePrototype>,
-    on_click: impl Fn(&mut WorkspacePrototype, &mut Context<WorkspacePrototype>) + 'static,
-) -> impl IntoElement {
-    appearance_button_palette(
-        if active {
-            format!("{label} On")
-        } else {
-            format!("{label} Off")
-        },
+    appearance_button_named(
+        label.to_string(),
+        format!("{label} {}", if active { "On" } else { "Off" }),
         active,
         palette,
         cx,
@@ -171,84 +135,60 @@ pub(super) fn effect_toggle_button_palette(
 pub(super) fn appearance_button(
     label: String,
     active: bool,
+    palette: UiTheme,
     cx: &mut Context<WorkspacePrototype>,
     on_click: impl Fn(&mut WorkspacePrototype, &mut Context<WorkspacePrototype>) + 'static,
-) -> impl IntoElement {
-    div()
-        .h(px(30.0))
-        .flex()
-        .items_center()
-        .justify_center()
-        .px_2()
-        .rounded_sm()
-        .border_1()
-        .border_color(rgb(if active { 0x47785f } else { BORDER }))
-        .bg(glass_fill(if active { 0x183725 } else { 0x242632 }))
-        .text_size(px(12.0))
-        .text_color(rgb(if active { QUEUE_GREEN } else { SIDEBAR_TEXT }))
-        .cursor_pointer()
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |this, _: &MouseDownEvent, _window, cx| {
-                on_click(this, cx);
-            }),
-        )
-        .child(label)
+) -> gpui::Stateful<gpui::Div> {
+    appearance_button_named(label.clone(), label, active, palette, cx, on_click)
 }
 
-pub(super) fn appearance_button_palette(
+pub(super) fn appearance_button_named(
+    id: String,
     label: String,
     active: bool,
-    palette: WorkspacePalette,
+    palette: UiTheme,
+    cx: &mut Context<WorkspacePrototype>,
+    on_click: impl Fn(&mut WorkspacePrototype, &mut Context<WorkspacePrototype>) + 'static,
+) -> gpui::Stateful<gpui::Div> {
+    ui::button_with_state(
+        SharedString::from(format!("settings-{id}")),
+        label,
+        palette,
+        ButtonVariant::Secondary,
+        ControlSize::Regular,
+        ControlState {
+            selected: active,
+            disabled: false,
+        },
+        cx.listener(move |this, _, _, cx| on_click(this, cx)),
+    )
+    .bg(glass_fill(if active {
+        palette.selection_bg
+    } else {
+        palette.panel_bg
+    }))
+}
+
+pub(super) fn settings_checkbox(
+    id: &'static str,
+    active: bool,
+    palette: UiTheme,
     cx: &mut Context<WorkspacePrototype>,
     on_click: impl Fn(&mut WorkspacePrototype, &mut Context<WorkspacePrototype>) + 'static,
 ) -> impl IntoElement {
-    div()
-        .h(px(30.0))
-        .flex()
-        .items_center()
-        .justify_center()
-        .px_2()
-        .rounded_sm()
-        .border_1()
-        .border_color(rgb(if active {
-            palette.queue_green
-        } else {
-            palette.border
-        }))
-        .bg(glass_fill(if active {
-            palette.sidebar_row_selected_bg
-        } else {
-            palette.inactive_tab_bg
-        }))
-        .text_size(px(12.0))
-        .text_color(rgb(if active {
-            palette.queue_green
-        } else {
-            palette.sidebar_text
-        }))
-        .cursor_pointer()
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |this, _: &MouseDownEvent, _window, cx| {
-                on_click(this, cx);
-            }),
-        )
-        .child(label)
+    ui::checkbox(
+        id,
+        active,
+        false,
+        palette,
+        cx.listener(move |this, _, _, cx| on_click(this, cx)),
+    )
 }
 
 pub(super) fn color_strip<const N: usize>(colors: [[u8; 3]; N]) -> impl IntoElement {
     let mut strip = div().flex().items_center().gap_1();
     for color in colors {
-        strip = strip.child(
-            div()
-                .w(px(16.0))
-                .h(px(16.0))
-                .rounded_sm()
-                .border_1()
-                .border_color(rgb(0x000000))
-                .bg(rgb(color_u32(color))),
-        );
+        strip = strip.child(div().size(px(12.0)).rounded_sm().bg(rgb(color_u32(color))));
     }
     strip
 }

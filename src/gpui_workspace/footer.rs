@@ -1,11 +1,11 @@
 use gpui::prelude::*;
-use gpui::{div, px, rgb, Context, MouseButton, MouseDownEvent};
+use gpui::{div, px, rgb, Context};
 
-use super::{WorkspacePalette, WorkspacePrototype, WorkspaceSurface, FOOTER_HEIGHT};
+use super::{UiTheme, WorkspacePrototype, WorkspaceSurface, FOOTER_HEIGHT};
 
 pub(super) fn workspace_footer(
     active_surface: Option<WorkspaceSurface>,
-    palette: WorkspacePalette,
+    palette: UiTheme,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     div()
@@ -54,33 +54,20 @@ fn footer_button(
     label: &'static str,
     surface: WorkspaceSurface,
     active_surface: Option<WorkspaceSurface>,
-    palette: WorkspacePalette,
+    palette: UiTheme,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     let active = active_surface == Some(surface);
-    div()
-        .h(px(36.0))
-        .flex()
-        .items_center()
-        .px_3()
-        .rounded_sm()
-        .bg(rgb(if active {
-            palette.accent
-        } else {
-            palette.chrome_bg
-        }))
-        .text_color(rgb(if active {
-            palette.active_text
-        } else {
-            palette.sidebar_text
-        }))
-        .text_size(px(14.0))
-        .cursor_pointer()
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |this, _: &MouseDownEvent, window, cx| {
-                this.open_footer_surface(surface, window, cx);
-            }),
-        )
-        .child(label)
+    crate::ui::button_with_state(
+        gpui::SharedString::from(format!("footer-{label}")),
+        label,
+        palette,
+        crate::ui::ButtonVariant::Ghost,
+        crate::ui_theme::ControlSize::Regular,
+        crate::ui::ControlState {
+            selected: active,
+            disabled: false,
+        },
+        cx.listener(move |this, _, window, cx| this.open_footer_surface(surface, window, cx)),
+    )
 }

@@ -10,6 +10,8 @@ use super::{AcademyError, CheckSpec};
 pub struct BookRef {
     pub title: String,
     pub edition: u32,
+    #[serde(default)]
+    pub url: Option<String>,
 }
 
 /// One module (book chapter) in a course: a title, an optional chapter

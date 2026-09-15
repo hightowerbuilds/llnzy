@@ -9,6 +9,13 @@ use super::schema::ConfigFile;
 
 impl Config {
     pub(super) fn apply(&mut self, file: ConfigFile) {
+        if let Some(mode) = file.ui_mode {
+            if let Some(mode) = crate::ui_theme::UiMode::parse(&mode) {
+                self.ui_mode = Some(mode);
+            } else {
+                log::warn!("Unknown UI mode {mode:?}; keeping existing app mode");
+            }
+        }
         if let Some(font) = file.font {
             if let Some(s) = font.size {
                 self.font_size = s;

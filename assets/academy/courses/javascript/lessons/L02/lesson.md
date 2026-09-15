@@ -121,15 +121,9 @@ After passing, explain why replacing `continue` with `return total` would incorr
 
 Implement classify(n): positive, negative, or zero. Implement totalPositive(numbers) ignoring zero and negatives. Implement commandAction(command) mapping add to write, list to read, and everything else to unknown using switch.
 
-Export a fresh workspace from the repository root. The exporter needs Python 3.11 or newer:
+Choose **Open practice** in the exercise card to create or reopen this lesson’s files. Edit the implementation, save your changes, then choose **Check work**. Your practice folder is reused when you return; opening it again keeps your edits. No source checkout or Python is needed.
 
-```bash
-python3 scripts/check_academy_courses.py --export javascript L02 /tmp/llnzy-js-l02
-```
-
-The destination must not already exist, so choose a new path for a retake.
-
-Open those files in LLNZY, then run the check from the exported directory:
+You can also run this command in the practice folder’s terminal:
 
 ```bash
 node check.js
@@ -138,3 +132,9 @@ node check.js
 The starter intentionally fails. Leave `check.js` unchanged: it calls your functions with several inputs and reports the first failed assertion.
 
 Read that failure, inspect the relevant input, and rerun after one focused edit.
+
+## Hint before a solution
+
+Try an empty list and a list containing only negatives. What should the running total start at? Remember a default branch for unknown commands.
+
+Try one focused change and check again. Before comparing with a reference solution, explain the failing case in your own words. A passing check covers the supplied examples; also try a new input and explain why your implementation handles it.

@@ -122,13 +122,9 @@ Wrap the await itself in try/catch when converting failure into a result object.
 
 The checks use manually released promises to prove start order and overlap. No elapsed time threshold determines success. After passing, explain why parallel output order differs from completion order, and why a failure does not automatically undo successful neighboring tasks.
 
-From the repository root, export this lesson. Python 3.11+ is required, and the destination must be new:
+Choose **Open practice** in the exercise card to create or reopen this lesson’s files. Edit the implementation, save your changes, then choose **Check work**. Your practice folder is reused when you return; opening it again keeps your edits. No source checkout or Python is needed.
 
-```bash
-python3 scripts/check_academy_courses.py --export javascript L08 /tmp/llnzy-javascript-L08
-```
-
-Open the exported directory in the editor, then run the check from that directory with Node.js 22 or newer:
+You can also run this command in the practice folder’s terminal:
 
 ```bash
 node check.js
@@ -137,3 +133,9 @@ node check.js
 Edit the implementation files and keep the supplied assertions intact. Read an assertion failure as a concrete example of behavior to repair.
 
 No exercise check downloads packages or accesses the network.
+
+## Hint before a solution
+
+If a later task has not started while the first task is waiting, where did you await too early? Return and await the promises you create.
+
+Try one focused change and check again. Before comparing with a reference solution, explain the failing case in your own words. A passing check covers the supplied examples; also try a new input and explain why your implementation handles it.

@@ -88,6 +88,8 @@ impl Default for ColorScheme {
 
 #[derive(Clone)]
 pub struct Config {
+    /// Explicit app chrome mode. None retains the legacy terminal-background fallback.
+    pub ui_mode: Option<crate::ui_theme::UiMode>,
     pub font_size: f32,
     pub font_family: Option<String>,
     pub font_weight: String,
@@ -396,6 +398,7 @@ impl Default for Config {
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
         Self {
             font_size: 16.0,
+            ui_mode: None,
             font_family: None,
             font_weight: "normal".to_string(),
             font_style: "normal".to_string(),

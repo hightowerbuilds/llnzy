@@ -95,7 +95,9 @@ A long-lived process can hold state by passing a new value to its next iteration
 {:reply, reply_for_caller, next_state}
 ```
 
-`init/1` returns `{:ok, initial_state}`. A synchronous `GenServer.call/2` waits for a reply from `handle_call/3`. The callback receives the request, caller information, and current state. Returning updated state does not mutate an integer; GenServer uses that returned value for the next message. `@impl true` marks callbacks so the compiler can check their relationship to the behaviour.
+`init/1` returns `{:ok, initial_state}`. A synchronous `GenServer.call/2` waits for a reply from `handle_call/3`. The callback receives the request, caller information, and current state. Returning updated state does not mutate an integer; GenServer uses that returned value for the next message.
+
+`@impl true` marks callbacks so the compiler can check their relationship to the behaviour.
 
 Our counter's :value request replies without changing state. An add request computes one updated value and uses it both as reply and next state. Each server handles its messages serially, so this read-modify-write sequence stays inside a single process. Two separately started counters have independent state.
 
@@ -107,4 +109,12 @@ The check starts the counter under ExUnit supervision for cleanup. After passing
 
 Implement Counter.init/1 and handle_call/3: start with the supplied integer, :value returns it unchanged, and {:add, amount} returns and stores the incremented value. Keep the supplied client API.
 
-Export from the repository root with `python3 scripts/check_academy_courses.py --export elixir L08 /tmp/llnzy-elixir-l08` (Python 3.11+). Choose a destination that does not already exist. Open the exported files in LLNZY and run `elixir check.exs` from that directory. The starter intentionally fails. Leave check.exs unchanged and implement lesson.exs. A successful check exits with status zero; read assertion failures to find the input that needs attention.
+Choose **Open practice** in the exercise card to create or reopen this lesson’s files. Edit the implementation, save your changes, then choose **Check work**. Your practice folder is reused when you return; opening it again keeps your edits. No source checkout or Python is needed.
+
+The command shown in the exercise card runs from that folder. The starter intentionally fails. Leave check.exs unchanged and implement lesson.exs. A successful check exits with status zero; read assertion failures to find the input that needs attention.
+
+## Hint before a solution
+
+List the reply and next state separately for each request. A correct reply can still leave the server holding an old value.
+
+Try one focused change and check again. Before comparing with a reference solution, explain the failing case in your own words. A passing check covers the supplied examples; also try a new input and explain why your implementation handles it.

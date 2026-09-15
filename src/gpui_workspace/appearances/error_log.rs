@@ -1,15 +1,17 @@
+use crate::ui_theme::Typography;
 use gpui::prelude::*;
 use gpui::{div, px, rgb, rgba, Context, FontWeight, MouseButton, MouseDownEvent};
 
-use crate::gpui_workspace::{ErrorLogFilter, WorkspacePalette, WorkspacePrototype};
+use crate::gpui_workspace::{ErrorLogFilter, WorkspacePrototype};
+use crate::ui_theme::UiTheme;
 
-use super::widgets::appearance_button_palette;
+use super::widgets::appearance_button;
 
 pub(super) fn settings_error_log_row(
     expanded: bool,
     filter: ErrorLogFilter,
     entries: Vec<crate::error_log::LogEntry>,
-    palette: WorkspacePalette,
+    palette: UiTheme,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     let (error_count, warn_count) =
@@ -30,45 +32,41 @@ pub(super) fn settings_error_log_row(
 
     let chevron = if expanded { "▾" } else { "▸" };
 
-    let header = div()
-        .id("error-log-header")
-        .flex()
-        .items_center()
-        .justify_between()
-        .gap_4()
-        .px_4()
-        .py_3()
-        .cursor_pointer()
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(|this, _: &MouseDownEvent, _window, cx| {
-                this.toggle_error_log_expanded(cx);
-            }),
-        )
-        .child(
-            div()
-                .flex()
-                .flex_col()
-                .gap_1()
-                .child(
-                    div()
-                        .text_size(px(13.0))
-                        .text_color(rgb(palette.active_text))
-                        .child("Error Log"),
-                )
-                .child(
-                    div()
-                        .text_size(px(12.0))
-                        .text_color(rgb(palette.muted_text))
-                        .child(count_summary),
-                ),
-        )
-        .child(
-            div()
-                .text_size(px(14.0))
-                .text_color(rgb(palette.muted_text))
-                .child(chevron),
-        );
+    let header = crate::ui::interactive(
+        "error-log-header",
+        palette,
+        cx.listener(|this, _, _, cx| this.toggle_error_log_expanded(cx)),
+    )
+    .flex()
+    .items_center()
+    .justify_between()
+    .gap_4()
+    .px_4()
+    .py_3()
+    .child(
+        div()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .child(
+                div()
+                    .text_size(px(Typography::BODY))
+                    .text_color(rgb(palette.active_text))
+                    .child("Error Log"),
+            )
+            .child(
+                div()
+                    .text_size(px(Typography::BODY))
+                    .text_color(rgb(palette.muted_text))
+                    .child(count_summary),
+            ),
+    )
+    .child(
+        div()
+            .text_size(px(Typography::BODY))
+            .text_color(rgb(palette.muted_text))
+            .child(chevron),
+    );
 
     let mut row = div().flex().flex_col().child(header);
 
@@ -109,7 +107,7 @@ pub(super) fn settings_error_log_row(
             .flex()
             .items_center()
             .gap_2()
-            .child(appearance_button_palette(
+            .child(appearance_button(
                 "Copy All".to_string(),
                 false,
                 palette,
@@ -118,7 +116,7 @@ pub(super) fn settings_error_log_row(
                     this.copy_error_log(cx);
                 },
             ))
-            .child(appearance_button_palette(
+            .child(appearance_button(
                 "Clear".to_string(),
                 false,
                 palette,
@@ -154,7 +152,7 @@ pub(super) fn settings_error_log_row(
                     .py_6()
                     .border_t_1()
                     .border_color(rgb(palette.border))
-                    .text_size(px(12.0))
+                    .text_size(px(Typography::BODY))
                     .text_color(rgb(palette.muted_text))
                     .child(empty_label),
             );
@@ -168,18 +166,23 @@ fn error_log_filter_button(
     label: &'static str,
     target: ErrorLogFilter,
     active_filter: ErrorLogFilter,
-    palette: WorkspacePalette,
+    palette: UiTheme,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     let active = target == active_filter;
-    appearance_button_palette(label.to_string(), active, palette, cx, move |this, cx| {
+    appearance_button(label.to_string(), active, palette, cx, move |this, cx| {
         this.set_error_log_filter(target, cx);
     })
+    .text_color(rgb(match target {
+        ErrorLogFilter::WarnAndError => palette.warning,
+        ErrorLogFilter::ErrorOnly => palette.danger,
+        ErrorLogFilter::All => palette.active_text,
+    }))
 }
 
 fn error_log_list(
     entries: Vec<crate::error_log::LogEntry>,
-    palette: WorkspacePalette,
+    palette: UiTheme,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     let mut list = div()
@@ -204,11 +207,14 @@ fn error_log_list(
 fn error_log_entry_row(
     idx: usize,
     entry: crate::error_log::LogEntry,
-    palette: WorkspacePalette,
+    palette: UiTheme,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
-    let [lr, lg, lb] = entry.level.color();
-    let level_color = ((lr as u32) << 16) | ((lg as u32) << 8) | (lb as u32);
+    let level_color = match entry.level {
+        crate::error_log::LogLevel::Error => palette.danger,
+        crate::error_log::LogLevel::Warn => palette.warning,
+        _ => palette.muted_text,
+    };
     let level_label = entry.level.label().trim().to_string();
 
     let timestamp = entry.timestamp_label();
@@ -237,20 +243,20 @@ fn error_log_entry_row(
         .gap_3()
         .child(
             div()
-                .text_size(px(10.0))
+                .text_size(px(Typography::BODY))
                 .text_color(rgb(level_color))
                 .child(level_label),
         )
         .child(
             div()
-                .text_size(px(10.0))
+                .text_size(px(Typography::BODY))
                 .text_color(rgb(palette.muted_text))
                 .whitespace_nowrap()
                 .child(timestamp),
         )
         .child(
             div()
-                .text_size(px(11.0))
+                .text_size(px(Typography::BODY))
                 .text_color(rgb(palette.sidebar_text))
                 .child(module),
         );
@@ -258,37 +264,36 @@ fn error_log_entry_row(
     if let Some(hint) = source_hint {
         metadata_row = metadata_row.child(
             div()
-                .text_size(px(10.0))
+                .text_size(px(Typography::BODY))
                 .text_color(rgb(palette.muted_text))
                 .child(hint),
         );
     }
 
-    let mut row = div()
-        .id(("error-log-row", idx))
-        .flex()
-        .flex_col()
-        .gap_1()
-        .px_4()
-        .py_2()
-        .border_b_1()
-        .border_color(rgb(palette.border))
-        .child(metadata_row)
-        .child(
-            div()
-                .text_size(px(12.0))
-                .text_color(rgb(palette.active_text))
-                .child(entry.message),
-        );
-
-    if let Some((file, line)) = jump_target {
-        row = row.cursor_pointer().on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |this, _: &MouseDownEvent, window, cx| {
-                this.open_error_log_source(file.clone(), line, window, cx);
-            }),
-        );
-    }
+    let row = crate::ui::interactive_with_state(
+        ("error-log-row", idx),
+        palette,
+        jump_target.is_none(),
+        cx.listener(move |this, _, window, cx| {
+            if let Some((file, line)) = &jump_target {
+                this.open_error_log_source(file.clone(), *line, window, cx);
+            }
+        }),
+    )
+    .flex()
+    .flex_col()
+    .gap_1()
+    .px_4()
+    .py_2()
+    .border_b_1()
+    .border_color(rgb(palette.border))
+    .child(metadata_row)
+    .child(
+        div()
+            .text_size(px(Typography::BODY))
+            .text_color(rgb(palette.active_text))
+            .child(entry.message),
+    );
 
     row
 }
@@ -296,7 +301,7 @@ fn error_log_entry_row(
 /// Scrim + centered card asking the user to confirm clearing the
 /// persisted error log.
 pub(super) fn error_log_clear_modal(
-    palette: WorkspacePalette,
+    palette: UiTheme,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     let scrim = div()
@@ -304,7 +309,7 @@ pub(super) fn error_log_clear_modal(
         .top_0()
         .left_0()
         .size_full()
-        .bg(rgba(0x00000099))
+        .bg(rgba((palette.scrim << 8) | 0x99))
         .flex()
         .items_center()
         .justify_center()
@@ -316,6 +321,7 @@ pub(super) fn error_log_clear_modal(
         );
 
     let card = div()
+        .id("clear-error-log-modal")
         .w(px(380.0))
         .flex()
         .flex_col()
@@ -333,14 +339,14 @@ pub(super) fn error_log_clear_modal(
         )
         .child(
             div()
-                .text_size(px(15.0))
+                .text_size(px(Typography::BODY))
                 .font_weight(FontWeight::BOLD)
                 .text_color(rgb(palette.active_text))
                 .child("Clear error log"),
         )
         .child(
             div()
-                .text_size(px(13.0))
+                .text_size(px(Typography::BODY))
                 .text_color(rgb(palette.muted_text))
                 .child(
                     "Drop every in-memory entry and truncate the persisted log on disk. \
@@ -353,7 +359,7 @@ pub(super) fn error_log_clear_modal(
                 .justify_end()
                 .gap_2()
                 .pt_2()
-                .child(appearance_button_palette(
+                .child(appearance_button(
                     "Cancel".to_string(),
                     false,
                     palette,
@@ -362,14 +368,13 @@ pub(super) fn error_log_clear_modal(
                         this.cancel_clear_error_log(cx);
                     },
                 ))
-                .child(appearance_button_palette(
-                    "Clear".to_string(),
-                    true,
+                .child(crate::ui::button(
+                    "confirm-clear-log",
+                    "Clear",
                     palette,
-                    cx,
-                    |this, cx| {
-                        this.confirm_clear_error_log(cx);
-                    },
+                    crate::ui::ButtonVariant::Danger,
+                    crate::ui_theme::ControlSize::Regular,
+                    cx.listener(|this, _, _, cx| this.confirm_clear_error_log(cx)),
                 )),
         );
 

@@ -115,13 +115,9 @@ Array.sort mutates its receiver. Sort the new array produced by map rather than 
 
 Sort team names before formatting to make output stable. Use ordinary string comparison, not locale-dependent formatting, for these ASCII fixtures.
 
-From the repository root, export this lesson. Python 3.11+ is required, and the destination must be new:
+Choose **Open practice** in the exercise card to create or reopen this lesson’s files. Edit the implementation, save your changes, then choose **Check work**. Your practice folder is reused when you return; opening it again keeps your edits. No source checkout or Python is needed.
 
-```bash
-python3 scripts/check_academy_courses.py --export javascript L07 /tmp/llnzy-javascript-L07
-```
-
-Open the exported directory in the editor, then run the check from that directory with Node.js 22 or newer:
+You can also run this command in the practice folder’s terminal:
 
 ```bash
 node check.js
@@ -130,3 +126,9 @@ node check.js
 Edit the implementation files and keep the supplied assertions intact. Read an assertion failure as a concrete example of behavior to repair.
 
 No exercise check downloads packages or accesses the network.
+
+## Hint before a solution
+
+Start by making the calculation helpers pass, then compose the report from their results. Which array can you safely sort without changing the input?
+
+Try one focused change and check again. Before comparing with a reference solution, explain the failing case in your own words. A passing check covers the supplied examples; also try a new input and explain why your implementation handles it.

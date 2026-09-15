@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 use gpui::{div, prelude::*, px, rgb, rgba, Action, Context, IntoElement, SharedString};
 
 use crate::text_utils::fuzzy_match_case_insensitive_ascii;
+use crate::ui::interactive;
+use crate::ui_theme::{Typography, UiTheme};
 
 use super::{
     MenuActivateTab1, MenuActivateTab2, MenuActivateTab3, MenuActivateTab4, MenuCloseProject,
@@ -410,16 +412,6 @@ pub(super) fn file_display(path: &Path, root: &Path) -> String {
         .into_owned()
 }
 
-const PALETTE_BG: u32 = 0x1d1f25;
-const PALETTE_BORDER: u32 = 0x3a3f4a;
-const PALETTE_INPUT_BG: u32 = 0x14161a;
-const PALETTE_ROW_HOVER_BG: u32 = 0x262a31;
-const PALETTE_ROW_SELECTED_BG: u32 = 0x344056;
-const PALETTE_LABEL: u32 = 0xe6e8ee;
-const PALETTE_SHORTCUT: u32 = 0x9097a3;
-const PALETTE_PLACEHOLDER: u32 = 0x6b727f;
-const PALETTE_BACKDROP: u32 = 0x000000;
-
 const PALETTE_WIDTH: f32 = 540.0;
 const PALETTE_TOP_OFFSET: f32 = 96.0;
 const PALETTE_LIST_MAX_HEIGHT: f32 = 360.0;
@@ -477,6 +469,7 @@ pub(super) fn render_command_palette(
     state: &CommandPaletteState,
     entries: &[CommandEntry],
     visible: &[usize],
+    palette: UiTheme,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     let (rows, placeholder, empty_message) = match state.mode {
@@ -508,9 +501,9 @@ pub(super) fn render_command_palette(
         state.query.clone().into()
     };
     let query_color = if state.query.is_empty() {
-        PALETTE_PLACEHOLDER
+        palette.muted_text
     } else {
-        PALETTE_LABEL
+        palette.active_text
     };
 
     let mut list = div()
@@ -525,49 +518,48 @@ pub(super) fn render_command_palette(
             div()
                 .px_3()
                 .py_2()
-                .text_size(px(12.0))
-                .text_color(rgb(PALETTE_PLACEHOLDER))
+                .text_size(px(Typography::CONTROL))
+                .text_color(rgb(palette.muted_text))
                 .child(empty_message),
         );
     } else {
         for (display_idx, row) in rows.into_iter().enumerate() {
             let selected = display_idx == state.selected;
             let bg = if selected {
-                PALETTE_ROW_SELECTED_BG
+                palette.selection_bg
             } else {
-                PALETTE_BG
+                palette.panel_bg
             };
-            let row_el = div()
-                .id(("palette-row", display_idx))
-                .flex()
-                .items_center()
-                .justify_between()
-                .gap_3()
-                .px_3()
-                .h(px(PALETTE_ROW_HEIGHT))
-                .bg(rgb(bg))
-                .hover(|style| style.bg(rgb(PALETTE_ROW_HOVER_BG)))
-                .cursor_pointer()
-                .on_mouse_down(
-                    gpui::MouseButton::Left,
-                    cx.listener(move |this, _, window, cx| {
-                        this.invoke_palette_at(display_idx, window, cx);
-                    }),
-                )
-                .child(
+            let row_el = interactive(
+                ("palette-row", display_idx),
+                palette,
+                cx.listener(move |this, _, window, cx| {
+                    this.invoke_palette_at(display_idx, window, cx)
+                }),
+            )
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_3()
+            .px_3()
+            .h(px(PALETTE_ROW_HEIGHT))
+            .bg(rgb(bg))
+            .hover(move |style| style.bg(rgb(palette.hover_bg)))
+            .cursor_pointer()
+            .child(
+                div()
+                    .text_size(px(Typography::CONTROL))
+                    .text_color(rgb(palette.active_text))
+                    .child(SharedString::from(row.label)),
+            )
+            .when_some(row.hint, |row_el, hint| {
+                row_el.child(
                     div()
-                        .text_size(px(13.0))
-                        .text_color(rgb(PALETTE_LABEL))
-                        .child(SharedString::from(row.label)),
+                        .text_size(px(Typography::CAPTION))
+                        .text_color(rgb(palette.muted_text))
+                        .child(SharedString::from(hint)),
                 )
-                .when_some(row.hint, |row_el, hint| {
-                    row_el.child(
-                        div()
-                            .text_size(px(11.0))
-                            .text_color(rgb(PALETTE_SHORTCUT))
-                            .child(SharedString::from(hint)),
-                    )
-                });
+            });
             list = list.child(row_el);
         }
     }
@@ -575,11 +567,12 @@ pub(super) fn render_command_palette(
     // Full-window backdrop catches outside clicks to dismiss the palette.
     div()
         .id("command-palette-backdrop")
+        .font_family(Typography::UI_FONT)
         .absolute()
         .size_full()
         .top_0()
         .left_0()
-        .bg(rgba(rgba_u32(PALETTE_BACKDROP, 0.35)))
+        .bg(rgba(rgba_u32(palette.scrim, 0.35)))
         .on_mouse_down(
             gpui::MouseButton::Left,
             cx.listener(|this, _, _window, cx| {
@@ -595,22 +588,22 @@ pub(super) fn render_command_palette(
                 .ml(px(-(PALETTE_WIDTH / 2.0)))
                 .flex()
                 .flex_col()
-                .bg(rgb(PALETTE_BG))
+                .bg(rgb(palette.panel_bg))
                 .border_1()
-                .border_color(rgb(PALETTE_BORDER))
+                .border_color(rgb(palette.border))
                 .rounded_md()
                 .overflow_hidden()
                 // Stop click events on the panel itself from reaching the
                 // backdrop (which would dismiss the palette).
-                .on_mouse_down(gpui::MouseButton::Left, |_, _, _| {})
+                .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .child(
                     div()
                         .px_3()
                         .py_2()
-                        .bg(rgb(PALETTE_INPUT_BG))
+                        .bg(rgb(palette.editor_bg))
                         .border_b_1()
-                        .border_color(rgb(PALETTE_BORDER))
-                        .text_size(px(13.0))
+                        .border_color(rgb(palette.border))
+                        .text_size(px(Typography::CONTROL))
                         .text_color(rgb(query_color))
                         .child(query),
                 )

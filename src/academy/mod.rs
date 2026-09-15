@@ -1,6 +1,7 @@
 //! Academy course-format module: manifests, lessons, and the course
-//! library. Pure model code — no GPUI, no threads — so every rule below
-//! is unit-testable without a window, per the architecture map.
+//! library, plus persistent practice workspaces and bounded check execution.
+//! No GPUI dependencies: rules and the runner can be tested without a window.
+//! Call the synchronous practice runner from a worker, never the UI thread.
 //!
 //! A course is a directory with a `course.toml` manifest and one
 //! `lessons/<ID>/lesson.md` per lesson. Lessons carry TOML frontmatter
@@ -12,6 +13,7 @@
 pub mod lesson;
 pub mod library;
 pub mod manifest;
+pub mod practice;
 
 pub use lesson::{Lesson, LessonMeta};
 pub use library::{Course, CourseLibrary};

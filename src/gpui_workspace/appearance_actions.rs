@@ -12,6 +12,28 @@ use super::{
 
 impl WorkspacePrototype {
     pub(super) fn apply_appearance_config(&mut self, cx: &mut Context<Self>) {
+        self.apply_appearance_locally(cx);
+        let source = cx.entity().downgrade();
+        let config = self.appearance_config.clone();
+        let preferences = self.preferences.clone();
+        // Defer until the current entity borrow is released. Existing windows
+        // share app appearance, and newly opened windows read the saved choices.
+        cx.defer(move |cx| {
+            let windows = super::WORKSPACE_REGISTRY.with(|registry| registry.borrow().clone());
+            for window in windows {
+                if window == source {
+                    continue;
+                }
+                let _ = window.update(cx, |workspace, cx| {
+                    workspace.appearance_config = config.clone();
+                    workspace.preferences = preferences.clone();
+                    workspace.apply_appearance_locally(cx);
+                });
+            }
+        });
+    }
+
+    fn apply_appearance_locally(&mut self, cx: &mut Context<Self>) {
         let config = self.appearance_config.clone();
         self.notepad
             .update(cx, |notepad, cx| notepad.set_config(config.clone(), cx));
@@ -38,12 +60,11 @@ impl WorkspacePrototype {
             .find(|theme| theme.name == theme_name)
         {
             let theme_name = theme.name.clone();
-            let terminal_effects = self.appearance_config.effects.clone();
-            let preserve_terminal_effects = theme.preserve_terminal_effects;
             theme.apply_to(&mut self.appearance_config);
-            if preserve_terminal_effects {
-                self.appearance_config.effects = terminal_effects;
-            }
+            self.preferences.ui_mode = self
+                .appearance_config
+                .ui_mode
+                .map(|mode| mode.as_str().to_string());
             self.preferences.app_theme = Some(theme_name);
             self.preferences.save();
             self.apply_appearance_config(cx);
@@ -114,6 +135,13 @@ impl WorkspacePrototype {
 
     pub(super) fn set_background_mode(&mut self, mode: &'static str, cx: &mut Context<Self>) {
         self.appearance_config.effects.background = mode.to_string();
+        if mode == "image" {
+            self.appearance_config.effects.enabled = true;
+        }
+        self.preferences.terminal_background_image =
+            self.appearance_config.effects.background_image.clone();
+        self.preferences.terminal_background_mode = Some(mode.to_string());
+        self.preferences.save();
         self.terminal_background_import_error = None;
         self.apply_appearance_config(cx);
     }
@@ -142,6 +170,8 @@ impl WorkspacePrototype {
                             workspace.appearance_config.effects.background_image =
                                 Some(reference.clone());
                             workspace.preferences.terminal_background_image = Some(reference);
+                            workspace.preferences.terminal_background_mode =
+                                Some("image".to_string());
                             workspace.preferences.save();
                             workspace.apply_appearance_config(cx);
                         }
@@ -163,6 +193,7 @@ impl WorkspacePrototype {
             self.appearance_config.effects.background = "none".to_string();
         }
         self.preferences.terminal_background_image = None;
+        self.preferences.terminal_background_mode = Some("none".to_string());
         self.preferences.save();
         self.apply_appearance_config(cx);
     }
@@ -199,6 +230,7 @@ impl WorkspacePrototype {
         self.appearance_config.effects.background = "image".to_string();
         self.appearance_config.effects.background_image = Some(reference.clone());
         self.preferences.terminal_background_image = Some(reference);
+        self.preferences.terminal_background_mode = Some("image".to_string());
         self.preferences.save();
         self.apply_appearance_config(cx);
     }
@@ -232,6 +264,7 @@ impl WorkspacePrototype {
                 self.appearance_config.effects.background = "none".to_string();
             }
             self.preferences.terminal_background_image = None;
+            self.preferences.terminal_background_mode = Some("none".to_string());
             self.preferences.save();
         }
         self.apply_appearance_config(cx);

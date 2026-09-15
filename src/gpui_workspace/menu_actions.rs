@@ -657,8 +657,37 @@ impl WorkspacePrototype {
         lesson: String,
         cx: &mut Context<Self>,
     ) {
-        self.academy_course = Some(course);
+        if let Some(lesson_data) = self
+            .academy_library
+            .as_ref()
+            .and_then(|library| library.course(&course))
+            .and_then(|course| course.lessons.get(&lesson))
+        {
+            let ids = lesson_data
+                .meta
+                .exercises
+                .iter()
+                .map(crate::academy_progress::exercise_id)
+                .collect::<Vec<_>>();
+            let required = ids.iter().map(String::as_str).collect::<Vec<_>>();
+            self.academy_progress
+                .reconcile_lesson(&course, &lesson, &required);
+        }
+        self.academy_progress
+            .record_location(&course, &lesson, None);
+        self.persist_academy_progress();
+        self.academy_course = Some(course.clone());
         self.academy_lesson = Some(lesson);
+        if let Some(language) = self
+            .academy_library
+            .as_ref()
+            .and_then(|library| library.course(&course))
+            .map(|course| course.manifest.language.clone())
+        {
+            if !self.academy_practice.readiness.contains_key(&language) {
+                self.academy_check_readiness(language, cx);
+            }
+        }
         cx.notify();
     }
 

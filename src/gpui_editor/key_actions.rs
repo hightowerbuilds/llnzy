@@ -503,8 +503,13 @@ impl EditorPrototype {
     }
 
     pub(super) fn tab(&mut self, _: &Tab, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(next) = &self.writing_next_focus {
-            window.focus(next);
+        if self.writing_surface {
+            if let Some(next) = &self.writing_next_focus {
+                window.focus(next);
+            } else {
+                window.focus_next();
+            }
+            cx.stop_propagation();
             return;
         }
         if self.accept_lsp_panel_selection(cx) {
@@ -523,7 +528,12 @@ impl EditorPrototype {
         self.dispatch_editor_command(EditorCommand::Indent { outdent: false }, cx);
     }
 
-    pub(super) fn shift_tab(&mut self, _: &ShiftTab, _: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn shift_tab(&mut self, _: &ShiftTab, window: &mut Window, cx: &mut Context<Self>) {
+        if self.writing_surface {
+            window.focus_prev();
+            cx.stop_propagation();
+            return;
+        }
         if self.move_lsp_panel_selection(-1, cx) {
             return;
         }

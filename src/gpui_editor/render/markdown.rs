@@ -359,7 +359,7 @@ fn markdown_preview_line_height(appearance: &EditorAppearance) -> f32 {
 /// height and any internal scroll continues to work as before.
 pub(super) fn markdown_mode_toggle(
     mode: MarkdownViewMode,
-    _snapshot: &EditorSnapshot,
+    snapshot: &EditorSnapshot,
     cx: &mut Context<EditorPrototype>,
 ) -> impl IntoElement {
     div()
@@ -369,12 +369,14 @@ pub(super) fn markdown_mode_toggle(
         .flex()
         .gap_1()
         .child(markdown_mode_button(
+            snapshot.appearance.chrome,
             "Preview",
             mode == MarkdownViewMode::Preview,
             MarkdownViewMode::Preview,
             cx,
         ))
         .child(markdown_mode_button(
+            snapshot.appearance.chrome,
             "Source",
             mode == MarkdownViewMode::Source,
             MarkdownViewMode::Source,
@@ -383,36 +385,37 @@ pub(super) fn markdown_mode_toggle(
 }
 
 fn markdown_mode_button(
+    theme: UiTheme,
     label: &'static str,
     active: bool,
     target: MarkdownViewMode,
     cx: &mut Context<EditorPrototype>,
 ) -> impl IntoElement {
-    let (bg, border, fg) = if active {
-        (0x214966u32, 0x4d8fbfu32, 0xe1e6eeu32)
-    } else {
-        (0x242632u32, 0x3a3f4bu32, 0x9aa3b3u32)
-    };
-    div()
-        .h(px(26.0))
-        .px_3()
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded_sm()
-        .border_1()
-        .border_color(rgb(border))
-        .bg(rgb(bg))
-        .text_size(px(12.0))
-        .text_color(rgb(fg))
-        .cursor_pointer()
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |this, _: &MouseDownEvent, _window, cx| {
-                this.set_markdown_mode_from_workspace(target, cx);
-            }),
-        )
-        .child(label)
+    crate::ui::button(
+        match target {
+            MarkdownViewMode::Preview => "editor-markdown-preview",
+            MarkdownViewMode::Source => "editor-markdown-source",
+            MarkdownViewMode::Split => "editor-markdown-split",
+        },
+        label,
+        theme,
+        if active {
+            crate::ui::ButtonVariant::Secondary
+        } else {
+            crate::ui::ButtonVariant::Ghost
+        },
+        crate::ui_theme::ControlSize::Compact,
+        cx.listener(move |this, _, window, cx| {
+            window.focus(&this.focus_handle);
+            this.set_markdown_mode_from_workspace(target, cx);
+        }),
+    )
+    .when(active, |button| {
+        button
+            .bg(rgb(theme.selection_bg))
+            .border_color(rgb(theme.accent))
+            .text_color(rgb(theme.active_text))
+    })
 }
 
 #[cfg(test)]

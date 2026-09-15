@@ -34,10 +34,18 @@ use crate::session::Session;
 use crate::terminal::{encode_alternate_scroll, encode_wheel_reports, route_wheel, WheelRoute};
 use crate::utf16::{char_index_to_utf16_index, utf16_index_to_char_index};
 
-const TERMINAL_BG: u32 = 0x080808;
+fn terminal_is_light(config: &Config) -> bool {
+    config
+        .colors
+        .background
+        .iter()
+        .map(|channel| *channel as u16)
+        .sum::<u16>()
+        > 600
+}
+
 const TERMINAL_PANEL_BG: u32 = 0x0d0d10;
 const TERMINAL_BORDER: u32 = 0x30323a;
-const TERMINAL_TEXT: u32 = 0xd6dde8;
 const TERMINAL_MUTED: u32 = 0x8d94a3;
 const TERMINAL_ACCENT: u32 = 0x6aff90;
 const TERMINAL_ERROR: u32 = 0xff7a7a;
@@ -115,30 +123,10 @@ actions!(
 /// Workspace-wide background-image layer. Returns `Some` only when the
 /// active background mode is `image` and the reference resolves to a file
 /// on disk. Named for the workspace rather than the terminal because every
-/// background-bearing surface mounts it — the terminal, the Academy, and
-/// the empty workspace — from one global `effects` config.
+/// background-bearing surface mounts it — the terminal, the Academy, Home,
+/// Settings, and the empty workspace — from one global `effects` config.
 pub(crate) fn workspace_background_layer(config: &Config) -> Option<gpui::Div> {
     terminal_background_image_path(config).map(|path| terminal_background_image(path, config))
-}
-
-/// Blur applied behind reading surfaces, in the downscaled working image's
-/// pixels. Tuned so text stays legible over a busy photo without the image
-/// dissolving into a flat wash.
-const UI_BACKGROUND_BLUR_SIGMA: f32 = 8.0;
-
-/// `workspace_background_layer` backed by a blurred copy of the image.
-///
-/// GPUI 0.2.2 has no backdrop filter: `blur_radius` in its style tree
-/// belongs to box shadows, and `WindowBackgroundAppearance::Blurred` blurs
-/// the desktop behind the whole window. So a frosted panel has to come
-/// from a pre-blurred image rather than a live filter. Falls back to the
-/// sharp image when the blur cannot be built — a crisp background beats no
-/// background.
-pub(crate) fn workspace_background_layer_blurred(config: &Config) -> Option<gpui::Div> {
-    let path = terminal_background_image_path(config)?;
-    let blurred = crate::theme_store::blurred_background_path(&path, UI_BACKGROUND_BLUR_SIGMA)
-        .unwrap_or_else(|| path.clone());
-    Some(terminal_background_image(blurred, config))
 }
 
 /// True when the background mode is `image` and the reference resolves to
@@ -255,6 +243,16 @@ impl TerminalSurface {
         };
         start_event_task(cx);
         surface
+    }
+
+    pub(crate) fn is_running_in(&self, directory: &std::path::Path) -> bool {
+        self.session.as_ref().is_some_and(|session| {
+            session.exited.is_none()
+                && session
+                    .cwd
+                    .as_deref()
+                    .is_some_and(|cwd| std::path::Path::new(cwd) == directory)
+        })
     }
 
     pub(crate) fn set_config(&mut self, config: Arc<Config>, cx: &mut Context<Self>) {
@@ -793,6 +791,10 @@ impl EntityInputHandler for TerminalSurface {
 impl Render for TerminalSurface {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let uses_background_image = workspace_background_image_active(&self.config);
+        let render_config = terminal_render_config(&self.config);
+        let background = effects::rgba_u32(render_config.colors.background, 1.0);
+        let foreground = effects::rgba_u32(render_config.colors.foreground, 1.0);
+        let light = terminal_is_light(&self.config);
         let body = if self.session.is_some() {
             let mut terminal_body = div()
                 .relative()
@@ -805,7 +807,7 @@ impl Render for TerminalSurface {
                 .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up));
 
             if !uses_background_image {
-                terminal_body = terminal_body.bg(rgb(TERMINAL_BG));
+                terminal_body = terminal_body.bg(rgba(background));
             }
 
             terminal_body.child(TerminalElement {
@@ -819,14 +821,18 @@ impl Render for TerminalSurface {
                 .flex_col()
                 .items_center()
                 .justify_center()
-                .bg(rgb(TERMINAL_BG))
-                .text_color(rgb(TERMINAL_ERROR))
+                .bg(rgba(background))
+                .text_color(rgb(if light { 0xa32e35 } else { TERMINAL_ERROR }))
                 .child(div().text_size(px(15.0)).child("Terminal failed to launch"))
                 .child(
                     div()
                         .mt_2()
                         .text_size(px(12.0))
-                        .text_color(rgb(TERMINAL_MUTED))
+                        .text_color(rgba(if light {
+                            foreground
+                        } else {
+                            (TERMINAL_MUTED << 8) | 0xff
+                        }))
                         .child(self.terminal_subtitle()),
                 )
         };
@@ -835,7 +841,7 @@ impl Render for TerminalSurface {
             .size_full()
             .flex()
             .flex_col()
-            .text_color(rgb(TERMINAL_TEXT))
+            .text_color(rgba(foreground))
             // Menlo ships with every macOS install. Berkeley Mono (the prior
             // default) is commercial and not present on most systems, so its
             // family name resolved through fallback to a proportional system
@@ -874,7 +880,11 @@ impl Render for TerminalSurface {
             .on_action(cx.listener(Self::ctrl_w));
 
         if !uses_background_image {
-            root = root.bg(rgb(TERMINAL_PANEL_BG));
+            root = root.bg(if light {
+                rgba(background)
+            } else {
+                rgb(TERMINAL_PANEL_BG)
+            });
         }
 
         root.child(terminal_header(
@@ -882,6 +892,7 @@ impl Render for TerminalSurface {
             self.terminal_subtitle(),
             self.status_message.clone(),
             uses_background_image,
+            &self.config,
         ))
         .child(body)
     }

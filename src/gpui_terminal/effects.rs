@@ -10,8 +10,10 @@ use crate::config::{BackgroundImageFit, Config};
 
 pub(super) fn terminal_render_config(config: &Config) -> Config {
     let mut terminal_config = config.clone();
-    terminal_config.colors.background = [8, 8, 8];
-    terminal_config.colors.ansi[0] = [8, 8, 8];
+    if !super::terminal_is_light(config) {
+        terminal_config.colors.background = [8, 8, 8];
+        terminal_config.colors.ansi[0] = [8, 8, 8];
+    }
     terminal_config
 }
 

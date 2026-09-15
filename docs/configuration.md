@@ -10,9 +10,26 @@ llnzy reads `config.toml` from the platform config directory. The file is option
 
 Every key below is optional. You only need to include the ones you want to change.
 
-Built-in visual themes currently ship as two presets: `Minimalist` and `Buzz`. User themes are saved under the same platform config directory in `themes/`. Saved workspaces use `workspaces/`, and background images use `backgrounds/`.
+Built-in visual themes currently ship as two presets: `Minimalist` and `Light Mode`. User themes are saved under the same platform config directory in `themes/`. Saved workspaces use `workspaces/`, and background images use `backgrounds/`.
 
 ---
+
+## UI theme and background preferences
+
+The top-level optional `ui_mode = "light"` or `ui_mode = "dark"` controls app
+chrome independently of terminal colors. Put it before table sections in TOML.
+On startup, a valid UI mode saved by Settings takes precedence, followed by the
+config-file mode, the selected built-in theme, and the legacy background-color
+heuristic. Unknown mode/theme names fall back without discarding other settings.
+
+Settings persists the app theme and image selection, visibility, fit, and intensity
+in its existing preferences sidecar. Selecting a theme keeps the background image;
+None hides a remembered image, while Clear removes the selection. An explicit
+None/Clear override remains effective even if `config.toml` contains an image.
+Appearance changes propagate to open workspace windows. Code fonts, syntax
+highlighting, and reading typography retain their own settings.
+
+See [the style-system guide](style-system.md) for semantic roles and shared controls.
 
 ## `[font]`
 

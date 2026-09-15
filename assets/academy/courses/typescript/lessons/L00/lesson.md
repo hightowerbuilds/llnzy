@@ -3,7 +3,7 @@ title = "Your First Strict Build"
 concepts = ["compiler versus runtime", "strict mode", "ES modules", "reading diagnostics"]
 
 [[exercise]]
-prompt = "Fix the two incorrect values in setup.ts while keeping their declared types. Compile and run the check from the exported exercise directory."
+prompt = "Fix the two incorrect values in setup.ts while keeping their declared types. Save your changes and choose Check work."
 [exercise.check]
 command = ["sh", "-c", "tsc --project tsconfig.json --pretty false && node dist/check.js"]
 expected = "L00 passed\n"
@@ -117,20 +117,6 @@ export const ready: boolean = true;
 +++
 # Your First Strict Build
 
-The Academy can display this lesson; exercise materialization and in-app checks are not wired up yet.
-
-From the repository root, export the starter files:
-
-```bash
-python3 scripts/check_academy_courses.py --export typescript L00 /tmp/llnzy-typescript-L00
-```
-
-Then open that directory in the editor and use it as your terminal working directory. Choose a destination that does not already exist.
-
-For later lessons, change both the lesson ID and the destination — `L01` with `/tmp/llnzy-typescript-L01`, and so on.
-
-The exporter requires Python 3.11 or newer. It copies starter files and prints the check command.
-
 This course assumes you can already write JavaScript functions, arrays, objects, imports, and promises. Complete the JavaScript course first if those are unfamiliar.
 
 TypeScript adds a static analysis stage: it checks a program before execution, then emits JavaScript. Its annotations do not validate user input at runtime.
@@ -154,7 +140,9 @@ const label: string = "ready";
 console.log(label.toUpperCase()); // READY
 ```
 
-Run the check from the exported exercise directory in your terminal:
+Choose **Open practice** in the exercise card to create or reopen this lesson’s files. Edit the implementation, save your changes, then choose **Check work**. Your practice folder is reused when you return; opening it again keeps your edits. No source checkout or Python is needed.
+
+You can also run this command in the practice folder’s terminal:
 
 ```bash
 tsc --project tsconfig.json --pretty false && node dist/check.js
@@ -166,6 +154,12 @@ Keep `check.ts`, `assert.ts`, and `tsconfig.json` intact; edit the exercise impl
 
 The checks compare behavior and compile type examples. Printing the success message yourself does not implement the exercise.
 
-After passing, hover the exported functions in the editor and explain their input and output types without executing them.
+After passing, read the exported declarations and explain their input and output types without executing them. If editor hover is available, use it to compare your prediction.
 
 Reference: [TypeScript strict compiler options](https://www.typescriptlang.org/tsconfig/strict.html).
+
+## Hint before a solution
+
+Read each declared type before changing its value. Quotation marks create strings; a number or boolean declaration needs a matching value.
+
+Try one focused change and check again. Before comparing with a reference solution, explain the failing case in your own words. A passing check covers the supplied examples; also try a new input and explain why your implementation handles it.

@@ -8,7 +8,7 @@ use std::{
 
 use gpui::prelude::*;
 use gpui::{
-    div, px, rgb, App, ClickEvent, Context, DragMoveEvent, ExternalPaths, MouseButton,
+    div, px, rgb, rgba, App, ClickEvent, Context, DragMoveEvent, ExternalPaths, MouseButton,
     MouseDownEvent, Render, Window,
 };
 
@@ -17,12 +17,18 @@ use crate::sidebar_move::{
     collect_sidebar_move_destinations, plan_sidebar_move, MoveOrigin, SidebarMoveDestination,
     SidebarMoveRequest,
 };
-
-use super::{
-    WorkspacePalette, WorkspacePrototype, ACTIVE_TEXT, BUMPER_RESIZE_WIDTH, BUMPER_WIDTH,
-    EXPLORER_ENTRY_LIMIT, FOLDER_BLUE, MUTED_TEXT, QUEUE_GREEN, SIDEBAR_DROP_INVALID_BG,
-    SIDEBAR_DROP_VALID_BG,
+use crate::ui::{
+    button, button_with_state, interactive, interactive_with_state, ButtonVariant, ControlState,
 };
+use crate::ui_theme::{ControlSize, Typography, UiTheme};
+
+use super::{WorkspacePrototype, BUMPER_RESIZE_WIDTH, BUMPER_WIDTH, EXPLORER_ENTRY_LIMIT};
+
+/// Opacity of the sidebar's fill, out of 0xff. The workspace window opens
+/// with a blurred background, so whatever this fill leaves uncovered shows
+/// the desktop behind the window, blurred by macOS. Every other region of
+/// the window paints an opaque fill of its own.
+const SIDEBAR_GLASS_ALPHA: u32 = 0xb8;
 
 #[derive(Clone, Debug)]
 pub(super) struct ExplorerEntry {
@@ -59,7 +65,7 @@ pub(super) struct WorkspaceSidebarContext {
     pub(super) recent_projects_open: bool,
     pub(super) sidebar_width: f32,
     pub(super) explorer_status: Option<String>,
-    pub(super) palette: WorkspacePalette,
+    pub(super) palette: UiTheme,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -205,15 +211,18 @@ pub(super) fn estimated_context_menu_height(
 }
 
 #[derive(Clone, Copy)]
-struct SidebarResizeDrag;
+struct SidebarResizeDrag {
+    palette: UiTheme,
+}
 
 impl Render for SidebarResizeDrag {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        let palette = self.palette;
         div()
             .w(px(2.0))
             .h(px(28.0))
             .rounded_sm()
-            .bg(rgb(QUEUE_GREEN))
+            .bg(rgb(palette.queue_green))
     }
 }
 
@@ -235,13 +244,15 @@ impl ExplorerDragPayload {
 }
 
 struct ExplorerDragPreview {
+    palette: UiTheme,
     label: String,
     is_dir: bool,
 }
 
 impl ExplorerDragPreview {
-    fn new(payload: &ExplorerDragPayload) -> Self {
+    fn new(payload: &ExplorerDragPayload, palette: UiTheme) -> Self {
         Self {
+            palette,
             label: payload.label.clone(),
             is_dir: payload.is_dir,
         }
@@ -250,6 +261,7 @@ impl ExplorerDragPreview {
 
 impl Render for ExplorerDragPreview {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        let palette = self.palette;
         div()
             .w(px(220.0))
             .h(px(30.0))
@@ -259,16 +271,20 @@ impl Render for ExplorerDragPreview {
             .px_2()
             .rounded_sm()
             .border_1()
-            .border_color(rgb(0x4c5262))
-            .bg(rgb(0x20232b))
-            .text_size(px(12.0))
-            .text_color(rgb(ACTIVE_TEXT))
+            .border_color(rgb(palette.border))
+            .bg(rgb(palette.panel_bg))
+            .text_size(px(Typography::CONTROL))
+            .text_color(rgb(palette.active_text))
             .shadow_md()
             .child(
                 div()
                     .w(px(34.0))
-                    .text_size(px(10.0))
-                    .text_color(rgb(if self.is_dir { FOLDER_BLUE } else { MUTED_TEXT }))
+                    .text_size(px(Typography::CAPTION))
+                    .text_color(rgb(if self.is_dir {
+                        palette.folder
+                    } else {
+                        palette.muted_text
+                    }))
                     .child(if self.is_dir { "DIR" } else { "FILE" }),
             )
             .child(
@@ -312,7 +328,7 @@ pub(super) fn workspace_sidebar(
         .justify_between()
         .border_b_1()
         .border_color(rgb(palette.border))
-        .text_size(px(13.0))
+        .text_size(px(Typography::CONTROL))
         .text_color(rgb(palette.active_text))
         .child(
             div().flex().items_center().gap_2().child("FILES").child(
@@ -320,7 +336,7 @@ pub(super) fn workspace_sidebar(
                     .rounded_sm()
                     .bg(rgb(palette.sidebar_row_selected_bg))
                     .px_1()
-                    .text_size(px(10.0))
+                    .text_size(px(Typography::CAPTION))
                     .text_color(rgb(palette.muted_text))
                     .child(root_label),
             ),
@@ -330,8 +346,8 @@ pub(super) fn workspace_sidebar(
                 .flex()
                 .items_center()
                 .gap_1()
-                .child(sidebar_pop_out_button(has_project, cx))
-                .child(sidebar_close_project_button(has_project, cx)),
+                .child(sidebar_pop_out_button(has_project, palette, cx))
+                .child(sidebar_close_project_button(has_project, palette, cx)),
         );
 
     if let Some(root) = workspace_root.clone() {
@@ -343,6 +359,7 @@ pub(super) fn workspace_sidebar(
                 style.bg(rgb(explorer_drop_background(
                     payload,
                     &explorer_drop_target,
+                    palette,
                 )))
             })
             .on_drop(
@@ -363,7 +380,7 @@ pub(super) fn workspace_sidebar(
         .flex_col()
         .border_r_1()
         .border_color(rgb(palette.border))
-        .bg(rgb(palette.chrome_bg))
+        .bg(rgba((palette.chrome_bg << 8) | SIDEBAR_GLASS_ALPHA))
         .child(header)
         .child(sidebar_project_controls(
             workspace_root.clone(),
@@ -376,11 +393,11 @@ pub(super) fn workspace_sidebar(
     if let Some(root) = workspace_root.clone() {
         sidebar = sidebar
             .can_drop(|drag, _window, _cx| drag.downcast_ref::<ExternalPaths>().is_some())
-            .drag_over::<ExternalPaths>(|style, paths, _window, _cx| {
+            .drag_over::<ExternalPaths>(move |style, paths, _window, _cx| {
                 if external_paths_contain_project_images(paths) {
-                    style.bg(rgb(SIDEBAR_DROP_VALID_BG))
+                    style.bg(rgb(palette.drop_valid_bg))
                 } else {
-                    style.bg(rgb(SIDEBAR_DROP_INVALID_BG))
+                    style.bg(rgb(palette.drop_invalid_bg))
                 }
             })
             .on_drop(
@@ -411,7 +428,7 @@ pub(super) fn workspace_sidebar(
                 .items_center()
                 .border_t_1()
                 .border_color(rgb(palette.border))
-                .text_size(px(11.0))
+                .text_size(px(Typography::CAPTION))
                 .text_color(rgb(palette.muted_text))
                 .child(explorer_status.unwrap_or_else(|| format!("{}px", sidebar_width.round()))),
         );
@@ -423,7 +440,7 @@ pub(super) fn explorer_tree_panel(
     entries: Vec<ExplorerEntry>,
     selected_path: Option<PathBuf>,
     has_project: bool,
-    palette: WorkspacePalette,
+    palette: UiTheme,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     let mut tree = div()
@@ -438,7 +455,7 @@ pub(super) fn explorer_tree_panel(
         return tree.child(
             div()
                 .p_3()
-                .text_size(px(12.0))
+                .text_size(px(Typography::CONTROL))
                 .text_color(rgb(palette.muted_text))
                 .child("Open a project to show its files."),
         );
@@ -447,7 +464,7 @@ pub(super) fn explorer_tree_panel(
         return tree.child(
             div()
                 .p_3()
-                .text_size(px(12.0))
+                .text_size(px(Typography::CONTROL))
                 .text_color(rgb(palette.muted_text))
                 .child("No readable project files."),
         );
@@ -464,7 +481,7 @@ pub(super) fn workspace_sidebar_context_menu(
     workspace_root: Option<PathBuf>,
     rename: Option<SidebarRenameState>,
     new_entry: Option<SidebarNewEntryState>,
-    palette: WorkspacePalette,
+    palette: UiTheme,
     viewport: gpui::Size<gpui::Pixels>,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
@@ -497,7 +514,7 @@ pub(super) fn workspace_sidebar_context_menu(
         .border_color(rgb(palette.border))
         .bg(rgb(palette.panel_bg))
         .p_1()
-        .text_size(px(13.0))
+        .text_size(px(Typography::CONTROL))
         .shadow_lg()
         .on_mouse_down(
             MouseButton::Left,
@@ -639,7 +656,7 @@ pub(super) fn workspace_sidebar_context_menu(
                             palette.inactive_tab_bg
                         }))
                         .px_2()
-                        .text_size(px(13.0))
+                        .text_size(px(Typography::CONTROL))
                         .text_color(rgb(field_color))
                         .overflow_hidden()
                         .whitespace_nowrap()
@@ -695,7 +712,7 @@ pub(super) fn workspace_sidebar_context_menu(
                         .border_color(rgb(palette.border))
                         .bg(rgb(palette.inactive_tab_bg))
                         .px_2()
-                        .text_size(px(13.0))
+                        .text_size(px(Typography::CONTROL))
                         .text_color(rgb(field_color))
                         .overflow_hidden()
                         .whitespace_nowrap()
@@ -805,67 +822,49 @@ pub(super) fn workspace_sidebar_context_menu(
 
 fn sidebar_close_project_button(
     has_project: bool,
+    palette: UiTheme,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
-    let button = div()
-        .w(px(22.0))
-        .h(px(22.0))
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded_sm()
-        .text_size(px(12.0))
-        .text_color(rgb(if has_project { MUTED_TEXT } else { 0x545965 }))
-        .child("x");
-
-    if has_project {
-        button.cursor_pointer().on_mouse_down(
-            MouseButton::Left,
-            cx.listener(|this, _: &MouseDownEvent, _window, cx| {
-                cx.stop_propagation();
-                this.close_project(cx);
-            }),
-        )
-    } else {
-        button
-    }
+    button_with_state(
+        "sidebar-close-project",
+        "×",
+        palette,
+        ButtonVariant::Ghost,
+        ControlSize::Compact,
+        ControlState {
+            disabled: !has_project,
+            ..Default::default()
+        },
+        cx.listener(|this, _, _window, cx| this.close_project(cx)),
+    )
+    .w(px(24.0))
+    .px_0()
 }
 
 fn sidebar_pop_out_button(
     has_project: bool,
+    palette: UiTheme,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
-    let button = div()
-        .h(px(22.0))
-        .px_2()
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded_sm()
-        .border_1()
-        .border_color(rgb(if has_project { 0x3a3f4c } else { 0x2c303a }))
-        .text_size(px(11.0))
-        .text_color(rgb(if has_project { MUTED_TEXT } else { 0x545965 }))
-        .child("Pop Out");
-
-    if has_project {
-        button.cursor_pointer().on_mouse_down(
-            MouseButton::Left,
-            cx.listener(|this, _: &MouseDownEvent, window, cx| {
-                cx.stop_propagation();
-                this.pop_out_sidebar_explorer(window, cx);
-            }),
-        )
-    } else {
-        button
-    }
+    button_with_state(
+        "sidebar-pop-out-project",
+        "Pop Out",
+        palette,
+        ButtonVariant::Ghost,
+        ControlSize::Compact,
+        ControlState {
+            disabled: !has_project,
+            ..Default::default()
+        },
+        cx.listener(|this, _, window, cx| this.pop_out_sidebar_explorer(window, cx)),
+    )
 }
 
 fn sidebar_project_controls(
     workspace_root: Option<PathBuf>,
     recent_projects: Vec<PathBuf>,
     recent_projects_open: bool,
-    palette: WorkspacePalette,
+    palette: UiTheme,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     let mut controls = div()
@@ -924,7 +923,7 @@ fn sidebar_project_controls(
                 div()
                     .px_2()
                     .py_1()
-                    .text_size(px(12.0))
+                    .text_size(px(Typography::CONTROL))
                     .text_color(rgb(palette.muted_text))
                     .child("No recent projects"),
             );
@@ -941,91 +940,76 @@ fn sidebar_project_controls(
 fn project_button(
     label: &'static str,
     primary: bool,
-    palette: WorkspacePalette,
+    palette: UiTheme,
     cx: &mut Context<WorkspacePrototype>,
     on_click: impl Fn(&mut WorkspacePrototype, &mut Window, &mut Context<WorkspacePrototype>) + 'static,
 ) -> impl IntoElement {
-    div()
-        .w_full()
-        .h(px(30.0))
-        .flex()
-        .items_center()
-        .px_2()
-        .rounded_sm()
-        .bg(rgb(if primary {
-            palette.accent
+    button(
+        label,
+        label,
+        palette,
+        if primary {
+            ButtonVariant::Primary
         } else {
-            palette.inactive_tab_bg
-        }))
-        .text_color(rgb(palette.active_text))
-        .text_size(px(13.0))
-        .cursor_pointer()
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |this, _: &MouseDownEvent, window, cx| {
-                on_click(this, window, cx);
-            }),
-        )
-        .child(label)
+            ButtonVariant::Ghost
+        },
+        ControlSize::Regular,
+        cx.listener(move |this, _, window, cx| on_click(this, window, cx)),
+    )
+    .w_full()
+    .justify_start()
 }
 
 fn quick_create_button(
     label: &'static str,
     kind: NewEntryKind,
     root: PathBuf,
-    palette: WorkspacePalette,
+    palette: UiTheme,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
-    div()
-        .flex_1()
-        .h(px(28.0))
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded_sm()
-        .bg(rgb(palette.inactive_tab_bg))
-        .text_color(rgb(palette.active_text))
-        .text_size(px(12.0))
-        .cursor_pointer()
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
-                this.quick_create_in_root(
-                    root.clone(),
-                    kind,
-                    event.position.x / px(1.0),
-                    event.position.y / px(1.0),
-                    cx,
-                );
-            }),
-        )
-        .child(label)
+    button(
+        label,
+        label,
+        palette,
+        ButtonVariant::Secondary,
+        ControlSize::Regular,
+        cx.listener(move |this, event: &ClickEvent, _window, cx| {
+            let position = event.position();
+            this.quick_create_in_root(
+                root.clone(),
+                kind,
+                position.x / px(1.0),
+                position.y / px(1.0),
+                cx,
+            );
+        }),
+    )
+    .flex_1()
 }
 
 fn recent_project_row(
     project: PathBuf,
-    palette: WorkspacePalette,
+    palette: UiTheme,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     let label = project_display_name(&project);
-    let path = project;
-    div()
-        .w_full()
-        .h(px(26.0))
-        .flex()
-        .items_center()
-        .px_2()
-        .rounded_sm()
-        .text_size(px(12.0))
-        .text_color(rgb(palette.sidebar_text))
-        .cursor_pointer()
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |this, _: &MouseDownEvent, _window, cx| {
-                this.open_project(path.clone(), cx);
-            }),
-        )
-        .child(label)
+    interactive(
+        ("sidebar-recent-project", explorer_row_id(&project)),
+        palette,
+        cx.listener(move |this, _, _window, cx| this.open_project(project.clone(), cx)),
+    )
+    .w_full()
+    .h(px(26.0))
+    .flex()
+    .items_center()
+    .px_2()
+    .rounded_sm()
+    .text_size(px(Typography::CONTROL))
+    .text_color(rgb(palette.sidebar_text))
+    .hover(move |style| style.bg(rgb(palette.hover_bg)))
+    .overflow_hidden()
+    .whitespace_nowrap()
+    .child(label)
 }
 
 pub(super) fn project_display_name(path: &Path) -> String {
@@ -1038,7 +1022,7 @@ pub(super) fn project_display_name(path: &Path) -> String {
 fn sidebar_tree_row(
     entry: ExplorerEntry,
     selected: bool,
-    palette: WorkspacePalette,
+    palette: UiTheme,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     let depth = entry.depth;
@@ -1055,59 +1039,10 @@ fn sidebar_tree_row(
         " "
     };
 
-    let mut row = div()
-        .id(("workspace-sidebar-row", row_id))
-        .w_full()
-        .h(px(26.0))
-        .flex()
-        .items_center()
-        .pl(px(8.0 + depth as f32 * 14.0))
-        .pr_2()
-        .rounded_sm()
-        .bg(rgb(if selected {
-            palette.sidebar_row_selected_bg
-        } else {
-            palette.chrome_bg
-        }))
-        .hover(move |style| {
-            style.bg(rgb(if selected {
-                palette.sidebar_row_selected_bg
-            } else {
-                palette.sidebar_row_hover_bg
-            }))
-        })
-        .text_size(px(13.0))
-        .text_color(rgb(if is_dir {
-            FOLDER_BLUE
-        } else {
-            palette.sidebar_text
-        }))
-        .cursor_move()
-        .on_drag(
-            drag_payload,
-            |payload: &ExplorerDragPayload, _offset, _window, cx| {
-                cx.new(|_| ExplorerDragPreview::new(payload))
-            },
-        )
-        .on_mouse_down(
-            MouseButton::Right,
-            cx.listener({
-                let context_path = path.clone();
-                let context_name = name.clone();
-                move |this, event: &MouseDownEvent, window, cx| {
-                    cx.stop_propagation();
-                    this.open_sidebar_context_menu(
-                        context_path.clone(),
-                        context_name.clone(),
-                        is_dir,
-                        (event.position.x / px(1.0), event.position.y / px(1.0)),
-                        window,
-                        cx,
-                    );
-                }
-            }),
-        )
-        .on_click(cx.listener({
+    let mut row = interactive(
+        ("workspace-sidebar-row", row_id),
+        palette,
+        cx.listener({
             let path = path.clone();
             move |this, _: &ClickEvent, window, cx| {
                 if is_dir {
@@ -1116,13 +1051,68 @@ fn sidebar_tree_row(
                     this.open_sidebar_file(path.clone(), window, cx);
                 }
             }
-        }));
+        }),
+    )
+    .w_full()
+    .h(px(26.0))
+    .flex()
+    .items_center()
+    .pl(px(8.0 + depth as f32 * 14.0))
+    .pr_2()
+    .rounded_sm()
+    .bg(rgb(if selected {
+        palette.sidebar_row_selected_bg
+    } else {
+        palette.chrome_bg
+    }))
+    .hover(move |style| {
+        style.bg(rgb(if selected {
+            palette.sidebar_row_selected_bg
+        } else {
+            palette.sidebar_row_hover_bg
+        }))
+    })
+    .text_size(px(Typography::CONTROL))
+    .text_color(rgb(if is_dir {
+        palette.folder
+    } else {
+        palette.sidebar_text
+    }))
+    .cursor_move()
+    .on_drag(
+        drag_payload,
+        move |payload: &ExplorerDragPayload, _offset, _window, cx| {
+            cx.new(|_| ExplorerDragPreview::new(payload, palette))
+        },
+    )
+    .on_mouse_down(
+        MouseButton::Right,
+        cx.listener({
+            let context_path = path.clone();
+            let context_name = name.clone();
+            move |this, event: &MouseDownEvent, window, cx| {
+                cx.stop_propagation();
+                this.open_sidebar_context_menu(
+                    context_path.clone(),
+                    context_name.clone(),
+                    is_dir,
+                    (event.position.x / px(1.0), event.position.y / px(1.0)),
+                    window,
+                    cx,
+                );
+            }
+        }),
+    );
 
     if is_dir {
         let drop_target = path.clone();
         row = row
             .drag_over::<ExplorerDragPayload>(move |style, payload, _window, _cx| {
-                style.bg(rgb(explorer_drop_background(payload, &drop_target)))
+                style.bg(rgb(explorer_drop_background(
+                    payload,
+                    &drop_target,
+                    palette,
+                )))
             })
             .on_drop(
                 cx.listener(move |this, payload: &ExplorerDragPayload, _window, cx| {
@@ -1134,9 +1124,9 @@ fn sidebar_tree_row(
     row.child(
         div()
             .w(px(16.0))
-            .text_size(px(11.0))
+            .text_size(px(Typography::CAPTION))
             .text_color(rgb(if is_dir {
-                FOLDER_BLUE
+                palette.folder
             } else {
                 palette.muted_text
             }))
@@ -1151,7 +1141,7 @@ fn sidebar_tree_row(
     )
 }
 
-fn sidebar_menu_header(label: String, is_dir: bool, palette: WorkspacePalette) -> impl IntoElement {
+fn sidebar_menu_header(label: String, is_dir: bool, palette: UiTheme) -> impl IntoElement {
     div()
         .w_full()
         .h(px(28.0))
@@ -1161,9 +1151,9 @@ fn sidebar_menu_header(label: String, is_dir: bool, palette: WorkspacePalette) -
         .rounded_sm()
         .bg(rgb(palette.inactive_tab_bg))
         .px_2()
-        .text_size(px(12.0))
+        .text_size(px(Typography::CONTROL))
         .text_color(rgb(if is_dir {
-            FOLDER_BLUE
+            palette.folder
         } else {
             palette.active_text
         }))
@@ -1179,7 +1169,7 @@ fn sidebar_menu_header(label: String, is_dir: bool, palette: WorkspacePalette) -
         )
 }
 
-fn sidebar_menu_note(label: String, palette: WorkspacePalette) -> impl IntoElement {
+fn sidebar_menu_note(label: String, palette: UiTheme) -> impl IntoElement {
     div()
         .w_full()
         .min_h(px(28.0))
@@ -1187,7 +1177,7 @@ fn sidebar_menu_note(label: String, palette: WorkspacePalette) -> impl IntoEleme
         .items_center()
         .rounded_sm()
         .px_2()
-        .text_size(px(12.0))
+        .text_size(px(Typography::CONTROL))
         .text_color(rgb(palette.muted_text))
         .overflow_hidden()
         .whitespace_nowrap()
@@ -1197,68 +1187,55 @@ fn sidebar_menu_note(label: String, palette: WorkspacePalette) -> impl IntoEleme
 fn sidebar_menu_button(
     label: String,
     active: bool,
-    palette: WorkspacePalette,
+    palette: UiTheme,
     cx: &mut Context<WorkspacePrototype>,
     on_click: impl Fn(&mut WorkspacePrototype, &mut Window, &mut Context<WorkspacePrototype>) + 'static,
 ) -> impl IntoElement {
-    div()
-        .w_full()
-        .h(px(30.0))
-        .flex()
-        .items_center()
-        .rounded_sm()
-        .bg(rgb(if active {
-            palette.sidebar_row_selected_bg
-        } else {
-            palette.panel_bg
-        }))
-        .px_2()
-        .text_size(px(13.0))
-        .text_color(rgb(palette.sidebar_text))
-        .cursor_pointer()
-        .hover(move |style| style.bg(rgb(palette.sidebar_row_hover_bg)))
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |this, _: &MouseDownEvent, window, cx| {
-                cx.stop_propagation();
-                on_click(this, window, cx);
-            }),
-        )
-        .child(label)
+    interactive(
+        gpui::SharedString::from(format!("sidebar-menu-{label}")),
+        palette,
+        cx.listener(move |this, _, window, cx| on_click(this, window, cx)),
+    )
+    .w_full()
+    .h(px(MENU_BUTTON_HEIGHT))
+    .flex()
+    .items_center()
+    .rounded_sm()
+    .bg(rgb(if active {
+        palette.selection_bg
+    } else {
+        palette.panel_bg
+    }))
+    .px_2()
+    .text_size(px(Typography::CONTROL))
+    .text_color(rgb(palette.sidebar_text))
+    .hover(move |style| style.bg(rgb(palette.hover_bg)))
+    .child(label)
 }
 
 fn sidebar_danger_button(
     label: String,
-    palette: WorkspacePalette,
+    palette: UiTheme,
     cx: &mut Context<WorkspacePrototype>,
     on_click: impl Fn(&mut WorkspacePrototype, &mut Window, &mut Context<WorkspacePrototype>) + 'static,
 ) -> impl IntoElement {
-    div()
-        .w_full()
-        .h(px(30.0))
-        .flex()
-        .items_center()
-        .rounded_sm()
-        .bg(rgb(if palette.is_light { 0xf3d5d1 } else { 0x3d2428 }))
-        .px_2()
-        .text_size(px(13.0))
-        .text_color(rgb(if palette.is_light { 0xa64141 } else { 0xffb4b4 }))
-        .cursor_pointer()
-        .hover(move |style| style.bg(rgb(if palette.is_light { 0xeebfba } else { 0x4a2a30 })))
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |this, _: &MouseDownEvent, window, cx| {
-                cx.stop_propagation();
-                on_click(this, window, cx);
-            }),
-        )
-        .child(label)
+    button(
+        gpui::SharedString::from(format!("sidebar-danger-{label}")),
+        label,
+        palette,
+        ButtonVariant::Danger,
+        ControlSize::Regular,
+        cx.listener(move |this, _, window, cx| on_click(this, window, cx)),
+    )
+    .w_full()
+    .h(px(MENU_BUTTON_HEIGHT))
+    .justify_start()
 }
 
 fn sidebar_move_destination_row(
     destination: SidebarMoveDestination,
     source_path: PathBuf,
-    palette: WorkspacePalette,
+    palette: UiTheme,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     let label = if destination.is_valid {
@@ -1272,49 +1249,48 @@ fn sidebar_move_destination_row(
                 .unwrap_or_else(|| "Unavailable".to_string())
         )
     };
-    let row = div()
-        .w_full()
-        .h(px(28.0))
-        .flex()
-        .items_center()
-        .rounded_sm()
-        .pl(px(8.0 + destination.depth as f32 * 12.0))
-        .pr_2()
-        .text_size(px(12.0))
-        .text_color(rgb(if destination.is_valid {
-            palette.sidebar_text
-        } else {
-            palette.muted_text
-        }))
-        .overflow_hidden()
-        .whitespace_nowrap()
-        .child(label);
-
-    if destination.is_valid {
-        let destination_path = destination.path;
-        row.cursor_pointer()
-            .hover(move |style| style.bg(rgb(palette.sidebar_row_hover_bg)))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _: &MouseDownEvent, _window, cx| {
-                    cx.stop_propagation();
-                    this.move_sidebar_entry_to_folder(
-                        source_path.clone(),
-                        destination_path.clone(),
-                        cx,
-                    );
-                }),
-            )
+    let destination_path = destination.path;
+    interactive_with_state(
+        (
+            "sidebar-move-destination",
+            explorer_row_id(&destination_path),
+        ),
+        palette,
+        !destination.is_valid,
+        cx.listener(move |this, _, _window, cx| {
+            this.move_sidebar_entry_to_folder(source_path.clone(), destination_path.clone(), cx);
+        }),
+    )
+    .w_full()
+    .h(px(28.0))
+    .flex()
+    .items_center()
+    .rounded_sm()
+    .pl(px(8.0 + destination.depth as f32 * 12.0))
+    .pr_2()
+    .text_size(px(Typography::CONTROL))
+    .text_color(rgb(if destination.is_valid {
+        palette.sidebar_text
     } else {
-        row
-    }
+        palette.disabled_text
+    }))
+    .when(destination.is_valid, |el| {
+        el.hover(move |style| style.bg(rgb(palette.hover_bg)))
+    })
+    .overflow_hidden()
+    .whitespace_nowrap()
+    .child(label)
 }
 
-fn explorer_drop_background(payload: &ExplorerDragPayload, destination_folder: &Path) -> u32 {
+fn explorer_drop_background(
+    payload: &ExplorerDragPayload,
+    destination_folder: &Path,
+    palette: UiTheme,
+) -> u32 {
     if explorer_drop_is_valid(payload, destination_folder) {
-        SIDEBAR_DROP_VALID_BG
+        palette.drop_valid_bg
     } else {
-        SIDEBAR_DROP_INVALID_BG
+        palette.drop_invalid_bg
     }
 }
 
@@ -1346,7 +1322,7 @@ fn explorer_row_id(path: &Path) -> u64 {
 
 pub(super) fn sidebar_bumper(
     sidebar_visible: bool,
-    palette: WorkspacePalette,
+    palette: UiTheme,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     div()
@@ -1369,8 +1345,8 @@ pub(super) fn sidebar_bumper(
                 .justify_center()
                 .cursor_col_resize()
                 .on_drag(
-                    SidebarResizeDrag,
-                    |_drag, _offset, _window, cx: &mut App| cx.new(|_| SidebarResizeDrag),
+                    SidebarResizeDrag { palette },
+                    |drag, _offset, _window, cx: &mut App| cx.new(|_| *drag),
                 )
                 .on_drag_move::<SidebarResizeDrag>(cx.listener(
                     |this, event: &DragMoveEvent<SidebarResizeDrag>, _window, cx| {
@@ -1386,27 +1362,25 @@ pub(super) fn sidebar_bumper(
                 ),
         )
         .child(
-            div()
-                .flex_1()
-                .h_full()
-                .flex()
-                .items_center()
-                .justify_center()
-                .text_color(rgb(if sidebar_visible {
-                    0x787d8c
-                } else {
-                    QUEUE_GREEN
-                }))
-                .text_size(px(14.0))
-                .cursor_pointer()
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _: &MouseDownEvent, _window, cx| {
-                        cx.stop_propagation();
-                        this.toggle_sidebar(cx);
-                    }),
-                )
-                .child(if sidebar_visible { "<" } else { ">" }),
+            interactive(
+                "workspace-sidebar-toggle",
+                palette,
+                cx.listener(|this, _, _window, cx| this.toggle_sidebar(cx)),
+            )
+            .flex_1()
+            .h_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .text_color(rgb(if sidebar_visible {
+                palette.muted_text
+            } else {
+                palette.queue_green
+            }))
+            .text_size(px(Typography::CONTROL))
+            .cursor_pointer()
+            .hover(move |style| style.bg(rgb(palette.hover_bg)))
+            .child(if sidebar_visible { "<" } else { ">" }),
         )
 }
 

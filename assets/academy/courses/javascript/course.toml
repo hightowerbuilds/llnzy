@@ -1,7 +1,7 @@
 id = "javascript"
 title = "JavaScript"
 language = "javascript"
-description = "Learn JavaScript with Node.js: values, functions, collections, modules, validation, asynchronous work, and a tested expense-report CLI. Requires Node.js 22+; no npm dependencies."
+description = "Start here with basic file and terminal skills; no prior programming language required. Eleven lessons teach Node.js values, functions, collections, modules, async work, and an expense-report CLI. Requires Node.js 22+; browser development is outside this course."
 order = 1
 
 [[modules]]

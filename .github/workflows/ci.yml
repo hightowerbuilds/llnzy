@@ -25,6 +25,7 @@ jobs:
         with:
           otp-version: '28.0'
           elixir-version: '1.19.5'
+      - uses: dtolnay/rust-toolchain@stable
       - run: npm install --global typescript@5.9.3
       - run: python3 scripts/check_academy_courses.py
 

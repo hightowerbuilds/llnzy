@@ -39,7 +39,7 @@ fn main() {
     for day in 1..=3 {
         // total is immutable, so this addition is refused.
         // The fix is one keyword on the declaration above.
-        // total += day;
+        total += day;
     }
     println!("total: {}", total);
 }
@@ -63,11 +63,11 @@ fn main() {
 
 Chapter 3 opens with the rule that surprises everyone: `let` bindings are immutable by default, and opting in costs one word — `let mut`.
 
-That default is load-bearing, because a reader can trust that a value named without `mut` never changes under them.
+For these scalar values, an immutable binding cannot be reassigned. Later Rust topics include interior mutability, so this rule does not promise that every value reachable through every immutable binding can never change.
 
 ## Shadowing is not mutation
 
-Shadowing is the other move. `let hours = hours * 7;` builds a *new* binding that can even change type, while the old one quietly goes out of scope.
+Shadowing is the other move. `let hours = hours * 7;` builds a *new* binding that can even change type, while the old name is hidden by the new binding.
 
 That is different from mutation, which reuses storage and must be declared up front.
 
@@ -75,10 +75,20 @@ That is different from mutation, which reuses storage and must be declared up fr
 
 `const` is named in `SCREAMING_SNAKE_CASE`, typed explicitly, set at compile time, and never `mut`.
 
-## Run it
+## Practice
+
+Choose **Open practice** in the exercise card to create or reopen this lesson’s files. Edit the implementation, save your changes, then choose **Check work**. Your practice folder is reused when you return; opening it again keeps your edits. No source checkout or Python is needed.
+
+You can also run this command in the practice folder’s terminal:
 
 ```bash
 cargo run
 ```
 
-Drop the `mut` fix back in and read the exact compiler wording — that message will be a colleague for years.
+Temporarily remove `mut` from your working declaration and read the exact compiler wording — that message will be a colleague for years.
+
+## Hint before a solution
+
+Create a new hours binding for shadowing. The total binding is updated repeatedly, so it needs mut; keep the addition inside the loop.
+
+Try one focused change and check again. Before comparing with a reference solution, explain the failing case in your own words. A passing check covers the supplied examples; also try a new input and explain why your implementation handles it.

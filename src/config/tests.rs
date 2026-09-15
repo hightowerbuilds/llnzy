@@ -1,8 +1,28 @@
 use super::colors::{apply_time_of_day_at_hour, parse_hex};
-use super::presets::{editor_syntax_preset, preset_scheme};
+use super::presets::{editor_syntax_preset, editor_syntax_presets, preset_scheme};
 use super::schema::ConfigFile;
 use super::*;
 use crate::editor::syntax::HighlightGroup;
+
+#[test]
+fn explicit_ui_mode_parses_without_coupling_terminal_colors() {
+    let file: ConfigFile =
+        toml::from_str("ui_mode = 'dark'\n[colors]\nbackground = '#ffffff'").unwrap();
+    let mut config = Config::default();
+    config.apply(file);
+    assert_eq!(config.ui_mode, Some(crate::ui_theme::UiMode::Dark));
+    assert_eq!(config.colors.background, [255, 255, 255]);
+    assert!(!crate::ui_theme::UiTheme::from_config(&config).is_light);
+}
+
+#[test]
+fn unknown_ui_mode_does_not_discard_other_config_settings() {
+    let file: ConfigFile = toml::from_str("ui_mode = 'future-mode'\n[font]\nsize = 21.0").unwrap();
+    let mut config = Config::default();
+    config.apply(file);
+    assert_eq!(config.ui_mode, None);
+    assert_eq!(config.font_size, 21.0);
+}
 
 #[test]
 fn parse_hex_accepts_hash_and_plain_values() {
@@ -302,13 +322,34 @@ fn apply_editor_syntax_colors() {
 
 #[test]
 fn editor_syntax_preset_maps_common_theme_name() {
-    let preset = editor_syntax_preset("solarized dark").unwrap();
+    let preset = editor_syntax_preset("one light").unwrap();
     let colors = preset.colors_map();
 
-    assert_eq!(preset.name, "Solarized Dark");
+    assert_eq!(preset.name, "One Light");
     assert_eq!(
         colors.get(&HighlightGroup::Function),
-        Some(&[0x26, 0x8B, 0xD2])
+        Some(&[0x40, 0x78, 0xF2])
     );
     assert!(editor_syntax_preset("one_dark").is_some());
+    assert!(editor_syntax_preset("  DRACULA ").is_some());
+}
+
+/// Three themes, no more: two dark and one light. The count is the point —
+/// see the list's own comment.
+#[test]
+fn editor_syntax_presets_are_two_dark_and_one_light() {
+    let names: Vec<_> = editor_syntax_presets()
+        .iter()
+        .map(|preset| preset.name)
+        .collect();
+    assert_eq!(names, ["One Dark", "Dracula", "One Light"]);
+
+    // Retired presets resolve to nothing, so a config or preference naming
+    // one falls back to the built-in default rather than half-applying.
+    for retired in ["Monokai", "Nord", "Solarized Dark", "GitHub Dark"] {
+        assert!(
+            editor_syntax_preset(retired).is_none(),
+            "{retired} should no longer resolve"
+        );
+    }
 }

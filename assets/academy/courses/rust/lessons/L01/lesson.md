@@ -48,6 +48,10 @@ The manifest's `[package]` table carries the name, version, and the language edi
 
 We pin `edition = "2021"` in every starter so a lesson behaves the same regardless of what your local cargo defaults to.
 
+## Open your practice
+
+Choose **Open practice** to prepare or reopen this lesson’s files. Edit src/main.rs, save, and choose **Check work**. Your edits stay in the practice folder when you return.
+
 ## Two commands matter today
 
 `cargo run` compiles and then executes in one step:
@@ -64,3 +68,9 @@ cargo build
 ```
 
 Run both and compare the two workflows. Same program, different feedback loop.
+
+## Hint before a solution
+
+Keep the manifest and main function in place. Check capitalization, punctuation, and the newline produced by println!.
+
+Try one focused change and check again. Before comparing with a reference solution, explain the failing case in your own words. A passing check covers the supplied examples; also try a new input and explain why your implementation handles it.

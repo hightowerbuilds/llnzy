@@ -164,6 +164,17 @@ impl EditorPrototype {
     }
 
     #[cfg(feature = "gpui-workspace")]
+    pub(crate) fn modified_practice_file(&self, directory: &std::path::Path) -> Option<String> {
+        self.editor.buffers.iter().find_map(|buffer| {
+            (buffer.is_modified()
+                && buffer
+                    .path()
+                    .is_some_and(|path| path.starts_with(directory)))
+            .then(|| buffer.file_name().to_string())
+        })
+    }
+
+    #[cfg(feature = "gpui-workspace")]
     pub(crate) fn modified_open_path_for_workspace_transition(
         &self,
         action: &str,

@@ -17,7 +17,15 @@ pub(super) fn terminal_header(
     subtitle: String,
     status_message: Option<String>,
     uses_background_image: bool,
+    config: &Config,
 ) -> impl IntoElement {
+    let light = super::terminal_is_light(config);
+    let muted = if light { 0x616161 } else { TERMINAL_MUTED };
+    let header_background = if light {
+        config.colors.background
+    } else {
+        [0x12, 0x12, 0x17]
+    };
     let mut header = div()
         .h(px(42.0))
         .w_full()
@@ -26,12 +34,12 @@ pub(super) fn terminal_header(
         .justify_between()
         .px_3()
         .border_b_1()
-        .border_color(rgb(TERMINAL_BORDER));
+        .border_color(rgb(if light { 0xe5e5e5 } else { TERMINAL_BORDER }));
 
     header = if uses_background_image {
-        header.bg(rgba(rgba_u32([0x12, 0x12, 0x17], 0.74)))
+        header.bg(rgba(rgba_u32(header_background, 0.74)))
     } else {
-        header.bg(rgb(0x121217))
+        header.bg(rgba(rgba_u32(header_background, 1.0)))
     };
 
     header
@@ -43,7 +51,7 @@ pub(super) fn terminal_header(
                 .child(
                     div()
                         .text_size(px(11.0))
-                        .text_color(rgb(TERMINAL_MUTED))
+                        .text_color(rgb(muted))
                         .child(subtitle),
                 ),
         )
@@ -51,9 +59,13 @@ pub(super) fn terminal_header(
             div()
                 .text_size(px(11.0))
                 .text_color(rgb(if status_message.is_some() {
-                    TERMINAL_ACCENT
+                    if light {
+                        0x005fb8
+                    } else {
+                        TERMINAL_ACCENT
+                    }
                 } else {
-                    TERMINAL_MUTED
+                    muted
                 }))
                 .child(status_message.unwrap_or_else(|| "Cmd-R restart".into())),
         )

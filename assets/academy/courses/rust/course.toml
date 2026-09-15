@@ -1,12 +1,13 @@
 id = "rust"
 title = "Rust"
 language = "rust"
-description = "The Rust course for LLNZY Code Academy, aligned chapter-by-chapter to The Rust Programming Language, 3rd Edition."
+description = "An introductory Rust course: seven lessons covering chapters 1–3 of The Rust Programming Language (3rd edition). Start with basic file and terminal skills; install Rust and Cargo. Ownership, borrowing, structs, and a capstone are not included yet."
 order = 3
 
 [book]
 title = "The Rust Programming Language"
 edition = 3
+url = "https://doc.rust-lang.org/book/"
 
 [[modules]]
 title = "Toolchain & Cargo"

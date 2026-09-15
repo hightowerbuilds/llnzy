@@ -29,11 +29,30 @@ impl EditorPrototype {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(next) = &self.writing_next_focus {
-            if matches!(event.keystroke.key.as_str(), "enter" | "tab") {
-                window.focus(next);
+        if self.writing_surface && self.focus_handle.is_focused(window) {
+            let stroke = &event.keystroke;
+            let plain_tab = stroke.key == "tab"
+                && !stroke.modifiers.control
+                && !stroke.modifiers.alt
+                && !stroke.modifiers.platform
+                && !stroke.modifiers.function;
+            if plain_tab {
+                if stroke.modifiers.shift {
+                    window.focus_prev();
+                } else if let Some(next) = &self.writing_next_focus {
+                    window.focus(next);
+                } else {
+                    window.focus_next();
+                }
                 cx.stop_propagation();
                 return;
+            }
+            if let Some(next) = &self.writing_next_focus {
+                if stroke.key == "enter" && !stroke.modifiers.modified() {
+                    window.focus(next);
+                    cx.stop_propagation();
+                    return;
+                }
             }
         }
         if self.lsp_panel.is_some() {
@@ -217,7 +236,9 @@ impl EditorPrototype {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if event.button != MouseButton::Left {
+        // A nested control's native focus handler claims mouse-down before
+        // it reaches the editor. Preserve that focus and the current selection.
+        if event.button != MouseButton::Left || window.default_prevented() {
             return;
         }
         window.focus(&self.focus_handle);

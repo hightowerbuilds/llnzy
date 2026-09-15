@@ -12,7 +12,7 @@ pub struct VisualTheme {
 }
 
 impl VisualTheme {
-    /// Apply this theme to a config with a smooth color transition.
+    /// Apply a preset while retaining the user's independently chosen image.
     pub fn apply_to(&self, config: &mut Config) {
         // Start a smooth color transition
         config.transition = Some(ColorTransition::new(
@@ -21,7 +21,22 @@ impl VisualTheme {
             0.6, // 600ms transition
         ));
         config.colors = self.colors.clone();
-        config.effects = self.effects.clone();
+        if !self.preserve_terminal_effects {
+            let previous = &config.effects;
+            let mut effects = self.effects.clone();
+            // A theme is not an instruction to clear, enable, or disable the
+            // user's background. Keep these choices even for image-free mode.
+            effects.enabled = previous.enabled;
+            effects.effects_on_ui = previous.effects_on_ui;
+            effects.background = previous.background.clone();
+            effects.background_image = previous.background_image.clone();
+            effects.background_image_fit = previous.background_image_fit;
+            effects.background_intensity = previous.background_intensity;
+            config.effects = effects;
+        }
+        if let Some(mode) = crate::ui_theme::UiMode::from_theme_name(&self.name) {
+            config.ui_mode = Some(mode);
+        }
         config.cursor_style = self.cursor_style;
     }
 }
@@ -67,35 +82,35 @@ fn minimalist() -> VisualTheme {
     }
 }
 
-/// Beige and pastel light theme for the full app appearance config.
+/// Light Modern-inspired neutral surfaces and blue accents.
 fn light_mode() -> VisualTheme {
     VisualTheme {
         name: "Light Mode".to_string(),
-        description: "Warm beige surface with pastel accents".to_string(),
+        description: "White surfaces, neutral gray chrome, and blue accents".to_string(),
         colors: ColorScheme {
             ansi: [
-                [84, 77, 68],
-                [214, 108, 117],
-                [116, 170, 139],
-                [216, 168, 80],
-                [117, 157, 215],
-                [198, 140, 184],
-                [110, 184, 178],
-                [247, 239, 223],
-                [126, 116, 104],
-                [229, 129, 136],
-                [139, 190, 157],
-                [229, 187, 104],
-                [144, 178, 228],
-                [214, 160, 202],
-                [136, 202, 196],
-                [255, 251, 242],
+                [0, 0, 0],
+                [163, 21, 21],
+                [0, 128, 0],
+                [121, 94, 38],
+                [4, 81, 165],
+                [175, 0, 219],
+                [0, 112, 112],
+                [229, 229, 229],
+                [97, 97, 97],
+                [205, 49, 49],
+                [9, 134, 88],
+                [137, 85, 3],
+                [0, 95, 184],
+                [128, 0, 128],
+                [5, 145, 145],
+                [255, 255, 255],
             ],
-            foreground: [62, 55, 49],
-            background: [250, 242, 226],
-            cursor: [117, 157, 215],
-            selection: [219, 200, 238],
-            selection_alpha: 0.38,
+            foreground: [59, 59, 59],
+            background: [255, 255, 255],
+            cursor: [0, 95, 184],
+            selection: [173, 214, 255],
+            selection_alpha: 0.5,
         },
         effects: EffectsConfig {
             enabled: true,
@@ -130,6 +145,75 @@ fn light_mode() -> VisualTheme {
 #[cfg(test)]
 mod tests {
     use super::builtin_themes;
+    use crate::config::{BackgroundImageFit, Config};
+    use crate::ui_theme::UiMode;
+
+    #[test]
+    fn theme_switches_preserve_background_preferences_and_other_content_choices() {
+        let mut config = Config::default();
+        config.effects.background = "image".into();
+        config.effects.background_image = Some("forest.png".into());
+        config.effects.background_image_fit = BackgroundImageFit::Fit;
+        config.effects.background_intensity = 0.42;
+        config.font_family = Some("Menlo".into());
+        config.font_size = 19.0;
+        config.editor.word_wrap = true;
+        config
+            .syntax_colors
+            .insert(crate::editor::syntax::HighlightGroup::Comment, [1, 2, 3]);
+
+        for _ in 0..2 {
+            for theme in builtin_themes() {
+                theme.apply_to(&mut config);
+                assert_eq!(config.effects.background, "image");
+                assert_eq!(
+                    config.effects.background_image.as_deref(),
+                    Some("forest.png")
+                );
+                assert_eq!(config.effects.background_image_fit, BackgroundImageFit::Fit);
+                assert_eq!(config.effects.background_intensity, 0.42);
+                assert!(config.effects.enabled);
+                assert!(config.effects.effects_on_ui);
+                assert_eq!(config.ui_mode, UiMode::from_theme_name(&theme.name));
+                assert_eq!(config.font_family.as_deref(), Some("Menlo"));
+                assert_eq!(config.font_size, 19.0);
+                assert!(config.editor.word_wrap);
+                assert_eq!(
+                    config.syntax_colors[&crate::editor::syntax::HighlightGroup::Comment],
+                    [1, 2, 3]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn theme_selection_respects_explicitly_disabled_backgrounds() {
+        for theme in builtin_themes() {
+            let mut config = Config::default();
+            config.effects.background = "none".into();
+            config.effects.background_image = Some("remembered.png".into());
+            config.effects.enabled = false;
+            config.effects.effects_on_ui = false;
+            theme.apply_to(&mut config);
+            assert_eq!(config.effects.background, "none");
+            assert_eq!(
+                config.effects.background_image.as_deref(),
+                Some("remembered.png")
+            );
+            assert!(!config.effects.enabled);
+            assert!(!config.effects.effects_on_ui);
+        }
+    }
+
+    #[test]
+    fn light_mode_retains_compatible_terminal_effects() {
+        let mut config = Config::default();
+        config.effects.bloom_enabled = true;
+        config.effects.bloom_intensity = 0.83;
+        super::light_mode().apply_to(&mut config);
+        assert!(config.effects.bloom_enabled);
+        assert_eq!(config.effects.bloom_intensity, 0.83);
+    }
 
     #[test]
     fn builtins_expose_light_mode_without_buzz() {
@@ -143,16 +227,16 @@ mod tests {
     }
 
     #[test]
-    fn light_mode_uses_beige_background_and_pastel_accents() {
+    fn light_mode_uses_neutral_surfaces_and_blue_accents() {
         let theme = builtin_themes()
             .into_iter()
             .find(|theme| theme.name == "Light Mode")
             .expect("Light Mode theme should exist");
 
-        assert_eq!(theme.colors.background, [250, 242, 226]);
-        assert_eq!(theme.colors.foreground, [62, 55, 49]);
-        assert_eq!(theme.colors.ansi[4], [117, 157, 215]);
-        assert_eq!(theme.colors.ansi[5], [198, 140, 184]);
+        assert_eq!(theme.colors.background, [255, 255, 255]);
+        assert_eq!(theme.colors.foreground, [59, 59, 59]);
+        assert_eq!(theme.colors.cursor, [0, 95, 184]);
+        assert_eq!(theme.colors.selection, [173, 214, 255]);
         assert_eq!(theme.effects.background, "none");
     }
 }

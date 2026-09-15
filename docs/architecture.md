@@ -21,10 +21,31 @@ belongs before adding logic to a large GPUI surface.
     actions.
   - `appearances.rs`, `appearance_actions.rs`, and `menu_actions.rs`:
     settings and menu command wiring.
-  - `footer.rs` and `home.rs`: lower-risk view helpers.
+  - `footer.rs`: shared workspace navigation presentation.
+  - `home.rs`: course entry, responsive learning/writing composition, and
+    secondary recent-project navigation.
 - New workspace behavior should prefer one of the submodules. Add logic to
   `gpui_workspace.rs` only when it truly coordinates multiple workspace
   subsystems.
+
+## Shared Style System
+
+- `src/ui_theme.rs` owns GPUI-independent `UiTheme`/`UiMode`, semantic RGB
+  roles, typography, spacing, and control dimensions. A resolved snapshot flows
+  through each surface's existing view context; screens do not maintain local
+  mutable palettes.
+- `src/ui.rs`, gated on `gpui-editor`, owns GPUI adapters and shared buttons,
+  icon buttons, checkboxes, rich interactive rows, panels, section headings,
+  and settings rows. Feature modules supply callbacks and stable IDs. Shared
+  controls own keyboard/pointer activation and focus, hover, and pressed states.
+- `src/ui/gallery.rs` is a debug-only control preview. Home is the production
+  preview for real course data and notepad editors. The gallery keeps its mode,
+  checkbox, and activation-counter state local and does not write preferences.
+- UI typography is independent of terminal fonts, editor code metrics, syntax
+  colors, and zoom. Images remain mounted by the workspace; shared surface
+  treatments provide local contrast. Settings keeps cached background blur.
+- [Style system](style-system.md) documents APIs, composition rules, image
+  behavior, the gallery, and deliberate content-specific exceptions.
 
 ## Editor
 
@@ -85,9 +106,19 @@ belongs before adding logic to a large GPUI surface.
   rejection, and `reload_if_changed` over a directory signature).
 - `src/academy_progress.rs` owns the persisted completion store
   (`<data_dir>/academy/progress.json`), keyed by course id and **lesson
-  id** rather than lesson position.
+  id** rather than lesson position. Reading markers and fingerprinted exercise
+  passes are separate; `record_exercise_passed` and `reconcile_lesson` derive
+  verified completion from all current exercises. `record_location` persists
+  the last course, lesson, and optional practice path for Continue.
 - `src/gpui_workspace/academy.rs` owns the Academy surface: course picker,
-  lesson list, and lesson reader.
+  lesson list, reader, practice feedback, readiness, and study actions.
+  `academy_actions.rs` coordinates background checks, unsaved-file guards,
+  persistent progress, workspace opening, and tool probes.
+- `src/academy/practice.rs` implements `prepare_exercise`, `run_check`, and
+  `probe_readiness` independently of GPUI. Practice prepares bundled starters
+  without overwriting returning students’ edits. Checks run in that directory
+  with bounded time/output and structured outcomes; required course tools are
+  distinguished from optional editor assistance.
 - `crate::platform::paths::bundled_courses_dir` resolves the courses root —
   the running `.app`'s `Contents/Resources/courses` first, then the source
   tree's `assets/academy/courses`. `bundle.sh` performs the copy that makes
@@ -104,17 +135,34 @@ belongs before adding logic to a large GPUI surface.
 - `assets/academy/courses/javascript` and `typescript` are separate five-module
   courses. Each lesson embeds its own starter/solution files in TOML frontmatter;
   no shared workspace or downloaded exercise dependency is required.
-- `scripts/check_academy_courses.py` materializes each JS/TS fixture in a fresh
-  temporary directory and checks solution success plus starter failure. CI
-  provisions Node and TypeScript before running it; lesson checks never install
-  packages. Strict Rust loader tests validate the course schema separately.
+- `scripts/check_academy_courses.py` materializes every JavaScript, TypeScript,
+  Rust, and Elixir fixture in fresh temporary directories and checks solution
+  success plus starter failure. CI provisions Node, TypeScript, stable Rust,
+  Elixir, and Erlang/OTP. This authoring tool needs Python; the packaged student
+  workflow does not. Strict Rust loader tests validate the schema separately.
+- Lesson question capture sends the current course/lesson title to the existing
+  Home notepad persistence flow. Lesson hints live in markdown bodies and do
+  not require a second content schema.
 
-## Home Notepad
+## Home And Notepad
 
+- `src/gpui_workspace/home.rs` composes one valid Continue action or immediate
+  course entry, compact course rows, and the notepad. Desktop panes place the
+  288-pixel course column beside the larger writing area with one divider.
+  Below 760 pixels of available pane width, a compact course entry precedes
+  writing; the full course catalog and recent projects follow the notepad.
+  Open project is a secondary header action. Course data comes from the library;
+  stale saved course/lesson IDs omit Continue without discarding progress.
+- Home and Courses receive `SurfaceBackdrop` from their containing pane.
+  Image-backed local panels use the shared tint; writing areas use an opaque
+  reading color matched to the editor. No full-page opaque fill covers an image.
 - `src/notebook.rs` owns the versioned chronological note model, titles, and
   atomic JSON persistence at `<data_dir>/notes/notebook.json`.
 - `src/gpui_workspace/notepad.rs` owns the Home writing surface and a shared
-  GPUI notebook entity so windows observe the same notes. Changes save after
+  GPUI notebook store so windows observe the same notes. Each window retains
+  its own notepad/editor appearance snapshot and selected note; content, dirty
+  state, and save errors live in the shared store. New notes persist immediately.
+  Changes save after
   400 ms of inactivity and flush on window release/app quit. Failed loads
   disable editing rather than replacing an unreadable notebook; failed saves
   leave the in-memory text intact and expose a retry action.
@@ -129,7 +177,11 @@ belongs before adding logic to a large GPUI surface.
 - `src/config/` owns config model, loading, schema, presets, colors, and
   runtime application.
 - `src/preferences.rs`, `src/theme.rs`, and `src/theme_store.rs` own user
-  preferences, theme data, and user-imported backgrounds/themes.
+  preferences, theme data, and user-imported backgrounds/themes. Explicit UI
+  mode is persisted independently from terminal colors, with compatibility
+  fallback for older settings. Applying an app theme preserves the selected
+  background image, its display mode, fit, and intensity. Existing workspace
+  appearance propagation updates editors, terminals, and notepad views.
 - `src/platform/` owns app paths, packaging metadata, shell profiles, and
   terminal launch specs.
 - `src/utf16.rs` owns UTF-16 <-> char index conversion shared by the terminal

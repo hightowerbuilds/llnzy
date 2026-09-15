@@ -64,7 +64,7 @@ Chapter 2 builds a guessing game, and its first lesson is that input is untruste
 
 The book calls `io::stdin().read_line(&mut guess)`, which returns a `Result` because reading can fail, then leans on `.expect()` for now.
 
-Whatever arrives, the tail of the buffer holds a newline. So `trim()` comes before `parse::<u32>()` — and `parse` itself returns a `Result`, because "banana" and a number past `u32`'s range both land in the error arm.
+A line read normally includes its trailing newline (the final line at end-of-file may not). So `trim()` comes before `parse::<u32>()` — and `parse` itself returns a `Result`, because "banana" and a number past `u32`'s range both land in the error arm.
 
 ## Why this lesson looks different from the book
 
@@ -72,10 +72,20 @@ Graded checks cannot pipe stdin. So we pull the logic out into a pure function t
 
 That refactor — isolate the decision, print at the edge — is a habit worth keeping well past this lesson.
 
-## Run it
+## Practice
+
+Choose **Open practice** in the exercise card to create or reopen this lesson’s files. Edit the implementation, save your changes, then choose **Check work**. Your practice folder is reused when you return; opening it again keeps your edits. No source checkout or Python is needed.
+
+You can also run this command in the practice folder’s terminal:
 
 ```bash
 cargo run
 ```
 
 Add your own demo strings to the loop and watch which arm they hit.
+
+## Hint before a solution
+
+Trim first, then match the Result returned by parse::<u32>(). Which branch handles both text and an out-of-range integer?
+
+Try one focused change and check again. Before comparing with a reference solution, explain the failing case in your own words. A passing check covers the supplied examples; also try a new input and explain why your implementation handles it.

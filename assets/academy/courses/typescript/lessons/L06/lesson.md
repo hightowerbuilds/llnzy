@@ -186,7 +186,9 @@ async function twice(task: () => Promise<number>): Promise<number> {
 }
 ```
 
-Run the check from the exported exercise directory in your terminal:
+Choose **Open practice** in the exercise card to create or reopen this lesson’s files. Edit the implementation, save your changes, then choose **Check work**. Your practice folder is reused when you return; opening it again keeps your edits. No source checkout or Python is needed.
+
+You can also run this command in the practice folder’s terminal:
 
 ```bash
 tsc --project tsconfig.json --pretty false && node dist/check.js
@@ -198,4 +200,10 @@ Keep `check.ts`, `assert.ts`, and `tsconfig.json` intact; edit the exercise impl
 
 The checks compare behavior and compile type examples. Printing the success message yourself does not implement the exercise.
 
-After passing, hover the exported functions in the editor and explain their input and output types without executing them.
+After passing, read the exported declarations and explain their input and output types without executing them. If editor hover is available, use it to compare your prediction.
+
+## Hint before a solution
+
+Validate the attempt budget before calling the task. On rejection, what can you safely read before narrowing an unknown error?
+
+Try one focused change and check again. Before comparing with a reference solution, explain the failing case in your own words. A passing check covers the supplied examples; also try a new input and explain why your implementation handles it.

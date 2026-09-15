@@ -84,16 +84,28 @@ Chapter 2's game compares a guess against a secret with `guess.cmp(&secret)` and
 
 The book reaches for the `rand` crate at this point, which is right for real projects. This course stays std-only and offline, so `next_secret` is a tiny linear congruential generator: multiply, add, shift, wrap.
 
-Seeded at 7 it always produces 79, then 32. Deterministic — which is exactly what a graded check needs, and exactly what a real game must avoid.
+Seeded at 7 it always produces 79, then 32. That makes checks reproducible. This teaching generator is predictable and is not suitable for security-sensitive randomness.
 
-## Two mutable threads at once
+Unlike the book’s game, this small loop chooses a new secret for each guess to exercise the comparison branches; a conventional guessing game keeps one secret until the player wins.
+
+## State and loop control
 
 Notice what runs together here: `state` mutates through the generator, while the loop itself stays immutable in its inputs.
 
-## Run it
+## Practice
+
+Choose **Open practice** in the exercise card to create or reopen this lesson’s files. Edit the implementation, save your changes, then choose **Check work**. Your practice folder is reused when you return; opening it again keeps your edits. No source checkout or Python is needed.
+
+You can also run this command in the practice folder’s terminal:
 
 ```bash
 cargo run
 ```
 
 Change the seed or the guesses, and predict the output before you run it.
+
+## Hint before a solution
+
+Print the secret before comparing. The Equal arm needs a block because it both prints and breaks.
+
+Try one focused change and check again. Before comparing with a reference solution, explain the failing case in your own words. A passing check covers the supplied examples; also try a new input and explain why your implementation handles it.

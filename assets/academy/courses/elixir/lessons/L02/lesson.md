@@ -78,10 +78,20 @@ case {:error, "offline"} do
 end
 ```
 
-A tuple's size is part of its shape. `{:ok, value}` does not match `{:ok, value, metadata}`. Put your catch-all clause last so specific clauses can run. In this lesson errors are ordinary data; the caller chooses how to display them. Later lessons preserve these tags across parsing steps and process calls. After the exercise, explain why an unconditional match on `{:ok, value}` would be inappropriate for an operation that can fail.
+A tuple's size is part of its shape. `{:ok, value}` does not match `{:ok, value, metadata}`. Put your catch-all clause last so specific clauses can run. In this lesson errors are ordinary data; the caller chooses how to display them. Later lessons preserve these tags across parsing steps and process calls.
+
+After the exercise, explain why an unconditional match on `{:ok, value}` would be inappropriate for an operation that can fail.
 
 ## Practice
 
 Implement Result.label/1: {:ok, name} becomes "Welcome, NAME"; {:error, reason} becomes "Error: REASON" (reason is a string); all other values become "Unknown result".
 
-Export from the repository root with `python3 scripts/check_academy_courses.py --export elixir L02 /tmp/llnzy-elixir-l02` (Python 3.11+). Choose a destination that does not already exist. Open the exported files in LLNZY and run `elixir check.exs` from that directory. The starter intentionally fails. Leave check.exs unchanged and implement lesson.exs. A successful check exits with status zero; read assertion failures to find the input that needs attention.
+Choose **Open practice** in the exercise card to create or reopen this lesson’s files. Edit the implementation, save your changes, then choose **Check work**. Your practice folder is reused when you return; opening it again keeps your edits. No source checkout or Python is needed.
+
+The command shown in the exercise card runs from that folder. The starter intentionally fails. Leave check.exs unchanged and implement lesson.exs. A successful check exits with status zero; read assertion failures to find the input that needs attention.
+
+## Hint before a solution
+
+Match the tuple tag and size before using its payload. Where must the catch-all clause go?
+
+Try one focused change and check again. Before comparing with a reference solution, explain the failing case in your own words. A passing check covers the supplied examples; also try a new input and explain why your implementation handles it.

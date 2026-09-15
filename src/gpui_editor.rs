@@ -14,6 +14,7 @@ use crate::editor::syntax::{group_color_with_overrides, HighlightGroup, Highligh
 use crate::editor::{BufferId, BufferView, EditorState, MarkdownViewMode};
 use crate::lsp::{DiagSeverity, LspManager};
 use crate::path_utils::{path_extension_matches, PREVIEW_IMAGE_EXTS};
+use crate::ui_theme::{Typography, UiTheme};
 use crate::utf16::{char_index_to_utf16_index, utf16_index_to_char_index};
 use gpui::prelude::*;
 use gpui::{
@@ -116,6 +117,7 @@ actions!(
 
 pub fn run_editor_prototype() {
     Application::new().run(|cx: &mut App| {
+        crate::ui::init(cx);
         bind_editor_keys(cx);
         cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
 
@@ -250,6 +252,7 @@ struct EditorImagePreview {
 
 #[derive(Clone)]
 struct EditorAppearanceConfig {
+    chrome: UiTheme,
     terminal_font_size: f32,
     font_family: Option<String>,
     foreground: [u8; 3],
@@ -265,6 +268,7 @@ struct EditorAppearanceConfig {
 impl EditorAppearanceConfig {
     fn from_config(config: &Config) -> Self {
         Self {
+            chrome: UiTheme::from_config(config),
             terminal_font_size: config.font_size,
             font_family: config.font_family.clone(),
             foreground: config.colors.foreground,
@@ -284,6 +288,7 @@ impl EditorAppearanceConfig {
         let line_height = (font_size * effective.line_height).clamp(font_size + 2.0, 72.0);
 
         EditorAppearance {
+            chrome: self.chrome,
             font_family: self
                 .font_family
                 .clone()
@@ -338,6 +343,7 @@ pub(super) struct MeasuredCharWidth {
 
 #[derive(Clone)]
 struct EditorAppearance {
+    chrome: UiTheme,
     font_family: String,
     font_size: gpui::Pixels,
     line_height: gpui::Pixels,
@@ -735,7 +741,7 @@ impl EditorPrototype {
             config.editor.word_wrap = self.writing_next_focus.is_none();
             config.editor.visible_whitespace = false;
             config.editor.rulers.clear();
-            config.editor.font_size = Some(16.0);
+            config.editor.font_size = Some(Typography::READING);
         }
         self.appearance_config = EditorAppearanceConfig::from_config(&config);
         self.last_text_layout = None;
@@ -1437,11 +1443,6 @@ struct EditorLineSnapshot {
     diagnostic: Option<EditorDiagnosticSnapshot>,
 }
 
-const EDITOR_CHROME_BG: u32 = 0x242424;
-const EDITOR_BORDER: u32 = 0x34343c;
-const EDITOR_TEXT_FG: u32 = 0xe8e8ee;
-const EDITOR_MUTED_FG: u32 = 0x9a9aa7;
-const EDITOR_DIM_FG: u32 = 0x70707d;
 // Used before GPUI has reported real text bounds for the embedded editor.
 // Keep this high enough that the first paint inside the workspace does not
 // leave a short 30-line editor floating above an otherwise empty pane.
@@ -1519,6 +1520,31 @@ mod tests {
             appearance.syntax_colors.get(&HighlightGroup::Keyword),
             Some(&[90, 80, 70])
         );
+    }
+
+    #[test]
+    fn editor_chrome_mode_does_not_change_code_appearance() {
+        let mut config = Config::default();
+        config.colors.background = [12, 18, 24];
+        config.colors.foreground = [210, 215, 220];
+        config.font_family = Some("Code Font".to_string());
+        config.editor.font_size = Some(17.0);
+        config.ui_mode = Some(crate::ui_theme::UiMode::Light);
+        let light = EditorAppearanceConfig::from_config(&config).for_language(None);
+        config.ui_mode = Some(crate::ui_theme::UiMode::Dark);
+        let dark = EditorAppearanceConfig::from_config(&config).for_language(None);
+
+        assert!(light.chrome.is_light);
+        assert!(!dark.chrome.is_light);
+        assert_ne!(light.chrome.active_text, dark.chrome.active_text);
+        assert_eq!(light.background, dark.background);
+        assert_eq!(light.foreground, dark.foreground);
+        assert_eq!(light.font_family, "Code Font");
+        assert_eq!(light.font_family, dark.font_family);
+        assert_eq!(light.font_size, px(17.0));
+        assert_eq!(light.font_size, dark.font_size);
+        assert_eq!(light.line_height, dark.line_height);
+        assert_eq!(light.char_width, dark.char_width);
     }
 
     #[test]

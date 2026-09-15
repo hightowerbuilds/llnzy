@@ -1,6 +1,7 @@
 use super::super::*;
 
 pub(super) fn status_bar(snapshot: &EditorSnapshot) -> impl IntoElement {
+    let theme = snapshot.appearance.chrome;
     let left = status_bar_left(snapshot);
     let right = status_bar_right(snapshot);
 
@@ -12,10 +13,10 @@ pub(super) fn status_bar(snapshot: &EditorSnapshot) -> impl IntoElement {
         .gap_3()
         .px_3()
         .border_t_1()
-        .border_color(rgb(EDITOR_BORDER))
-        .bg(rgb(EDITOR_CHROME_BG))
-        .text_size(px(11.0))
-        .text_color(snapshot.appearance.muted_color())
+        .border_color(rgb(theme.border))
+        .bg(rgb(theme.chrome_bg))
+        .text_size(px(Typography::CAPTION))
+        .text_color(rgb(theme.muted_text))
         .child(
             div()
                 .flex_1()
@@ -30,7 +31,7 @@ pub(super) fn status_bar(snapshot: &EditorSnapshot) -> impl IntoElement {
                 .flex_shrink_0()
                 .overflow_hidden()
                 .whitespace_nowrap()
-                .text_color(snapshot.appearance.dim_color())
+                .text_color(rgb(theme.muted_text))
                 .child(right),
         )
 }

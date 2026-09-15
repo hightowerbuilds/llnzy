@@ -1,7 +1,7 @@
 id = "elixir"
 title = "Elixir"
 language = "elixir"
-description = "Learn functional programming on the BEAM, from immutable values and pattern matching to tested, supervised OTP services."
+description = "Ten lessons from immutable values and pattern matching to a tested, supervised task tracker. Requires basic programming familiarity, Elixir, and compatible Erlang/OTP; no other LLNZY course is required. Phoenix and durable storage are extensions."
 order = 4
 
 [[modules]]

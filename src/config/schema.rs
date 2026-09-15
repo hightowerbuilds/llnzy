@@ -4,6 +4,7 @@ use serde::Deserialize;
 
 #[derive(Deserialize)]
 pub(super) struct ConfigFile {
+    pub(super) ui_mode: Option<String>,
     pub(super) font: Option<FontConfig>,
     pub(super) colors: Option<ColorConfig>,
     pub(super) cursor: Option<CursorConfig>,

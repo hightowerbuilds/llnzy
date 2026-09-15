@@ -70,7 +70,9 @@ after_update = %{before | count: 5}
 {before.count, after_update.count} # {4, 5}
 ```
 
-Maps associate keys with values. `%{count: 4}` uses an atom key, equivalent to `%{:count => 4}`. `%{"count" => 4}` uses a string key and is a different map. The update syntax above requires the key to exist; `Map.put/3` also inserts absent keys. Atoms such as `:ok` represent named values. Keep externally supplied names as strings instead of creating arbitrary atoms.
+Maps associate keys with values. `%{count: 4}` uses an atom key, equivalent to `%{:count => 4}`. `%{"count" => 4}` uses a string key and is a different map. The update syntax above requires the key to exist; `Map.put/3` also inserts absent keys. Atoms such as `:ok` represent named values.
+
+Keep externally supplied names as strings instead of creating arbitrary atoms.
 
 Only `false` and `nil` are falsy. Zero, empty strings, and empty lists are truthy. `value || fallback` therefore preserves zero, unlike JavaScript's corresponding expression. Integers and floats are distinct number types; `/` returns a float, while `div/2` performs integer division. Try `7 / 2` and `div(7, 2)` in IEx.
 
@@ -80,4 +82,12 @@ The exercise assumes a map with an integer count. Preserve its other fields and 
 
 Implement Values.bump/1, which returns a map with its integer :count increased by one and preserves other keys. Implement default/1, which substitutes "missing" only for nil and false.
 
-Export from the repository root with `python3 scripts/check_academy_courses.py --export elixir L01 /tmp/llnzy-elixir-l01` (Python 3.11+). Choose a destination that does not already exist. Open the exported files in LLNZY and run `elixir check.exs` from that directory. The starter intentionally fails. Leave check.exs unchanged and implement lesson.exs. A successful check exits with status zero; read assertion failures to find the input that needs attention.
+Choose **Open practice** in the exercise card to create or reopen this lesson’s files. Edit the implementation, save your changes, then choose **Check work**. Your practice folder is reused when you return; opening it again keeps your edits. No source checkout or Python is needed.
+
+The command shown in the exercise card runs from that folder. The starter intentionally fails. Leave check.exs unchanged and implement lesson.exs. A successful check exits with status zero; read assertion failures to find the input that needs attention.
+
+## Hint before a solution
+
+Map.put returns a new map. Which two values trigger ||, and should zero trigger the fallback?
+
+Try one focused change and check again. Before comparing with a reference solution, explain the failing case in your own words. A passing check covers the supplied examples; also try a new input and explain why your implementation handles it.

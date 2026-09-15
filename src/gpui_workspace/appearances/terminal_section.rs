@@ -1,14 +1,15 @@
 use std::path::{Path, PathBuf};
 
+use crate::ui_theme::{Typography, UiTheme};
 use gpui::prelude::*;
 use gpui::{div, px, rgb, Context};
 
 use crate::config::{BackgroundImageFit, Config, CursorStyle, TerminalLayoutMode};
-use crate::gpui_workspace::{
-    WorkspacePrototype, ACTIVE_TEXT, GPUI_TERMINAL_BACKGROUND_MAX_EDGE, MUTED_TEXT,
-};
+use crate::gpui_workspace::{WorkspacePrototype, GPUI_TERMINAL_BACKGROUND_MAX_EDGE};
 
-use super::widgets::{appearance_button, control_label, effect_toggle_button, metric_row};
+use super::widgets::{
+    appearance_button, appearance_button_named, control_label, effect_toggle_button, metric_row,
+};
 use super::{TERMINAL_DISPLAY_FONT_CHOICES, TERMINAL_MONO_FONT_CHOICES};
 
 pub(super) fn terminal_appearance_controls(
@@ -17,30 +18,35 @@ pub(super) fn terminal_appearance_controls(
     terminal_background_import_error: Option<String>,
     cx: &mut Context<WorkspacePrototype>,
 ) -> gpui::Div {
+    let palette = UiTheme::from_config(&config);
     let layout_mode = config.terminal_layout;
     let layout_row = div()
         .flex()
+        .flex_wrap()
         .items_center()
         .gap_2()
-        .child(control_label("Layout"))
+        .child(control_label("Layout", palette))
         .child(appearance_button(
             "Monospace".to_string(),
             layout_mode == TerminalLayoutMode::Monospace,
+            palette,
             cx,
             |this, cx| this.set_terminal_layout_mode(TerminalLayoutMode::Monospace, cx),
         ))
         .child(appearance_button(
             "Display".to_string(),
             layout_mode == TerminalLayoutMode::Display,
+            palette,
             cx,
             |this, cx| this.set_terminal_layout_mode(TerminalLayoutMode::Display, cx),
         ));
 
     let mut font_row = div()
         .flex()
+        .flex_wrap()
         .items_center()
         .gap_2()
-        .child(control_label("Font"));
+        .child(control_label("Font", palette));
     match layout_mode {
         TerminalLayoutMode::Monospace => {
             for (label, family) in TERMINAL_MONO_FONT_CHOICES {
@@ -49,6 +55,7 @@ pub(super) fn terminal_appearance_controls(
                 font_row = font_row.child(appearance_button(
                     (*label).to_string(),
                     active,
+                    palette,
                     cx,
                     move |this, cx| this.set_terminal_font_family(family.map(String::from), cx),
                 ));
@@ -61,6 +68,7 @@ pub(super) fn terminal_appearance_controls(
                 font_row = font_row.child(appearance_button(
                     (*label).to_string(),
                     active,
+                    palette,
                     cx,
                     move |this, cx| this.set_terminal_font_family(Some(family.to_string()), cx),
                 ));
@@ -72,6 +80,7 @@ pub(super) fn terminal_appearance_controls(
         .child(metric_row(
             "Terminal Line Height",
             format!("{:.2}x", config.line_height),
+            palette,
             cx,
             |this, cx| this.adjust_line_height(-0.05, cx),
             |this, cx| this.adjust_line_height(0.05, cx),
@@ -81,8 +90,8 @@ pub(super) fn terminal_appearance_controls(
         .child(
             div()
                 .pl(px(150.0))
-                .text_size(px(12.0))
-                .text_color(rgb(MUTED_TEXT))
+                .text_size(px(Typography::CONTROL))
+                .text_color(rgb(palette.muted_text))
                 .child(if layout_mode == TerminalLayoutMode::Display {
                     "Display layout flows text with natural advance widths — \
                      TUIs and box-drawing characters will look broken."
@@ -93,12 +102,14 @@ pub(super) fn terminal_appearance_controls(
         .child(
             div()
                 .flex()
+                .flex_wrap()
                 .items_center()
                 .gap_2()
-                .child(control_label("Effects"))
+                .child(control_label("Effects", palette))
                 .child(effect_toggle_button(
                     "Terminal",
                     config.effects.enabled,
+                    palette,
                     cx,
                     |this, cx| this.toggle_effects_enabled(cx),
                 )),
@@ -106,24 +117,28 @@ pub(super) fn terminal_appearance_controls(
         .child(
             div()
                 .flex()
+                .flex_wrap()
                 .items_center()
                 .gap_2()
-                .child(control_label("Cursor Style"))
+                .child(control_label("Cursor Style", palette))
                 .child(appearance_button(
                     "Block".to_string(),
                     config.cursor_style == CursorStyle::Block,
+                    palette,
                     cx,
                     |this, cx| this.set_cursor_style(CursorStyle::Block, cx),
                 ))
                 .child(appearance_button(
                     "Beam".to_string(),
                     config.cursor_style == CursorStyle::Beam,
+                    palette,
                     cx,
                     |this, cx| this.set_cursor_style(CursorStyle::Beam, cx),
                 ))
                 .child(appearance_button(
                     "Underline".to_string(),
                     config.cursor_style == CursorStyle::Underline,
+                    palette,
                     cx,
                     |this, cx| this.set_cursor_style(CursorStyle::Underline, cx),
                 )),
@@ -131,18 +146,21 @@ pub(super) fn terminal_appearance_controls(
         .child(
             div()
                 .flex()
+                .flex_wrap()
                 .items_center()
                 .gap_2()
-                .child(control_label("Background"))
+                .child(control_label("Background", palette))
                 .child(appearance_button(
                     "None".to_string(),
                     config.effects.background == "none",
+                    palette,
                     cx,
                     |this, cx| this.set_background_mode("none", cx),
                 ))
                 .child(appearance_button(
                     "Image".to_string(),
                     config.effects.background == "image",
+                    palette,
                     cx,
                     |this, cx| this.import_terminal_background(cx),
                 )),
@@ -155,24 +173,28 @@ pub(super) fn terminal_appearance_controls(
         .child(
             div()
                 .flex()
+                .flex_wrap()
                 .items_center()
                 .gap_2()
-                .child(control_label("Post Effects"))
+                .child(control_label("Post Effects", palette))
                 .child(effect_toggle_button(
                     "Bloom",
                     config.effects.bloom_enabled,
+                    palette,
                     cx,
                     |this, cx| this.toggle_bloom(cx),
                 ))
                 .child(effect_toggle_button(
                     "CRT",
                     config.effects.crt_enabled,
+                    palette,
                     cx,
                     |this, cx| this.toggle_crt(cx),
                 ))
                 .child(effect_toggle_button(
                     "Particles",
                     config.effects.particles_enabled,
+                    palette,
                     cx,
                     |this, cx| this.toggle_particles(cx),
                 )),
@@ -180,24 +202,28 @@ pub(super) fn terminal_appearance_controls(
         .child(
             div()
                 .flex()
+                .flex_wrap()
                 .items_center()
                 .gap_2()
-                .child(control_label("Text Effects"))
+                .child(control_label("Text Effects", palette))
                 .child(effect_toggle_button(
                     "Glow",
                     config.effects.cursor_glow,
+                    palette,
                     cx,
                     |this, cx| this.toggle_cursor_glow(cx),
                 ))
                 .child(effect_toggle_button(
                     "Trail",
                     config.effects.cursor_trail,
+                    palette,
                     cx,
                     |this, cx| this.toggle_cursor_trail(cx),
                 ))
                 .child(effect_toggle_button(
                     "Text Anim",
                     config.effects.text_animation,
+                    palette,
                     cx,
                     |this, cx| this.toggle_text_animation(cx),
                 )),
@@ -209,6 +235,7 @@ fn terminal_background_image_controls(
     terminal_background_import_error: Option<String>,
     cx: &mut Context<WorkspacePrototype>,
 ) -> gpui::Div {
+    let palette = UiTheme::from_config(config);
     let current_image = config
         .effects
         .background_image
@@ -221,16 +248,18 @@ fn terminal_background_image_controls(
             .flex()
             .items_center()
             .gap_2()
-            .child(control_label("Image Background"))
+            .child(control_label("Image Background", palette))
             .child(appearance_button(
                 "Import Image".to_string(),
                 config.effects.background == "image" && config.effects.background_image.is_some(),
+                palette,
                 cx,
                 |this, cx| this.import_terminal_background(cx),
             ))
             .child(appearance_button(
                 "Clear".to_string(),
                 false,
+                palette,
                 cx,
                 |this, cx| {
                     this.clear_terminal_background_image(cx);
@@ -241,8 +270,8 @@ fn terminal_background_image_controls(
                     .max_w(px(220.0))
                     .overflow_hidden()
                     .whitespace_nowrap()
-                    .text_size(px(12.0))
-                    .text_color(rgb(MUTED_TEXT))
+                    .text_size(px(Typography::CONTROL))
+                    .text_color(rgb(palette.muted_text))
                     .child(current_image),
             ),
     );
@@ -252,11 +281,12 @@ fn terminal_background_image_controls(
             .flex()
             .items_center()
             .gap_2()
-            .child(control_label("Image Fit"));
+            .child(control_label("Image Fit", palette));
         for fit in BackgroundImageFit::ALL {
             fit_row = fit_row.child(appearance_button(
                 fit.label().to_string(),
                 config.effects.background_image_fit == fit,
+                palette,
                 cx,
                 move |this, cx| this.set_background_image_fit(fit, cx),
             ));
@@ -270,6 +300,7 @@ fn terminal_background_image_controls(
         controls = controls.child(metric_row(
             "Image Brightness",
             format!("{brightness:.0}%"),
+            palette,
             cx,
             |this, cx| this.adjust_background_brightness(-0.05, cx),
             |this, cx| this.adjust_background_brightness(0.05, cx),
@@ -280,8 +311,8 @@ fn terminal_background_image_controls(
         controls = controls.child(
             div()
                 .pl(px(150.0))
-                .text_size(px(12.0))
-                .text_color(rgb(0xff8a7a))
+                .text_size(px(Typography::CONTROL))
+                .text_color(rgb(palette.danger))
                 .child(error),
         );
     }
@@ -295,6 +326,7 @@ fn terminal_background_library(
     config: &Config,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
+    let palette = UiTheme::from_config(config);
     let images = crate::theme_store::list_backgrounds();
     let total = images.len();
     let max = crate::theme_store::MAX_BACKGROUND_IMAGES;
@@ -305,11 +337,11 @@ fn terminal_background_library(
             .flex()
             .items_center()
             .gap_2()
-            .child(control_label("Library"))
+            .child(control_label("Library", palette))
             .child(
                 div()
-                    .text_size(px(12.0))
-                    .text_color(rgb(MUTED_TEXT))
+                    .text_size(px(Typography::CONTROL))
+                    .text_color(rgb(palette.muted_text))
                     .child(format!("{total} / {max}")),
             ),
     );
@@ -318,8 +350,8 @@ fn terminal_background_library(
         section = section.child(
             div()
                 .pl(px(150.0))
-                .text_size(px(12.0))
-                .text_color(rgb(MUTED_TEXT))
+                .text_size(px(Typography::CONTROL))
+                .text_color(rgb(palette.muted_text))
                 .child("Import an image to start the library."),
         );
         return section;
@@ -331,7 +363,7 @@ fn terminal_background_library(
             (active_reference.as_deref(), gpui_terminal_background_reference(&image).ok()),
             (Some(active), Some(reference)) if active == reference
         );
-        list = list.child(background_library_row(image, active, cx));
+        list = list.child(background_library_row(image, active, palette, cx));
     }
     section.child(list)
 }
@@ -339,6 +371,7 @@ fn terminal_background_library(
 fn background_library_row(
     image: std::path::PathBuf,
     active: bool,
+    palette: UiTheme,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     let display = image
@@ -347,10 +380,15 @@ fn background_library_row(
         .unwrap_or("image")
         .to_string();
     let apply_path = image.clone();
-    let delete_path = image;
+    let delete_path = image.clone();
 
     div()
+        .id(gpui::SharedString::from(format!(
+            "background-{}",
+            image.display()
+        )))
         .flex()
+        .flex_wrap()
         .items_center()
         .gap_2()
         .child(
@@ -359,23 +397,30 @@ fn background_library_row(
                 .max_w(px(300.0))
                 .overflow_hidden()
                 .whitespace_nowrap()
-                .text_size(px(12.0))
-                .text_color(rgb(if active { ACTIVE_TEXT } else { MUTED_TEXT }))
+                .text_size(px(Typography::CONTROL))
+                .text_color(rgb(if active {
+                    palette.active_text
+                } else {
+                    palette.muted_text
+                }))
                 .child(display),
         )
-        .child(appearance_button(
+        .child(appearance_button_named(
+            "apply-background".into(),
             if active {
                 "Active".to_string()
             } else {
                 "Apply".to_string()
             },
             active,
+            palette,
             cx,
             move |this, cx| this.apply_library_background(apply_path.clone(), cx),
         ))
         .child(appearance_button(
             "Delete".to_string(),
             false,
+            palette,
             cx,
             move |this, cx| this.delete_library_background(delete_path.clone(), cx),
         ))

@@ -6,7 +6,8 @@ use gpui::{
     Subscription, Task, Window,
 };
 
-use super::{home::home_palette, WorkspacePalette};
+use crate::ui::{button, interactive, ButtonVariant};
+use crate::ui_theme::{ControlSize, Typography, UiTheme};
 use crate::{
     config::Config,
     gpui_editor::EditorPrototype,
@@ -126,7 +127,7 @@ pub(super) struct Notepad {
     selected: Option<u64>,
     last_editor_text: String,
     last_title: String,
-    palette: WorkspacePalette,
+    palette: UiTheme,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -153,6 +154,7 @@ impl Notepad {
             .and_then(|book| book.notes.first())
             .map(|note| note.title.clone())
             .unwrap_or_default();
+        let palette = UiTheme::from_config(&config);
         let config = writing_config(config);
         let editor = cx.new(EditorPrototype::notepad);
         editor.update(cx, |editor, cx| {
@@ -208,20 +210,48 @@ impl Notepad {
             last_editor_text: text,
             title_editor,
             last_title: title,
-            palette: home_palette(),
+            palette,
             _subscriptions: vec![edits, title_edits, updates, quit, release],
         }
     }
 
     pub(super) fn set_config(&mut self, config: Config, cx: &mut Context<Self>) {
+        self.palette = UiTheme::from_config(&config);
         let config = writing_config(config);
-        self.palette = home_palette();
         self.title_editor.update(cx, |editor, cx| {
             editor.set_appearance_config(config.clone(), cx)
         });
         self.editor
             .update(cx, |editor, cx| editor.set_appearance_config(config, cx));
         cx.notify();
+    }
+
+    /// Create a separate lesson note and persist it immediately. Existing
+    /// writing is captured first and never replaced by the template.
+    pub(super) fn capture_lesson_question(
+        &mut self,
+        title: String,
+        body: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.capture(cx);
+        let (id, saved) = self.store.update(cx, |store, cx| {
+            let Some(book) = store.book.as_mut() else {
+                return (None, false);
+            };
+            let id = book.new_note(now_ms());
+            book.update_title(id, title);
+            book.update(id, body);
+            store.dirty = true;
+            store.flush();
+            cx.notify();
+            (Some(id), !store.dirty)
+        });
+        if let Some(id) = id {
+            self.select(id, window, cx);
+        }
+        saved
     }
 
     pub(super) fn focused_editor(
@@ -281,9 +311,10 @@ impl Notepad {
 }
 
 impl Render for Notepad {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let palette = self.palette;
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = self.palette;
         let store = self.store.read(cx);
+        let has_error = store.error.is_some();
         let status = store.error.clone().unwrap_or_else(|| {
             if store.dirty {
                 "Saving…"
@@ -293,109 +324,157 @@ impl Render for Notepad {
             .into()
         });
         let notes = store.book.as_ref().map(|book| book.notes.clone());
-        let mut root = div().w_full().text_size(px(16.0)).flex().flex_col().gap_3();
+        let mut root = div()
+            .w_full()
+            .min_w(px(0.0))
+            .text_size(px(Typography::BODY))
+            .flex()
+            .flex_col()
+            .gap_3();
         let Some(notes) = notes else {
-            return root.child(div().text_color(rgb(palette.muted_text)).child(status));
+            return root.child(div().text_color(rgb(theme.danger)).child(status));
         };
         let selected = notes.iter().find(|note| Some(note.id) == self.selected);
+        let title_placeholder = self.title_editor.read(cx).note_text().is_empty()
+            && !self.title_editor.focus_handle(cx).is_focused(window);
+        let body_placeholder = self.editor.read(cx).note_text().is_empty()
+            && !self.editor.focus_handle(cx).is_focused(window);
         root = root
             .child(
                 div()
                     .flex()
                     .items_center()
                     .justify_between()
+                    .gap_2()
                     .child(
                         div()
-                            .text_size(px(16.0))
-                            .text_color(rgb(palette.active_text))
+                            .text_size(px(Typography::SECTION))
+                            .text_color(rgb(theme.active_text))
                             .child("Notepad"),
                     )
-                    .child(
-                        div()
-                            .id("new-note")
-                            .cursor_pointer()
-                            .px_3()
-                            .py_1()
-                            .rounded_sm()
-                            .text_size(px(16.0))
-                            .text_color(rgb(palette.sidebar_text))
-                            .hover(|style| style.bg(rgb(palette.panel_bg)))
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(|this, _, window, cx| {
-                                    this.capture(cx);
-                                    let id = this.store.update(cx, |store, cx| {
-                                        let id =
-                                            store.book.as_mut().map(|book| book.new_note(now_ms()));
-                                        cx.notify();
-                                        id
-                                    });
-                                    if let Some(id) = id {
-                                        this.select(id, window, cx);
-                                        window.focus(&this.title_editor.focus_handle(cx));
-                                    }
-                                }),
-                            )
-                            .child("+ New note"),
-                    ),
+                    .child(button(
+                        "new-note",
+                        "+ New note",
+                        theme,
+                        ButtonVariant::Ghost,
+                        ControlSize::Compact,
+                        cx.listener(|this, _, window, cx| {
+                            this.capture(cx);
+                            let id = this.store.update(cx, |store, cx| {
+                                let id = store.book.as_mut().map(|book| book.new_note(now_ms()));
+                                if id.is_some() {
+                                    store.dirty = true;
+                                    store.flush();
+                                }
+                                cx.notify();
+                                id
+                            });
+                            if let Some(id) = id {
+                                this.select(id, window, cx);
+                                window.focus(&this.title_editor.focus_handle(cx));
+                            }
+                        }),
+                    )),
             )
             .child(
                 div()
                     .flex()
+                    .flex_wrap()
+                    .items_center()
                     .justify_between()
                     .gap_2()
-                    .text_size(px(16.0))
-                    .text_color(rgb(palette.muted_text))
+                    .text_size(px(Typography::CAPTION))
+                    .text_color(rgb(theme.muted_text))
                     .child(
                         selected
-                            .map(|n| date_label(n.created_ms))
+                            .map(|note| date_label(note.created_ms))
                             .unwrap_or_default(),
+                    )
+                    .child(button(
+                        "note-save-status",
+                        status,
+                        theme,
+                        if has_error {
+                            ButtonVariant::Danger
+                        } else {
+                            ButtonVariant::Ghost
+                        },
+                        ControlSize::Compact,
+                        cx.listener(|this, _, _, cx| {
+                            this.capture(cx);
+                            this.store.update(cx, |store, cx| {
+                                store.flush();
+                                cx.notify();
+                            });
+                        }),
+                    )),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .min_w(px(0.0))
+                    .border_1()
+                    .border_color(rgb(theme.border))
+                    .bg(rgb(theme.reading_bg))
+                    .rounded_sm()
+                    .overflow_hidden()
+                    .child(
+                        div()
+                            .h(px(48.0))
+                            .w_full()
+                            .border_b_1()
+                            .border_color(rgb(theme.border))
+                            .px_3()
+                            .relative()
+                            .child(self.title_editor.clone())
+                            .when(title_placeholder, |area| {
+                                area.child(
+                                    div()
+                                        .absolute()
+                                        .left(px(12.0))
+                                        .top(px(12.0))
+                                        .text_color(rgb(theme.muted_text))
+                                        .child("Note title")
+                                        .on_mouse_down(
+                                            MouseButton::Left,
+                                            cx.listener(|this, _, window, cx| {
+                                                window.focus(&this.title_editor.focus_handle(cx));
+                                                cx.notify();
+                                            }),
+                                        ),
+                                )
+                            }),
                     )
                     .child(
                         div()
-                            .id("note-save-status")
-                            .cursor_pointer()
-                            .child(status)
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(|this, _, _, cx| {
-                                    this.capture(cx);
-                                    this.store.update(cx, |store, cx| {
-                                        store.flush();
-                                        cx.notify();
-                                    });
-                                }),
-                            ),
+                            .h(px(320.0))
+                            .w_full()
+                            .p_3()
+                            .relative()
+                            .child(self.editor.clone())
+                            .when(body_placeholder, |area| {
+                                area.child(
+                                    div()
+                                        .absolute()
+                                        .left(px(12.0))
+                                        .top(px(12.0))
+                                        .text_color(rgb(theme.muted_text))
+                                        .child("Start writing…")
+                                        .on_mouse_down(
+                                            MouseButton::Left,
+                                            cx.listener(|this, _, window, cx| {
+                                                window.focus(&this.editor.focus_handle(cx));
+                                                cx.notify();
+                                            }),
+                                        ),
+                                )
+                            }),
                     ),
-            )
-            .child(div().text_color(rgb(palette.muted_text)).child("Title"))
-            .child(
-                div()
-                    .h(px(56.0))
-                    .w_full()
-                    .border_1()
-                    .border_color(rgb(palette.border))
-                    .bg(rgb(palette.editor_bg))
-                    .rounded_sm()
-                    .overflow_hidden()
-                    .px_3()
-                    .child(self.title_editor.clone()),
-            )
-            .child(
-                div()
-                    .h(px(360.0))
-                    .w_full()
-                    .border_1()
-                    .border_color(rgb(palette.border))
-                    .rounded_sm()
-                    .overflow_hidden()
-                    .bg(rgb(palette.editor_bg))
-                    .p_4()
-                    .child(self.editor.clone()),
             );
+        // A short scrollable list keeps large notebooks from crowding the writing area.
         let mut history = div()
             .id("notes-history")
-            .max_h(px(160.0))
+            .max_h(px(144.0))
             .overflow_y_scroll()
             .flex()
             .flex_col()
@@ -404,48 +483,56 @@ impl Render for Notepad {
             let id = note.id;
             let active = Some(id) == self.selected;
             history = history.child(
-                div()
-                    .id(("note", id))
-                    .flex()
-                    .justify_between()
-                    .items_center()
-                    .gap_3()
-                    .px_2()
-                    .py_2()
-                    .rounded_sm()
-                    .when(active, |row| row.bg(rgb(palette.panel_bg)))
-                    .hover(|row| row.bg(rgb(palette.panel_bg)))
-                    .cursor_pointer()
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _, window, cx| this.select(id, window, cx)),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w(px(0.0))
-                            .truncate()
-                            .text_size(px(16.0))
-                            .text_color(rgb(palette.sidebar_text))
-                            .child(note.title()),
-                    )
-                    .child(
-                        div()
-                            .flex_shrink_0()
-                            .text_size(px(16.0))
-                            .text_color(rgb(palette.muted_text))
-                            .child(date_label(note.created_ms)),
-                    ),
+                interactive(
+                    ("note", id),
+                    theme,
+                    cx.listener(move |this, _, window, cx| this.select(id, window, cx)),
+                )
+                .hover(move |style| style.bg(rgb(theme.hover_bg)))
+                .active(move |style| style.bg(rgb(theme.pressed_bg)))
+                .flex()
+                .justify_between()
+                .items_center()
+                .gap_3()
+                .px_2()
+                .py_2()
+                .when(active, |row| row.bg(rgb(theme.selection_bg)))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(px(0.0))
+                        .truncate()
+                        .text_size(px(Typography::CONTROL))
+                        .text_color(rgb(theme.sidebar_text))
+                        .child(note.title()),
+                )
+                .child(
+                    div()
+                        .flex_shrink_0()
+                        .text_size(px(Typography::CAPTION))
+                        .text_color(rgb(theme.muted_text))
+                        .child(date_label(note.created_ms)),
+                ),
             );
         }
-        root.child(history)
+        root.child(
+            div()
+                .mt_1()
+                .text_size(px(Typography::CAPTION))
+                .text_color(rgb(theme.muted_text))
+                .child("Recent notes"),
+        )
+        .child(history)
     }
 }
 
 fn writing_config(mut config: Config) -> Config {
-    config.colors.background = [27, 27, 27];
-    config.colors.foreground = [220, 220, 220];
-    config.colors.cursor = [220, 220, 220];
+    let theme = UiTheme::from_config(&config);
+    config.font_family = Some(Typography::READING_FONT_FAMILY.to_string());
+    let channels = |color: u32| [(color >> 16) as u8, (color >> 8) as u8, color as u8];
+    config.colors.background = channels(theme.reading_bg);
+    config.colors.foreground = channels(theme.active_text);
+    config.colors.cursor = channels(theme.active_text);
     config.cursor_style = crate::config::CursorStyle::Beam;
     config
 }

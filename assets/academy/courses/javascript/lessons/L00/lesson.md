@@ -93,21 +93,15 @@ An object groups named fields. Assigning an object to another variable shares th
 
 It is not a universal copier: functions cannot be cloned this way. The first harness checks that the runtime supports this feature and that editing the copy leaves the original intact.
 
-After the exercise, explain why `const copy = original` would fail the independence check. Use the editor's hover on `greeting` to inspect its inferred return type.
+After the exercise, explain why `const copy = original` would fail the independence check. If editor hover is available, inspect greeting’s inferred return type; otherwise describe its returned value in your notes.
 
 ## Practice
 
 Implement greeting(name) with a template literal and cloneRecord(record) with structuredClone. Return values; the harness handles printing.
 
-Export a fresh workspace from the repository root. The exporter needs Python 3.11 or newer:
+Choose **Open practice** in the exercise card to create or reopen this lesson’s files. Edit the implementation, save your changes, then choose **Check work**. Your practice folder is reused when you return; opening it again keeps your edits. No source checkout or Python is needed.
 
-```bash
-python3 scripts/check_academy_courses.py --export javascript L00 /tmp/llnzy-js-l00
-```
-
-The destination must not already exist, so choose a new path for a retake.
-
-Open those files in LLNZY, then run the check from the exported directory:
+You can also run this command in the practice folder’s terminal:
 
 ```bash
 node check.js
@@ -116,3 +110,9 @@ node check.js
 The starter intentionally fails. Leave `check.js` unchanged: it calls your functions with several inputs and reports the first failed assertion.
 
 Read that failure, inspect the relevant input, and rerun after one focused edit.
+
+## Hint before a solution
+
+What is the difference between returning a greeting and printing it? For the copy, consider whether changing a nested field could still change the original.
+
+Try one focused change and check again. Before comparing with a reference solution, explain the failing case in your own words. A passing check covers the supplied examples; also try a new input and explain why your implementation handles it.

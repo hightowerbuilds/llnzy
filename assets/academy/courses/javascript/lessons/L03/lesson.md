@@ -119,15 +119,9 @@ Further reading: [MDN on closures](https://developer.mozilla.org/en-US/docs/Web/
 
 Implement makeCounter(start = 0), returning a function that increments then returns its private count. Implement makeCallbacks(values), returning one zero-argument callback per value. Implement bindLabel(record), returning record.label bound to record so it works when detached.
 
-Export a fresh workspace from the repository root. The exporter needs Python 3.11 or newer:
+Choose **Open practice** in the exercise card to create or reopen this lesson’s files. Edit the implementation, save your changes, then choose **Check work**. Your practice folder is reused when you return; opening it again keeps your edits. No source checkout or Python is needed.
 
-```bash
-python3 scripts/check_academy_courses.py --export javascript L03 /tmp/llnzy-js-l03
-```
-
-The destination must not already exist, so choose a new path for a retake.
-
-Open those files in LLNZY, then run the check from the exported directory:
+You can also run this command in the practice folder’s terminal:
 
 ```bash
 node check.js
@@ -136,3 +130,9 @@ node check.js
 The starter intentionally fails. Leave `check.js` unchanged: it calls your functions with several inputs and reports the first failed assertion.
 
 Read that failure, inspect the relevant input, and rerun after one focused edit.
+
+## Hint before a solution
+
+Each counter needs its own captured binding. For a detached method, ask which object should supply this when it is called.
+
+Try one focused change and check again. Before comparing with a reference solution, explain the failing case in your own words. A passing check covers the supplied examples; also try a new input and explain why your implementation handles it.

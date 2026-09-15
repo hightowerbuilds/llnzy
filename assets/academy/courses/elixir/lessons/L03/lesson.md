@@ -58,7 +58,9 @@ end
 +++
 # Function Clauses, Guards & Recursion
 
-A named function can have multiple clauses. Elixir selects the first clause whose argument patterns and guard match. Keep clauses of the same function together, with specific cases before broad fallbacks. Guards are restricted expressions such as type checks and comparisons, not places to call arbitrary application functions.
+A named function can have multiple clauses. Elixir selects the first clause whose argument patterns and guard match. Keep clauses of the same function together, with specific cases before broad fallbacks.
+
+Guards are restricted expressions such as type checks and comparisons, not places to call arbitrary application functions.
 
 Lists are linked structures. `[head | tail]` separates the first item from the remaining list; `[]` is the empty list. Recursion handles one item and asks the same function to handle the smaller remainder. A base case prevents the recursion from continuing forever.
 
@@ -72,10 +74,20 @@ Count.size([:a, :b]) # 2
 
 Trace that example: two nonempty clauses lead to the empty clause returning zero, then the pending additions produce two. The exercise adds a guard to distinguish included values from skipped values. Every recursive branch must pass the tail, so the input gets smaller.
 
-This direct style leaves pending additions. An accumulator can express a tail-recursive version, and Enum offers standard collection operations so you usually do not need a custom traversal. We write one here to understand the mechanism. After passing, trace `[2, -1, 4]` by hand, naming the selected clause and remaining list at every call.
+This direct style leaves pending additions. An accumulator can express a tail-recursive version, and Enum offers standard collection operations so you usually do not need a custom traversal. We write one here to understand the mechanism.
+
+After passing, trace `[2, -1, 4]` by hand, naming the selected clause and remaining list at every call.
 
 ## Practice
 
 Implement Totals.sum_nonnegative/1 for lists of integers: sum values greater than or equal to zero, skipping negatives. Use an empty-list base case and recursive head/tail clauses.
 
-Export from the repository root with `python3 scripts/check_academy_courses.py --export elixir L03 /tmp/llnzy-elixir-l03` (Python 3.11+). Choose a destination that does not already exist. Open the exported files in LLNZY and run `elixir check.exs` from that directory. The starter intentionally fails. Leave check.exs unchanged and implement lesson.exs. A successful check exits with status zero; read assertion failures to find the input that needs attention.
+Choose **Open practice** in the exercise card to create or reopen this lesson’s files. Edit the implementation, save your changes, then choose **Check work**. Your practice folder is reused when you return; opening it again keeps your edits. No source checkout or Python is needed.
+
+The command shown in the exercise card runs from that folder. The starter intentionally fails. Leave check.exs unchanged and implement lesson.exs. A successful check exits with status zero; read assertion failures to find the input that needs attention.
+
+## Hint before a solution
+
+Write the empty-list result first. In every nonempty branch, which argument makes the recursive problem smaller?
+
+Try one focused change and check again. Before comparing with a reference solution, explain the failing case in your own words. A passing check covers the supplied examples; also try a new input and explain why your implementation handles it.

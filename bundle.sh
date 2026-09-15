@@ -210,6 +210,22 @@ if [ "$BUILD_PKG" -eq 1 ]; then
     echo "Built $PKG_PATH"
 fi
 
+# Give a file the app icon in Finder, e.g. the .dmg sitting on the Desktop.
+# The icon goes in the file's resource fork, so its data is untouched.
+set_finder_icon() {
+    local target="$1"
+    local work status
+    work="$(mktemp -d)" || return 1
+    sips -s format png -Z 512 "assets/$ICON_RESOURCE" --out "$work/icon.png" >/dev/null \
+        && sips -i "$work/icon.png" >/dev/null \
+        && DeRez -only icns "$work/icon.png" > "$work/icon.rsrc" \
+        && Rez -append "$work/icon.rsrc" -o "$target" \
+        && SetFile -a C "$target"
+    status=$?
+    rm -rf "$work"
+    return "$status"
+}
+
 if [ "$BUILD_DMG" -eq 1 ]; then
     DMG_ROOT="target/dmg-root"
     DMG_PATH="target/$DISPLAY_NAME-$VERSION.dmg"
@@ -231,6 +247,9 @@ if [ "$BUILD_DMG" -eq 1 ]; then
         -ov \
         -format UDZO \
         "$DMG_PATH"
+    if ! set_finder_icon "$DMG_PATH"; then
+        echo "Warning: $DMG_PATH keeps the default disk image icon (sips/Rez/SetFile failed)." >&2
+    fi
     # Same cleanup as the .pkg path: drop the staging tree once the
     # .dmg is produced so target/dmg-root/LLNZY.app doesn't sit on disk
     # as a phantom duplicate of /Applications/LLNZY.app.

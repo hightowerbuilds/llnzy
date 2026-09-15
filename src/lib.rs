@@ -32,4 +32,7 @@ pub mod terminal;
 pub mod text_utils;
 pub mod theme;
 pub mod theme_store;
+#[cfg(feature = "gpui-editor")]
+pub mod ui;
+pub mod ui_theme;
 pub mod utf16;

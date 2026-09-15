@@ -15,7 +15,12 @@ import tempfile
 import tomllib
 
 
-COURSES = {"javascript": ("node",), "typescript": ("node", "tsc"), "elixir": ("elixir", "mix")}
+COURSES = {
+    "javascript": ("node",),
+    "typescript": ("node", "tsc"),
+    "rust": ("cargo", "rustc"),
+    "elixir": ("elixir", "mix"),
+}
 
 
 ROOT = Path(__file__).resolve().parents[1] / "assets/academy/courses"

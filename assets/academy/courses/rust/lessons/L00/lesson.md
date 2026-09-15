@@ -41,6 +41,14 @@ solution = """fn main() {
 
 This lesson pairs with chapter 1 of *The Rust Programming Language* (3rd ed.), the getting-started chapter.
 
+## Before you begin
+
+This introductory course contains seven lessons covering chapters 1–3. You need basic file and terminal skills; no prior Rust is required. The book is optional companion reading. Ownership, borrowing, and a full project come after this course’s current endpoint.
+
+Install the stable Rust toolchain using the [official Rust installation guide](https://www.rust-lang.org/tools/install), then reopen LLNZY so Cargo and rustc are available to the app. The bundled exercises use the standard library and need no downloaded crates.
+
+Editor assistance is optional and uses rust-analyzer when installed; Cargo can check your work without it.
+
 ## What rustup owns
 
 Rust installs through `rustup`, which owns a toolchain directory and can hold several at once. Ask it which one is active:
@@ -64,10 +72,20 @@ We deliberately never assert on that text in a check. Version strings drift acro
 
 When your program prints a fixed line instead, the toolchain is proven.
 
-## Run it
+## Practice
+
+Choose **Open practice** in the exercise card to create or reopen this lesson’s files. Edit the implementation, save your changes, then choose **Check work**. Your practice folder is reused when you return; opening it again keeps your edits. No source checkout or Python is needed.
+
+You can also run this command in the practice folder’s terminal:
 
 ```bash
 cargo run
 ```
 
 Try the same thing in your own terminal and watch the line appear there too.
+
+## Hint before a solution
+
+The starter compiles but prints nothing. Which macro writes a line, and where does program execution begin?
+
+Try one focused change and check again. Before comparing with a reference solution, explain the failing case in your own words. A passing check covers the supplied examples; also try a new input and explain why your implementation handles it.

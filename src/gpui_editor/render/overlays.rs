@@ -1,7 +1,10 @@
 use super::super::*;
+use crate::ui::{button, ButtonVariant};
+use crate::ui_theme::ControlSize;
 
 pub(super) fn language_panel_overlay(
     panel: GpuiLspPanel,
+    theme: UiTheme,
     cx: &mut Context<EditorPrototype>,
 ) -> impl IntoElement {
     let selected = panel.selected;
@@ -19,19 +22,19 @@ pub(super) fn language_panel_overlay(
                     .w_full()
                     .overflow_hidden()
                     .whitespace_nowrap()
-                    .text_size(px(11.0))
-                    .text_color(rgb(EDITOR_TEXT_FG))
+                    .text_size(px(Typography::CONTROL))
+                    .text_color(rgb(theme.active_text))
                     .px_1()
                     .py_1()
                     .rounded_sm()
                     .bg(if is_selected {
-                        rgb(0x2d374a)
+                        rgb(theme.selection_bg)
                     } else {
                         rgba(0x00000000)
                     })
                     .when(is_actionable, |row| {
                         row.cursor(CursorStyle::PointingHand)
-                            .hover(|style| style.bg(rgb(0x2d374a)))
+                            .hover(|style| style.bg(rgb(theme.selection_bg)))
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(move |editor, _: &MouseDownEvent, _window, cx| {
@@ -59,8 +62,8 @@ pub(super) fn language_panel_overlay(
         .py_2()
         .rounded_sm()
         .border_1()
-        .border_color(rgb(0x3d4a5f))
-        .bg(rgb(0x202432))
+        .border_color(rgb(theme.border))
+        .bg(rgb(theme.panel_bg))
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(|_this, _: &MouseDownEvent, _window, cx| {
@@ -76,18 +79,24 @@ pub(super) fn language_panel_overlay(
                 .child(
                     div()
                         .font_weight(gpui::FontWeight::BOLD)
-                        .text_size(px(12.0))
-                        .text_color(rgb(EDITOR_TEXT_FG))
+                        .text_size(px(Typography::CONTROL))
+                        .text_color(rgb(theme.active_text))
                         .child(panel.title),
                 )
-                .child(find_button("x", cx, |editor, cx| {
-                    editor.close_lsp_panel(cx);
-                })),
+                .child(find_button(
+                    "editor-language-panel-overlay-x",
+                    theme,
+                    "x",
+                    cx,
+                    |editor, cx| {
+                        editor.close_lsp_panel(cx);
+                    },
+                )),
         )
         .child(items)
 }
 
-pub(super) fn degraded_mode_overlay(notice: String) -> impl IntoElement {
+pub(super) fn degraded_mode_overlay(notice: String, theme: UiTheme) -> impl IntoElement {
     div()
         .absolute()
         .top(px(46.0))
@@ -99,10 +108,10 @@ pub(super) fn degraded_mode_overlay(notice: String) -> impl IntoElement {
         .px_2()
         .rounded_sm()
         .border_1()
-        .border_color(rgb(0x665f3a))
-        .bg(rgb(0x252313))
-        .text_size(px(11.0))
-        .text_color(rgb(0xe1d58a))
+        .border_color(rgb(theme.warning))
+        .bg(rgb(theme.panel_bg))
+        .text_size(px(Typography::CONTROL))
+        .text_color(rgb(theme.warning))
         .overflow_hidden()
         .whitespace_nowrap()
         .child(notice)
@@ -110,6 +119,7 @@ pub(super) fn degraded_mode_overlay(notice: String) -> impl IntoElement {
 
 pub(super) fn external_change_overlay(
     change: ExternalFileChangeSnapshot,
+    theme: UiTheme,
     cx: &mut Context<EditorPrototype>,
 ) -> impl IntoElement {
     div()
@@ -123,10 +133,10 @@ pub(super) fn external_change_overlay(
         .px_2()
         .rounded_sm()
         .border_1()
-        .border_color(rgb(0x765b2f))
-        .bg(rgb(0x2a2419))
-        .text_size(px(12.0))
-        .text_color(rgb(EDITOR_TEXT_FG))
+        .border_color(rgb(theme.warning))
+        .bg(rgb(theme.panel_bg))
+        .text_size(px(Typography::CONTROL))
+        .text_color(rgb(theme.active_text))
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(|_this, _: &MouseDownEvent, _window, cx| {
@@ -140,18 +150,31 @@ pub(super) fn external_change_overlay(
                 .whitespace_nowrap()
                 .child(format!("{} changed on disk", change.file_name)),
         )
-        .child(find_button("Reload", cx, |editor, cx| {
-            editor.reload_external_change(cx);
-        }))
-        .child(find_button("Keep Local", cx, |editor, cx| {
-            editor.keep_local_external_change(cx);
-        }))
+        .child(find_button(
+            "editor-external-change-overlay-reload",
+            theme,
+            "Reload",
+            cx,
+            |editor, cx| {
+                editor.reload_external_change(cx);
+            },
+        ))
+        .child(find_button(
+            "editor-external-change-overlay-keep-local",
+            theme,
+            "Keep Local",
+            cx,
+            |editor, cx| {
+                editor.keep_local_external_change(cx);
+            },
+        ))
 }
 
 pub(super) fn find_overlay(
     snapshot: &EditorSnapshot,
     cx: &mut Context<EditorPrototype>,
 ) -> impl IntoElement {
+    let theme = snapshot.appearance.chrome;
     let height = if snapshot.search_replace_mode {
         px(66.0)
     } else {
@@ -171,10 +194,10 @@ pub(super) fn find_overlay(
         .py_1()
         .rounded_sm()
         .border_1()
-        .border_color(rgb(0x3d4a5f))
-        .bg(rgb(0x202432))
-        .text_size(px(12.0))
-        .text_color(rgb(EDITOR_TEXT_FG))
+        .border_color(rgb(theme.border))
+        .bg(rgb(theme.panel_bg))
+        .text_size(px(Typography::CONTROL))
+        .text_color(rgb(theme.active_text))
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(|_this, _: &MouseDownEvent, _window, cx| {
@@ -188,6 +211,7 @@ pub(super) fn find_overlay(
                 .items_center()
                 .gap_1()
                 .child(find_text_field(
+                    theme,
                     "Find",
                     snapshot.search_query.clone(),
                     snapshot.search_input_target == EditorSearchInputTarget::Query,
@@ -198,21 +222,45 @@ pub(super) fn find_overlay(
                     div()
                         .w(px(54.0))
                         .text_align(gpui::TextAlign::Center)
-                        .text_color(rgb(EDITOR_MUTED_FG))
+                        .text_color(rgb(theme.muted_text))
                         .child(snapshot.search_status.clone()),
                 )
-                .child(find_button("Prev", cx, |editor, cx| {
-                    editor.move_search_focus(EditorSearchDirection::Previous, cx);
-                }))
-                .child(find_button("Next", cx, |editor, cx| {
-                    editor.move_search_focus(EditorSearchDirection::Next, cx);
-                }))
-                .child(find_button("Repl", cx, |editor, cx| {
-                    editor.toggle_replace_mode(cx);
-                }))
-                .child(find_button("x", cx, |editor, cx| {
-                    editor.close_find(cx);
-                })),
+                .child(find_button(
+                    "editor-find-overlay-prev",
+                    theme,
+                    "Prev",
+                    cx,
+                    |editor, cx| {
+                        editor.move_search_focus(EditorSearchDirection::Previous, cx);
+                    },
+                ))
+                .child(find_button(
+                    "editor-find-overlay-next",
+                    theme,
+                    "Next",
+                    cx,
+                    |editor, cx| {
+                        editor.move_search_focus(EditorSearchDirection::Next, cx);
+                    },
+                ))
+                .child(find_button(
+                    "editor-find-overlay-repl",
+                    theme,
+                    "Repl",
+                    cx,
+                    |editor, cx| {
+                        editor.toggle_replace_mode(cx);
+                    },
+                ))
+                .child(find_button(
+                    "editor-find-overlay-x",
+                    theme,
+                    "x",
+                    cx,
+                    |editor, cx| {
+                        editor.close_find(cx);
+                    },
+                )),
         )
         .when(snapshot.search_replace_mode, |overlay| {
             overlay.child(
@@ -222,18 +270,31 @@ pub(super) fn find_overlay(
                     .items_center()
                     .gap_1()
                     .child(find_text_field(
+                        theme,
                         "Replace",
                         snapshot.search_replacement.clone(),
                         snapshot.search_input_target == EditorSearchInputTarget::Replacement,
                         EditorSearchInputTarget::Replacement,
                         cx,
                     ))
-                    .child(find_button("Replace", cx, |editor, cx| {
-                        editor.replace_focused_search_match(cx);
-                    }))
-                    .child(find_button("All", cx, |editor, cx| {
-                        editor.replace_all_search_matches(cx);
-                    })),
+                    .child(find_button(
+                        "editor-find-overlay-replace",
+                        theme,
+                        "Replace",
+                        cx,
+                        |editor, cx| {
+                            editor.replace_focused_search_match(cx);
+                        },
+                    ))
+                    .child(find_button(
+                        "editor-find-overlay-all",
+                        theme,
+                        "All",
+                        cx,
+                        |editor, cx| {
+                            editor.replace_all_search_matches(cx);
+                        },
+                    )),
             )
         })
 }
@@ -242,6 +303,7 @@ pub(super) fn go_to_line_overlay(
     snapshot: &EditorSnapshot,
     cx: &mut Context<EditorPrototype>,
 ) -> impl IntoElement {
+    let theme = snapshot.appearance.chrome;
     div()
         .absolute()
         .top(px(8.0))
@@ -255,10 +317,10 @@ pub(super) fn go_to_line_overlay(
         .py_1()
         .rounded_sm()
         .border_1()
-        .border_color(rgb(0x3d4a5f))
-        .bg(rgb(0x202432))
-        .text_size(px(12.0))
-        .text_color(rgb(EDITOR_TEXT_FG))
+        .border_color(rgb(theme.border))
+        .bg(rgb(theme.panel_bg))
+        .text_size(px(Typography::CONTROL))
+        .text_color(rgb(theme.active_text))
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(|_this, _: &MouseDownEvent, _window, cx| {
@@ -268,19 +330,33 @@ pub(super) fn go_to_line_overlay(
         .child(go_to_line_text_field(
             snapshot.go_to_line_input.clone(),
             snapshot.total_lines,
+            theme,
         ))
-        .child(find_button("Go", cx, |editor, cx| {
-            editor.submit_go_to_line(cx);
-        }))
-        .child(find_button("x", cx, |editor, cx| {
-            editor.close_go_to_line(cx);
-        }))
+        .child(find_button(
+            "editor-go-to-line-overlay-go",
+            theme,
+            "Go",
+            cx,
+            |editor, cx| {
+                editor.submit_go_to_line(cx);
+            },
+        ))
+        .child(find_button(
+            "editor-go-to-line-overlay-x",
+            theme,
+            "x",
+            cx,
+            |editor, cx| {
+                editor.close_go_to_line(cx);
+            },
+        ))
 }
 
 pub(super) fn rename_symbol_overlay(
     snapshot: &EditorSnapshot,
     cx: &mut Context<EditorPrototype>,
 ) -> impl IntoElement {
+    let theme = snapshot.appearance.chrome;
     div()
         .absolute()
         .top(px(8.0))
@@ -294,26 +370,41 @@ pub(super) fn rename_symbol_overlay(
         .py_1()
         .rounded_sm()
         .border_1()
-        .border_color(rgb(0x3d4a5f))
-        .bg(rgb(0x202432))
-        .text_size(px(12.0))
-        .text_color(rgb(EDITOR_TEXT_FG))
+        .border_color(rgb(theme.border))
+        .bg(rgb(theme.panel_bg))
+        .text_size(px(Typography::CONTROL))
+        .text_color(rgb(theme.active_text))
         .on_mouse_down(
             MouseButton::Left,
             cx.listener(|_this, _: &MouseDownEvent, _window, cx| {
                 cx.stop_propagation();
             }),
         )
-        .child(rename_symbol_text_field(snapshot.rename_input.clone()))
-        .child(find_button("Rename", cx, |editor, cx| {
-            editor.submit_lsp_rename(cx);
-        }))
-        .child(find_button("x", cx, |editor, cx| {
-            editor.close_lsp_rename(cx);
-        }))
+        .child(rename_symbol_text_field(
+            snapshot.rename_input.clone(),
+            theme,
+        ))
+        .child(find_button(
+            "editor-rename-symbol-overlay-rename",
+            theme,
+            "Rename",
+            cx,
+            |editor, cx| {
+                editor.submit_lsp_rename(cx);
+            },
+        ))
+        .child(find_button(
+            "editor-rename-symbol-overlay-x",
+            theme,
+            "x",
+            cx,
+            |editor, cx| {
+                editor.close_lsp_rename(cx);
+            },
+        ))
 }
 
-fn rename_symbol_text_field(input: String) -> impl IntoElement {
+fn rename_symbol_text_field(input: String, theme: UiTheme) -> impl IntoElement {
     let empty = input.is_empty();
     let label = if empty {
         "New symbol name".to_string()
@@ -328,17 +419,21 @@ fn rename_symbol_text_field(input: String) -> impl IntoElement {
         .items_center()
         .rounded_sm()
         .border_1()
-        .border_color(rgb(0x78a6d8))
-        .bg(rgb(0x141d2b))
+        .border_color(rgb(theme.focus_ring))
+        .bg(rgb(theme.editor_bg))
         .px_2()
         .overflow_hidden()
         .whitespace_nowrap()
-        .text_color(rgb(if empty { EDITOR_DIM_FG } else { EDITOR_TEXT_FG }))
+        .text_color(rgb(if empty {
+            theme.muted_text
+        } else {
+            theme.active_text
+        }))
         .cursor(CursorStyle::IBeam)
         .child(label)
 }
 
-fn go_to_line_text_field(input: String, total_lines: usize) -> impl IntoElement {
+fn go_to_line_text_field(input: String, total_lines: usize, theme: UiTheme) -> impl IntoElement {
     let empty = input.is_empty();
     let label = if empty {
         format!("Line 1-{total_lines}")
@@ -353,17 +448,22 @@ fn go_to_line_text_field(input: String, total_lines: usize) -> impl IntoElement 
         .items_center()
         .rounded_sm()
         .border_1()
-        .border_color(rgb(0x78a6d8))
-        .bg(rgb(0x141d2b))
+        .border_color(rgb(theme.focus_ring))
+        .bg(rgb(theme.editor_bg))
         .px_2()
         .overflow_hidden()
         .whitespace_nowrap()
-        .text_color(rgb(if empty { EDITOR_DIM_FG } else { EDITOR_TEXT_FG }))
+        .text_color(rgb(if empty {
+            theme.muted_text
+        } else {
+            theme.active_text
+        }))
         .cursor(CursorStyle::IBeam)
         .child(label)
 }
 
 fn find_text_field(
+    theme: UiTheme,
     placeholder: &'static str,
     text: String,
     active: bool,
@@ -378,17 +478,26 @@ fn find_text_field(
         .items_center()
         .rounded_sm()
         .border_1()
-        .border_color(rgb(if active { 0x78a6d8 } else { 0x48546a }))
-        .bg(rgb(if active { 0x141d2b } else { 0x111722 }))
+        .border_color(rgb(if active {
+            theme.focus_ring
+        } else {
+            theme.border
+        }))
+        .bg(rgb(theme.editor_bg))
         .px_2()
         .overflow_hidden()
         .whitespace_nowrap()
-        .text_color(rgb(if empty { EDITOR_DIM_FG } else { EDITOR_TEXT_FG }))
+        .text_color(rgb(if empty {
+            theme.muted_text
+        } else {
+            theme.active_text
+        }))
         .cursor(CursorStyle::IBeam)
         .on_mouse_down(
             MouseButton::Left,
-            cx.listener(move |editor, _: &MouseDownEvent, _window, cx| {
+            cx.listener(move |editor, _: &MouseDownEvent, window, cx| {
                 cx.stop_propagation();
+                window.focus(&editor.focus_handle);
                 editor.set_search_input_target(target, cx);
             }),
         )
@@ -396,31 +505,22 @@ fn find_text_field(
 }
 
 fn find_button(
+    id: &'static str,
+    theme: UiTheme,
     label: &'static str,
     cx: &mut Context<EditorPrototype>,
     handler: fn(&mut EditorPrototype, &mut Context<EditorPrototype>),
 ) -> impl IntoElement {
-    div()
-        .h(px(24.0))
-        .min_w(px(28.0))
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded_sm()
-        .border_1()
-        .border_color(rgb(0x48546a))
-        .bg(rgb(0x151b26))
-        .px_2()
-        .text_size(px(11.0))
-        .text_color(rgb(EDITOR_TEXT_FG))
-        .cursor_pointer()
-        .hover(|style| style.bg(rgb(0x273247)))
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |this, _: &MouseDownEvent, _window, cx| {
-                cx.stop_propagation();
-                handler(this, cx);
-            }),
-        )
-        .child(label)
+    button(
+        id,
+        label,
+        theme,
+        ButtonVariant::Secondary,
+        ControlSize::Compact,
+        cx.listener(move |this, _, window, cx| {
+            cx.stop_propagation();
+            window.focus(&this.focus_handle);
+            handler(this, cx);
+        }),
+    )
 }

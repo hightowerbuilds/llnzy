@@ -14,6 +14,10 @@ use serde::{Deserialize, Serialize};
 // that round-trip these structs.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct WorkspacePreferences {
+    /// Explicit background visibility, applied after the remembered image.
+    /// None preserves old preferences; "none" keeps a config-file image off.
+    #[serde(default)]
+    pub terminal_background_mode: Option<String>,
     /// Library reference (file name under the backgrounds/ dir, or an
     /// absolute path for legacy entries) of the terminal background image
     /// last selected by the user. None when no image is active. Persisted so
@@ -63,6 +67,11 @@ pub struct WorkspacePreferences {
     /// `None` means "use config.toml defaults".
     #[serde(default)]
     pub app_theme: Option<String>,
+
+    /// Explicit chrome mode ("light" / "dark"). Unknown or missing values fall
+    /// back to the configured mode, known app theme, then legacy background.
+    #[serde(default)]
+    pub ui_mode: Option<String>,
 
     /// Maximum number of tabs a joined tab group may contain. Missing / zero
     /// keeps the historical two-tab behavior; Settings can raise this to 3
@@ -140,6 +149,7 @@ mod tests {
         let path = dir.join("preferences.json");
 
         let prefs = WorkspacePreferences {
+            terminal_background_mode: Some("image".to_string()),
             terminal_background_image: Some("forest.png".to_string()),
             terminal_background_image_fit: "fit".to_string(),
             terminal_background_intensity: Some(0.42),
@@ -149,6 +159,7 @@ mod tests {
             editor_word_wrap: Some(true),
             markdown_preview_style: Some("newspaper".to_string()),
             app_theme: Some("Light Mode".to_string()),
+            ui_mode: Some("light".to_string()),
             joined_tab_limit: 4,
         };
         prefs.save_to(&path).unwrap();
@@ -172,6 +183,7 @@ mod tests {
 
         let loaded = WorkspacePreferences::load_from(&path);
         assert!(loaded.terminal_background_image.is_none());
+        assert!(loaded.terminal_background_mode.is_none());
         assert!(loaded.terminal_background_image_fit.is_empty());
         assert!(loaded.terminal_background_intensity.is_none());
         assert!(loaded.terminal_font_family.is_none());
@@ -180,6 +192,7 @@ mod tests {
         assert!(loaded.editor_word_wrap.is_none());
         assert!(loaded.markdown_preview_style.is_none());
         assert!(loaded.app_theme.is_none());
+        assert!(loaded.ui_mode.is_none());
         assert_eq!(loaded.joined_tab_limit(), 2);
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -195,5 +208,28 @@ mod tests {
         let prefs = WorkspacePreferences::load_from(&path);
         assert_eq!(prefs, WorkspacePreferences::default());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn disabled_background_and_unknown_ui_mode_roundtrip_without_losing_image() {
+        let json = r#"{"terminal_background_mode":"none","terminal_background_image":"forest.png","ui_mode":"future-mode"}"#;
+        let prefs: WorkspacePreferences = serde_json::from_str(json).unwrap();
+        assert_eq!(prefs.terminal_background_mode.as_deref(), Some("none"));
+        assert_eq!(
+            prefs.terminal_background_image.as_deref(),
+            Some("forest.png")
+        );
+        assert_eq!(
+            prefs
+                .ui_mode
+                .as_deref()
+                .and_then(crate::ui_theme::UiMode::parse),
+            None
+        );
+        assert_eq!(
+            serde_json::from_str::<WorkspacePreferences>(&serde_json::to_string(&prefs).unwrap())
+                .unwrap(),
+            prefs
+        );
     }
 }

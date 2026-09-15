@@ -1,3 +1,4 @@
+use crate::ui_theme::{Typography, UiMode, UiTheme};
 use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet},
@@ -10,10 +11,11 @@ use gpui::prelude::*;
 use gpui::{
     actions, div, px, rgb, size, App, Application, Bounds, Context, Entity, FocusHandle, Focusable,
     KeyBinding, KeyDownEvent, Menu, MenuItem, MouseButton, MouseDownEvent, Render, Window,
-    WindowBounds, WindowOptions,
+    WindowBackgroundAppearance, WindowBounds, WindowOptions,
 };
 
 mod academy;
+mod academy_actions;
 mod appearance_actions;
 mod appearances;
 mod command_palette;
@@ -25,6 +27,8 @@ mod panes;
 mod project;
 mod recovery;
 mod sidebar;
+#[cfg(test)]
+mod style_tests;
 mod tabs;
 
 use crate::config::Config;
@@ -116,37 +120,13 @@ actions!(
     ]
 );
 
-const CHROME_BG: u32 = 0x242424;
-const BUMPER_BG: u32 = 0x242424;
-const PANEL_BG: u32 = 0x1b1b22;
-const EDITOR_BG: u32 = 0x191920;
-const BORDER: u32 = 0x30323a;
-const ACTIVE_TAB_BG: u32 = 0x161616;
-const INACTIVE_TAB_BG: u32 = 0x0e0e0e;
-const ACTIVE_TEXT: u32 = 0xffffff;
-const MUTED_TEXT: u32 = 0xa0a5b4;
-const SIDEBAR_TEXT: u32 = 0xabb2bf;
-const FOLDER_BLUE: u32 = 0x64b4ff;
-const ACCENT: u32 = 0x214966;
-const QUEUE_GREEN: u32 = 0x6aff90;
-
-/// Border colors for joined tab groups, taken in order.
-///
-/// Every tab in one group wears the same color; the next group on screen
-/// takes the next entry, so two groups are never confusable at a glance.
-/// Past the end the list wraps — four distinct hues is already more
-/// simultaneous groups than the join limit makes practical, and wrapping
-/// degrades to a repeat rather than to no color at all.
-const JOINED_GROUPS_DARK: [u32; 4] = [0x6aff90, 0x6ab8ff, 0xc78bff, 0xffc46a];
-const JOINED_GROUPS_LIGHT: [u32; 4] = [0x5f9f79, 0x5f7fb0, 0x8a6bb0, 0xa8792f];
-
 const RECOVERY_PERSIST_INTERVAL: Duration = Duration::from_secs(5);
 /// Cadence for draining the explorer filesystem watcher. Combined with the
 /// watcher's own debounce this bounds how quickly externally created files
 /// appear in the sidebar.
 const EXPLORER_WATCH_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
-const FOOTER_HEIGHT: f32 = 48.0;
+const FOOTER_HEIGHT: f32 = 36.0;
 const JOINED_TAB_DIVIDER_WIDTH: f32 = 8.0;
 const SIDEBAR_DEFAULT_WIDTH: f32 = 220.0;
 const SIDEBAR_MIN_WIDTH: f32 = 160.0;
@@ -156,11 +136,6 @@ const BUMPER_RESIZE_WIDTH: f32 = 6.0;
 const EXPLORER_ENTRY_LIMIT: usize = 260;
 const GPUI_TERMINAL_BACKGROUND_MAX_EDGE: u32 = 2048;
 const EMPTY_WORKSPACE_TAB_ID: WorkspaceTabId = WorkspaceTabId(0);
-const SIDEBAR_ROW_HOVER_BG: u32 = 0x2b2e36;
-const SIDEBAR_ROW_SELECTED_BG: u32 = 0x303440;
-const SIDEBAR_DROP_VALID_BG: u32 = 0x1f3a2b;
-const SIDEBAR_DROP_INVALID_BG: u32 = 0x3d2428;
-
 thread_local! {
     static WORKSPACE_REGISTRY: RefCell<Vec<gpui::WeakEntity<WorkspacePrototype>>> =
         const { RefCell::new(Vec::new()) };
@@ -188,154 +163,6 @@ fn load_academy_library() -> Option<Rc<crate::academy::CourseLibrary>> {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct WorkspacePalette {
-    pub(super) is_light: bool,
-    pub(super) chrome_bg: u32,
-    pub(super) bumper_bg: u32,
-    pub(super) panel_bg: u32,
-    pub(super) editor_bg: u32,
-    pub(super) border: u32,
-    pub(super) active_tab_bg: u32,
-    pub(super) inactive_tab_bg: u32,
-    pub(super) active_text: u32,
-    pub(super) muted_text: u32,
-    pub(super) sidebar_text: u32,
-    pub(super) accent: u32,
-    pub(super) queue_green: u32,
-    pub(super) joined_groups: [u32; 4],
-    pub(super) sidebar_row_selected_bg: u32,
-    pub(super) sidebar_row_hover_bg: u32,
-}
-
-impl WorkspacePalette {
-    /// Border color for a joined group, by its ordinal among live groups.
-    /// Wraps, so any ordinal is safe to pass.
-    pub(super) fn joined_group_color(&self, ordinal: usize) -> u32 {
-        self.joined_groups[ordinal % self.joined_groups.len()]
-    }
-
-    pub(super) fn from_config(config: &Config) -> Self {
-        if config
-            .colors
-            .background
-            .iter()
-            .map(|channel| *channel as u16)
-            .sum::<u16>()
-            > 600
-        {
-            Self::light()
-        } else {
-            Self::dark()
-        }
-    }
-
-    fn dark() -> Self {
-        Self {
-            is_light: false,
-            chrome_bg: CHROME_BG,
-            bumper_bg: BUMPER_BG,
-            panel_bg: PANEL_BG,
-            editor_bg: EDITOR_BG,
-            border: BORDER,
-            active_tab_bg: ACTIVE_TAB_BG,
-            inactive_tab_bg: INACTIVE_TAB_BG,
-            active_text: ACTIVE_TEXT,
-            muted_text: MUTED_TEXT,
-            sidebar_text: SIDEBAR_TEXT,
-            accent: ACCENT,
-            queue_green: QUEUE_GREEN,
-            joined_groups: JOINED_GROUPS_DARK,
-            sidebar_row_selected_bg: SIDEBAR_ROW_SELECTED_BG,
-            sidebar_row_hover_bg: SIDEBAR_ROW_HOVER_BG,
-        }
-    }
-
-    fn light() -> Self {
-        Self {
-            is_light: true,
-            chrome_bg: 0xf0e3d1,
-            bumper_bg: 0xe8d8c1,
-            panel_bg: 0xfffbf2,
-            editor_bg: 0xfaf2e2,
-            border: 0xd8c6ad,
-            active_tab_bg: 0xfffbf2,
-            inactive_tab_bg: 0xe9d8bf,
-            active_text: 0x3e372f,
-            muted_text: 0x7d7064,
-            sidebar_text: 0x5f554b,
-            accent: 0xb7d8d4,
-            queue_green: 0x5f9f79,
-            joined_groups: JOINED_GROUPS_LIGHT,
-            sidebar_row_selected_bg: 0xe2d0ed,
-            sidebar_row_hover_bg: 0xeadcc8,
-        }
-    }
-}
-
-#[cfg(test)]
-mod workspace_palette_tests {
-    use super::{WorkspacePalette, CHROME_BG};
-    use crate::config::Config;
-
-    #[test]
-    fn joined_group_colors_are_distinct_in_both_themes() {
-        for palette in [WorkspacePalette::dark(), WorkspacePalette::light()] {
-            let colors = palette.joined_groups;
-            for (i, color) in colors.iter().enumerate() {
-                for (j, other) in colors.iter().enumerate() {
-                    assert!(
-                        i == j || color != other,
-                        "group colors {i} and {j} are the same ({color:#08x}); \
-                         separate groups would be indistinguishable"
-                    );
-                }
-                assert_ne!(
-                    *color, palette.border,
-                    "group color {i} matches the unjoined border color"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn joined_group_color_wraps_past_the_list() {
-        let palette = WorkspacePalette::dark();
-        let len = palette.joined_groups.len();
-
-        assert_eq!(palette.joined_group_color(0), palette.joined_groups[0]);
-        assert_eq!(
-            palette.joined_group_color(len),
-            palette.joined_groups[0],
-            "an ordinal past the end wraps rather than panicking"
-        );
-        assert_eq!(
-            palette.joined_group_color(len * 3 + 2),
-            palette.joined_groups[2]
-        );
-    }
-
-    #[test]
-    fn palette_switches_to_light_for_light_config_background() {
-        let mut config = Config::default();
-        config.colors.background = [250, 242, 226];
-
-        let palette = WorkspacePalette::from_config(&config);
-
-        assert_eq!(palette.editor_bg, 0xfaf2e2);
-        assert_ne!(palette.chrome_bg, CHROME_BG);
-    }
-
-    #[test]
-    fn palette_keeps_dark_defaults_for_dark_config_background() {
-        let config = Config::default();
-
-        let palette = WorkspacePalette::from_config(&config);
-
-        assert_eq!(palette.chrome_bg, CHROME_BG);
-    }
-}
-
 /// Build the initial appearance config for a new workspace session, honoring
 /// the user's last persisted background image selection. Any image-related
 /// preferences are applied on top of the config-file defaults so a user who
@@ -343,26 +170,49 @@ mod workspace_palette_tests {
 fn appearance_config_from_preferences(
     preferences: &crate::preferences::WorkspacePreferences,
 ) -> Config {
-    let mut config = Config::load();
+    resolve_appearance_preferences(Config::load(), preferences)
+}
+
+fn resolve_appearance_preferences(
+    mut config: Config,
+    preferences: &crate::preferences::WorkspacePreferences,
+) -> Config {
+    let configured_ui_mode = config.ui_mode;
     if let Some(theme_name) = preferences.app_theme.as_deref() {
         if let Some(theme) = crate::theme::builtin_themes()
             .into_iter()
             .find(|theme| theme.name == theme_name)
         {
-            let terminal_effects = config.effects.clone();
-            let preserve_terminal_effects = theme.preserve_terminal_effects;
             theme.apply_to(&mut config);
-            if preserve_terminal_effects {
-                config.effects = terminal_effects;
-            }
         }
     }
+    config.ui_mode = preferences
+        .ui_mode
+        .as_deref()
+        .and_then(UiMode::parse)
+        .or(configured_ui_mode)
+        .or(config.ui_mode);
     if let Some(image_ref) = preferences.terminal_background_image.as_deref() {
         if !image_ref.is_empty() {
-            config.effects.enabled = true;
             config.effects.background = "image".to_string();
             config.effects.background_image = Some(image_ref.to_string());
         }
+    }
+    if let Some(mode) = preferences.terminal_background_mode.as_deref() {
+        if matches!(mode, "none" | "image") {
+            config.effects.background = mode.to_string();
+            if mode == "none" && preferences.terminal_background_image.is_none() {
+                config.effects.background_image = None;
+            }
+        }
+    }
+    if config.effects.background == "image"
+        && preferences
+            .terminal_background_image
+            .as_deref()
+            .is_some_and(|image| !image.is_empty())
+    {
+        config.effects.enabled = true;
     }
     if let Some(fit) =
         crate::config::BackgroundImageFit::parse(preferences.terminal_background_image_fit.as_str())
@@ -498,6 +348,7 @@ struct JoinedWorkspacePanes {
 
 pub fn run_workspace_prototype() {
     Application::new().run(|cx: &mut App| {
+        crate::ui::init(cx);
         bind_editor_keys(cx);
         bind_terminal_keys(cx);
         install_workspace_menu_bar(cx);
@@ -541,6 +392,8 @@ pub fn run_workspace_prototype() {
         let window = match cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
+                // The translucent sidebar shows the desktop through this.
+                window_background: WindowBackgroundAppearance::Blurred,
                 ..Default::default()
             },
             |_, cx| cx.new(WorkspacePrototype::new),
@@ -568,6 +421,7 @@ pub fn run_workspace_prototype() {
             let window = match cx.open_window(
                 WindowOptions {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
+                    window_background: WindowBackgroundAppearance::Blurred,
                     ..Default::default()
                 },
                 |_, cx| cx.new(WorkspacePrototype::new_secondary),
@@ -584,6 +438,10 @@ pub fn run_workspace_prototype() {
                 log::error!("failed to focus new workspace window: {error:?}");
             }
         });
+        #[cfg(debug_assertions)]
+        if std::env::var_os("LLNZY_STYLE_GALLERY").is_some() {
+            crate::ui::gallery::open(cx);
+        }
         cx.activate(true);
     });
 }
@@ -723,6 +581,7 @@ struct WorkspacePrototype {
     academy_course: Option<String>,
     academy_lesson: Option<String>,
     academy_progress: crate::academy_progress::AcademyProgress,
+    academy_practice: academy_actions::AcademyPracticeState,
     terminal_background_import_error: Option<String>,
     palette: command_palette::CommandPaletteState,
     preferences: crate::preferences::WorkspacePreferences,
@@ -876,6 +735,7 @@ impl WorkspacePrototype {
             academy_course: None,
             academy_lesson: None,
             academy_progress: crate::academy_progress::AcademyProgress::load(),
+            academy_practice: Default::default(),
             terminal_background_import_error: None,
             palette: command_palette::CommandPaletteState::default(),
             preferences,
@@ -1566,6 +1426,18 @@ impl WorkspacePrototype {
         }
 
         if self.tab_rename.is_none() {
+            if event.keystroke.key == "tab"
+                && !event.keystroke.modifiers.control
+                && !event.keystroke.modifiers.alt
+                && !event.keystroke.modifiers.platform
+            {
+                if event.keystroke.modifiers.shift {
+                    window.focus_prev();
+                } else {
+                    window.focus_next();
+                }
+                cx.stop_propagation();
+            }
             return;
         }
 
@@ -2201,7 +2073,7 @@ impl Render for WorkspacePrototype {
         let sidebar_rename = self.sidebar_rename.clone();
         let sidebar_new_entry = self.sidebar_new_entry.clone();
         let appearance_config = self.appearance_config.clone();
-        let workspace_palette = WorkspacePalette::from_config(&appearance_config);
+        let workspace_palette = UiTheme::from_config(&appearance_config);
         let settings_page = self.settings_page;
         let terminal_background_import_error = self.terminal_background_import_error.clone();
         let explorer_entries = self.explorer_entries();
@@ -2233,6 +2105,13 @@ impl Render for WorkspacePrototype {
             .child(sidebar_bumper(sidebar_visible, workspace_palette, cx))
             .child(workspace_content(
                 WorkspaceSurfaceContext {
+                    available_width: (f32::from(viewport_size.width)
+                        - if sidebar_visible {
+                            sidebar_width + BUMPER_WIDTH
+                        } else {
+                            BUMPER_WIDTH
+                        })
+                    .max(0.0),
                     notepad: self.notepad.clone(),
                     editor: self.editor.clone(),
                     file_editors: self.file_editors.clone(),
@@ -2246,6 +2125,7 @@ impl Render for WorkspacePrototype {
                     academy_course: self.academy_course.clone(),
                     academy_lesson: self.academy_lesson.clone(),
                     academy_progress: self.academy_progress.clone(),
+                    academy_practice: self.academy_practice.clone(),
                     terminal_background_import_error,
                     editor_word_wrap: self.editor_word_wrap_enabled(),
                     joined_tab_limit: self.tab_join_limit(),
@@ -2259,19 +2139,23 @@ impl Render for WorkspacePrototype {
                 cx,
             ));
 
+        // No fill on the root: the window's blurred background has to show
+        // through the translucent sidebar. The tab bar, footer, and content
+        // paint opaque fills of their own.
         div()
             .size_full()
             .flex()
             .flex_col()
-            .bg(rgb(workspace_palette.chrome_bg))
             .text_color(rgb(workspace_palette.sidebar_text))
-            .font_family("Atkinson Hyperlegible")
+            .font_family(Typography::UI_FONT)
             .key_context("Workspace")
             .track_focus(&self.focus_handle(cx))
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, _: &MouseDownEvent, _window, cx| {
-                    this.close_context_menus(cx);
+                cx.listener(|this, _: &MouseDownEvent, window, cx| {
+                    if !window.default_prevented() {
+                        this.close_context_menus(cx);
+                    }
                 }),
             )
             .on_key_down(cx.listener(Self::on_workspace_key_down))
@@ -2348,6 +2232,7 @@ impl Render for WorkspacePrototype {
                     &self.tab_manager,
                     tab_rename,
                     self.tab_join_limit(),
+                    workspace_palette,
                     cx,
                 ))
             })
@@ -2356,6 +2241,7 @@ impl Render for WorkspacePrototype {
                     self.tabs.clone(),
                     active_tab_id,
                     &self.tab_manager,
+                    workspace_palette,
                     cx,
                 ))
             })
@@ -2393,6 +2279,7 @@ impl Render for WorkspacePrototype {
                     &self.palette,
                     &entries,
                     &visible,
+                    workspace_palette,
                     cx,
                 ))
             })

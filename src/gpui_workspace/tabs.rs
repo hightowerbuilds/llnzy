@@ -4,11 +4,10 @@ use gpui::prelude::*;
 use gpui::{div, px, rgb, App, Context, MouseButton, MouseDownEvent, Render, Window};
 
 use crate::gpui_tabs::{GpuiTabChoice, GpuiTabContextMenu, GpuiTabContextMenuView, GpuiTabManager};
+use crate::ui::{button, interactive, ButtonVariant};
+use crate::ui_theme::{ControlSize, Typography, UiTheme};
 
-use super::{
-    sidebar::project_display_name, WorkspacePalette, WorkspacePrototype, WorkspaceSurface,
-    ACTIVE_TEXT, MUTED_TEXT, QUEUE_GREEN, SIDEBAR_TEXT,
-};
+use super::{sidebar::project_display_name, WorkspacePrototype, WorkspaceSurface};
 
 const TAB_BAR_HEIGHT: f32 = 44.0;
 const TAB_BAR_PADDING_X: f32 = 8.0;
@@ -77,12 +76,14 @@ struct WorkspaceTabDragPayload {
 }
 
 struct WorkspaceTabDragPreview {
+    palette: UiTheme,
     label: String,
 }
 
 impl WorkspaceTabDragPreview {
-    fn new(payload: &WorkspaceTabDragPayload) -> Self {
+    fn new(payload: &WorkspaceTabDragPayload, palette: UiTheme) -> Self {
         Self {
+            palette,
             label: payload.label.clone(),
         }
     }
@@ -90,6 +91,7 @@ impl WorkspaceTabDragPreview {
 
 impl Render for WorkspaceTabDragPreview {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        let palette = self.palette;
         div()
             .w(px(workspace_tab_width_for_label(&self.label, true)))
             .h(px(TAB_HEIGHT))
@@ -97,11 +99,11 @@ impl Render for WorkspaceTabDragPreview {
             .items_center()
             .rounded_sm()
             .border_1()
-            .border_color(rgb(0x4c5262))
-            .bg(rgb(0x20232b))
+            .border_color(rgb(palette.border))
+            .bg(rgb(palette.panel_bg))
             .px_3()
-            .text_size(px(13.0))
-            .text_color(rgb(ACTIVE_TEXT))
+            .text_size(px(Typography::CONTROL))
+            .text_color(rgb(palette.active_text))
             .shadow_md()
             .overflow_hidden()
             .whitespace_nowrap()
@@ -115,7 +117,7 @@ pub(super) fn workspace_tab_bar(
     tab_name_overrides: BTreeMap<u64, String>,
     tab_manager: &GpuiTabManager,
     overflow_open: bool,
-    palette: WorkspacePalette,
+    palette: UiTheme,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     let tab_items = tabs
@@ -167,41 +169,18 @@ pub(super) fn workspace_tab_bar(
         ));
     }
 
-    let overflow_button = div()
-        .h(px(28.0))
-        .min_w(px(52.0))
-        .flex_none()
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded_sm()
-        .border_1()
-        .border_color(rgb(if overflow_open {
-            palette.queue_green
-        } else {
-            palette.border
-        }))
-        .bg(rgb(if overflow_open {
-            palette.sidebar_row_selected_bg
-        } else {
-            palette.inactive_tab_bg
-        }))
-        .px_2()
-        .text_size(px(12.0))
-        .text_color(rgb(if overflow_open {
-            palette.queue_green
-        } else {
-            palette.muted_text
-        }))
-        .cursor_pointer()
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(|this, _: &MouseDownEvent, _window, cx| {
-                cx.stop_propagation();
-                this.toggle_tab_overflow_menu(cx);
-            }),
-        )
-        .child("Tabs");
+    let overflow_button = button(
+        "workspace-tab-overflow",
+        "Tabs",
+        palette,
+        ButtonVariant::Ghost,
+        ControlSize::Regular,
+        cx.listener(|this, _, _window, cx| this.toggle_tab_overflow_menu(cx)),
+    )
+    .when(overflow_open, |el| {
+        el.bg(rgb(palette.selection_bg))
+            .border_color(rgb(palette.accent))
+    });
 
     bar.child(tab_strip).child(overflow_button)
 }
@@ -292,7 +271,7 @@ fn workspace_tab(
     width: f32,
     joined_group: Option<usize>,
     menu_anchor: WorkspaceTabMenuAnchor,
-    palette: WorkspacePalette,
+    palette: UiTheme,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     let active = tab.id == active_tab_id;
@@ -301,100 +280,103 @@ fn workspace_tab(
         tab_id,
         label: label.clone(),
     };
-    div()
-        .id(("workspace-tab", tab_id.0))
-        .w(px(width))
-        .min_w(px(TAB_MIN_WIDTH))
-        .max_w(px(TAB_MAX_WIDTH))
-        .flex_none()
-        .h(px(TAB_HEIGHT))
-        .flex()
-        .items_center()
-        .justify_between()
-        .px_3()
-        .rounded_sm()
-        .border_1()
-        // Group identity, not position within the group: every member of
-        // a joined group wears the same border, and a separate group wears
-        // a different one.
-        .border_color(rgb(match joined_group {
-            Some(ordinal) => palette.joined_group_color(ordinal),
-            None => palette.border,
-        }))
-        .bg(rgb(if active {
-            palette.active_tab_bg
-        } else {
-            palette.inactive_tab_bg
-        }))
-        .text_color(rgb(if active {
-            palette.active_text
-        } else {
-            palette.muted_text
-        }))
-        .text_size(px(14.0))
-        .cursor_move()
-        .on_drag(
-            drag_payload,
-            |payload: &WorkspaceTabDragPayload, _offset, _window, cx: &mut App| {
-                cx.new(|_| WorkspaceTabDragPreview::new(payload))
-            },
-        )
-        .drag_over::<WorkspaceTabDragPayload>(move |style, payload, _window, _cx| {
-            if payload.tab_id == tab_id {
-                style
-            } else {
-                style.border_color(rgb(QUEUE_GREEN)).bg(rgb(0x1b2a22))
-            }
-        })
-        .on_drop(cx.listener(
-            move |this, payload: &WorkspaceTabDragPayload, _window, cx| {
-                this.reorder_tab(payload.tab_id, tab_id, cx);
-            },
-        ))
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |this, _: &MouseDownEvent, window, cx| {
+    interactive(
+        ("workspace-tab", tab_id.0),
+        palette,
+        cx.listener(move |this, event: &gpui::ClickEvent, window, cx| {
+            // Pointer activation stays on mouse-down so dragging behaves as before.
+            if matches!(event, gpui::ClickEvent::Keyboard(_)) {
                 this.activate_tab(tab_id, window, cx);
-            }),
+            }
+        }),
+    )
+    .w(px(width))
+    .min_w(px(TAB_MIN_WIDTH))
+    .max_w(px(TAB_MAX_WIDTH))
+    .flex_none()
+    .h(px(TAB_HEIGHT))
+    .flex()
+    .items_center()
+    .justify_between()
+    .px_3()
+    .rounded_sm()
+    .border_1()
+    // Group identity, not position within the group: every member of
+    // a joined group wears the same border, and a separate group wears
+    // a different one.
+    .border_color(rgb(match joined_group {
+        Some(ordinal) => palette.joined_group_color(ordinal),
+        None => palette.border,
+    }))
+    .bg(rgb(if active {
+        palette.active_tab_bg
+    } else {
+        palette.inactive_tab_bg
+    }))
+    .text_color(rgb(if active {
+        palette.active_text
+    } else {
+        palette.muted_text
+    }))
+    .text_size(px(Typography::CONTROL))
+    .hover(move |style| style.bg(rgb(palette.hover_bg)))
+    .cursor_move()
+    .on_drag(
+        drag_payload,
+        move |payload: &WorkspaceTabDragPayload, _offset, _window, cx: &mut App| {
+            cx.new(|_| WorkspaceTabDragPreview::new(payload, palette))
+        },
+    )
+    .drag_over::<WorkspaceTabDragPayload>(move |style, payload, _window, _cx| {
+        if payload.tab_id == tab_id {
+            style
+        } else {
+            style
+                .border_color(rgb(palette.queue_green))
+                .bg(rgb(palette.drop_valid_bg))
+        }
+    })
+    .on_drop(cx.listener(
+        move |this, payload: &WorkspaceTabDragPayload, _window, cx| {
+            this.reorder_tab(payload.tab_id, tab_id, cx);
+        },
+    ))
+    .on_mouse_down(
+        MouseButton::Left,
+        cx.listener(move |this, _: &MouseDownEvent, window, cx| {
+            if window.default_prevented() {
+                return;
+            }
+            this.activate_tab(tab_id, window, cx);
+            // Keep focus in the activated content; a nested close button has
+            // already prevented default and retains its own native focus.
+            window.prevent_default();
+        }),
+    )
+    .on_mouse_down(
+        MouseButton::Right,
+        cx.listener(move |this, _: &MouseDownEvent, window, cx| {
+            cx.stop_propagation();
+            this.open_tab_context_menu(tab_id, menu_anchor, window, cx);
+        }),
+    )
+    .child(
+        div()
+            .flex_1()
+            .overflow_hidden()
+            .whitespace_nowrap()
+            .child(label),
+    )
+    .child(
+        crate::ui::icon_button(
+            ("workspace-tab-close", tab_id.0),
+            "×",
+            palette,
+            cx.listener(move |this, _, window, cx| this.close_tab(tab_id, window, cx)),
         )
-        .on_mouse_down(
-            MouseButton::Right,
-            cx.listener(move |this, _: &MouseDownEvent, window, cx| {
-                cx.stop_propagation();
-                this.open_tab_context_menu(tab_id, menu_anchor, window, cx);
-            }),
-        )
-        .child(
-            div()
-                .flex_1()
-                .overflow_hidden()
-                .whitespace_nowrap()
-                .child(label),
-        )
-        .child(
-            div()
-                .w(px(18.0))
-                .h(px(18.0))
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded_sm()
-                .text_size(px(13.0))
-                .text_color(rgb(if active {
-                    palette.muted_text
-                } else {
-                    palette.sidebar_text
-                }))
-                .cursor_pointer()
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _: &MouseDownEvent, window, cx| {
-                        cx.stop_propagation();
-                        this.close_tab(tab_id, window, cx);
-                    }),
-                )
-                .child("x"),
-        )
+        .w(px(18.0))
+        .h(px(18.0)),
+    )
 }
 
 pub(super) fn workspace_tab_label(tab: &WorkspaceTab) -> String {
@@ -502,6 +484,7 @@ pub(super) fn workspace_tab_context_menu(
     tab_manager: &GpuiTabManager,
     tab_rename: Option<TabRenameState>,
     join_limit: usize,
+    palette: UiTheme,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     let tab_id = WorkspaceTabId(menu.tab_id);
@@ -524,10 +507,10 @@ pub(super) fn workspace_tab_context_menu(
         .gap_1()
         .rounded_sm()
         .border_1()
-        .border_color(rgb(0x454a56))
-        .bg(rgb(0x202229))
+        .border_color(rgb(palette.border))
+        .bg(rgb(palette.panel_bg))
         .p_1()
-        .text_size(px(14.0))
+        .text_size(px(Typography::CONTROL))
         .shadow_lg()
         .on_mouse_down(
             MouseButton::Left,
@@ -553,9 +536,9 @@ pub(super) fn workspace_tab_context_menu(
                 rename_text
             };
             let field_color = if field_text == "Type name" {
-                MUTED_TEXT
+                palette.muted_text
             } else {
-                ACTIVE_TEXT
+                palette.active_text
             };
             menu_panel = menu_panel
                 .child(
@@ -566,16 +549,21 @@ pub(super) fn workspace_tab_context_menu(
                         .items_center()
                         .rounded_sm()
                         .border_1()
-                        .border_color(rgb(0x4f5666))
-                        .bg(rgb(if replace_on_input { 0x253044 } else { 0x15171d }))
+                        .border_color(rgb(palette.focus_ring))
+                        .bg(rgb(if replace_on_input {
+                            palette.selection_bg
+                        } else {
+                            palette.editor_bg
+                        }))
                         .px_2()
-                        .text_size(px(14.0))
+                        .text_size(px(Typography::CONTROL))
                         .text_color(rgb(field_color))
                         .overflow_hidden()
                         .whitespace_nowrap()
                         .child(field_text),
                 )
                 .child(tab_menu_button(
+                    palette,
                     "Save".to_string(),
                     false,
                     cx,
@@ -584,6 +572,7 @@ pub(super) fn workspace_tab_context_menu(
                     },
                 ))
                 .child(tab_menu_button(
+                    palette,
                     "Cancel".to_string(),
                     false,
                     cx,
@@ -595,6 +584,7 @@ pub(super) fn workspace_tab_context_menu(
         GpuiTabContextMenuView::Main | GpuiTabContextMenuView::JoinTargets => {
             let join_targets_active = menu.view == GpuiTabContextMenuView::JoinTargets;
             menu_panel = menu_panel.child(tab_menu_button(
+                palette,
                 "Edit name".to_string(),
                 false,
                 cx,
@@ -605,6 +595,7 @@ pub(super) fn workspace_tab_context_menu(
             if joined {
                 if joined_count == 2 {
                     menu_panel = menu_panel.child(tab_menu_button(
+                        palette,
                         "Swap Side".to_string(),
                         false,
                         cx,
@@ -614,6 +605,7 @@ pub(super) fn workspace_tab_context_menu(
                     ));
                 }
                 menu_panel = menu_panel.child(tab_menu_button(
+                    palette,
                     "Separate Tabs".to_string(),
                     false,
                     cx,
@@ -625,6 +617,7 @@ pub(super) fn workspace_tab_context_menu(
             if !joined || can_join_more {
                 let label = if joined { "Add Tab" } else { "Join Tab" };
                 menu_panel = menu_panel.child(tab_menu_button(
+                    palette,
                     label.to_string(),
                     join_targets_active,
                     cx,
@@ -650,6 +643,7 @@ pub(super) fn workspace_tab_context_menu(
             menu_width.max(180.0),
             tab_id,
             tab_manager.join_choices(&tabs, menu.tab_id, join_limit),
+            palette,
             cx,
         ));
     }
@@ -661,6 +655,7 @@ pub(super) fn workspace_tab_overflow_menu(
     tabs: Vec<WorkspaceTab>,
     active_tab_id: WorkspaceTabId,
     tab_manager: &GpuiTabManager,
+    palette: UiTheme,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     let mut panel = div()
@@ -676,10 +671,10 @@ pub(super) fn workspace_tab_overflow_menu(
         .gap_1()
         .rounded_sm()
         .border_1()
-        .border_color(rgb(0x454a56))
-        .bg(rgb(0x202229))
+        .border_color(rgb(palette.border))
+        .bg(rgb(palette.panel_bg))
         .p_1()
-        .text_size(px(13.0))
+        .text_size(px(Typography::CONTROL))
         .shadow_lg()
         .on_mouse_down(
             MouseButton::Left,
@@ -700,64 +695,74 @@ pub(super) fn workspace_tab_overflow_menu(
             .and_then(|path| path.parent())
             .map(project_display_name);
         panel = panel.child(
-            div()
-                .w_full()
-                .min_h(px(34.0))
-                .flex()
-                .items_center()
-                .gap_2()
-                .rounded_sm()
-                .border_1()
-                .border_color(rgb(if active { 0x325c44 } else { 0x30323a }))
-                .bg(rgb(if active { 0x102c20 } else { 0x191b22 }))
-                .px_2()
-                .text_color(rgb(if active { ACTIVE_TEXT } else { SIDEBAR_TEXT }))
-                .cursor_pointer()
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _: &MouseDownEvent, window, cx| {
-                        cx.stop_propagation();
-                        this.activate_tab(tab_id, window, cx);
-                    }),
-                )
-                .child(
-                    div()
-                        .flex_1()
-                        .overflow_hidden()
-                        .child(
+            interactive(
+                ("workspace-tab-overflow-row", tab_id.0),
+                palette,
+                cx.listener(move |this, _, window, cx| this.activate_tab(tab_id, window, cx)),
+            )
+            .w_full()
+            .min_h(px(34.0))
+            .flex()
+            .items_center()
+            .gap_2()
+            .rounded_sm()
+            .border_1()
+            .border_color(rgb(if active {
+                palette.accent
+            } else {
+                palette.border
+            }))
+            .bg(rgb(if active {
+                palette.selection_bg
+            } else {
+                palette.panel_bg
+            }))
+            .px_2()
+            .text_color(rgb(if active {
+                palette.active_text
+            } else {
+                palette.sidebar_text
+            }))
+            .cursor_pointer()
+            .hover(move |style| style.bg(rgb(palette.hover_bg)))
+            .child(
+                div()
+                    .flex_1()
+                    .overflow_hidden()
+                    .child(
+                        div()
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .text_size(px(Typography::CONTROL))
+                            .child(label),
+                    )
+                    .when_some(subtitle, |text, subtitle| {
+                        text.child(
                             div()
                                 .overflow_hidden()
                                 .whitespace_nowrap()
-                                .text_size(px(13.0))
-                                .child(label),
+                                .text_size(px(Typography::CAPTION))
+                                .text_color(rgb(palette.muted_text))
+                                .child(subtitle),
                         )
-                        .when_some(subtitle, |text, subtitle| {
-                            text.child(
-                                div()
-                                    .overflow_hidden()
-                                    .whitespace_nowrap()
-                                    .text_size(px(10.0))
-                                    .text_color(rgb(MUTED_TEXT))
-                                    .child(subtitle),
-                            )
+                    }),
+            )
+            .when(joined, |row| {
+                row.child(
+                    div()
+                        .rounded_sm()
+                        .border_1()
+                        .border_color(rgb(palette.accent))
+                        .px_1()
+                        .text_size(px(Typography::CAPTION))
+                        .text_color(rgb(palette.queue_green))
+                        .child(if joined_count > 2 {
+                            format!("joined {joined_count}")
+                        } else {
+                            "joined".to_string()
                         }),
                 )
-                .when(joined, |row| {
-                    row.child(
-                        div()
-                            .rounded_sm()
-                            .border_1()
-                            .border_color(rgb(0x325c44))
-                            .px_1()
-                            .text_size(px(10.0))
-                            .text_color(rgb(QUEUE_GREEN))
-                            .child(if joined_count > 2 {
-                                format!("joined {joined_count}")
-                            } else {
-                                "joined".to_string()
-                            }),
-                    )
-                }),
+            }),
         );
     }
 
@@ -765,37 +770,39 @@ pub(super) fn workspace_tab_overflow_menu(
 }
 
 fn tab_menu_button(
+    palette: UiTheme,
     label: String,
     active: bool,
     cx: &mut Context<WorkspacePrototype>,
     on_click: impl Fn(&mut WorkspacePrototype, &mut Window, &mut Context<WorkspacePrototype>) + 'static,
 ) -> impl IntoElement {
-    div()
-        .w_full()
-        .h(px(TAB_MENU_ITEM_HEIGHT))
-        .flex()
-        .items_center()
-        .rounded_sm()
-        .bg(rgb(if active { 0x303644 } else { 0x202229 }))
-        .px_2()
-        .text_size(px(14.0))
-        .text_color(rgb(SIDEBAR_TEXT))
-        .cursor_pointer()
-        .hover(|style| style.bg(rgb(0x303644)))
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |this, _: &MouseDownEvent, window, cx| {
-                cx.stop_propagation();
-                on_click(this, window, cx);
-            }),
-        )
-        .child(label)
+    interactive(
+        gpui::SharedString::from(format!("tab-menu-{label}")),
+        palette,
+        cx.listener(move |this, _, window, cx| on_click(this, window, cx)),
+    )
+    .w_full()
+    .h(px(TAB_MENU_ITEM_HEIGHT))
+    .flex()
+    .items_center()
+    .rounded_sm()
+    .bg(rgb(if active {
+        palette.selection_bg
+    } else {
+        palette.panel_bg
+    }))
+    .px_2()
+    .text_size(px(Typography::CONTROL))
+    .text_color(rgb(palette.sidebar_text))
+    .hover(move |style| style.bg(rgb(palette.hover_bg)))
+    .child(label)
 }
 
 fn tab_join_side_menu(
     width: f32,
     source_id: WorkspaceTabId,
     targets: Vec<GpuiTabChoice>,
+    palette: UiTheme,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     let mut side_menu = div()
@@ -805,10 +812,10 @@ fn tab_join_side_menu(
         .gap_1()
         .rounded_sm()
         .border_1()
-        .border_color(rgb(0x454a56))
-        .bg(rgb(0x202229))
+        .border_color(rgb(palette.border))
+        .bg(rgb(palette.panel_bg))
         .p_1()
-        .text_size(px(14.0))
+        .text_size(px(Typography::CONTROL))
         .shadow_lg()
         .on_mouse_down(
             MouseButton::Left,
@@ -827,8 +834,8 @@ fn tab_join_side_menu(
                     .items_center()
                     .rounded_sm()
                     .px_2()
-                    .text_size(px(14.0))
-                    .text_color(rgb(MUTED_TEXT))
+                    .text_size(px(Typography::CONTROL))
+                    .text_color(rgb(palette.muted_text))
                     .overflow_hidden()
                     .whitespace_nowrap()
                     .child("No available tabs"),
@@ -838,14 +845,19 @@ fn tab_join_side_menu(
 
     for target in targets {
         let target_id = WorkspaceTabId(target.id);
-        side_menu = side_menu.child(tab_menu_button(
-            target.title,
-            false,
-            cx,
-            move |this, _window, cx| {
-                this.join_tabs_by_id(source_id, target_id, cx);
-            },
-        ));
+        side_menu = side_menu.child(
+            div()
+                .id(("join-target", target_id.0))
+                .child(tab_menu_button(
+                    palette,
+                    target.title,
+                    false,
+                    cx,
+                    move |this, _window, cx| {
+                        this.join_tabs_by_id(source_id, target_id, cx);
+                    },
+                )),
+        );
     }
 
     side_menu.into_any_element()

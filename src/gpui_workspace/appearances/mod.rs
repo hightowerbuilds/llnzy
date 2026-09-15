@@ -1,12 +1,11 @@
+use crate::ui_theme::Typography;
 use gpui::prelude::*;
-use gpui::{div, px, rgb, Context, MouseButton, MouseDownEvent};
+use gpui::{div, px, rgb, Context};
 
 use crate::{config::Config, theme::builtin_themes};
 
-use super::{
-    ErrorLogFilter, SettingsPage, WorkspacePalette, WorkspacePrototype, ACTIVE_TEXT, BORDER,
-    EDITOR_BG, MUTED_TEXT, PANEL_BG, QUEUE_GREEN, SIDEBAR_TEXT,
-};
+use super::{ErrorLogFilter, SettingsPage, WorkspacePrototype};
+use crate::ui_theme::UiTheme;
 
 mod editor_section;
 mod error_log;
@@ -19,8 +18,9 @@ use editor_section::editor_appearance_controls;
 use error_log::{error_log_clear_modal, settings_error_log_row};
 use terminal_section::terminal_appearance_controls;
 use widgets::{
-    appearance_button, appearance_button_palette, color_strip, control_label_palette,
-    effect_toggle_button_palette, glass_fill, metric_readout, metric_row, metric_row_palette,
+    appearance_button, appearance_button_named, color_strip, control_label, glass_fill,
+    metric_readout_sized, metric_row, metric_row_sized, settings_checkbox, CONTROL_LABEL_TEXT,
+    COURSES_TEXT,
 };
 
 // Monospace families. `None` means "use the system default", which is what
@@ -53,22 +53,28 @@ pub(super) fn appearances_surface(
     config: Config,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
-    div()
+    let palette = UiTheme::from_config(&config);
+    let background = crate::gpui_terminal::workspace_background_layer(&config);
+    let has_background = background.is_some();
+    let content = div()
         .flex_1()
         .h_full()
         .flex()
         .flex_col()
-        .bg(rgb(EDITOR_BG))
+        .relative()
+        .when(!has_background, |el| el.bg(rgb(palette.editor_bg)))
+        .font_family(Typography::UI_FONT)
         .child(
             div()
-                .h(px(52.0))
+                .h(px(44.0))
+                .bg(glass_fill(palette.editor_bg))
                 .w_full()
                 .flex()
                 .items_center()
                 .justify_between()
                 .px_4()
                 .border_b_1()
-                .border_color(rgb(BORDER))
+                .border_color(rgb(palette.border))
                 .child(
                     div()
                         .flex()
@@ -76,14 +82,14 @@ pub(super) fn appearances_surface(
                         .gap_2()
                         .child(
                             div()
-                                .text_size(px(18.0))
-                                .text_color(rgb(ACTIVE_TEXT))
+                                .text_size(px(Typography::SECTION))
+                                .text_color(rgb(palette.active_text))
                                 .child("Appearances"),
                         )
                         .child(
                             div()
-                                .text_size(px(12.0))
-                                .text_color(rgb(MUTED_TEXT))
+                                .text_size(px(Typography::CONTROL))
+                                .text_color(rgb(palette.muted_text))
                                 .child("Theme, terminal, and editor presentation"),
                         ),
                 ),
@@ -97,7 +103,14 @@ pub(super) fn appearances_surface(
                 .overflow_hidden()
                 .child(appearance_theme_column(&config, cx))
                 .child(appearance_all_controls_column(config, cx)),
-        )
+        );
+    div()
+        .relative()
+        .size_full()
+        .flex()
+        .overflow_hidden()
+        .children(background)
+        .child(content)
 }
 
 /// The standalone Appearances surface shows every visual section in one
@@ -107,20 +120,19 @@ fn appearance_all_controls_column(
     config: Config,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
+    let palette = UiTheme::from_config(&config);
     let content = div()
         .flex_1()
         .h_full()
         .flex()
         .flex_col()
         .gap_3()
-        .border_1()
-        .border_color(rgb(BORDER))
-        .bg(rgb(0x15151c))
+        .bg(glass_fill(palette.panel_bg))
         .p_4()
         .child(
             div()
-                .text_size(px(18.0))
-                .text_color(rgb(ACTIVE_TEXT))
+                .text_size(px(Typography::SECTION))
+                .text_color(rgb(palette.active_text))
                 .child("Appearances"),
         );
 
@@ -133,13 +145,17 @@ fn appearance_all_controls_column(
 }
 
 /// Settings groups controls under Home, Courses, and Terminal.
-fn settings_page_nav(page: SettingsPage, cx: &mut Context<WorkspacePrototype>) -> impl IntoElement {
+fn settings_page_nav(
+    page: SettingsPage,
+    palette: UiTheme,
+    cx: &mut Context<WorkspacePrototype>,
+) -> impl IntoElement {
     let mut nav = div().flex().items_center().gap_1();
     for target in SettingsPage::ALL {
-        let active = target == page;
         nav = nav.child(appearance_button(
             target.title().to_string(),
-            active,
+            target == page,
+            palette,
             cx,
             move |this, cx| this.set_settings_page(target, cx),
         ));
@@ -151,6 +167,7 @@ fn appearance_theme_column(
     config: &Config,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
+    let palette = UiTheme::from_config(config);
     let mut themes = div()
         .id("appearance-themes-scroll")
         .w(px(320.0))
@@ -159,15 +176,15 @@ fn appearance_theme_column(
         .flex_col()
         .gap_2()
         .border_1()
-        .border_color(rgb(BORDER))
-        .bg(rgb(PANEL_BG))
+        .border_color(rgb(palette.border))
+        .bg(glass_fill(palette.panel_bg))
         .p_3()
         .overflow_y_scroll()
         .scrollbar_width(px(8.0))
         .child(
             div()
-                .text_size(px(13.0))
-                .text_color(rgb(MUTED_TEXT))
+                .text_size(px(Typography::BODY))
+                .text_color(rgb(palette.muted_text))
                 .child("THEMES"),
         )
         .child(color_strip([
@@ -191,7 +208,7 @@ fn appearance_theme_column(
                 .justify_between()
                 .gap_2()
                 .rounded_sm()
-                .bg(rgb(0x252935))
+                .bg(glass_fill(palette.panel_bg))
                 .p_2()
                 .child(
                     div()
@@ -200,8 +217,8 @@ fn appearance_theme_column(
                         .gap_1()
                         .child(
                             div()
-                                .text_size(px(13.0))
-                                .text_color(rgb(ACTIVE_TEXT))
+                                .text_size(px(Typography::BODY))
+                                .text_color(rgb(palette.active_text))
                                 .child(theme.name.clone()),
                         )
                         .child(color_strip([
@@ -211,9 +228,11 @@ fn appearance_theme_column(
                             theme.colors.ansi[1],
                         ])),
                 )
-                .child(appearance_button(
+                .child(appearance_button_named(
+                    format!("theme-column-{}", theme.name),
                     "Apply".to_string(),
                     false,
+                    palette,
                     cx,
                     move |this, cx| {
                         this.apply_builtin_theme(&theme_name, cx);
@@ -228,17 +247,17 @@ fn appearance_theme_column(
 fn app_theme_section(
     content: gpui::Div,
     config: &Config,
-    palette: WorkspacePalette,
+    palette: UiTheme,
     cx: &mut Context<WorkspacePrototype>,
 ) -> gpui::Div {
-    let mut section = div()
+    let section = div()
         .w_full()
         .flex()
         .flex_col()
         .gap_2()
         .child(
             div()
-                .text_size(px(13.0))
+                .text_size(px(Typography::BODY))
                 .text_color(rgb(palette.muted_text))
                 .child("THEMES"),
         )
@@ -253,14 +272,18 @@ fn app_theme_section(
             config.colors.ansi[5],
         ]));
 
-    for theme in builtin_themes() {
+    let mut choices = div().w_full().flex().flex_wrap().gap_3();
+    let mut themes = builtin_themes();
+    themes.sort_by_key(|theme| theme.name != "Light Mode");
+    for theme in themes {
         let active = theme.colors.background == config.colors.background
             && theme.colors.foreground == config.colors.foreground
             && theme.colors.cursor == config.colors.cursor;
         let theme_name = theme.name.clone();
-        section = section.child(
+        choices = choices.child(
             div()
-                .w_full()
+                .flex_1()
+                .min_w_0()
                 .flex()
                 .items_center()
                 .justify_between()
@@ -268,7 +291,7 @@ fn app_theme_section(
                 .rounded_sm()
                 .border_1()
                 .border_color(rgb(if active {
-                    palette.queue_green
+                    palette.accent
                 } else {
                     palette.border
                 }))
@@ -281,9 +304,13 @@ fn app_theme_section(
                         .gap_1()
                         .child(
                             div()
-                                .text_size(px(13.0))
+                                .text_size(px(Typography::BODY))
                                 .text_color(rgb(palette.active_text))
-                                .child(theme.name.clone()),
+                                .child(if theme.name == "Minimalist" {
+                                    "Dark Mode".to_string()
+                                } else {
+                                    theme.name.clone()
+                                }),
                         )
                         .child(color_strip([
                             theme.colors.background,
@@ -292,7 +319,8 @@ fn app_theme_section(
                             theme.colors.ansi[1],
                         ])),
                 )
-                .child(appearance_button_palette(
+                .child(appearance_button_named(
+                    format!("theme-{}", theme.name),
                     if active {
                         "Applied".to_string()
                     } else {
@@ -308,7 +336,7 @@ fn app_theme_section(
         );
     }
 
-    content.child(section)
+    content.child(section.child(choices))
 }
 
 fn advanced_settings_controls(
@@ -317,7 +345,7 @@ fn advanced_settings_controls(
     error_log_expanded: bool,
     error_log_filter: ErrorLogFilter,
     error_entries: Vec<crate::error_log::LogEntry>,
-    palette: WorkspacePalette,
+    palette: UiTheme,
     cx: &mut Context<WorkspacePrototype>,
 ) -> gpui::Div {
     content
@@ -337,12 +365,12 @@ fn advanced_settings_controls(
 
 fn settings_join_limit_row_palette(
     current_limit: usize,
-    palette: WorkspacePalette,
+    palette: UiTheme,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
     let mut choices = div().flex().items_center().gap_1();
     for limit in [2_u8, 3, 4] {
-        choices = choices.child(appearance_button_palette(
+        choices = choices.child(appearance_button(
             limit.to_string(),
             current_limit == limit as usize,
             palette,
@@ -365,13 +393,13 @@ fn settings_join_limit_row_palette(
                 .gap_1()
                 .child(
                     div()
-                        .text_size(px(13.0))
+                        .text_size(px(Typography::BODY))
                         .text_color(rgb(palette.active_text))
                         .child("Joined tab limit"),
                 )
                 .child(
                     div()
-                        .text_size(px(12.0))
+                        .text_size(px(Typography::BODY))
                         .text_color(rgb(palette.muted_text))
                         .child(
                             "Choose whether joined tab groups can hold two, three, or four tabs.",
@@ -384,71 +412,68 @@ fn settings_join_limit_row_palette(
 pub(super) fn markdown_appearance_controls(
     content: gpui::Div,
     config: Config,
+    text: f32,
     cx: &mut Context<WorkspacePrototype>,
 ) -> gpui::Div {
+    let palette = UiTheme::from_config(&config);
     let editor_font = config
         .editor
         .font_size
         .unwrap_or((config.font_size - 2.0).max(10.0));
     content
-        .child(markdown_preview_style_controls(&config, cx))
-        .child(metric_row(
+        .child(markdown_preview_style_controls(&config, text, cx))
+        .child(metric_row_sized(
             "Preview Font Size",
             format!("{editor_font:.0}px"),
-            cx,
+            text,
+            text,
+            palette, cx,
             |this, cx| this.adjust_editor_font_size(-1.0, cx),
             |this, cx| this.adjust_editor_font_size(1.0, cx),
         ))
-        .child(metric_row(
+        .child(metric_row_sized(
             "Preview Line Height",
             format!("{:.2}x", config.editor.line_height),
-            cx,
+            text,
+            text,
+            palette, cx,
             |this, cx| this.adjust_editor_line_height(-0.05, cx),
             |this, cx| this.adjust_editor_line_height(0.05, cx),
         ))
-        .child(metric_readout(
+        .child(metric_readout_sized(
             "Preview Width",
             "Matches editor pane or split pane".to_string(),
+            text,
+            text,
+            palette,
         ))
         .child(
             div()
                 .mt_2()
-                .text_size(px(13.0))
-                .text_color(rgb(SIDEBAR_TEXT))
+                .text_size(px(text))
+                .text_color(rgb(palette.sidebar_text))
                 .child("Markdown preview uses editor font, line height, and theme colors while keeping Source, Preview, and Split mode state separate."),
         )
 }
 
 fn markdown_preview_style_controls(
     config: &Config,
+    text: f32,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
+    let palette = UiTheme::from_config(config);
     let active_style = config.editor.markdown_preview_style;
     let mut buttons = div().flex().flex_wrap().gap_2();
     for style in crate::config::MarkdownPreviewStyle::all() {
         let active = style == active_style;
-        buttons = buttons.child(
-            div()
-                .h(px(30.0))
-                .px_3()
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded_sm()
-                .border_1()
-                .border_color(rgb(if active { 0x47785f } else { BORDER }))
-                .bg(glass_fill(if active { 0x183725 } else { 0x242632 }))
-                .text_size(px(12.0))
-                .text_color(rgb(if active { QUEUE_GREEN } else { SIDEBAR_TEXT }))
-                .cursor_pointer()
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _: &MouseDownEvent, _window, cx| {
-                        this.set_markdown_preview_style(style, cx);
-                    }),
-                )
-                .child(style.label()),
-        );
+        buttons = buttons.child(appearance_button_named(
+            format!("markdown-style-{}", style.as_str()),
+            style.label().to_string(),
+            active,
+            palette,
+            cx,
+            move |this, cx| this.set_markdown_preview_style(style, cx),
+        ));
     }
 
     div()
@@ -458,8 +483,8 @@ fn markdown_preview_style_controls(
         .gap_2()
         .child(
             div()
-                .text_size(px(12.0))
-                .text_color(rgb(MUTED_TEXT))
+                .text_size(px(text))
+                .text_color(rgb(palette.muted_text))
                 .child("Preview Style"),
         )
         .child(buttons)
@@ -480,7 +505,7 @@ pub(super) fn settings_surface(
     pending_clear_error_log: bool,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
-    let palette = WorkspacePalette::from_config(&config);
+    let palette = UiTheme::from_config(&config);
     let error_entries = crate::error_log::global().recent(1000);
 
     let content = settings_controls_column(
@@ -495,9 +520,11 @@ pub(super) fn settings_surface(
         cx,
     );
 
-    let background = crate::gpui_terminal::workspace_background_layer_blurred(&config);
+    let background = crate::gpui_terminal::workspace_background_layer(&config);
     let has_background = background.is_some();
     let root_content = div()
+        .font_family(Typography::UI_FONT)
+        .text_size(px(Typography::BODY))
         .id("settings-surface")
         .relative()
         .flex_1()
@@ -509,7 +536,7 @@ pub(super) fn settings_surface(
         })
         .child(
             div()
-                .h(px(52.0))
+                .h(px(44.0))
                 .w_full()
                 .flex()
                 .items_center()
@@ -520,7 +547,7 @@ pub(super) fn settings_surface(
                 .child(
                     div().flex().items_center().gap_2().child(
                         div()
-                            .text_size(px(18.0))
+                            .text_size(px(Typography::SECTION))
                             .text_color(rgb(palette.active_text))
                             .child("Settings"),
                     ),
@@ -528,7 +555,7 @@ pub(super) fn settings_surface(
                 .when(has_background, |header| {
                     header.bg(glass_fill(palette.editor_bg))
                 })
-                .child(settings_page_nav(page, cx)),
+                .child(settings_page_nav(page, palette, cx)),
         )
         .child(content);
 
@@ -563,7 +590,7 @@ fn settings_controls_column(
     error_entries: Vec<crate::error_log::LogEntry>,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
-    let palette = WorkspacePalette::from_config(&config);
+    let palette = UiTheme::from_config(&config);
     let body = div()
         .flex_1()
         .h_full()
@@ -578,26 +605,23 @@ fn settings_controls_column(
         .flex()
         .flex_col()
         .gap_3()
-        .border_1()
-        .border_color(rgb(palette.border))
         .bg(glass_fill(palette.panel_bg))
         .p_4()
         .child(
             div()
-                .text_size(px(18.0))
+                .text_size(px(Typography::SECTION))
                 .text_color(rgb(palette.active_text))
                 .child(page.title()),
         );
 
     let content = match page {
         SettingsPage::Home => {
-            let content = app_appearance_controls(
-                content.child(settings_section_label("APP APPEARANCE")),
-                &config,
-                cx,
-            );
+            let content = app_appearance_controls(content, &config, cx);
             advanced_settings_controls(
-                content.child(settings_section_label("WORKSPACE & DIAGNOSTICS")),
+                content.child(
+                    settings_section_label("WORKSPACE & DIAGNOSTICS", palette)
+                        .text_size(px(Typography::BODY)),
+                ),
                 joined_tab_limit,
                 error_log_expanded,
                 error_log_filter,
@@ -608,26 +632,34 @@ fn settings_controls_column(
         }
         SettingsPage::Courses => {
             let content = editor_appearance_controls(
-                content.child(settings_section_label("EDITOR APPEARANCE")),
+                content.child(
+                    settings_section_label("EDITOR APPEARANCE", palette)
+                        .text_size(px(COURSES_TEXT)),
+                ),
                 config.clone(),
+                COURSES_TEXT,
                 cx,
             );
             editor_behavior_appearance_controls(
-                content.child(settings_section_label("EDITING & MARKDOWN")),
+                content.child(
+                    settings_section_label("EDITING & MARKDOWN", palette)
+                        .text_size(px(COURSES_TEXT)),
+                ),
                 config,
                 editor_word_wrap,
+                COURSES_TEXT,
                 cx,
             )
         }
         SettingsPage::Terminal => {
             let content = terminal_appearance_controls(
-                content.child(settings_section_label("TERMINAL APPEARANCE")),
+                content.child(settings_section_label("TERMINAL APPEARANCE", palette)),
                 config.clone(),
                 terminal_background_import_error,
                 cx,
             );
             settings_terminal_controls(
-                content.child(settings_section_label("TERMINAL BEHAVIOR")),
+                content.child(settings_section_label("TERMINAL BEHAVIOR", palette)),
                 &config,
                 cx,
             )
@@ -650,28 +682,31 @@ fn settings_appearances_controls(
     editor_word_wrap: bool,
     cx: &mut Context<WorkspacePrototype>,
 ) -> gpui::Div {
+    let palette = UiTheme::from_config(&config);
     content
-        .child(settings_section_label("TERMINAL"))
+        .child(settings_section_label("TERMINAL", palette))
         .child(terminal_appearance_controls(
             div().flex().flex_col().gap_3(),
             config.clone(),
             terminal_background_import_error,
             cx,
         ))
-        .child(settings_section_label("EDITOR"))
+        .child(settings_section_label("EDITOR", palette))
         .child(editor_appearance_controls(
             div().flex().flex_col().gap_3(),
             config.clone(),
+            CONTROL_LABEL_TEXT,
             cx,
         ))
-        .child(settings_section_label("EDITOR BEHAVIOR"))
+        .child(settings_section_label("EDITOR BEHAVIOR", palette))
         .child(editor_behavior_appearance_controls(
             div().flex().flex_col().gap_3(),
             config.clone(),
             editor_word_wrap,
+            CONTROL_LABEL_TEXT,
             cx,
         ))
-        .child(settings_section_label("APP"))
+        .child(settings_section_label("APP", palette))
         .child(app_appearance_controls(
             div().flex().flex_col().gap_3(),
             &config,
@@ -685,17 +720,17 @@ fn app_appearance_controls(
     config: &Config,
     cx: &mut Context<WorkspacePrototype>,
 ) -> gpui::Div {
-    let palette = WorkspacePalette::from_config(config);
+    let palette = UiTheme::from_config(config);
     app_theme_section(content, config, palette, cx)
-        .child(metric_row_palette(
-            "App Font Size",
+        .child(metric_row(
+            "Terminal Font Size",
             format!("{:.0}px", config.font_size),
             palette,
             cx,
             |this, cx| this.adjust_font_size(-1.0, cx),
             |this, cx| this.adjust_font_size(1.0, cx),
         ))
-        .child(metric_row_palette(
+        .child(metric_row(
             "Selection Alpha",
             format!("{:.0}%", config.colors.selection_alpha * 100.0),
             palette,
@@ -708,8 +743,9 @@ fn app_appearance_controls(
                 .flex()
                 .items_center()
                 .gap_2()
-                .child(control_label_palette("Time-of-Day Warmth", palette))
-                .child(appearance_button_palette(
+                .child(control_label("Time-of-Day Warmth", palette))
+                .child(appearance_button_named(
+                    "time-of-day".into(),
                     if config.time_of_day_enabled {
                         "On".to_string()
                     } else {
@@ -729,14 +765,16 @@ fn editor_behavior_appearance_controls(
     content: gpui::Div,
     config: Config,
     editor_word_wrap: bool,
+    text: f32,
     cx: &mut Context<WorkspacePrototype>,
 ) -> gpui::Div {
-    let palette = WorkspacePalette::from_config(&config);
+    let palette = UiTheme::from_config(&config);
     content
         .child(settings_toggle_row(
             "Word wrap",
             "Wraps long source lines in JavaScript, Markdown, and other text files.",
             editor_word_wrap,
+            text,
             palette,
             cx,
             |this, cx| this.toggle_editor_word_wrap(cx),
@@ -744,6 +782,7 @@ fn editor_behavior_appearance_controls(
         .child(markdown_appearance_controls(
             div().flex().flex_col().gap_3(),
             config,
+            text,
             cx,
         ))
 }
@@ -754,38 +793,44 @@ fn settings_terminal_controls(
     config: &Config,
     cx: &mut Context<WorkspacePrototype>,
 ) -> gpui::Div {
+    let palette = UiTheme::from_config(config);
     content.child(metric_row(
         "Scrollback Lines",
         format!("{}", config.terminal.scrollback_lines),
+        palette,
         cx,
         |this, cx| this.adjust_terminal_scrollback(-1000, cx),
         |this, cx| this.adjust_terminal_scrollback(1000, cx),
     ))
 }
 
-fn settings_section_label(label: &'static str) -> impl IntoElement {
+fn settings_section_label(label: &'static str, palette: UiTheme) -> gpui::Div {
     div()
         .mt_2()
-        .text_size(px(12.0))
-        .text_color(rgb(0x8d94a3))
+        .text_size(px(Typography::CONTROL))
+        .text_color(rgb(palette.muted_text))
         .child(label)
 }
 
+/// A checkbox, then the setting's title and description. The check sits to
+/// the left of both lines rather than opposite them: the box is the control,
+/// and the text reads as its label instead of as a row it happens to share.
 pub(super) fn settings_toggle_row(
     title: &'static str,
     description: &'static str,
     active: bool,
-    palette: WorkspacePalette,
+    text: f32,
+    palette: UiTheme,
     cx: &mut Context<WorkspacePrototype>,
     on_click: impl Fn(&mut WorkspacePrototype, &mut Context<WorkspacePrototype>) + 'static,
 ) -> impl IntoElement {
     div()
         .flex()
         .items_center()
-        .justify_between()
-        .gap_4()
+        .gap_3()
         .px_4()
         .py_3()
+        .child(settings_checkbox(title, active, palette, cx, on_click))
         .child(
             div()
                 .flex()
@@ -793,18 +838,15 @@ pub(super) fn settings_toggle_row(
                 .gap_1()
                 .child(
                     div()
-                        .text_size(px(13.0))
+                        .text_size(px(text))
                         .text_color(rgb(palette.active_text))
                         .child(title),
                 )
                 .child(
                     div()
-                        .text_size(px(12.0))
+                        .text_size(px(text))
                         .text_color(rgb(palette.muted_text))
                         .child(description),
                 ),
         )
-        .child(effect_toggle_button_palette(
-            "", active, palette, cx, on_click,
-        ))
 }

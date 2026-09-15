@@ -91,14 +91,24 @@ A body that ends in an expression *without* a semicolon is the value. That is wh
 
 Tuples group mixed types of fixed arity. Reach elements by position like `pair.1`, or destructure with `let (a, b) = pair;`.
 
-Arrays hold one type with a length fixed at compile time. Both are stack-shaped and quick, and neither grows.
+Arrays hold one type with a length fixed at compile time. Both have fixed size; where they are stored depends on how the surrounding program uses them.
 
-Structs, which name their fields and arrive next chapter with ownership, are where this groundwork pays off.
+You have reached the end of the seven shipped Rust lessons. Continue with ownership and borrowing in chapter 4 of the book, then structs in chapter 5. Those topics and a Rust capstone are not yet part of this app’s course.
 
-## Run it
+## Practice
+
+Choose **Open practice** in the exercise card to create or reopen this lesson’s files. Edit the implementation, save your changes, then choose **Check work**. Your practice folder is reused when you return; opening it again keeps your edits. No source checkout or Python is needed.
+
+You can also run this command in the practice folder’s terminal:
 
 ```bash
 cargo run
 ```
 
 Rewrite swap to destructure instead of indexing, then add a three-element tuple to see where fixed arity starts to chafe.
+
+## Hint before a solution
+
+The last expression supplies a function’s return value. A tuple’s numbered fields let you build a new tuple in a different order.
+
+Try one focused change and check again. Before comparing with a reference solution, explain the failing case in your own words. A passing check covers the supplied examples; also try a new input and explain why your implementation handles it.

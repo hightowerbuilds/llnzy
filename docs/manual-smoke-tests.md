@@ -102,35 +102,78 @@ cargo test --release --test performance_budgets -- --ignored --nocapture
 
 ## Code Academy
 
-- Open the Academy tab (Code Academy in the menu, Home's "Open Course"
-  button, or the footer's Courses button).
-- Confirm the picker lists Rust, JavaScript, and TypeScript with lesson counts
-  from their manifests (7, 11, and 10 respectively). TypeScript has a blue TS badge.
-- Open the course and confirm modules appear as chapter headings with
-  their lessons listed in manifest order.
-- Open a lesson and confirm the markdown body renders (headings, prose,
-  code blocks), concepts appear as chips, and each exercise shows its
-  prompt, files, and check command.
-- Use Previous/Next through the lesson list; confirm the first lesson has
-  no Previous and the last has no Next.
-- Back out to the course, then to the picker.
-- Open both JavaScript and TypeScript; verify their five modules, introductory
-  toolchain instructions, and final project lessons render. Follow the terminal
-  practice instructions in `assets/academy/courses/README.md`; automatic exercise
-  materialization and grading remain unimplemented.
-- Edit a bundled `lesson.md` while the app runs and confirm the reader
-  picks the change up; break its frontmatter and confirm the previously
-  loaded course stays visible rather than blanking.
-- Rename `assets/academy/courses` (source runs) and relaunch; confirm the
-  Academy surface shows the empty-catalog notice and the error log names
-  the reason, with no panic.
+- Open Academy from the menu, Home, or Courses footer. Confirm JavaScript (11),
+  TypeScript (10), Rust (7), and Elixir (10) appear in manifest order. Confirm
+  Rust describes chapters 1–3 and prerequisites are visible for every course.
+- Open a lesson: check headings, short paragraphs, code copying, concepts,
+  exercise prompt, files, command, and the hint section. Previous/Next should
+  stop at the first and last lesson. Back should return to the course/picker.
+- In the packaged app, open JavaScript L00 and choose **Open practice**. Confirm
+  a persistent folder opens with starter files, editor, and terminal. No source
+  checkout or Python should be required. Record its path for the return check.
+- Choose **Check work** on the saved starter. Confirm it fails with useful
+  output. Make an unsaved edit and check again: the save guard should explain
+  what to save rather than grade an older file from disk.
+- Implement greeting and cloneRecord, save, and check again. Confirm the pass
+  advances verified practice. **Mark as read** should affect reading separately;
+  opening or reading the lesson alone must not earn verified completion.
+- Reopen practice and confirm it retains your edits. Quit and relaunch, then
+  use Home’s **Continue** action. Confirm the same lesson and practice path are
+  restored, with reading and verified progress preserved.
+- Choose **Ask in my notes**, write a question, and confirm its title/body name
+  the course and lesson. Return to the lesson, quit, and verify the note survives.
+- Use **Recheck setup** with installed tools, and with a course tool unavailable
+  in a controlled launch environment. Required runtime failures must show setup
+  guidance; optional editor assistance must be identified separately. Reopen
+  after correcting PATH and recheck. A missing tool must not award completion.
+- Repeat practice/check for TypeScript L00, Rust L00, and Elixir L00; include
+  Elixir L06 (`mix test`) to cover a project check. Checks should show compiler
+  or assertion failures and allow retry after saving a correction.
+- At an ordinary laptop window size, then a roughly 720-pixel window and narrow
+  joined lesson/editor/terminal panes, verify readable wrapping, reachable
+  controls, scrolling, and long error output without horizontal layout overflow.
+- Edit a bundled lesson during a source run and verify reload. Break its
+  frontmatter temporarily and confirm the last valid course remains visible.
+  Restore it afterward. Test a missing catalog with a disposable copy and
+  confirm an explanatory empty state without a panic.
 
 ## Packaging And Operations
 
-- Confirm manifests for `rust`, `javascript`, and `typescript` exist under
-  `Contents/Resources/courses` in the bundle and the packaged app lists all three.
+- Confirm manifests for `rust`, `javascript`, `typescript`, and `elixir` exist under
+  `Contents/Resources/courses` in the bundle and the packaged app lists all four.
 
 - Launch the packaged app from `target/llnzy.app`.
 - Confirm the bundle display name is `LLNZY` and the app executable runs.
 - Open the diagnostics panel after triggering a recoverable warning.
 - Confirm crash and diagnostics paths match `docs/operations.md`.
+
+## Style System and Home Redesign
+
+These checks require an interactive display and are not implied by passing Rust tests.
+Run `LLNZY_STYLE_GALLERY=1 ./dev.sh` to inspect the shared control gallery beside Home.
+Optionally set `LLNZY_STYLE_GALLERY_IMAGE` to a local image path for its tint preview.
+
+- Compare light/dark Home at a normal desktop size and a narrow window or joined
+  pane. Courses and writing align on desktop; narrow Home puts writing immediately
+  after the compact course entry, before the full catalog and project list.
+- Start a course as a new learner; Continue a saved lesson in one action. Check
+  absent courses, a missing saved lesson, long titles, and completed courses.
+- Confirm notepad title/body are visible on arrival. Create a blank note, restart,
+  and verify it persists. Edit title/body, switch notes, and use a second window;
+  auto-save and explicit save failures must remain understandable and recoverable.
+- Use Tab/Shift-Tab, Enter, and Space through controls; check visible focus and one
+  action per activation. Clicking a control inside editor chrome must not move the
+  source caret. Source-editor Tab still indents; note fields support focus traversal.
+- Exercise gallery primary/secondary/ghost/danger, selected and disabled controls.
+  Disabled controls never activate; each enabled state keeps readable text.
+- Import an image, select each fit option, adjust intensity, then switch themes,
+  open a second window, and restart. Verify the settings and intended image-backed
+  surfaces survive. Hide, re-enable, replace, clear, and delete the active image.
+- Check bright and dark photos, image-free mode, missing-image fallback, and local
+  opaque note/editor reading areas. Backgrounds remain visible around tinted Home
+  and Courses content. Existing Tile renders as stretch and Center as ScaleDown;
+  true repetition/native-size center cropping remain separate renderer work.
+- Verify Settings, error-log filters, menus, command palette, sidebar drag/drop,
+  tab-close/join/resize, editor overlays, and standalone editor in both modes.
+- Verify ordinary note/source typing, terminal output, scrolling, and idle views
+  remain responsive. Shared controls introduce no continuous animation loop.

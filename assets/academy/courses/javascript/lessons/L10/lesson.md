@@ -240,13 +240,9 @@ Build summaries with filter, reduce, and map, keeping formatting deterministic b
 
 As a final review, explain why validation precedes reporting, why cents stay integers, why report generation does not write files, and why a failed CLI writes to stderr rather than stdout. This project reports an existing journal; persistent editing is a possible follow-up extension.
 
-From the repository root, export this lesson. Python 3.11+ is required, and the destination must be new:
+Choose **Open practice** in the exercise card to create or reopen this lesson’s files. Edit the implementation, save your changes, then choose **Check work**. Your practice folder is reused when you return; opening it again keeps your edits. No source checkout or Python is needed.
 
-```bash
-python3 scripts/check_academy_courses.py --export javascript L10 /tmp/llnzy-javascript-L10
-```
-
-Open the exported directory in the editor, then run the check from that directory with Node.js 22 or newer:
+You can also run this command in the practice folder’s terminal:
 
 ```bash
 node check.js
@@ -255,3 +251,9 @@ node check.js
 Edit the implementation files and keep the supplied assertions intact. Read an assertion failure as a concrete example of behavior to repair.
 
 No exercise check downloads packages or accesses the network.
+
+## Hint before a solution
+
+Make validation and pure reporting work before connecting file input. Exercise invalid data and no matching tags as carefully as a successful report.
+
+Try one focused change and check again. Before comparing with a reference solution, explain the failing case in your own words. A passing check covers the supplied examples; also try a new input and explain why your implementation handles it.

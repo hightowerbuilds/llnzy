@@ -59,16 +59,26 @@ Integers are sized and signed per name: `i32`, `u8`, `u64`. Then two float types
 
 ## Control flow is deliberately plain
 
-`if` takes no parentheses and, unlike most languages, is an expression — you can assign from its arms.
+`if` does not require parentheses around its condition and is an expression: you can assign its result when its arms have compatible types.
 
-Loops come in three shapes: bare `loop` until you `break`, `while` on a condition, and `for` over an iterator such as `1..=15`. Reach for `for` by default, since it cannot index off the end.
+Loops come in three shapes: bare `loop` until you `break`, `while` on a condition, and `for` over an iterator such as `1..=15`. Iterating directly over values avoids the indexing mistakes a manually managed index can introduce.
 
 The classic classroom task here is divisibility printing, and arm order is the whole exercise.
 
-## Run it
+## Practice
+
+Choose **Open practice** in the exercise card to create or reopen this lesson’s files. Edit the implementation, save your changes, then choose **Check work**. Your practice folder is reused when you return; opening it again keeps your edits. No source checkout or Python is needed.
+
+You can also run this command in the practice folder’s terminal:
 
 ```bash
 cargo run
 ```
 
 Extend the range to 30 and confirm your arm ordering holds beyond the first coincidence.
+
+## Hint before a solution
+
+Trace 3, 5, and 15 separately. A branch for multiples of 3 alone would capture 15 before the combined case.
+
+Try one focused change and check again. Before comparing with a reference solution, explain the failing case in your own words. A passing check covers the supplied examples; also try a new input and explain why your implementation handles it.
