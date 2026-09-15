@@ -11,16 +11,23 @@ use crate::ui_theme::{ControlSize, Typography, UiTheme};
 #[cfg(debug_assertions)]
 pub mod gallery;
 
-/// Register the reading face once per application; chrome uses the native UI
-/// face so packaged builds do not depend on an installed third-party font.
+/// Register the bundled reading and code faces once per application; chrome
+/// uses the native UI face so packaged builds do not depend on an installed
+/// third-party font.
 pub fn init(cx: &mut App) {
-    if let Err(error) =
-        cx.text_system()
-            .add_fonts(vec![std::borrow::Cow::Borrowed(include_bytes!(
-                "../assets/fonts/AtkinsonHyperlegible-Regular.ttf"
-            ))])
-    {
-        log::warn!("could not load the bundled reading font: {error}");
+    let fonts: Vec<std::borrow::Cow<'static, [u8]>> = vec![
+        std::borrow::Cow::Borrowed(include_bytes!(
+            "../assets/fonts/AtkinsonHyperlegible-Regular.ttf"
+        )),
+        std::borrow::Cow::Borrowed(include_bytes!("../assets/fonts/JetBrainsMono-Regular.ttf")),
+        std::borrow::Cow::Borrowed(include_bytes!("../assets/fonts/JetBrainsMono-Bold.ttf")),
+        std::borrow::Cow::Borrowed(include_bytes!("../assets/fonts/JetBrainsMono-Italic.ttf")),
+        std::borrow::Cow::Borrowed(include_bytes!(
+            "../assets/fonts/JetBrainsMono-BoldItalic.ttf"
+        )),
+    ];
+    if let Err(error) = cx.text_system().add_fonts(fonts) {
+        log::warn!("could not load the bundled reading and code fonts: {error}");
     }
 }
 

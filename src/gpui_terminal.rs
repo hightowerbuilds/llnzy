@@ -7,8 +7,8 @@ use std::{cell::RefCell, ops::Range, path::PathBuf, sync::Arc, time::Duration};
 use rustc_hash::FxHashMap;
 
 use self::effects::{
-    terminal_background_image, terminal_background_image_path, terminal_cursor_effects,
-    terminal_effect_overlay, terminal_effect_underlay, terminal_rect_quad, terminal_render_config,
+    terminal_background_image, terminal_background_image_path, terminal_rect_quad,
+    terminal_render_config,
 };
 use self::render::{
     col_for_local_x, compute_cell_metrics, cursor_quad, display_mode_background_rects,
@@ -187,18 +187,10 @@ struct GlyphShapeKey {
     strikethrough: Option<StrikethroughStyle>,
 }
 
-struct CachedTerminalEffects {
-    width: Pixels,
-    height: Pixels,
-    underlay: Vec<PaintQuad>,
-    overlay: Vec<PaintQuad>,
-}
-
 pub(crate) struct TerminalSurface {
     focus_handle: FocusHandle,
     config: Arc<Config>,
     glyph_shape_cache: RefCell<FxHashMap<GlyphShapeKey, ShapedLine>>,
-    cached_effects: RefCell<Option<CachedTerminalEffects>>,
     session: Option<Session>,
     launch_error: Option<String>,
     last_bounds: Option<Bounds<Pixels>>,
@@ -230,7 +222,6 @@ impl TerminalSurface {
             focus_handle: cx.focus_handle(),
             config,
             glyph_shape_cache: RefCell::new(FxHashMap::default()),
-            cached_effects: RefCell::new(None),
             session,
             launch_error,
             last_bounds: None,
@@ -258,7 +249,6 @@ impl TerminalSurface {
     pub(crate) fn set_config(&mut self, config: Arc<Config>, cx: &mut Context<Self>) {
         self.config = config;
         self.glyph_shape_cache.borrow_mut().clear();
-        self.cached_effects.borrow_mut().take();
         cx.notify();
     }
 
@@ -903,14 +893,11 @@ struct TerminalElement {
 }
 
 struct TerminalPrepaintState {
-    effect_underlay: Vec<PaintQuad>,
     backgrounds: Vec<PaintQuad>,
     decorations: Vec<PaintQuad>,
     lines: Vec<TerminalPaintLine>,
     selection: Vec<PaintQuad>,
-    cursor_effects: Vec<PaintQuad>,
     cursor: Option<PaintQuad>,
-    effect_overlay: Vec<PaintQuad>,
     metrics: CellMetrics,
     /// Per-row column-x-offset tables when prepaint ran in Display layout
     /// mode. `Some(...)` always means Display mode (so `paint` writes the
@@ -977,25 +964,7 @@ impl Element for TerminalElement {
         let mut decorations = Vec::new();
         let mut lines = Vec::new();
         let mut selection = Vec::new();
-        let mut cursor_effects = Vec::new();
         let mut cursor = None;
-        let (effect_underlay, effect_overlay) = {
-            let mut cache = surface.cached_effects.borrow_mut();
-            let matches = cache
-                .as_ref()
-                .is_some_and(|c| c.width == bounds.size.width && c.height == bounds.size.height);
-            if !matches {
-                *cache = Some(CachedTerminalEffects {
-                    width: bounds.size.width,
-                    height: bounds.size.height,
-                    underlay: terminal_effect_underlay(bounds, &terminal_config),
-                    overlay: terminal_effect_overlay(bounds, &terminal_config),
-                });
-            }
-            let entry = cache.as_ref().expect("populated above");
-            (entry.underlay.clone(), entry.overlay.clone())
-        };
-
         let mut row_offsets_cache: Option<Vec<Vec<f32>>> = None;
         if let Some(session) = &surface.session {
             let (cols, rows) = session.terminal.size();
@@ -1082,13 +1051,6 @@ impl Element for TerminalElement {
 
                     if let Some((row, col)) = session.terminal.cursor_point() {
                         if is_focused {
-                            cursor_effects = terminal_cursor_effects(
-                                bounds,
-                                row,
-                                col,
-                                &terminal_config,
-                                metrics,
-                            );
                             cursor = Some(cursor_quad(
                                 bounds,
                                 row,
@@ -1162,13 +1124,6 @@ impl Element for TerminalElement {
 
                     if let Some((row, col)) = session.terminal.cursor_point() {
                         if is_focused {
-                            cursor_effects = terminal_cursor_effects(
-                                bounds,
-                                row,
-                                col,
-                                &terminal_config,
-                                metrics,
-                            );
                             cursor = Some(cursor_quad(
                                 bounds,
                                 row,
@@ -1207,14 +1162,11 @@ impl Element for TerminalElement {
 
         TerminalPrepaintState {
             metrics,
-            effect_underlay,
             backgrounds,
             decorations,
             lines,
             selection,
-            cursor_effects,
             cursor,
-            effect_overlay,
             row_offsets: row_offsets_cache,
         }
     }
@@ -1244,20 +1196,12 @@ impl Element for TerminalElement {
         });
 
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
-            for effect in prepaint.effect_underlay.drain(..) {
-                window.paint_quad(effect);
-            }
-
             for background in prepaint.backgrounds.drain(..) {
                 window.paint_quad(background);
             }
 
             for selection in prepaint.selection.drain(..) {
                 window.paint_quad(selection);
-            }
-
-            for cursor_effect in prepaint.cursor_effects.drain(..) {
-                window.paint_quad(cursor_effect);
             }
 
             if let Some(cursor) = prepaint.cursor.take() {
@@ -1278,10 +1222,6 @@ impl Element for TerminalElement {
 
             for decoration in prepaint.decorations.drain(..) {
                 window.paint_quad(decoration);
-            }
-
-            for effect in prepaint.effect_overlay.drain(..) {
-                window.paint_quad(effect);
             }
         });
 

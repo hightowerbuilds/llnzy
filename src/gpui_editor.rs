@@ -270,12 +270,24 @@ impl EditorAppearanceConfig {
         Self {
             chrome: UiTheme::from_config(config),
             terminal_font_size: config.font_size,
-            font_family: config.font_family.clone(),
-            foreground: config.colors.foreground,
-            background: config.colors.background,
-            cursor: config.colors.cursor,
-            selection: config.colors.selection,
-            selection_alpha: config.colors.selection_alpha,
+            font_family: config.editor.font_family.clone(),
+            foreground: config
+                .editor_colors
+                .map_or(config.colors.foreground, |colors| colors.foreground),
+            background: config
+                .editor_colors
+                .map_or(config.colors.background, |colors| colors.background),
+            cursor: config
+                .editor_colors
+                .map_or(config.colors.cursor, |colors| colors.cursor),
+            selection: config
+                .editor_colors
+                .map_or(config.colors.selection, |colors| colors.selection),
+            selection_alpha: config
+                .editor_colors
+                .map_or(config.colors.selection_alpha, |colors| {
+                    colors.selection_alpha
+                }),
             cursor_style: config.cursor_style,
             editor: config.editor.clone(),
             syntax_colors: Arc::new(config.syntax_colors.clone()),
@@ -292,7 +304,7 @@ impl EditorAppearanceConfig {
             font_family: self
                 .font_family
                 .clone()
-                .unwrap_or_else(|| "Berkeley Mono".to_string()),
+                .unwrap_or_else(|| EDITOR_CODE_FONT_FAMILY.to_string()),
             font_size: px(font_size),
             line_height: px(line_height),
             char_width: px((font_size * 0.6).max(4.0)),
@@ -373,6 +385,29 @@ struct EditorAppearance {
 }
 
 impl EditorAppearance {
+    /// The code face with programming ligatures off. The editor positions
+    /// the caret, selection, and click targets on a column grid, and a
+    /// ligature (`::`, `->`, `!=`) shapes several columns into one glyph
+    /// whose placement no longer matches that grid. The terminal disables
+    /// `calt` for the same reason.
+    fn code_font(&self) -> gpui::Font {
+        let mut code_font = font(self.font_family.clone());
+        code_font.features = gpui::FontFeatures::disable_ligatures();
+        code_font
+    }
+
+    /// Apply the code face and its features to a styled element so every
+    /// text child shapes the way `code_font` and the measured advance do.
+    fn style_code_text<E: Styled>(&self, mut element: E) -> E {
+        element
+            .text_style()
+            .get_or_insert_with(Default::default)
+            .font_features = Some(gpui::FontFeatures::disable_ligatures());
+        element
+            .font_family(self.font_family.clone())
+            .text_size(self.font_size)
+    }
+
     fn foreground_color(&self) -> gpui::Rgba {
         rgb(rgb_u32(self.foreground))
     }
@@ -1448,6 +1483,9 @@ struct EditorLineSnapshot {
 // leave a short 30-line editor floating above an otherwise empty pane.
 const VISIBLE_LINE_LIMIT: usize = 48;
 const EDITOR_VERTICAL_PADDING: gpui::Pixels = px(12.0);
+/// Bundled code face registered by `crate::ui::init`. Used whenever
+/// `[editor].font_family` is unset.
+pub(crate) const EDITOR_CODE_FONT_FAMILY: &str = "JetBrains Mono";
 const DEFAULT_VISIBLE_COL_LIMIT: usize = 96;
 const CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(530);
 const CURSOR_BLINK_TICK: Duration = Duration::from_millis(80);
@@ -1492,6 +1530,35 @@ mod tests {
     }
 
     #[test]
+    fn editor_theme_colors_replace_terminal_colors_and_code_font_is_bundled() {
+        let mut config = Config::default();
+        config.colors.background = [1, 2, 3];
+        config.colors.foreground = [10, 20, 30];
+        config.font_family = Some("Terminal Font".to_string());
+
+        // No theme: the editor follows the terminal scheme and uses the
+        // bundled code face rather than the terminal font.
+        let plain = EditorAppearanceConfig::from_config(&config).for_language(None);
+        assert_eq!(plain.background, [1, 2, 3]);
+        assert_eq!(plain.foreground, [10, 20, 30]);
+        assert_eq!(plain.font_family, EDITOR_CODE_FONT_FAMILY);
+
+        let theme = crate::config::editor_theme("Solarized Light").unwrap();
+        config.editor_colors = Some(theme.colors);
+        config.syntax_colors = theme.colors_map();
+        let themed = EditorAppearanceConfig::from_config(&config).for_language(None);
+        assert_eq!(themed.background, theme.colors.background);
+        assert_eq!(themed.foreground, theme.colors.foreground);
+        assert_eq!(themed.cursor, theme.colors.cursor);
+        assert_eq!(themed.selection, theme.colors.selection);
+        assert_eq!(
+            themed.syntax_colors.get(&HighlightGroup::Keyword),
+            Some(&[0x85, 0x99, 0x00])
+        );
+        assert_eq!(themed.font_family, EDITOR_CODE_FONT_FAMILY);
+    }
+
+    #[test]
     fn editor_appearance_uses_editor_specific_overrides() {
         let mut config = Config::default();
         config.font_size = 18.0;
@@ -1527,7 +1594,7 @@ mod tests {
         let mut config = Config::default();
         config.colors.background = [12, 18, 24];
         config.colors.foreground = [210, 215, 220];
-        config.font_family = Some("Code Font".to_string());
+        config.editor.font_family = Some("Code Font".to_string());
         config.editor.font_size = Some(17.0);
         config.ui_mode = Some(crate::ui_theme::UiMode::Light);
         let light = EditorAppearanceConfig::from_config(&config).for_language(None);

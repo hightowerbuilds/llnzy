@@ -121,13 +121,12 @@ pub(super) fn editor_line(
     } else {
         appearance.background_color()
     };
-    let mut row = div()
+    let mut row = appearance
+        .style_code_text(div())
         .h(appearance.line_height)
         .w_full()
         .flex()
         .items_center()
-        .font_family(appearance.font_family.clone())
-        .text_size(appearance.font_size)
         .bg(row_bg);
 
     if appearance.show_line_numbers {
@@ -315,10 +314,17 @@ fn styled_text_chunk(
     style: TextChunkStyle,
     appearance: &EditorAppearance,
 ) -> impl IntoElement {
+    // Pin each chunk to its column span. Flex would otherwise size the box
+    // from the shaped width, and rounding or shaping differences between
+    // chunks would push later text off the grid the caret is drawn on.
+    let columns = text.chars().count().max(1) as f32;
     let mut chunk = div()
         .h(appearance.line_height)
+        .w(appearance.char_width * columns)
+        .flex_none()
         .flex()
         .items_center()
+        .whitespace_nowrap()
         .text_color(style.color);
     if style.selected {
         chunk = chunk.bg(appearance.selection_color());

@@ -75,7 +75,6 @@ pub(super) struct ScrollConfig {
 #[derive(Deserialize)]
 pub(super) struct TerminalFileConfig {
     pub(super) copy_on_select: Option<bool>,
-    pub(super) scrollback_lines: Option<usize>,
 }
 
 #[derive(Deserialize)]
@@ -117,6 +116,7 @@ pub(super) struct EditorFileConfig {
     pub(super) rulers: Option<Vec<usize>>,
     pub(super) word_wrap: Option<bool>,
     pub(super) visible_whitespace: Option<bool>,
+    pub(super) font_family: Option<String>,
     pub(super) font_size: Option<f32>,
     pub(super) line_height: Option<f32>,
     pub(super) sidebar_font_size: Option<f32>,

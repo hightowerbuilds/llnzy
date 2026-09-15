@@ -325,7 +325,7 @@ pub(super) fn plan_restore(snapshot: WorkspaceRecoverySnapshot) -> Option<Worksp
                 .members
                 .into_iter()
                 .filter(|member| valid_ids.contains(member))
-                .take(4)
+                .take(crate::tab_groups::MAX_JOINED_TABS)
                 .collect::<Vec<_>>();
             (members.len() >= 2).then_some(WorkspaceRecoveryJoinedGroup { members, ..group })
         })

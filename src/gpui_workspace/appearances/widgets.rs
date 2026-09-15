@@ -115,23 +115,6 @@ pub(super) fn control_label_sized(
         .child(label)
 }
 
-pub(super) fn effect_toggle_button(
-    label: &'static str,
-    active: bool,
-    palette: UiTheme,
-    cx: &mut Context<WorkspacePrototype>,
-    on_click: impl Fn(&mut WorkspacePrototype, &mut Context<WorkspacePrototype>) + 'static,
-) -> impl IntoElement {
-    appearance_button_named(
-        label.to_string(),
-        format!("{label} {}", if active { "On" } else { "Off" }),
-        active,
-        palette,
-        cx,
-        on_click,
-    )
-}
-
 pub(super) fn appearance_button(
     label: String,
     active: bool,

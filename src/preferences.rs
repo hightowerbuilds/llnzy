@@ -47,8 +47,10 @@ pub struct WorkspacePreferences {
     #[serde(default)]
     pub terminal_layout: String,
 
-    /// Name of the syntax-color preset chosen from Appearance > Editor.
-    /// `None` means "use config.toml or the built-in editor default".
+    /// Name of the editor theme chosen from Settings > Appearances > Editor.
+    /// The JSON key predates editor themes carrying surface colors and is
+    /// kept so saved preferences keep resolving. `None` means "use
+    /// config.toml or the built-in editor default".
     #[serde(default)]
     pub editor_syntax_theme: Option<String>,
 
@@ -72,23 +74,9 @@ pub struct WorkspacePreferences {
     /// back to the configured mode, known app theme, then legacy background.
     #[serde(default)]
     pub ui_mode: Option<String>,
-
-    /// Maximum number of tabs a joined tab group may contain. Missing / zero
-    /// keeps the historical two-tab behavior; Settings can raise this to 3
-    /// or 4.
-    #[serde(default)]
-    pub joined_tab_limit: u8,
 }
 
 impl WorkspacePreferences {
-    pub fn joined_tab_limit(&self) -> usize {
-        if self.joined_tab_limit == 0 {
-            2
-        } else {
-            self.joined_tab_limit.clamp(2, 4) as usize
-        }
-    }
-
     /// Load preferences from the platform-default sidecar. Returns
     /// `Default::default()` if the file is missing, unreadable, or
     /// malformed — preferences are best-effort, never a hard error.
@@ -129,6 +117,23 @@ impl WorkspacePreferences {
 }
 
 #[cfg(test)]
+#[test]
+fn legacy_join_limits_are_ignored_and_not_saved_again() {
+    for limit in [0, 2, 3, 4, 255] {
+        let prefs: WorkspacePreferences = serde_json::from_value(serde_json::json!({
+            "joined_tab_limit": limit,
+            "terminal_layout": "display"
+        }))
+        .unwrap();
+        assert_eq!(prefs.terminal_layout, "display");
+        assert!(serde_json::to_value(prefs)
+            .unwrap()
+            .get("joined_tab_limit")
+            .is_none());
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -160,7 +165,6 @@ mod tests {
             markdown_preview_style: Some("newspaper".to_string()),
             app_theme: Some("Light Mode".to_string()),
             ui_mode: Some("light".to_string()),
-            joined_tab_limit: 4,
         };
         prefs.save_to(&path).unwrap();
 
@@ -193,7 +197,6 @@ mod tests {
         assert!(loaded.markdown_preview_style.is_none());
         assert!(loaded.app_theme.is_none());
         assert!(loaded.ui_mode.is_none());
-        assert_eq!(loaded.joined_tab_limit(), 2);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

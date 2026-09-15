@@ -791,7 +791,11 @@ fn refresh_measured_char_width(input: &Entity<EditorPrototype>, window: &mut Win
     let sample = SharedString::from(CHAR_WIDTH_SAMPLE);
     let run = TextRun {
         len: sample.len(),
-        font: font(font_family.clone()),
+        font: {
+            let mut code_font = font(font_family.clone());
+            code_font.features = gpui::FontFeatures::disable_ligatures();
+            code_font
+        },
         color: gpui::black(),
         background_color: None,
         underline: None,
@@ -841,7 +845,7 @@ fn build_measured_layout(
     let (_, buffer, view) = editor.active_buffer_view()?;
     let visible_lines = visible_line_limit_for_bounds(bounds, appearance);
     let wrap_cols = visible_col_limit_for_bounds(bounds, appearance).max(1);
-    let editor_font = font(appearance.font_family.clone());
+    let editor_font = appearance.code_font();
     let rows = if appearance.word_wrap {
         wrapped_visual_rows(buffer, view.wrap_scroll_row, visible_lines, wrap_cols)
     } else {

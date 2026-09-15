@@ -15,6 +15,20 @@ fn create_terminal_small() {
 }
 
 #[test]
+fn scrollback_stays_capped_at_ten_thousand_lines() {
+    let mut term = Terminal::new(10, 5);
+    for _ in 0..10_050 {
+        term.process(b"line\r\n");
+    }
+    assert_eq!(term.term.grid().history_size(), 10_000);
+    term.resize(10, 3);
+    for _ in 0..100 {
+        term.process(b"more\r\n");
+    }
+    assert_eq!(term.term.grid().history_size(), 10_000);
+}
+
+#[test]
 fn resize_terminal() {
     let mut term = Terminal::new(80, 24);
     term.resize(120, 40);

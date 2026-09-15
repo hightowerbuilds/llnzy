@@ -108,6 +108,9 @@ pub struct Config {
     pub terminal: TerminalConfig,
     pub effects: EffectsConfig,
     pub editor: EditorConfig,
+    /// Editor surface colors chosen from an editor theme. `None` keeps the
+    /// editor on the terminal color scheme, which is the legacy behavior.
+    pub editor_colors: Option<EditorColors>,
     pub syntax_colors: FxHashMap<HighlightGroup, [u8; 3]>,
     pub keybindings: KeyBindings,
     pub transition: Option<ColorTransition>,
@@ -116,22 +119,19 @@ pub struct Config {
     pub(super) config_mtime: Option<SystemTime>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct TerminalConfig {
     pub copy_on_select: bool,
-    /// Maximum scrollback history per terminal grid, in lines. Bounds the
-    /// memory each `Terminal` retains for scroll-back. `10000` matches the
-    /// alacritty_terminal default that LLNZY previously hard-coded.
-    pub scrollback_lines: usize,
 }
 
-impl Default for TerminalConfig {
-    fn default() -> Self {
-        Self {
-            copy_on_select: false,
-            scrollback_lines: 10_000,
-        }
-    }
+/// Surface colors for the code editor, independent of the terminal palette.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EditorColors {
+    pub background: [u8; 3],
+    pub foreground: [u8; 3],
+    pub cursor: [u8; 3],
+    pub selection: [u8; 3],
+    pub selection_alpha: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -141,6 +141,9 @@ pub struct EditorConfig {
     pub rulers: Vec<usize>,
     pub word_wrap: bool,
     pub visible_whitespace: bool,
+    /// Code font family. `None` uses the bundled JetBrains Mono face; the
+    /// editor no longer inherits the terminal font.
+    pub font_family: Option<String>,
     pub font_size: Option<f32>,
     pub line_height: f32,
     pub sidebar_font_size: f32,
@@ -223,6 +226,7 @@ impl Default for EditorConfig {
             rulers: Vec::new(),
             word_wrap: false,
             visible_whitespace: false,
+            font_family: None,
             font_size: None,
             line_height: 1.38,
             sidebar_font_size: 14.0,
@@ -416,6 +420,7 @@ impl Default for Config {
             terminal: TerminalConfig::default(),
             effects: EffectsConfig::default(),
             editor: EditorConfig::default(),
+            editor_colors: None,
             syntax_colors: FxHashMap::default(),
             keybindings: KeyBindings::default_bindings(),
             transition: None,

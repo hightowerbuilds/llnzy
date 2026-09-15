@@ -7,15 +7,13 @@ use gpui::{div, px, rgb, Context};
 use crate::config::{BackgroundImageFit, Config, CursorStyle, TerminalLayoutMode};
 use crate::gpui_workspace::{WorkspacePrototype, GPUI_TERMINAL_BACKGROUND_MAX_EDGE};
 
-use super::widgets::{
-    appearance_button, appearance_button_named, control_label, effect_toggle_button, metric_row,
-};
+use super::background_thumbnail::background_thumbnail;
+use super::widgets::{appearance_button, appearance_button_named, control_label, metric_row};
 use super::{TERMINAL_DISPLAY_FONT_CHOICES, TERMINAL_MONO_FONT_CHOICES};
 
 pub(super) fn terminal_appearance_controls(
     content: gpui::Div,
     config: Config,
-    terminal_background_import_error: Option<String>,
     cx: &mut Context<WorkspacePrototype>,
 ) -> gpui::Div {
     let palette = UiTheme::from_config(&config);
@@ -78,6 +76,14 @@ pub(super) fn terminal_appearance_controls(
 
     content
         .child(metric_row(
+            "Terminal Font Size",
+            format!("{:.0}px", config.font_size),
+            palette,
+            cx,
+            |this, cx| this.adjust_font_size(-1.0, cx),
+            |this, cx| this.adjust_font_size(1.0, cx),
+        ))
+        .child(metric_row(
             "Terminal Line Height",
             format!("{:.2}x", config.line_height),
             palette,
@@ -98,21 +104,6 @@ pub(super) fn terminal_appearance_controls(
                 } else {
                     ""
                 }),
-        )
-        .child(
-            div()
-                .flex()
-                .flex_wrap()
-                .items_center()
-                .gap_2()
-                .child(control_label("Effects", palette))
-                .child(effect_toggle_button(
-                    "Terminal",
-                    config.effects.enabled,
-                    palette,
-                    cx,
-                    |this, cx| this.toggle_effects_enabled(cx),
-                )),
         )
         .child(
             div()
@@ -143,6 +134,17 @@ pub(super) fn terminal_appearance_controls(
                     |this, cx| this.set_cursor_style(CursorStyle::Underline, cx),
                 )),
         )
+}
+
+/// Shared background selection for Settings Appearances and standalone Appearances.
+pub(super) fn background_appearance_controls(
+    content: gpui::Div,
+    config: &Config,
+    terminal_background_import_error: Option<String>,
+    cx: &mut Context<WorkspacePrototype>,
+) -> gpui::Div {
+    let palette = UiTheme::from_config(config);
+    content
         .child(
             div()
                 .flex()
@@ -166,68 +168,10 @@ pub(super) fn terminal_appearance_controls(
                 )),
         )
         .child(terminal_background_image_controls(
-            &config,
+            config,
             terminal_background_import_error,
             cx,
         ))
-        .child(
-            div()
-                .flex()
-                .flex_wrap()
-                .items_center()
-                .gap_2()
-                .child(control_label("Post Effects", palette))
-                .child(effect_toggle_button(
-                    "Bloom",
-                    config.effects.bloom_enabled,
-                    palette,
-                    cx,
-                    |this, cx| this.toggle_bloom(cx),
-                ))
-                .child(effect_toggle_button(
-                    "CRT",
-                    config.effects.crt_enabled,
-                    palette,
-                    cx,
-                    |this, cx| this.toggle_crt(cx),
-                ))
-                .child(effect_toggle_button(
-                    "Particles",
-                    config.effects.particles_enabled,
-                    palette,
-                    cx,
-                    |this, cx| this.toggle_particles(cx),
-                )),
-        )
-        .child(
-            div()
-                .flex()
-                .flex_wrap()
-                .items_center()
-                .gap_2()
-                .child(control_label("Text Effects", palette))
-                .child(effect_toggle_button(
-                    "Glow",
-                    config.effects.cursor_glow,
-                    palette,
-                    cx,
-                    |this, cx| this.toggle_cursor_glow(cx),
-                ))
-                .child(effect_toggle_button(
-                    "Trail",
-                    config.effects.cursor_trail,
-                    palette,
-                    cx,
-                    |this, cx| this.toggle_cursor_trail(cx),
-                ))
-                .child(effect_toggle_button(
-                    "Text Anim",
-                    config.effects.text_animation,
-                    palette,
-                    cx,
-                    |this, cx| this.toggle_text_animation(cx),
-                )),
-        )
 }
 
 fn terminal_background_image_controls(
@@ -357,7 +301,7 @@ fn terminal_background_library(
         return section;
     }
 
-    let mut list = div().flex().flex_col().gap_1().pl(px(150.0));
+    let mut list = div().w_full().flex().flex_col().gap_2();
     for image in images {
         let active = matches!(
             (active_reference.as_deref(), gpui_terminal_background_reference(&image).ok()),
@@ -390,10 +334,13 @@ fn background_library_row(
         .flex()
         .flex_wrap()
         .items_center()
-        .gap_2()
+        .gap_3()
+        .p_2()
+        .child(background_thumbnail(image, active, palette))
         .child(
             div()
                 .flex_1()
+                .min_w(px(100.0))
                 .max_w(px(300.0))
                 .overflow_hidden()
                 .whitespace_nowrap()

@@ -1,7 +1,7 @@
 use gpui::Context;
 
 use crate::{
-    config::{editor_syntax_preset, BackgroundImageFit, CursorStyle, TerminalLayoutMode},
+    config::{editor_theme, BackgroundImageFit, CursorStyle, TerminalLayoutMode},
     theme::builtin_themes,
 };
 
@@ -80,16 +80,6 @@ impl WorkspacePrototype {
     pub(super) fn adjust_line_height(&mut self, delta: f32, cx: &mut Context<Self>) {
         self.appearance_config.line_height =
             (self.appearance_config.line_height + delta).clamp(0.9, 2.2);
-        self.apply_appearance_config(cx);
-    }
-
-    /// Terminal-behavior setting (Settings > Terminal): scrollback history
-    /// size per grid, in lines. Applies to new and restarted sessions;
-    /// existing grids keep their current history.
-    pub(super) fn adjust_terminal_scrollback(&mut self, delta: i64, cx: &mut Context<Self>) {
-        let current = self.appearance_config.terminal.scrollback_lines as i64;
-        let next = (current + delta).clamp(1_000, 100_000);
-        self.appearance_config.terminal.scrollback_lines = next as usize;
         self.apply_appearance_config(cx);
     }
 
@@ -270,44 +260,6 @@ impl WorkspacePrototype {
         self.apply_appearance_config(cx);
     }
 
-    pub(super) fn toggle_bloom(&mut self, cx: &mut Context<Self>) {
-        self.appearance_config.effects.bloom_enabled =
-            !self.appearance_config.effects.bloom_enabled;
-        self.apply_appearance_config(cx);
-    }
-
-    pub(super) fn toggle_crt(&mut self, cx: &mut Context<Self>) {
-        self.appearance_config.effects.crt_enabled = !self.appearance_config.effects.crt_enabled;
-        self.apply_appearance_config(cx);
-    }
-
-    pub(super) fn toggle_particles(&mut self, cx: &mut Context<Self>) {
-        self.appearance_config.effects.particles_enabled =
-            !self.appearance_config.effects.particles_enabled;
-        self.apply_appearance_config(cx);
-    }
-
-    pub(super) fn toggle_cursor_glow(&mut self, cx: &mut Context<Self>) {
-        self.appearance_config.effects.cursor_glow = !self.appearance_config.effects.cursor_glow;
-        self.apply_appearance_config(cx);
-    }
-
-    pub(super) fn toggle_cursor_trail(&mut self, cx: &mut Context<Self>) {
-        self.appearance_config.effects.cursor_trail = !self.appearance_config.effects.cursor_trail;
-        self.apply_appearance_config(cx);
-    }
-
-    pub(super) fn toggle_text_animation(&mut self, cx: &mut Context<Self>) {
-        self.appearance_config.effects.text_animation =
-            !self.appearance_config.effects.text_animation;
-        self.apply_appearance_config(cx);
-    }
-
-    pub(super) fn toggle_effects_enabled(&mut self, cx: &mut Context<Self>) {
-        self.appearance_config.effects.enabled = !self.appearance_config.effects.enabled;
-        self.apply_appearance_config(cx);
-    }
-
     pub(super) fn adjust_editor_font_size(&mut self, delta: f32, cx: &mut Context<Self>) {
         let current = self
             .appearance_config
@@ -330,19 +282,14 @@ impl WorkspacePrototype {
         cx.notify();
     }
 
-    pub(super) fn apply_editor_syntax_theme(&mut self, theme_name: &str, cx: &mut Context<Self>) {
-        if let Some(theme) = editor_syntax_preset(theme_name) {
+    pub(super) fn apply_editor_theme(&mut self, theme_name: &str, cx: &mut Context<Self>) {
+        if let Some(theme) = editor_theme(theme_name) {
+            self.appearance_config.editor_colors = Some(theme.colors);
             self.appearance_config.syntax_colors = theme.colors_map();
             self.preferences.editor_syntax_theme = Some(theme.name.to_string());
             self.preferences.save();
             self.apply_appearance_config(cx);
         }
-    }
-
-    pub(super) fn adjust_selection_alpha(&mut self, delta: f32, cx: &mut Context<Self>) {
-        self.appearance_config.colors.selection_alpha =
-            (self.appearance_config.colors.selection_alpha + delta).clamp(0.05, 1.0);
-        self.apply_appearance_config(cx);
     }
 
     /// Brightness of the terminal background image: the render path dims the

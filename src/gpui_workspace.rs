@@ -236,7 +236,8 @@ fn resolve_appearance_preferences(
         config.terminal_layout = layout;
     }
     if let Some(theme_name) = preferences.editor_syntax_theme.as_deref() {
-        if let Some(theme) = crate::config::editor_syntax_preset(theme_name) {
+        if let Some(theme) = crate::config::editor_theme(theme_name) {
+            config.editor_colors = Some(theme.colors);
             config.syntax_colors = theme.colors_map();
         }
     }
@@ -315,19 +316,19 @@ impl From<WorkspaceSurface> for WorkspaceRecoverySurface {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SettingsPage {
-    Home,
+    Appearances,
     Courses,
-    Terminal,
+    ErrorLog,
 }
 
 impl SettingsPage {
-    const ALL: [Self; 3] = [Self::Home, Self::Courses, Self::Terminal];
+    const ALL: [Self; 3] = [Self::Appearances, Self::Courses, Self::ErrorLog];
 
     fn title(self) -> &'static str {
         match self {
-            SettingsPage::Home => "Home",
-            SettingsPage::Terminal => "Terminal",
+            SettingsPage::Appearances => "Appearances",
             SettingsPage::Courses => "Courses",
+            SettingsPage::ErrorLog => "Error Log",
         }
     }
 }
@@ -534,18 +535,7 @@ fn install_workspace_menu_bar(cx: &mut App) {
 }
 
 fn restore_joined_group_shares(tab_manager: &mut GpuiTabManager, primary: u64, shares: &[f32]) {
-    if shares.len() < 2 || shares.iter().any(|share| !share.is_finite()) {
-        return;
-    }
-    let mut boundary = 0.0;
-    for (divider_index, share) in shares
-        .iter()
-        .take(shares.len().saturating_sub(1))
-        .enumerate()
-    {
-        boundary += *share;
-        tab_manager.set_split_for_tab(primary, divider_index, boundary);
-    }
+    tab_manager.restore_shares_for_tab(primary, shares);
 }
 
 struct WorkspacePrototype {
@@ -730,7 +720,7 @@ impl WorkspacePrototype {
             sidebar_width: SIDEBAR_DEFAULT_WIDTH,
             last_sidebar_width: SIDEBAR_DEFAULT_WIDTH,
             appearance_config,
-            settings_page: SettingsPage::Home,
+            settings_page: SettingsPage::Appearances,
             academy_library: load_academy_library(),
             academy_course: None,
             academy_lesson: None,
@@ -760,10 +750,6 @@ impl WorkspacePrototype {
         workspace
     }
 
-    fn tab_join_limit(&self) -> usize {
-        self.preferences.joined_tab_limit()
-    }
-
     fn editor_word_wrap_enabled(&self) -> bool {
         self.appearance_config.editor.word_wrap
     }
@@ -788,17 +774,6 @@ impl WorkspacePrototype {
         self.preferences.save();
         self.appearance_config.editor.markdown_preview_style = style;
         self.apply_appearance_config(cx);
-    }
-
-    pub(super) fn set_joined_tab_limit(&mut self, limit: u8, cx: &mut Context<Self>) {
-        let limit = limit.clamp(2, 4);
-        if self.preferences.joined_tab_limit == limit {
-            return;
-        }
-        self.preferences.joined_tab_limit = limit;
-        self.preferences.save();
-        self.tab_manager.enforce_join_limit(limit as usize);
-        cx.notify();
     }
 
     pub(super) fn toggle_error_log_expanded(&mut self, cx: &mut Context<Self>) {
@@ -951,7 +926,7 @@ impl WorkspacePrototype {
                 .iter()
                 .copied()
                 .filter(|member| valid_tabs.contains(member))
-                .take(self.tab_join_limit())
+                .take(crate::tab_groups::MAX_JOINED_TABS)
                 .collect::<Vec<_>>();
             let Some((&primary, rest)) = members.split_first() else {
                 continue;
@@ -961,8 +936,7 @@ impl WorkspacePrototype {
             }
             let axis = crate::tab_groups::PartitionAxis::from(group.axis);
             for member in rest {
-                self.tab_manager
-                    .join_tabs_with_axis(primary, *member, self.tab_join_limit(), axis);
+                self.tab_manager.join_tabs_with_axis(primary, *member, axis);
             }
             restore_joined_group_shares(&mut self.tab_manager, primary, &group.shares);
         }
@@ -1635,10 +1609,7 @@ impl WorkspacePrototype {
         if self.tab_by_id(primary_id).is_none() || self.tab_by_id(secondary_id).is_none() {
             return;
         }
-        if self
-            .tab_manager
-            .join_tabs(primary_id.0, secondary_id.0, self.tab_join_limit())
-        {
+        if self.tab_manager.join_tabs(primary_id.0, secondary_id.0) {
             let group_ids = self.joined_tab_ids_for(primary_id);
             self.place_joined_tabs_together(&group_ids);
             self.active_tab_id = primary_id;
@@ -1881,8 +1852,7 @@ impl WorkspacePrototype {
     /// terminal. The active tab becomes the `primary` (kept focused) and the
     /// new terminal becomes the `secondary`. The `axis` determines the
     /// orientation of the divider: vertical = side-by-side, horizontal =
-    /// stacked top/bottom. No-ops when the active tab is already inside a
-    /// partition (separate first).
+    /// stacked top/bottom. Extends the active group until it contains four tabs.
     pub(super) fn partition_active_with_new_terminal(
         &mut self,
         axis: crate::tab_groups::PartitionAxis,
@@ -1894,7 +1864,8 @@ impl WorkspacePrototype {
             self.open_new_terminal_tab(window, cx);
             return;
         }
-        if self.tab_manager.joined_member_count(primary_id.0) >= self.tab_join_limit() {
+        if self.tab_manager.joined_member_count(primary_id.0) >= crate::tab_groups::MAX_JOINED_TABS
+        {
             return;
         }
         let secondary_id = WorkspaceTabId(self.next_tab_id);
@@ -1904,12 +1875,9 @@ impl WorkspacePrototype {
         let terminal = self.new_terminal_surface(cx);
         self.terminals.insert(secondary_id.0, terminal);
 
-        let joined = self.tab_manager.join_tabs_with_axis(
-            primary_id.0,
-            secondary_id.0,
-            self.tab_join_limit(),
-            axis,
-        );
+        let joined = self
+            .tab_manager
+            .join_tabs_with_axis(primary_id.0, secondary_id.0, axis);
         if !joined {
             // Roll back the freshly allocated terminal if the join failed.
             self.tabs.retain(|tab| tab.id != secondary_id);
@@ -2128,7 +2096,6 @@ impl Render for WorkspacePrototype {
                     academy_practice: self.academy_practice.clone(),
                     terminal_background_import_error,
                     editor_word_wrap: self.editor_word_wrap_enabled(),
-                    joined_tab_limit: self.tab_join_limit(),
                     error_log_expanded: self.error_log_expanded,
                     error_log_filter: self.error_log_filter,
                     pending_clear_error_log: self.pending_clear_error_log,
@@ -2231,7 +2198,6 @@ impl Render for WorkspacePrototype {
                     self.tab_choices(),
                     &self.tab_manager,
                     tab_rename,
-                    self.tab_join_limit(),
                     workspace_palette,
                     cx,
                 ))

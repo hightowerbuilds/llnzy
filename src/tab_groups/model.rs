@@ -177,7 +177,7 @@ impl TabGroupState {
             return None;
         }
 
-        let max_members = max_members.clamp(2, 4);
+        let max_members = max_members.clamp(2, super::MAX_JOINED_TABS);
         let primary_group = self.group_for_tab(primary).cloned();
         let secondary_group = self.group_for_tab(secondary).cloned();
 
@@ -327,6 +327,24 @@ impl TabGroupState {
         self.set_split_for_tab(tab_id, 0, ratio)
     }
 
+    /// Restore all pane sizes together so intermediate divider clamps cannot
+    /// distort a valid saved layout.
+    pub fn restore_shares_for_tab(&mut self, tab_id: TabId, shares: &[f32]) -> bool {
+        let Some(group) = self.group_for_tab_mut(tab_id) else {
+            return false;
+        };
+        if shares.len() != group.member_count()
+            || shares
+                .iter()
+                .any(|share| !share.is_finite() || *share <= 0.0)
+        {
+            return false;
+        }
+        group.shares = shares.to_vec();
+        group.normalize_layout();
+        true
+    }
+
     pub fn set_split_for_tab(
         &mut self,
         tab_id: TabId,
@@ -379,7 +397,7 @@ impl TabGroupState {
     }
 
     pub fn enforce_max_members(&mut self, max_members: usize) {
-        let max_members = max_members.clamp(2, 4);
+        let max_members = max_members.clamp(2, super::MAX_JOINED_TABS);
         for group in &mut self.groups {
             group.members.truncate(max_members);
             group.shares.truncate(max_members);

@@ -8,10 +8,11 @@ mod schema;
 
 pub use colors::{apply_time_of_day, indexed_color, ColorTransition};
 pub use model::{
-    BackgroundImageFit, ColorScheme, Config, CursorStyle, EditorConfig, EditorLanguageConfig,
-    EffectiveEditorConfig, EffectsConfig, MarkdownPreviewStyle, TerminalLayoutMode,
+    BackgroundImageFit, ColorScheme, Config, CursorStyle, EditorColors, EditorConfig,
+    EditorLanguageConfig, EffectiveEditorConfig, EffectsConfig, MarkdownPreviewStyle,
+    TerminalLayoutMode,
 };
-pub(crate) use presets::{editor_syntax_preset, editor_syntax_presets, EditorSyntaxPreset};
+pub(crate) use presets::{editor_theme, editor_themes, EditorTheme};
 
 /// The only background modes the terminal still renders. Everything else —
 /// including the retired shader patterns (`smoke`, `fire`, `aurora`,

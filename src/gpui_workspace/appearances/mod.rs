@@ -7,6 +7,7 @@ use crate::{config::Config, theme::builtin_themes};
 use super::{ErrorLogFilter, SettingsPage, WorkspacePrototype};
 use crate::ui_theme::UiTheme;
 
+mod background_thumbnail;
 mod editor_section;
 mod error_log;
 mod terminal_section;
@@ -16,11 +17,10 @@ pub(super) use terminal_section::gpui_terminal_background_reference;
 
 use editor_section::editor_appearance_controls;
 use error_log::{error_log_clear_modal, settings_error_log_row};
-use terminal_section::terminal_appearance_controls;
+use terminal_section::{background_appearance_controls, terminal_appearance_controls};
 use widgets::{
     appearance_button, appearance_button_named, color_strip, control_label, glass_fill,
-    metric_readout_sized, metric_row, metric_row_sized, settings_checkbox, CONTROL_LABEL_TEXT,
-    COURSES_TEXT,
+    metric_readout_sized, metric_row_sized, settings_checkbox, CONTROL_LABEL_TEXT, COURSES_TEXT,
 };
 
 // Monospace families. `None` means "use the system default", which is what
@@ -115,7 +115,7 @@ pub(super) fn appearances_surface(
 
 /// The standalone Appearances surface shows every visual section in one
 /// scroll (theme column + terminal/editor/app appearance sections), now that
-/// Settings owns the three-tab split.
+/// Settings groups controls under Appearances and Courses.
 fn appearance_all_controls_column(
     config: Config,
     cx: &mut Context<WorkspacePrototype>,
@@ -144,7 +144,7 @@ fn appearance_all_controls_column(
         .scrollbar_width(px(8.0))
 }
 
-/// Settings groups controls under Home, Courses, and Terminal.
+/// Settings groups controls under Appearances and Courses.
 fn settings_page_nav(
     page: SettingsPage,
     palette: UiTheme,
@@ -341,72 +341,19 @@ fn app_theme_section(
 
 fn advanced_settings_controls(
     content: gpui::Div,
-    joined_tab_limit: usize,
     error_log_expanded: bool,
     error_log_filter: ErrorLogFilter,
     error_entries: Vec<crate::error_log::LogEntry>,
     palette: UiTheme,
     cx: &mut Context<WorkspacePrototype>,
 ) -> gpui::Div {
-    content
-        .child(settings_join_limit_row_palette(
-            joined_tab_limit,
-            palette,
-            cx,
-        ))
-        .child(settings_error_log_row(
-            error_log_expanded,
-            error_log_filter,
-            error_entries,
-            palette,
-            cx,
-        ))
-}
-
-fn settings_join_limit_row_palette(
-    current_limit: usize,
-    palette: UiTheme,
-    cx: &mut Context<WorkspacePrototype>,
-) -> impl IntoElement {
-    let mut choices = div().flex().items_center().gap_1();
-    for limit in [2_u8, 3, 4] {
-        choices = choices.child(appearance_button(
-            limit.to_string(),
-            current_limit == limit as usize,
-            palette,
-            cx,
-            move |this, cx| this.set_joined_tab_limit(limit, cx),
-        ));
-    }
-
-    div()
-        .flex()
-        .items_center()
-        .justify_between()
-        .gap_4()
-        .px_4()
-        .py_3()
-        .child(
-            div()
-                .flex()
-                .flex_col()
-                .gap_1()
-                .child(
-                    div()
-                        .text_size(px(Typography::BODY))
-                        .text_color(rgb(palette.active_text))
-                        .child("Joined tab limit"),
-                )
-                .child(
-                    div()
-                        .text_size(px(Typography::BODY))
-                        .text_color(rgb(palette.muted_text))
-                        .child(
-                            "Choose whether joined tab groups can hold two, three, or four tabs.",
-                        ),
-                ),
-        )
-        .child(choices)
+    content.child(settings_error_log_row(
+        error_log_expanded,
+        error_log_filter,
+        error_entries,
+        palette,
+        cx,
+    ))
 }
 
 pub(super) fn markdown_appearance_controls(
@@ -499,7 +446,6 @@ pub(super) fn settings_surface(
     page: SettingsPage,
     terminal_background_import_error: Option<String>,
     editor_word_wrap: bool,
-    joined_tab_limit: usize,
     error_log_expanded: bool,
     error_log_filter: ErrorLogFilter,
     pending_clear_error_log: bool,
@@ -513,7 +459,6 @@ pub(super) fn settings_surface(
         page,
         terminal_background_import_error,
         editor_word_wrap,
-        joined_tab_limit,
         error_log_expanded,
         error_log_filter,
         error_entries,
@@ -544,6 +489,7 @@ pub(super) fn settings_surface(
                 .px_4()
                 .border_b_1()
                 .border_color(rgb(palette.border))
+                .child(settings_page_nav(page, palette, cx))
                 .child(
                     div().flex().items_center().gap_2().child(
                         div()
@@ -554,8 +500,7 @@ pub(super) fn settings_surface(
                 )
                 .when(has_background, |header| {
                     header.bg(glass_fill(palette.editor_bg))
-                })
-                .child(settings_page_nav(page, palette, cx)),
+                }),
         )
         .child(content);
 
@@ -584,8 +529,7 @@ fn settings_controls_column(
     page: SettingsPage,
     terminal_background_import_error: Option<String>,
     editor_word_wrap: bool,
-    joined_tab_limit: usize,
-    error_log_expanded: bool,
+    _error_log_expanded: bool,
     error_log_filter: ErrorLogFilter,
     error_entries: Vec<crate::error_log::LogEntry>,
     cx: &mut Context<WorkspacePrototype>,
@@ -615,54 +559,55 @@ fn settings_controls_column(
         );
 
     let content = match page {
-        SettingsPage::Home => {
+        SettingsPage::Appearances => {
             let content = app_appearance_controls(content, &config, cx);
-            advanced_settings_controls(
-                content.child(
-                    settings_section_label("WORKSPACE & DIAGNOSTICS", palette)
-                        .text_size(px(Typography::BODY)),
-                ),
-                joined_tab_limit,
-                error_log_expanded,
-                error_log_filter,
-                error_entries,
-                palette,
-                cx,
-            )
-        }
-        SettingsPage::Courses => {
-            let content = editor_appearance_controls(
-                content.child(
-                    settings_section_label("EDITOR APPEARANCE", palette)
-                        .text_size(px(COURSES_TEXT)),
-                ),
-                config.clone(),
-                COURSES_TEXT,
-                cx,
-            );
-            editor_behavior_appearance_controls(
-                content.child(
-                    settings_section_label("EDITING & MARKDOWN", palette)
-                        .text_size(px(COURSES_TEXT)),
-                ),
-                config,
-                editor_word_wrap,
-                COURSES_TEXT,
-                cx,
-            )
-        }
-        SettingsPage::Terminal => {
-            let content = terminal_appearance_controls(
-                content.child(settings_section_label("TERMINAL APPEARANCE", palette)),
-                config.clone(),
+            let content = background_appearance_controls(
+                content,
+                &config,
                 terminal_background_import_error,
                 cx,
             );
-            settings_terminal_controls(
-                content.child(settings_section_label("TERMINAL BEHAVIOR", palette)),
-                &config,
+            let content = editor_appearance_controls(
+                content.child(
+                    settings_section_label("EDITOR", palette)
+                        .w_full()
+                        .border_t_1()
+                        .border_color(rgb(palette.border))
+                        .pt_4()
+                        .text_size(px(Typography::BODY)),
+                ),
+                config.clone(),
+                CONTROL_LABEL_TEXT,
+                cx,
+            );
+            let content = editor_behavior_appearance_controls(
+                content,
+                config.clone(),
+                editor_word_wrap,
+                CONTROL_LABEL_TEXT,
+                cx,
+            );
+            terminal_appearance_controls(
+                content.child(
+                    settings_section_label("TERMINAL", palette)
+                        .w_full()
+                        .border_t_1()
+                        .border_color(rgb(palette.border))
+                        .pt_4()
+                        .text_size(px(Typography::BODY)),
+                ),
+                config,
                 cx,
             )
+        }
+        // Intentionally empty for now: its editing controls moved under
+        // Appearances > Editor, and course-specific settings are still to come.
+        SettingsPage::Courses => content,
+        // The log is the whole page, so it is always open here. The
+        // collapsed state only applied when the log shared a page with the
+        // appearance controls.
+        SettingsPage::ErrorLog => {
+            advanced_settings_controls(content, true, error_log_filter, error_entries, palette, cx)
         }
     };
 
@@ -688,6 +633,11 @@ fn settings_appearances_controls(
         .child(terminal_appearance_controls(
             div().flex().flex_col().gap_3(),
             config.clone(),
+            cx,
+        ))
+        .child(background_appearance_controls(
+            div().flex().flex_col().gap_3(),
+            &config,
             terminal_background_import_error,
             cx,
         ))
@@ -721,42 +671,25 @@ fn app_appearance_controls(
     cx: &mut Context<WorkspacePrototype>,
 ) -> gpui::Div {
     let palette = UiTheme::from_config(config);
-    app_theme_section(content, config, palette, cx)
-        .child(metric_row(
-            "Terminal Font Size",
-            format!("{:.0}px", config.font_size),
-            palette,
-            cx,
-            |this, cx| this.adjust_font_size(-1.0, cx),
-            |this, cx| this.adjust_font_size(1.0, cx),
-        ))
-        .child(metric_row(
-            "Selection Alpha",
-            format!("{:.0}%", config.colors.selection_alpha * 100.0),
-            palette,
-            cx,
-            |this, cx| this.adjust_selection_alpha(-0.05, cx),
-            |this, cx| this.adjust_selection_alpha(0.05, cx),
-        ))
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .gap_2()
-                .child(control_label("Time-of-Day Warmth", palette))
-                .child(appearance_button_named(
-                    "time-of-day".into(),
-                    if config.time_of_day_enabled {
-                        "On".to_string()
-                    } else {
-                        "Off".to_string()
-                    },
-                    config.time_of_day_enabled,
-                    palette,
-                    cx,
-                    |this, cx| this.toggle_time_of_day(cx),
-                )),
-        )
+    app_theme_section(content, config, palette, cx).child(
+        div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(control_label("Time-of-Day Warmth", palette))
+            .child(appearance_button_named(
+                "time-of-day".into(),
+                if config.time_of_day_enabled {
+                    "On".to_string()
+                } else {
+                    "Off".to_string()
+                },
+                config.time_of_day_enabled,
+                palette,
+                cx,
+                |this, cx| this.toggle_time_of_day(cx),
+            )),
+    )
 }
 
 /// Word wrap + markdown preview controls that used to live under the
@@ -785,23 +718,6 @@ fn editor_behavior_appearance_controls(
             text,
             cx,
         ))
-}
-
-/// Terminal-behavior (non-visual) settings for the Terminal tab.
-fn settings_terminal_controls(
-    content: gpui::Div,
-    config: &Config,
-    cx: &mut Context<WorkspacePrototype>,
-) -> gpui::Div {
-    let palette = UiTheme::from_config(config);
-    content.child(metric_row(
-        "Scrollback Lines",
-        format!("{}", config.terminal.scrollback_lines),
-        palette,
-        cx,
-        |this, cx| this.adjust_terminal_scrollback(-1000, cx),
-        |this, cx| this.adjust_terminal_scrollback(1000, cx),
-    ))
 }
 
 fn settings_section_label(label: &'static str, palette: UiTheme) -> gpui::Div {

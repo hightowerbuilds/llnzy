@@ -143,12 +143,12 @@ opacity = 0.95
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `enabled` | boolean | `true` | Enables visual effects. |
+| `enabled` | boolean | `true` | Enables the background image layer. |
 | `background` | string | `"none"` | Background mode: `"none"` or `"image"`. Any other value — including the retired shader patterns `"smoke"`, `"fire"`, `"aurora"`, `"trees"`, and `"rain"` — falls back to `"none"`. |
 | `background_intensity` | float | `0.3` | Brightness of the background image; the terminal dims the image by `1 - background_intensity`. |
 | `background_image` | string | _(none)_ | Path to an image used when `background = "image"`. |
 | `background_image_fit` | string | `"fill"` | Image placement when `background = "image"`: `"fill"`, `"fit"`, `"tile"`, or `"center"`. |
-| `effects_on_ui` | boolean | `true` | Applies post-processing effects to UI views that opt in. |
+
 
 ```toml
 [effects]
@@ -158,9 +158,17 @@ background_image = "~/Pictures/terminal.png"
 background_image_fit = "fill"
 ```
 
+Terminal post-processing and decorative cursor effects have been removed. Legacy
+Bloom, CRT, particle, glow, trail, and text-animation settings still load for
+compatibility, but no longer affect rendering.
+
 ---
 
 ## `[scrolling]`
+
+Each terminal retains up to 10,000 lines of scrollback history. This limit is
+fixed; legacy `[terminal].scrollback_lines` values are ignored. The `lines`
+setting below only controls how far the mouse wheel scrolls per tick.
 
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -190,6 +198,8 @@ program = "/bin/bash"
 
 Override code editor syntax highlight colors by semantic group. Values are hex strings in `"#RRGGBB"` or `"RRGGBB"` format.
 
+Choosing an editor theme under Settings → Appearances → Editor (One Dark, Dracula, Nord, One Light, Solarized Light, GitHub Light) sets the editor background, foreground, cursor, selection, and syntax palette together and takes precedence over these keys. With no theme chosen, the editor draws on the terminal color scheme.
+
 Accepted groups: `keyword`, `type`, `function`, `variable`, `string`, `number`, `comment`, `operator`, `punctuation`, `constant`, `attribute`, `tag`, `property`, `escape`, `label`, `module` or `namespace`.
 
 ```toml
@@ -213,6 +223,7 @@ Configure code editor behavior. Language-specific overrides use the tree-sitter 
 | `rulers` | integer array | `[]` | Optional column ruler positions to draw in the editor. |
 | `word_wrap` | boolean | `false` | Stores the preferred wrap mode and shows it in editor status. |
 | `visible_whitespace` | boolean | `false` | Render visible markers for spaces and tabs. |
+| `font_family` | string | `"JetBrains Mono"` | Code editor font family. The bundled JetBrains Mono face is used when unset; the editor does not inherit the terminal font. |
 | `font_size` | float | terminal font minus `2.0` | Code editor font size. |
 | `sidebar_font_size` | float | `14.0` | Font size for the sidebar file tree text. Clamped to 8.0-24.0. |
 | `keybinding_preset` | string | `"vscode"` | Editor keybinding preset: `"vscode"` or `"emacs"`. Legacy `"vim"` values parse as VsCode; run vim in the integrated terminal instead. |

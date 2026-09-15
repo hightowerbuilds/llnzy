@@ -1,4 +1,4 @@
-use crate::tab_groups::{PartitionAxis, TabGroupState, TabId};
+use crate::tab_groups::{PartitionAxis, TabGroupState, TabId, MAX_JOINED_TABS};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct GpuiTabChoice {
@@ -105,12 +105,12 @@ impl GpuiTabManager {
         self.groups.group_member_count(tab_id)
     }
 
-    pub fn can_join(&self, source: TabId, target: TabId, max_members: usize) -> bool {
+    pub fn can_join(&self, source: TabId, target: TabId) -> bool {
         if source == target {
             return false;
         }
         let Some(source_group) = self.groups.group_for_tab(source) else {
-            return self.groups.group_member_count(target) < max_members.clamp(2, 4);
+            return self.groups.group_member_count(target) < MAX_JOINED_TABS;
         };
         if source_group.contains(target) {
             return false;
@@ -127,36 +127,30 @@ impl GpuiTabManager {
                 combined.push(member);
             }
         }
-        combined.len() <= max_members.clamp(2, 4)
+        combined.len() <= MAX_JOINED_TABS
     }
 
-    pub fn join_choices(
-        &self,
-        tabs: &[GpuiTabChoice],
-        source: TabId,
-        max_members: usize,
-    ) -> Vec<GpuiTabChoice> {
+    pub fn join_choices(&self, tabs: &[GpuiTabChoice], source: TabId) -> Vec<GpuiTabChoice> {
         tabs.iter()
             .filter(|tab| tab.id != source)
-            .filter(|tab| self.can_join(source, tab.id, max_members))
+            .filter(|tab| self.can_join(source, tab.id))
             .cloned()
             .collect()
     }
 
-    pub fn join_tabs(&mut self, primary: TabId, secondary: TabId, max_members: usize) -> bool {
-        self.join_tabs_with_axis(primary, secondary, max_members, PartitionAxis::default())
+    pub fn join_tabs(&mut self, primary: TabId, secondary: TabId) -> bool {
+        self.join_tabs_with_axis(primary, secondary, PartitionAxis::default())
     }
 
     pub fn join_tabs_with_axis(
         &mut self,
         primary: TabId,
         secondary: TabId,
-        max_members: usize,
         axis: PartitionAxis,
     ) -> bool {
         let joined = self
             .groups
-            .join_tabs_with_axis(primary, secondary, max_members, axis)
+            .join_tabs_with_axis(primary, secondary, MAX_JOINED_TABS, axis)
             .is_some();
         if joined {
             self.groups.set_active_tab(primary);
@@ -195,6 +189,10 @@ impl GpuiTabManager {
             .set_split_for_tab(tab_id, divider_index, boundary)
     }
 
+    pub fn restore_shares_for_tab(&mut self, tab_id: TabId, shares: &[f32]) -> bool {
+        self.groups.restore_shares_for_tab(tab_id, shares)
+    }
+
     pub fn retain_tabs(&mut self, valid_tabs: &[TabId]) {
         self.groups
             .retain_tabs(|tab_id| valid_tabs.contains(&tab_id));
@@ -205,8 +203,63 @@ impl GpuiTabManager {
             self.context_menu = None;
         }
     }
+}
 
-    pub fn enforce_join_limit(&mut self, max_members: usize) {
-        self.groups.enforce_max_members(max_members);
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn joins_four_tabs_and_rejects_a_fifth_without_changing_the_group() {
+        for axis in [PartitionAxis::Vertical, PartitionAxis::Horizontal] {
+            let mut manager = GpuiTabManager::default();
+            for target in 2..=4 {
+                assert!(manager.can_join(1, target));
+                assert!(manager.can_join(target, 1));
+                assert!(manager.join_tabs_with_axis(1, target, axis));
+            }
+            let before = manager.joined_group_for(4, &[1, 2, 3, 4, 5]).unwrap();
+            assert_eq!(before.members, vec![1, 2, 3, 4]);
+            assert_eq!(before.axis, axis);
+            assert!(!manager.can_join(1, 5));
+            assert!(!manager.can_join(5, 1));
+            assert!(!manager.join_tabs(1, 5));
+            assert_eq!(manager.joined_group_for(1, &[1, 2, 3, 4, 5]), Some(before));
+            let choices = (1..=5)
+                .map(|id| GpuiTabChoice {
+                    id,
+                    title: id.to_string(),
+                    joined: id <= 4,
+                })
+                .collect::<Vec<_>>();
+            assert!(manager.join_choices(&choices, 1).is_empty());
+            assert!(manager.join_choices(&choices, 5).is_empty());
+        }
+    }
+
+    #[test]
+    fn two_pairs_merge_and_four_panes_can_resize_separate_and_close() {
+        let mut manager = GpuiTabManager::default();
+        assert!(manager.join_tabs(1, 2));
+        assert!(manager.join_tabs(3, 4));
+        assert!(manager.can_join(1, 3));
+        assert!(manager.join_tabs(1, 3));
+        for (divider, boundary) in [0.18, 0.48, 0.8].into_iter().enumerate() {
+            assert!(manager.set_split_for_tab(1, divider, boundary));
+        }
+        let group = manager.joined_group_for(4, &[1, 2, 3, 4]).unwrap();
+        for (actual, expected) in group.shares.iter().zip([0.18, 0.30, 0.32, 0.20]) {
+            assert!((actual - expected).abs() < 0.0001);
+        }
+        manager.set_active_tab(4);
+        assert!(manager.separate_tab(4));
+        assert_eq!(manager.joined_member_count(1), 3);
+        assert!(!manager.is_joined(4));
+        assert!(manager.join_tabs(1, 5));
+        manager.retain_tabs(&[1, 3, 4, 5]);
+        assert_eq!(
+            manager.joined_group_for(5, &[1, 3, 4, 5]).unwrap().members,
+            vec![1, 3, 5]
+        );
     }
 }

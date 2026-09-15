@@ -65,12 +65,8 @@ pub struct Terminal {
 
 impl Terminal {
     pub fn new(cols: u16, rows: u16) -> Self {
-        Self::with_scrollback(cols, rows, TermConfig::default().scrolling_history)
-    }
-
-    pub fn with_scrollback(cols: u16, rows: u16, scrollback_lines: usize) -> Self {
         let config = TermConfig {
-            scrolling_history: scrollback_lines,
+            scrolling_history: 10_000,
             ..TermConfig::default()
         };
         let size = TermSize::new(cols as usize, rows as usize);

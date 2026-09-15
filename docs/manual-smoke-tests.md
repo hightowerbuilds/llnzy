@@ -89,16 +89,31 @@ cargo test --release --test performance_budgets -- --ignored --nocapture
 - Kill the language server process and confirm LLNZY reports the failure without
   losing editor work.
 
-## Appearances And Effects
+## Appearances
 
 - Switch built-in themes and confirm terminal and editor colors update
   coherently.
 - Import a valid background image.
+- Confirm every saved background has a thumbnail beside its filename, including
+  images imported before this update. Check portrait/landscape images, the active
+  outline, Apply/Delete, narrow panes, and the fallback for unreadable images.
 - Try missing, invalid, and oversized background images and confirm the app
   rejects them without crashing.
-- Toggle effects off and on.
+- Confirm older configs with Bloom, CRT, particles, cursor glow/trail, or text
+  animation enabled render without those retired effects.
 - Switch the background between None and Image and confirm the terminal stays
   legible in both, and that Image Brightness moves the image dim.
+- Open Settings and confirm its sub-tabs read Appearances, Courses, and Error
+  Log, with Appearances selected by default. Error Log shows the full log with
+  its filters, Copy All, and Clear. Appearances → Editor also holds word wrap
+  and the markdown preview controls; Courses is empty for now.
+- Under Appearances → Editor, apply each dark theme (One Dark, Dracula, Nord)
+  and each light theme (One Light, Solarized Light, GitHub Light). The open
+  editor's background, text, cursor, selection, and syntax colors should all
+  change; the terminal and app chrome should not. Restart and confirm the
+  choice persists. The Home notepad keeps its reading colors throughout.
+- Confirm code in the editor renders in JetBrains Mono regardless of the
+  terminal font choice, including bold and italic markdown spans.
 
 ## Code Academy
 
@@ -177,3 +192,17 @@ Optionally set `LLNZY_STYLE_GALLERY_IMAGE` to a local image path for its tint pr
   tab-close/join/resize, editor overlays, and standalone editor in both modes.
 - Verify ordinary note/source typing, terminal output, scrolling, and idle views
   remain responsive. Shared controls introduce no continuous animation loop.
+
+## Four-Tab Groups
+
+- Join two tabs, then add a third and fourth through the tab menu. Repeat with
+  horizontal and vertical terminal partitions; each group supports four tabs.
+- Drag each of the three dividers, focus each pane, and confirm its input and
+  scrolling work. Check a mix of Terminal, Editor, Home, and Settings surfaces.
+- Confirm a full group offers no fifth join target and adding a terminal
+  partition does not create an extra tab.
+- Separate or close one member and join a replacement; the other panes stay open.
+- Restore a four-tab recovery snapshot with uneven sizes and confirm all four
+  tabs, the partition direction, and their sizes survive.
+- Check older preferences with `joined_tab_limit` set to 2 or 3; both now allow
+  four joined tabs and Settings shows no limit control.

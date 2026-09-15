@@ -9,6 +9,34 @@ use crate::editor::syntax::HighlightGroup;
 use crate::preferences::WorkspacePreferences;
 use crate::ui_theme::{UiMode, UiTheme};
 
+#[test]
+fn four_tab_recovery_preserves_uneven_shares_and_axis() {
+    use super::recovery::{WorkspaceRecoveryAxis, WorkspaceRecoveryJoinedGroup};
+    use crate::gpui_tabs::GpuiTabManager;
+    use crate::tab_groups::PartitionAxis;
+
+    for axis in [PartitionAxis::Vertical, PartitionAxis::Horizontal] {
+        let snapshot = WorkspaceRecoveryJoinedGroup {
+            members: vec![1, 2, 3, 4],
+            shares: vec![0.52, 0.16, 0.16, 0.16],
+            axis: WorkspaceRecoveryAxis::from(axis),
+        };
+        let saved = toml::to_string(&snapshot).unwrap();
+        let loaded: WorkspaceRecoveryJoinedGroup = toml::from_str(&saved).unwrap();
+        let mut manager = GpuiTabManager::default();
+        for member in &loaded.members[1..] {
+            assert!(manager.join_tabs_with_axis(1, *member, loaded.axis.into()));
+        }
+        super::restore_joined_group_shares(&mut manager, 1, &loaded.shares);
+        let group = manager.joined_group_for(4, &loaded.members).unwrap();
+        assert_eq!(group.members, loaded.members);
+        assert_eq!(group.axis, axis);
+        for (actual, expected) in group.shares.iter().zip(&loaded.shares) {
+            assert!((actual - expected).abs() < 0.0001);
+        }
+    }
+}
+
 fn restart_preferences(preferences: &WorkspacePreferences) -> WorkspacePreferences {
     serde_json::from_str(&serde_json::to_string(preferences).unwrap()).unwrap()
 }
@@ -213,12 +241,9 @@ fn theme_reload_keeps_editor_fonts_syntax_and_applies_explicit_content_preferenc
         resolved.editor.markdown_preview_style,
         MarkdownPreviewStyle::Newspaper
     );
-    assert_eq!(
-        resolved.syntax_colors,
-        crate::config::editor_syntax_preset("Dracula")
-            .unwrap()
-            .colors_map()
-    );
+    let dracula = crate::config::editor_theme("Dracula").unwrap();
+    assert_eq!(resolved.syntax_colors, dracula.colors_map());
+    assert_eq!(resolved.editor_colors, Some(dracula.colors));
     assert_eq!(resolved.editor.font_size, Some(17.0));
 }
 

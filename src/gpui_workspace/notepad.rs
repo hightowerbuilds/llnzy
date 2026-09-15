@@ -528,7 +528,8 @@ impl Render for Notepad {
 
 fn writing_config(mut config: Config) -> Config {
     let theme = UiTheme::from_config(&config);
-    config.font_family = Some(Typography::READING_FONT_FAMILY.to_string());
+    config.editor.font_family = Some(Typography::READING_FONT_FAMILY.to_string());
+    config.editor_colors = None;
     let channels = |color: u32| [(color >> 16) as u8, (color >> 8) as u8, color as u8];
     config.colors.background = channels(theme.reading_bg);
     config.colors.foreground = channels(theme.active_text);

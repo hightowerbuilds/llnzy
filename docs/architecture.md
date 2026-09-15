@@ -16,6 +16,8 @@ belongs before adding logic to a large GPUI surface.
   app-level state wiring, and the final GPUI render shell.
 - `src/gpui_workspace/` owns feature slices below that shell:
   - `tabs.rs` and `panes.rs`: tab and joined-pane presentation helpers.
+    Joined groups have a fixed four-tab capacity (`tab_groups::MAX_JOINED_TABS`),
+    shared by the tab manager and recovery. Legacy limit preferences are ignored.
   - `command_palette.rs`: file filtering and command palette logic.
   - `sidebar.rs` and `project.rs`: project tree, sidebar, and workspace file
     actions.
@@ -78,7 +80,7 @@ belongs before adding logic to a large GPUI surface.
   routing, and session lifecycle.
 - `src/gpui_terminal/` owns rendering helpers:
   - `text.rs`: row text shaping and paste payload normalization.
-  - `effects.rs`: terminal background/effect quads and image layers.
+  - `effects.rs`: terminal background images, color conversion, and grid quads.
   - `render.rs`: render geometry, display-mode rects, cursor quads, and cell
     metrics.
 - New terminal emulation behavior belongs in `src/terminal/`. New process
@@ -176,6 +178,12 @@ belongs before adding logic to a large GPUI surface.
 
 - `src/config/` owns config model, loading, schema, presets, colors, and
   runtime application.
+- `src/config/presets.rs` owns the built-in editor themes (`EditorTheme`:
+  surface colors plus a syntax palette, tagged light or dark). Applying one
+  sets `Config.editor_colors` and `Config.syntax_colors`; the editor falls
+  back to the terminal scheme when `editor_colors` is `None`. The code font
+  is `[editor].font_family`, defaulting to bundled JetBrains Mono, and is
+  independent of the terminal font.
 - `src/preferences.rs`, `src/theme.rs`, and `src/theme_store.rs` own user
   preferences, theme data, and user-imported backgrounds/themes. Explicit UI
   mode is persisted independently from terminal colors, with compatibility

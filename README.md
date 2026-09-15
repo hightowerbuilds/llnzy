@@ -46,15 +46,15 @@ Requires Rust 1.75+. macOS is the active release target.
 
 ## Features
 
-**Terminal** -- The primary surface. ANSI/VT emulation via alacritty_terminal and portable-pty. Supports true color, scrollback, selection/copy/paste, bracketed paste, app cursor mode, title/CWD events, session restart, shell exit reporting, background images, and cursor effects.
+**Terminal** -- The primary surface. ANSI/VT emulation via alacritty_terminal and portable-pty. Supports true color, 10,000 lines of scrollback, selection/copy/paste, bracketed paste, app cursor mode, title/CWD events, session restart, shell exit reporting, background images, and cursor styles.
 
 **Code Editor** -- Edits source files alongside the terminal session. Rope-backed editing with undo/redo, tree-sitter syntax highlighting for Rust, JavaScript, TypeScript, TSX, Python, Go, C, JSON, HTML, CSS, and Bash. LSP integration covers diagnostics, hover, completions, go-to-definition, find references, signature help, rename, code actions, formatting, inlay hints, code lens, document symbols, and workspace symbols when the matching language server is available on PATH. Find, go-to-line, selection movement, line movement, duplicate/delete line, comment toggle, save, recently closed files, and git gutter indicators are included.
 
 **Project Sidebar** -- Scopes the workspace to the directory the terminal is operating on. Open a project folder, browse files, open files in the GPUI editor, drag files/folders into folders, resize or hide the sidebar, and reopen recent projects.
 
-**Appearances** -- Apply built-in themes, tune terminal and editor colors, import terminal background images, and adjust cursor presentation.
+**Appearances** -- Apply built-in themes, choose an editor theme (three dark, three light), tune terminal colors, import terminal background images, and adjust cursor presentation. The code editor renders in bundled JetBrains Mono.
 
-**Tabs** -- Home, Terminal, Editor, Appearances, and Settings surfaces can be opened from the workspace menus. Tabs can be joined, separated, swapped, renamed, and closed.
+**Tabs** -- Home, Terminal, Editor, Appearances, and Settings surfaces can be opened from the workspace menus. Settings is split into Appearances, Courses, and Error Log sub-tabs; Courses is a placeholder for now. Up to four tabs can be joined in resizable panes. Tabs can also be separated, swapped, renamed, and closed.
 
 **Code Academy** -- Programming courses alongside your editor and terminal. Open a lesson, choose Open practice to prepare persistent starter files, save your edits, and choose Check work for local feedback. Ships JavaScript (11 lessons), TypeScript (10), Elixir (10), and introductory Rust (7 lessons covering chapters 1–3 of *The Rust Programming Language*, 3rd edition). JavaScript, TypeScript, and Elixir finish with practical projects; Rust currently ends at functions and compound types. Course runtimes must be installed separately; practice in the app requires neither Python nor a source checkout. See [course setup, scope, and validation](assets/academy/courses/README.md).
 
@@ -103,11 +103,6 @@ llnzy reads `config.toml` from the platform config directory and auto-reloads ch
 ```toml
 [effects]
 background = "image"
-bloom_enabled = true
-crt_enabled = true
-
-[terminal]
-scrollback_lines = 10000  # per-terminal scrollback history; lower to save memory
 
 [editor]
 tab_size = 4

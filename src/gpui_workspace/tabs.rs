@@ -483,7 +483,6 @@ pub(super) fn workspace_tab_context_menu(
     tabs: Vec<GpuiTabChoice>,
     tab_manager: &GpuiTabManager,
     tab_rename: Option<TabRenameState>,
-    join_limit: usize,
     palette: UiTheme,
     cx: &mut Context<WorkspacePrototype>,
 ) -> impl IntoElement {
@@ -497,7 +496,7 @@ pub(super) fn workspace_tab_context_menu(
     let joined_count = tab_manager.joined_member_count(menu.tab_id);
     let can_join_more = tabs
         .iter()
-        .any(|tab| tab_manager.can_join(menu.tab_id, tab.id, join_limit));
+        .any(|tab| tab_manager.can_join(menu.tab_id, tab.id));
     let menu_width = menu.width;
 
     let mut menu_panel = div()
@@ -642,7 +641,7 @@ pub(super) fn workspace_tab_context_menu(
         menu_root = menu_root.child(tab_join_side_menu(
             menu_width.max(180.0),
             tab_id,
-            tab_manager.join_choices(&tabs, menu.tab_id, join_limit),
+            tab_manager.join_choices(&tabs, menu.tab_id),
             palette,
             cx,
         ));

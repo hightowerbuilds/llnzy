@@ -3,47 +3,54 @@ use rustc_hash::FxHashMap;
 use super::model::ColorScheme;
 use crate::editor::syntax::HighlightGroup;
 
+use super::model::EditorColors;
+use crate::ui_theme::UiMode;
+
+/// One editor theme: the surface colors the code area paints plus the
+/// syntax palette drawn on top of them. Independent of the terminal scheme.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct EditorSyntaxPreset {
+pub(crate) struct EditorTheme {
     pub(crate) name: &'static str,
-    pub(crate) colors: &'static [(HighlightGroup, [u8; 3])],
+    pub(crate) mode: UiMode,
+    pub(crate) colors: EditorColors,
+    pub(crate) syntax: &'static [(HighlightGroup, [u8; 3])],
 }
 
-impl EditorSyntaxPreset {
+impl EditorTheme {
     pub(crate) fn colors_map(&self) -> FxHashMap<HighlightGroup, [u8; 3]> {
-        self.colors.iter().copied().collect()
+        self.syntax.iter().copied().collect()
     }
 
     pub(crate) fn swatch(&self) -> [[u8; 3]; 6] {
         [
-            syntax_color(self.colors, HighlightGroup::Keyword),
-            syntax_color(self.colors, HighlightGroup::Function),
-            syntax_color(self.colors, HighlightGroup::String),
-            syntax_color(self.colors, HighlightGroup::Number),
-            syntax_color(self.colors, HighlightGroup::Type),
-            syntax_color(self.colors, HighlightGroup::Comment),
+            self.colors.background,
+            syntax_color(self.syntax, HighlightGroup::Keyword),
+            syntax_color(self.syntax, HighlightGroup::Function),
+            syntax_color(self.syntax, HighlightGroup::String),
+            syntax_color(self.syntax, HighlightGroup::Type),
+            syntax_color(self.syntax, HighlightGroup::Comment),
         ]
     }
 
     pub(crate) fn matches_colors(&self, colors: &FxHashMap<HighlightGroup, [u8; 3]>) -> bool {
-        colors.len() == self.colors.len()
+        colors.len() == self.syntax.len()
             && self
-                .colors
+                .syntax
                 .iter()
                 .all(|(group, color)| colors.get(group) == Some(color))
     }
 }
 
-pub(crate) fn editor_syntax_presets() -> &'static [EditorSyntaxPreset] {
-    EDITOR_SYNTAX_PRESETS
+pub(crate) fn editor_themes() -> &'static [EditorTheme] {
+    EDITOR_THEMES
 }
 
-pub(crate) fn editor_syntax_preset(name: &str) -> Option<EditorSyntaxPreset> {
+pub(crate) fn editor_theme(name: &str) -> Option<EditorTheme> {
     let normalized = normalize_preset_name(name);
-    EDITOR_SYNTAX_PRESETS
+    EDITOR_THEMES
         .iter()
         .copied()
-        .find(|preset| normalize_preset_name(preset.name) == normalized)
+        .find(|theme| normalize_preset_name(theme.name) == normalized)
 }
 
 fn normalize_preset_name(name: &str) -> String {
@@ -57,13 +64,35 @@ fn syntax_color(colors: &[(HighlightGroup, [u8; 3])], group: HighlightGroup) -> 
         .unwrap_or([0xAB, 0xB2, 0xBF])
 }
 
-/// Three editor themes: two dark and one light. Deliberately short — a
-/// syntax palette is picked once and then lived in, so a long list is a
-/// menu to scroll past rather than a choice worth making.
-const EDITOR_SYNTAX_PRESETS: &[EditorSyntaxPreset] = &[
-    EditorSyntaxPreset {
+const fn editor_colors(
+    background: [u8; 3],
+    foreground: [u8; 3],
+    cursor: [u8; 3],
+    selection: [u8; 3],
+) -> EditorColors {
+    EditorColors {
+        background,
+        foreground,
+        cursor,
+        selection,
+        selection_alpha: 0.35,
+    }
+}
+
+/// Six editor themes: three dark, then three light. Deliberately short — a
+/// code palette is picked once and then lived in, so a long list is a menu
+/// to scroll past rather than a choice worth making.
+const EDITOR_THEMES: &[EditorTheme] = &[
+    EditorTheme {
         name: "One Dark",
-        colors: &[
+        mode: UiMode::Dark,
+        colors: editor_colors(
+            [0x28, 0x2C, 0x34],
+            [0xAB, 0xB2, 0xBF],
+            [0x52, 0x8B, 0xFF],
+            [0x3E, 0x44, 0x51],
+        ),
+        syntax: &[
             (HighlightGroup::Keyword, [198, 120, 221]),
             (HighlightGroup::Type, [86, 182, 194]),
             (HighlightGroup::Function, [97, 175, 239]),
@@ -82,9 +111,16 @@ const EDITOR_SYNTAX_PRESETS: &[EditorSyntaxPreset] = &[
             (HighlightGroup::Module, [86, 182, 194]),
         ],
     },
-    EditorSyntaxPreset {
+    EditorTheme {
         name: "Dracula",
-        colors: &[
+        mode: UiMode::Dark,
+        colors: editor_colors(
+            [0x28, 0x2A, 0x36],
+            [0xF8, 0xF8, 0xF2],
+            [0xF8, 0xF8, 0xF2],
+            [0x44, 0x47, 0x5A],
+        ),
+        syntax: &[
             (HighlightGroup::Keyword, [0xBD, 0x93, 0xF9]),
             (HighlightGroup::Type, [0x8B, 0xE9, 0xFD]),
             (HighlightGroup::Function, [0x50, 0xFA, 0x7B]),
@@ -103,12 +139,47 @@ const EDITOR_SYNTAX_PRESETS: &[EditorSyntaxPreset] = &[
             (HighlightGroup::Module, [0x8B, 0xE9, 0xFD]),
         ],
     },
-    // The one light theme. Mirrors One Dark group for group, in the Atom One
-    // Light hues, so switching between them moves the background without
-    // moving where each kind of token sits in the palette.
-    EditorSyntaxPreset {
+    EditorTheme {
+        name: "Nord",
+        mode: UiMode::Dark,
+        colors: editor_colors(
+            [0x2E, 0x34, 0x40],
+            [0xD8, 0xDE, 0xE9],
+            [0xD8, 0xDE, 0xE9],
+            [0x43, 0x4C, 0x5E],
+        ),
+        syntax: &[
+            (HighlightGroup::Keyword, [0x81, 0xA1, 0xC1]),
+            (HighlightGroup::Type, [0x8F, 0xBC, 0xBB]),
+            (HighlightGroup::Function, [0x88, 0xC0, 0xD0]),
+            (HighlightGroup::Variable, [0xD8, 0xDE, 0xE9]),
+            (HighlightGroup::String, [0xA3, 0xBE, 0x8C]),
+            (HighlightGroup::Number, [0xB4, 0x8E, 0xAD]),
+            (HighlightGroup::Comment, [0x61, 0x6E, 0x88]),
+            (HighlightGroup::Operator, [0x81, 0xA1, 0xC1]),
+            (HighlightGroup::Punctuation, [0xEC, 0xEF, 0xF4]),
+            (HighlightGroup::Constant, [0xB4, 0x8E, 0xAD]),
+            (HighlightGroup::Attribute, [0xD0, 0x87, 0x70]),
+            (HighlightGroup::Tag, [0x81, 0xA1, 0xC1]),
+            (HighlightGroup::Property, [0x8F, 0xBC, 0xBB]),
+            (HighlightGroup::Escape, [0xEB, 0xCB, 0x8B]),
+            (HighlightGroup::Label, [0xEB, 0xCB, 0x8B]),
+            (HighlightGroup::Module, [0x8F, 0xBC, 0xBB]),
+        ],
+    },
+    // Mirrors One Dark group for group, in the Atom One Light hues, so
+    // switching between them moves the background without moving where each
+    // kind of token sits in the palette.
+    EditorTheme {
         name: "One Light",
-        colors: &[
+        mode: UiMode::Light,
+        colors: editor_colors(
+            [0xFA, 0xFA, 0xFA],
+            [0x38, 0x3A, 0x42],
+            [0x52, 0x6F, 0xFF],
+            [0xD7, 0xDA, 0xE0],
+        ),
+        syntax: &[
             (HighlightGroup::Keyword, [0xA6, 0x26, 0xA4]),
             (HighlightGroup::Type, [0x01, 0x84, 0xBC]),
             (HighlightGroup::Function, [0x40, 0x78, 0xF2]),
@@ -125,6 +196,62 @@ const EDITOR_SYNTAX_PRESETS: &[EditorSyntaxPreset] = &[
             (HighlightGroup::Escape, [0x01, 0x84, 0xBC]),
             (HighlightGroup::Label, [0xC1, 0x84, 0x01]),
             (HighlightGroup::Module, [0x01, 0x84, 0xBC]),
+        ],
+    },
+    EditorTheme {
+        name: "Solarized Light",
+        mode: UiMode::Light,
+        colors: editor_colors(
+            [0xFD, 0xF6, 0xE3],
+            [0x58, 0x6E, 0x75],
+            [0x58, 0x6E, 0x75],
+            [0xE3, 0xDC, 0xC6],
+        ),
+        syntax: &[
+            (HighlightGroup::Keyword, [0x85, 0x99, 0x00]),
+            (HighlightGroup::Type, [0xB5, 0x89, 0x00]),
+            (HighlightGroup::Function, [0x26, 0x8B, 0xD2]),
+            (HighlightGroup::Variable, [0x26, 0x8B, 0xD2]),
+            (HighlightGroup::String, [0x2A, 0xA1, 0x98]),
+            (HighlightGroup::Number, [0xD3, 0x36, 0x82]),
+            (HighlightGroup::Comment, [0x93, 0xA1, 0xA1]),
+            (HighlightGroup::Operator, [0x85, 0x99, 0x00]),
+            (HighlightGroup::Punctuation, [0x65, 0x7B, 0x83]),
+            (HighlightGroup::Constant, [0xCB, 0x4B, 0x16]),
+            (HighlightGroup::Attribute, [0xB5, 0x89, 0x00]),
+            (HighlightGroup::Tag, [0x26, 0x8B, 0xD2]),
+            (HighlightGroup::Property, [0x26, 0x8B, 0xD2]),
+            (HighlightGroup::Escape, [0xDC, 0x32, 0x2F]),
+            (HighlightGroup::Label, [0xB5, 0x89, 0x00]),
+            (HighlightGroup::Module, [0xB5, 0x89, 0x00]),
+        ],
+    },
+    EditorTheme {
+        name: "GitHub Light",
+        mode: UiMode::Light,
+        colors: editor_colors(
+            [0xFF, 0xFF, 0xFF],
+            [0x24, 0x29, 0x2F],
+            [0x09, 0x69, 0xDA],
+            [0xB6, 0xD6, 0xFC],
+        ),
+        syntax: &[
+            (HighlightGroup::Keyword, [0xCF, 0x22, 0x2E]),
+            (HighlightGroup::Type, [0x95, 0x38, 0x00]),
+            (HighlightGroup::Function, [0x82, 0x50, 0xDF]),
+            (HighlightGroup::Variable, [0x24, 0x29, 0x2F]),
+            (HighlightGroup::String, [0x0A, 0x30, 0x69]),
+            (HighlightGroup::Number, [0x05, 0x50, 0xAE]),
+            (HighlightGroup::Comment, [0x6E, 0x77, 0x81]),
+            (HighlightGroup::Operator, [0xCF, 0x22, 0x2E]),
+            (HighlightGroup::Punctuation, [0x24, 0x29, 0x2F]),
+            (HighlightGroup::Constant, [0x05, 0x50, 0xAE]),
+            (HighlightGroup::Attribute, [0x11, 0x63, 0x29]),
+            (HighlightGroup::Tag, [0x11, 0x63, 0x29]),
+            (HighlightGroup::Property, [0x05, 0x50, 0xAE]),
+            (HighlightGroup::Escape, [0x0A, 0x30, 0x69]),
+            (HighlightGroup::Label, [0x95, 0x38, 0x00]),
+            (HighlightGroup::Module, [0x95, 0x38, 0x00]),
         ],
     },
 ];

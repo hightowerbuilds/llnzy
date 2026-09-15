@@ -1,5 +1,5 @@
 use super::colors::{apply_time_of_day_at_hour, parse_hex};
-use super::presets::{editor_syntax_preset, editor_syntax_presets, preset_scheme};
+use super::presets::{editor_theme, editor_themes, preset_scheme};
 use super::schema::ConfigFile;
 use super::*;
 use crate::editor::syntax::HighlightGroup;
@@ -148,6 +148,10 @@ fn unknown_config_keys_are_ignored() {
             [sketch]
             toolbar = "left"
 
+            [terminal]
+            scrollback_lines = 500
+            copy_on_select = true
+
             [colors]
             foreground = "#112233"
             not_a_color = "#000000"
@@ -158,6 +162,7 @@ fn unknown_config_keys_are_ignored() {
     let mut config = Config::default();
     config.apply(file);
     assert_eq!(config.font_size, 15.0);
+    assert!(config.terminal.copy_on_select);
     assert_eq!(config.colors.foreground, [0x11, 0x22, 0x33]);
 }
 
@@ -321,34 +326,73 @@ fn apply_editor_syntax_colors() {
 }
 
 #[test]
-fn editor_syntax_preset_maps_common_theme_name() {
-    let preset = editor_syntax_preset("one light").unwrap();
-    let colors = preset.colors_map();
+fn editor_theme_maps_common_theme_name() {
+    let theme = editor_theme("one light").unwrap();
+    let colors = theme.colors_map();
 
-    assert_eq!(preset.name, "One Light");
+    assert_eq!(theme.name, "One Light");
+    assert_eq!(theme.mode, crate::ui_theme::UiMode::Light);
+    assert_eq!(theme.colors.background, [0xFA, 0xFA, 0xFA]);
     assert_eq!(
         colors.get(&HighlightGroup::Function),
         Some(&[0x40, 0x78, 0xF2])
     );
-    assert!(editor_syntax_preset("one_dark").is_some());
-    assert!(editor_syntax_preset("  DRACULA ").is_some());
+    assert!(editor_theme("one_dark").is_some());
+    assert!(editor_theme("  DRACULA ").is_some());
+    assert!(editor_theme("solarized-light").is_some());
+    assert!(editor_theme("GitHub Light").is_some());
 }
 
-/// Three themes, no more: two dark and one light. The count is the point —
-/// see the list's own comment.
+/// Six themes, no more: three dark and three light, dark first. The count
+/// is the point — see the list's own comment.
 #[test]
-fn editor_syntax_presets_are_two_dark_and_one_light() {
-    let names: Vec<_> = editor_syntax_presets()
-        .iter()
-        .map(|preset| preset.name)
-        .collect();
-    assert_eq!(names, ["One Dark", "Dracula", "One Light"]);
+fn editor_themes_are_three_dark_and_three_light() {
+    use crate::ui_theme::UiMode;
+
+    let names: Vec<_> = editor_themes().iter().map(|theme| theme.name).collect();
+    assert_eq!(
+        names,
+        [
+            "One Dark",
+            "Dracula",
+            "Nord",
+            "One Light",
+            "Solarized Light",
+            "GitHub Light"
+        ]
+    );
+    let modes: Vec<_> = editor_themes().iter().map(|theme| theme.mode).collect();
+    assert_eq!(
+        modes,
+        [
+            UiMode::Dark,
+            UiMode::Dark,
+            UiMode::Dark,
+            UiMode::Light,
+            UiMode::Light,
+            UiMode::Light
+        ]
+    );
+
+    // Every theme paints its own full surface and syntax palette, and the
+    // surface actually matches its declared mode.
+    for theme in editor_themes() {
+        let brightness: u16 = theme.colors.background.iter().map(|c| *c as u16).sum();
+        assert_eq!(
+            theme.mode == UiMode::Light,
+            brightness > 600,
+            "{} background does not match its mode",
+            theme.name
+        );
+        assert_eq!(theme.syntax.len(), 16, "{} syntax palette", theme.name);
+        assert!(theme.matches_colors(&theme.colors_map()));
+    }
 
     // Retired presets resolve to nothing, so a config or preference naming
     // one falls back to the built-in default rather than half-applying.
-    for retired in ["Monokai", "Nord", "Solarized Dark", "GitHub Dark"] {
+    for retired in ["Monokai", "Solarized Dark", "GitHub Dark"] {
         assert!(
-            editor_syntax_preset(retired).is_none(),
+            editor_theme(retired).is_none(),
             "{retired} should no longer resolve"
         );
     }

@@ -121,9 +121,6 @@ impl Config {
             if let Some(copy_on_select) = terminal.copy_on_select {
                 self.terminal.copy_on_select = copy_on_select;
             }
-            if let Some(scrollback_lines) = terminal.scrollback_lines {
-                self.terminal.scrollback_lines = scrollback_lines.max(64);
-            }
         }
 
         if let Some(shell) = file.shell {
@@ -223,6 +220,11 @@ impl Config {
             }
             if let Some(visible_whitespace) = editor.visible_whitespace {
                 self.editor.visible_whitespace = visible_whitespace;
+            }
+            if let Some(font_family) = editor.font_family {
+                let font_family = font_family.trim();
+                self.editor.font_family =
+                    (!font_family.is_empty()).then(|| font_family.to_string());
             }
             if let Some(font_size) = editor.font_size {
                 self.editor.font_size = Some(font_size.clamp(8.0, 40.0));
